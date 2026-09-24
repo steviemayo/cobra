@@ -139,7 +139,7 @@ export async function handleStripeEvent(
   now = new Date(),
 ): Promise<'applied' | 'duplicate' | 'ignored' | 'unmatched'> {
   if (await db.stripeEvent.findFirst({ where: { id: event.id } })) return 'duplicate';
-  let result: 'applied' | 'ignored' | 'unmatched' = 'ignored';
+  let result: 'applied' | 'ignored' | 'unmatched';
   switch (event.type) {
     case 'customer.subscription.created':
     case 'customer.subscription.updated':
