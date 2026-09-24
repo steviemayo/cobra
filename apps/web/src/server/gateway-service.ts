@@ -8,34 +8,40 @@ import {
   type AssignedRoom,
   type PublicKey,
 } from '@kestrel/model';
+import { applyCommandResults, takePendingCommands } from './commands';
 import { applyReport, promoteDue } from './deployment-service';
+import { deliverAlerts } from './alerts';
+import { maybeSweep, recordReports } from './monitoring';
 
 // The cloud's half of the gateway protocol. Route handlers are thin wrappers over these functions,
 // which take the database as a parameter so they can be tested without one.
 export type Db = Pick<
   PrismaClient,
-  'gateway' | 'room' | 'release' | 'gatewayEvent' | 'auditLog' | 'deployment' | 'deploymentEvent'
+  | 'gateway'
+  | 'room'
+  | 'release'
+  | 'gatewayEvent'
+  | 'auditLog'
+  | 'deployment'
+  | 'deploymentEvent'
+  | 'deviceStatus'
+  | 'incident'
+  | 'remoteCommand'
+  | 'alertChannel'
+  | 'alertDelivery'
 >;
 type GatewayRow = NonNullable<Awaited<ReturnType<Db['gateway']['findFirst']>>>;
 export interface Result {
   status: number;
   body: unknown;
+  /** Work to do once the response has been sent, such as delivering alerts. */
+  after?: () => Promise<void>;
 }
 
-export const HEARTBEAT_SECONDS = 30;
-/** A gateway that has missed three heartbeats is offline. */
-export const OFFLINE_AFTER_MS = HEARTBEAT_SECONDS * 3 * 1000;
+export { HEARTBEAT_SECONDS, OFFLINE_AFTER_MS, effectiveStatus } from './gateway-status';
+import { HEARTBEAT_SECONDS } from './gateway-status';
 
 const fail = (status: number, error: string): Result => ({ status, body: { error } });
-
-export function effectiveStatus(
-  gw: { enrolledAt: Date | null; lastSeenAt: Date | null },
-  now = Date.now(),
-): 'pending' | 'online' | 'offline' {
-  if (!gw.enrolledAt) return 'pending';
-  if (!gw.lastSeenAt || now - gw.lastSeenAt.getTime() > OFFLINE_AFTER_MS) return 'offline';
-  return 'online';
-}
 
 /** Changes whenever what a gateway should be running (or trust) changes. */
 export function configVersion(
@@ -141,7 +147,12 @@ async function assignments(db: Db, gatewayId: string) {
   return out;
 }
 
-export async function heartbeat(db: Db, gw: GatewayRow, raw: unknown, keys: PublicKey[]): Promise<Result> {
+export async function heartbeat(
+  db: Db,
+  gw: GatewayRow,
+  raw: unknown,
+  keys: PublicKey[],
+): Promise<Result> {
   const parsed = HeartbeatRequest.safeParse(raw);
   if (!parsed.success) return fail(400, 'Bad heartbeat');
   const now = new Date();
@@ -168,12 +179,22 @@ export async function heartbeat(db: Db, gw: GatewayRow, raw: unknown, keys: Publ
   // Reports first, so a deployment that just finished is settled before the next one starts.
   await promoteDue(db, gw.id, now);
   const list = await assignments(db, gw.id);
+
+  const jobs = await recordReports(db, gw, parsed.data.rooms, now);
+  await applyCommandResults(db, gw.id, parsed.data.commandResults, now);
+  jobs.push(...(await maybeSweep(db, now)));
+  const commands = await takePendingCommands(db, gw.id, now);
   return {
     status: 200,
     body: {
-      configVersion: configVersion(list, keys.map((k) => k.keyId)),
+      configVersion: configVersion(
+        list,
+        keys.map((k) => k.keyId),
+      ),
       serverTime: now.toISOString(),
+      commands,
     },
+    after: jobs.length ? () => deliverAlerts(db, jobs) : undefined,
   };
 }
 
@@ -183,17 +204,26 @@ export async function config(db: Db, gw: GatewayRow, keys: PublicKey[]): Promise
     status: 200,
     body: {
       gatewayId: gw.id,
-      configVersion: configVersion(rooms, keys.map((k) => k.keyId)),
+      configVersion: configVersion(
+        rooms,
+        keys.map((k) => k.keyId),
+      ),
       rooms,
       publicKeys: keys,
     },
   };
 }
 
-export async function manifest(db: Db, gw: GatewayRow, roomId: string, releaseId: string): Promise<Result> {
+export async function manifest(
+  db: Db,
+  gw: GatewayRow,
+  roomId: string,
+  releaseId: string,
+): Promise<Result> {
   const room = await db.room.findFirst({ where: { id: roomId, gatewayId: gw.id } });
   // Only the release currently assigned to this gateway's room can be downloaded.
-  if (!room || room.desiredReleaseId !== releaseId) return fail(404, 'No such release for this gateway');
+  if (!room || room.desiredReleaseId !== releaseId)
+    return fail(404, 'No such release for this gateway');
   const release = await db.release.findFirst({ where: { id: releaseId, roomId } });
   if (!release) return fail(404, 'No such release for this gateway');
   return { status: 200, body: release.manifest };
@@ -206,7 +236,10 @@ export async function telemetry(db: Db, gw: GatewayRow, raw: unknown): Promise<R
   const ownRooms = claimed.length
     ? new Set(
         (
-          await db.room.findMany({ where: { id: { in: claimed }, gatewayId: gw.id }, select: { id: true } })
+          await db.room.findMany({
+            where: { id: { in: claimed }, gatewayId: gw.id },
+            select: { id: true },
+          })
         ).map((r) => r.id),
       )
     : new Set<string>();
