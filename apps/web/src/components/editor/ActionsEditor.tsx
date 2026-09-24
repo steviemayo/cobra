@@ -47,12 +47,12 @@ export function ActionsEditor({
 
   return (
     <div className="space-y-2">
-      <div className="text-xs text-slate-400">Actions</div>
-      {actions.length === 0 && <p className="text-xs text-slate-500">No actions.</p>}
+      <div className="text-xs text-muted-foreground">Actions</div>
+      {actions.length === 0 && <p className="text-xs text-muted-foreground">No actions.</p>}
       {actions.map((a) => (
-        <div key={a.id} className="space-y-1 rounded border border-slate-800 p-2">
+        <div key={a.id} className="space-y-1 rounded border border-border p-2">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="font-mono text-xs text-slate-500">{a.id}</span>
+            <span className="font-mono text-xs text-muted-foreground">{a.id}</span>
             <ActionFields model={model} action={a} edit={(fn) => edit(a.id, fn)} />
             <button
               className={`${dangerBtnCls} ml-auto`}
@@ -70,7 +70,7 @@ export function ActionsEditor({
           </div>
           {actions.length > 1 && (
             <details>
-              <summary className="cursor-pointer text-xs text-slate-400">
+              <summary className="cursor-pointer text-xs text-muted-foreground">
                 {a.dependsOn.length
                   ? `Runs after: ${a.dependsOn.join(', ')}`
                   : 'Runs immediately, in parallel'}
@@ -166,11 +166,11 @@ function ActionFields({
       const dests = devicesWith(model, 'video_sink', 'audio_sink');
       return (
         <>
-          <span className="text-slate-400">Route</span>
+          <span className="text-muted-foreground">Route</span>
           {deviceSelect(a.sourceDeviceId, sources, (id) =>
             edit((x) => x.type === 'route' && ((x.sourceDeviceId = id), delete x.sourcePortId)),
           )}
-          <span className="text-slate-400">to</span>
+          <span className="text-muted-foreground">to</span>
           {deviceSelect(a.destinationDeviceId, dests, (id) =>
             edit(
               (x) =>
@@ -187,7 +187,7 @@ function ActionFields({
       const value = a.type === 'env_scene' ? a.scene : a.preset;
       return (
         <>
-          <span className="text-slate-400">
+          <span className="text-muted-foreground">
             {a.type === 'env_scene'
               ? 'Scene'
               : a.type === 'camera_preset'
@@ -229,7 +229,7 @@ function ActionFields({
     case 'volume':
       return (
         <>
-          <span className="text-slate-400">Volume</span>
+          <span className="text-muted-foreground">Volume</span>
           {deviceSelect(a.deviceId, actionTargets(model, 'volume'), (id) =>
             edit((x) => 'deviceId' in x && (x.deviceId = id)),
           )}
@@ -251,7 +251,7 @@ function ActionFields({
     case 'device_command':
       return (
         <>
-          <span className="text-slate-400">Command</span>
+          <span className="text-muted-foreground">Command</span>
           {deviceSelect(a.deviceId, actionTargets(model, 'device_command'), (id) =>
             edit((x) => 'deviceId' in x && (x.deviceId = id)),
           )}
@@ -264,7 +264,7 @@ function ActionFields({
     case 'run_state':
       return (
         <>
-          <span className="text-slate-400">Run state</span>
+          <span className="text-muted-foreground">Run state</span>
           <Select
             value={a.stateId}
             options={

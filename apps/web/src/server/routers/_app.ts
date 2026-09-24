@@ -1,6 +1,7 @@
 import { router } from '../trpc';
 import { auditRouter } from './audit';
 import { draftRouter } from './draft';
+import { gatewayRouter } from './gateway';
 import { inviteRouter } from './invite';
 import { memberRouter } from './member';
 import { orgRouter } from './org';
@@ -17,5 +18,6 @@ export const appRouter = router({
   member: memberRouter,
   invite: inviteRouter,
   audit: auditRouter,
+  gateway: gatewayRouter,
 });
 export type AppRouter = typeof appRouter;

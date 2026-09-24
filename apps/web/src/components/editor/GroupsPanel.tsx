@@ -59,7 +59,7 @@ export function GroupsPanel({ model, update, issues }: PanelProps) {
         </button>
       </div>
       {model.groups.length === 0 && (
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-muted-foreground">
           Groups let several displays or speakers act together, with a set of allowed sources.
         </p>
       )}
@@ -82,7 +82,7 @@ export function GroupsPanel({ model, update, issues }: PanelProps) {
                   onChange={(v) => edit(g.id, (x) => (x.mode = v))}
                 />
               </Label>
-              <span className="text-xs text-slate-400">{g.kind} group</span>
+              <span className="text-xs text-muted-foreground">{g.kind} group</span>
               <div className="ml-auto">
                 <ConfirmButton
                   label="Delete"
@@ -94,7 +94,7 @@ export function GroupsPanel({ model, update, issues }: PanelProps) {
               </div>
             </div>
             <div className="space-y-1">
-              <div className="text-xs text-slate-400">Members</div>
+              <div className="text-xs text-muted-foreground">Members</div>
               <CheckList
                 items={members.map((d) => ({ id: d.id, label: d.name }))}
                 selected={g.members}
@@ -103,7 +103,7 @@ export function GroupsPanel({ model, update, issues }: PanelProps) {
               />
             </div>
             <div className="space-y-1">
-              <div className="text-xs text-slate-400">Allowed sources</div>
+              <div className="text-xs text-muted-foreground">Allowed sources</div>
               <CheckList
                 items={sources.map((d) => ({ id: d.id, label: d.name }))}
                 selected={g.allowedSources}

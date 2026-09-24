@@ -41,20 +41,29 @@ export function ValidationPanel({
   const errors = result.issues.filter((i) => i.severity === 'error');
   const warnings = result.issues.filter((i) => i.severity === 'warning');
   return (
-    <aside className="space-y-3 rounded-lg border border-slate-800 bg-slate-900/40 p-3 text-sm">
+    <aside className="space-y-3 rounded-lg border border-border bg-card p-3 text-sm">
       <div className="flex items-center justify-between">
         <h2 className="font-medium">Validation</h2>
         <span
           className={`rounded px-2 py-0.5 text-xs font-medium ${
-            result.valid ? 'bg-emerald-900 text-emerald-200' : 'bg-red-900 text-red-200'
+            result.valid
+              ? 'bg-success/15 text-emerald-700 dark:text-emerald-300'
+              : 'bg-destructive/15 text-destructive'
           }`}
         >
           {result.valid ? 'Valid' : `${errors.length} error${errors.length === 1 ? '' : 's'}`}
         </span>
       </div>
-      {result.issues.length === 0 && <p className="text-xs text-slate-400">No problems found.</p>}
-      <IssueGroup title="Errors" tone="text-red-300" issues={errors} onSelect={onSelect} />
-      <IssueGroup title="Warnings" tone="text-amber-300" issues={warnings} onSelect={onSelect} />
+      {result.issues.length === 0 && (
+        <p className="text-xs text-muted-foreground">No problems found.</p>
+      )}
+      <IssueGroup title="Errors" tone="text-destructive" issues={errors} onSelect={onSelect} />
+      <IssueGroup
+        title="Warnings"
+        tone="text-amber-700 dark:text-amber-300"
+        issues={warnings}
+        onSelect={onSelect}
+      />
     </aside>
   );
 }
@@ -80,7 +89,7 @@ function IssueGroup({
         {issues.map((i, n) => (
           <li key={n}>
             <button
-              className="w-full rounded px-1 py-0.5 text-left text-xs text-slate-200 hover:bg-slate-800"
+              className="w-full rounded px-1 py-0.5 text-left text-xs text-foreground hover:bg-muted"
               onClick={() => onSelect(tabForRef(i.ref))}
             >
               {i.message}

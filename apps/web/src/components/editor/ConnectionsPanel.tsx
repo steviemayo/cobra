@@ -36,7 +36,7 @@ export function ConnectionsPanel({ model, update, issues }: PanelProps) {
           options={outs.length ? outs : [{ value: '', label: 'No outputs' }]}
           onChange={setFrom}
         />
-        <span className="text-slate-500">to</span>
+        <span className="text-muted-foreground">to</span>
         <Select
           value={toValue}
           options={ins.length ? ins : [{ value: '', label: 'No inputs' }]}
@@ -63,19 +63,19 @@ export function ConnectionsPanel({ model, update, issues }: PanelProps) {
           Connect
         </button>
       </div>
-      {error && <p className="text-sm text-red-300">{error}</p>}
-      <p className="text-xs text-slate-500">
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      <p className="text-xs text-muted-foreground">
         Tip: you can also drag between ports in the Graph tab.
       </p>
       {model.connections.length === 0 && (
-        <p className="text-sm text-slate-400">No connections yet.</p>
+        <p className="text-sm text-muted-foreground">No connections yet.</p>
       )}
       {model.connections.map((c) => (
         <Card key={c.id} issues={issuesFor(issues, 'connection', c.id)}>
           <div className="flex items-center justify-between gap-2 text-sm">
             <span>
-              {label(c.from.deviceId, c.from.portId)} <span className="text-slate-500">→</span>{' '}
-              {label(c.to.deviceId, c.to.portId)}
+              {label(c.from.deviceId, c.from.portId)}{' '}
+              <span className="text-muted-foreground">→</span> {label(c.to.deviceId, c.to.portId)}
             </span>
             <button
               className={dangerBtnCls}

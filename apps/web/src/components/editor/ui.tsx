@@ -4,13 +4,13 @@ import type { RoomModel } from '@kestrel/model';
 import type { IssueRef, ValidationIssue } from '@kestrel/engine';
 
 export const inputCls =
-  'rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100 placeholder:text-slate-500 disabled:opacity-50';
+  'h-8 rounded-lg border border-input bg-background px-2.5 text-sm text-foreground transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50';
 export const btnCls =
-  'rounded bg-sky-600 px-3 py-1.5 text-sm font-medium hover:bg-sky-500 disabled:opacity-50';
+  'inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-all hover:bg-primary/85 active:translate-y-px disabled:pointer-events-none disabled:opacity-50';
 export const ghostBtnCls =
-  'rounded border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800 disabled:opacity-50';
+  'inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium transition-all hover:bg-muted active:translate-y-px disabled:pointer-events-none disabled:opacity-50';
 export const dangerBtnCls =
-  'rounded border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950 disabled:opacity-50';
+  'inline-flex h-7 items-center justify-center rounded-lg border border-destructive/40 px-2 text-xs font-medium text-destructive transition-all hover:bg-destructive/10 active:translate-y-px disabled:pointer-events-none disabled:opacity-50';
 
 export interface PanelProps {
   model: RoomModel;
@@ -31,8 +31,8 @@ export function Card({
   return (
     <div
       className={`space-y-3 rounded-lg border p-3 ${
-        hasError ? 'border-red-800' : issues.length ? 'border-amber-800' : 'border-slate-800'
-      } bg-slate-900/40 ${className}`}
+        hasError ? 'border-destructive/50' : issues.length ? 'border-warning/60' : 'border-border'
+      } bg-card ${className}`}
     >
       {children}
       <IssueLines issues={issues} />
@@ -45,7 +45,12 @@ export function IssueLines({ issues }: { issues: ValidationIssue[] }) {
   return (
     <ul className="space-y-0.5 text-xs">
       {issues.map((i, n) => (
-        <li key={n} className={i.severity === 'error' ? 'text-red-300' : 'text-amber-300'}>
+        <li
+          key={n}
+          className={
+            i.severity === 'error' ? 'text-destructive' : 'text-amber-700 dark:text-amber-300'
+          }
+        >
           {i.severity === 'error' ? 'Error: ' : 'Warning: '}
           {i.message}
         </li>
@@ -72,7 +77,7 @@ export function issuesForDevice(issues: ValidationIssue[], id: string) {
 
 export function Label({ text, children }: { text: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-col gap-1 text-xs text-slate-400">
+    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
       {text}
       {children}
     </label>
@@ -160,7 +165,7 @@ export function CheckList({
   onToggle: (id: string, on: boolean) => void;
   empty: string;
 }) {
-  if (!items.length) return <p className="text-xs text-slate-500">{empty}</p>;
+  if (!items.length) return <p className="text-xs text-muted-foreground">{empty}</p>;
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1">
       {items.map((it) => (

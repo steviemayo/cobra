@@ -57,7 +57,7 @@ export function ActivitiesPanel({ model, update, issues }: PanelProps) {
           Add room-type defaults
         </button>
       </div>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted-foreground">
         Activities are what people see on the panel: plain-language intents like Present or Room
         Off.
       </p>
@@ -99,7 +99,7 @@ export function ActivitiesPanel({ model, update, issues }: PanelProps) {
           </div>
 
           <details>
-            <summary className="cursor-pointer text-xs text-slate-400">
+            <summary className="cursor-pointer text-xs text-muted-foreground">
               Needs in room: {a.requires.length ? a.requires.join(', ') : 'nothing'}
             </summary>
             <div className="mt-1">
@@ -119,7 +119,7 @@ export function ActivitiesPanel({ model, update, issues }: PanelProps) {
 
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-3">
-              <span className="text-xs text-slate-400">Sources the user can choose</span>
+              <span className="text-xs text-muted-foreground">Sources the user can choose</span>
               <Label text="Shown on">
                 <Select
                   value={a.targetGroupId ?? ''}

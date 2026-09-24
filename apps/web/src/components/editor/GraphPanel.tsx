@@ -15,6 +15,7 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { useTheme } from 'next-themes';
 import { DEVICE_CATALOG, type Device, type RoomModel } from '@kestrel/model';
 import { addConnection, removeConnection } from '@/lib/editor/ops';
 import { issuesForDevice, type PanelProps } from './ui';
@@ -23,9 +24,9 @@ type DeviceNodeData = { device: Device; hasError: boolean; hasWarning: boolean }
 type DeviceNode = Node<DeviceNodeData, 'device'>;
 
 const SIGNAL_DOT: Record<string, string> = {
-  av: 'bg-sky-400',
-  video: 'bg-violet-400',
-  audio: 'bg-amber-400',
+  av: 'bg-brand',
+  video: 'bg-info',
+  audio: 'bg-warning',
 };
 
 const COLUMN: Record<string, number> = {
@@ -55,13 +56,15 @@ function DeviceNodeView({ data }: NodeProps<DeviceNode>) {
   const outs = device.ports.filter((p) => p.direction === 'out');
   return (
     <div
-      className={`min-w-44 rounded-lg border bg-slate-900 text-slate-100 shadow ${
-        hasError ? 'border-red-600' : hasWarning ? 'border-amber-600' : 'border-slate-700'
+      className={`min-w-44 rounded-lg border bg-card text-foreground shadow ${
+        hasError ? 'border-destructive' : hasWarning ? 'border-warning' : 'border-border'
       }`}
     >
-      <div className="border-b border-slate-800 px-3 py-1.5">
+      <div className="border-b border-border px-3 py-1.5">
         <div className="text-sm font-medium">{device.name}</div>
-        <div className="text-[10px] text-slate-400">{DEVICE_CATALOG[device.category].label}</div>
+        <div className="text-[10px] text-muted-foreground">
+          {DEVICE_CATALOG[device.category].label}
+        </div>
       </div>
       <div className="flex justify-between gap-6 py-1.5">
         <div>
@@ -105,6 +108,7 @@ export function GraphPanel({ model, update, issues }: PanelProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<DeviceNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [message, setMessage] = useState('');
+  const { resolvedTheme } = useTheme();
 
   const layout = useMemo(() => autoLayout(model.devices), [model.devices]);
 
@@ -137,7 +141,10 @@ export function GraphPanel({ model, update, issues }: PanelProps) {
         sourceHandle: c.from.portId,
         target: c.to.deviceId,
         targetHandle: c.to.portId,
-        style: { stroke: errored.has(c.id) ? '#dc2626' : '#38bdf8', strokeWidth: 2 },
+        style: {
+          stroke: errored.has(c.id) ? 'var(--destructive)' : 'var(--brand)',
+          strokeWidth: 2,
+        },
       })),
     );
   }, [model.connections, issues, setEdges]);
@@ -158,14 +165,14 @@ export function GraphPanel({ model, update, issues }: PanelProps) {
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted-foreground">
         Drag from an output (right) to an input (left) to connect. Select a line and press Backspace
         to remove it. Layout is for this session only.
       </p>
-      {message && <p className="text-sm text-red-300">{message}</p>}
-      <div className="h-[620px] overflow-hidden rounded-lg border border-slate-800">
+      {message && <p className="text-sm text-destructive">{message}</p>}
+      <div className="h-[620px] overflow-hidden rounded-lg border border-border">
         <ReactFlow
-          colorMode="dark"
+          colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}

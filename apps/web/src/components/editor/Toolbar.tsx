@@ -7,12 +7,15 @@ import type { SaveStatus } from './use-room-editor';
 import { TextInput, btnCls, ghostBtnCls } from './ui';
 
 const STATUS_TEXT: Record<SaveStatus, { text: string; tone: string }> = {
-  saved: { text: 'All changes saved', tone: 'text-emerald-300' },
-  dirty: { text: 'Unsaved changes…', tone: 'text-slate-300' },
-  saving: { text: 'Saving…', tone: 'text-slate-300' },
-  invalid: { text: 'Not saved: a required field is empty', tone: 'text-amber-300' },
-  conflict: { text: 'Someone else changed this draft', tone: 'text-red-300' },
-  error: { text: 'Save failed — will retry on next change', tone: 'text-red-300' },
+  saved: { text: 'All changes saved', tone: 'text-emerald-700 dark:text-emerald-300' },
+  dirty: { text: 'Unsaved changes…', tone: 'text-foreground/80' },
+  saving: { text: 'Saving…', tone: 'text-foreground/80' },
+  invalid: {
+    text: 'Not saved: a required field is empty',
+    tone: 'text-amber-700 dark:text-amber-300',
+  },
+  conflict: { text: 'Someone else changed this draft', tone: 'text-destructive' },
+  error: { text: 'Save failed — will retry on next change', tone: 'text-destructive' },
 };
 
 export function SaveStatusBadge({ status, onRetry }: { status: SaveStatus; onRetry: () => void }) {
@@ -111,9 +114,9 @@ export function Toolbar({
         <button className={ghostBtnCls} disabled={blocked} onClick={() => toggle('template')}>
           Save as template
         </button>
-        {note && <span className="text-xs text-emerald-300">{note}</span>}
+        {note && <span className="text-xs text-emerald-700 dark:text-emerald-300">{note}</span>}
       </div>
-      {error && <p className="text-sm text-red-300">{error.message}</p>}
+      {error && <p className="text-sm text-destructive">{error.message}</p>}
 
       {open === 'version' && (
         <form
@@ -148,16 +151,16 @@ export function Toolbar({
       )}
 
       {open === 'versions' && (
-        <div className="max-w-xl space-y-1 rounded-lg border border-slate-800 p-2">
-          {versions.isPending && <p className="text-xs text-slate-400">Loading…</p>}
+        <div className="max-w-xl space-y-1 rounded-lg border border-border p-2">
+          {versions.isPending && <p className="text-xs text-muted-foreground">Loading…</p>}
           {versions.data?.length === 0 && (
-            <p className="text-xs text-slate-400">No saved versions yet.</p>
+            <p className="text-xs text-muted-foreground">No saved versions yet.</p>
           )}
           {versions.data?.map((v) => (
             <div key={v.id} className="flex items-center justify-between gap-3 text-sm">
               <span>
                 {v.label || 'Untitled version'}{' '}
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-muted-foreground">
                   rev {v.revision} · {new Date(v.createdAt).toLocaleString()}
                 </span>
               </span>
