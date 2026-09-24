@@ -18,6 +18,8 @@ export interface LoadedRoom {
   releaseId: string;
   signed: SignedManifest;
   runtime: RoomRuntime;
+  /** The device bus this room runs on. Exposed for diagnostics and the demo. */
+  bus: DeviceBus;
   access: PanelAccess;
   branding: PanelBranding;
   close(): void;
@@ -91,6 +93,7 @@ export class RoomHost {
       releaseId: manifest.releaseId,
       signed,
       runtime,
+      bus: built.bus,
       access: manifest.panel.access,
       branding: manifest.panel.branding,
       close: () => {

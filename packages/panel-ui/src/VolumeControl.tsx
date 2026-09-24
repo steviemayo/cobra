@@ -39,7 +39,11 @@ function RampButton({
       aria-label={label}
       disabled={disabled}
       onPointerDown={(e) => {
-        e.currentTarget.setPointerCapture?.(e.pointerId);
+        try {
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+        } catch {
+          // Capture is a nicety (keeps the ramp going if the finger drifts); some browsers refuse it.
+        }
         onBump(delta * TAP_STEP);
         stop();
         hold.current = setTimeout(() => {

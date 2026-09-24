@@ -9,3 +9,9 @@ dist
 .vercel
 coverage
 packages/db/src/generated
+
+# Gateway local data
+apps/gateway/data
+*.db
+*.db-wal
+*.db-shm

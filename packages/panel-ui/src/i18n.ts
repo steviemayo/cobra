@@ -41,6 +41,12 @@ export const en = {
   'volume.unmute': 'Unmute',
   'start.title': 'What would you like to do?',
   'activity.running': 'Running',
+  'session.connecting': 'Connecting to the room…',
+  'session.reconnecting': 'Reconnecting to the room…',
+  'session.error': 'This panel can’t reach the room right now.',
+  'pin.title': 'Enter PIN',
+  'pin.submit': 'Unlock',
+  'pin.clear': 'Clear',
 } as const;
 
 export type TextKey = keyof typeof en;

@@ -17,6 +17,19 @@ export interface PanelTheme {
 export const darkTheme: PanelTheme = { mode: 'dark', accent: '#3db8b8', accentText: '#04181a' };
 export const lightTheme: PanelTheme = { mode: 'light', accent: '#0f8a8c', accentText: '#ffffff' };
 
+/** Turn a manifest's branding into a theme, filling gaps from the mode defaults. */
+export function themeFromBranding(
+  branding?: { mode: 'dark' | 'light'; accent?: string; accentText?: string; logoUrl?: string } | null,
+): PanelTheme {
+  const base = branding?.mode === 'light' ? lightTheme : darkTheme;
+  return {
+    ...base,
+    ...(branding?.accent ? { accent: branding.accent } : {}),
+    ...(branding?.accentText ? { accentText: branding.accentText } : {}),
+    ...(branding?.logoUrl ? { logoUrl: branding.logoUrl } : {}),
+  };
+}
+
 const PALETTE = {
   dark: {
     bg: '#0d1216',

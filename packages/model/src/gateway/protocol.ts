@@ -141,7 +141,12 @@ export type TelemetryBatch = z.infer<typeof TelemetryBatch>;
 // ---- Panel link (gateway <-> browser panel over WebSocket) -------------------------------------
 
 export const PanelServerMessage = z.discriminatedUnion('t', [
-  z.object({ t: z.literal('hello'), roomId: z.string().uuid(), pinRequired: z.boolean() }),
+  z.object({
+    t: z.literal('hello'),
+    roomId: z.string().uuid(),
+    pinRequired: z.boolean(),
+    branding: PanelBranding,
+  }),
   z.object({ t: z.literal('snapshot'), vm: PanelViewModel }),
   z.object({ t: z.literal('error'), message: z.string() }),
 ]);

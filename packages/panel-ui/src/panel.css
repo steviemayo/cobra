@@ -476,3 +476,109 @@
     border-right-color: var(--kp-accent);
   }
 }
+
+/* Session states: connecting, PIN gate, reconnecting */
+.kp-center {
+  align-items: center;
+  justify-content: center;
+}
+.kp-splash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 40px;
+  color: var(--kp-muted);
+  font-size: 20px;
+  text-align: center;
+}
+.kp-splash p {
+  margin: 0;
+}
+.kp-offline {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  border-radius: 0 0 14px 14px;
+  background: var(--kp-warn);
+  color: #1a1200;
+  font-family: var(--kp-font, 'IBM Plex Sans', system-ui, sans-serif);
+  font-size: 16px;
+  font-weight: 500;
+}
+.kp-offline .kp-spinner {
+  border-color: #1a120033;
+  border-top-color: #1a1200;
+}
+.kp-pin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 32px 24px;
+}
+.kp-pin h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+}
+.kp-pin-dots {
+  display: flex;
+  gap: 14px;
+  min-height: 20px;
+}
+.kp-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--kp-muted);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.kp-dot-on {
+  background: var(--kp-accent);
+  border-color: var(--kp-accent);
+}
+.kp-pin-error {
+  margin: 0;
+  color: var(--kp-error);
+  font-size: 17px;
+}
+.kp-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 84px);
+  gap: 14px;
+}
+.kp-key {
+  height: 84px;
+  border: 1px solid var(--kp-line);
+  border-radius: 50%;
+  background: var(--kp-raised);
+  font-size: 30px;
+  transition:
+    background 120ms ease,
+    transform 100ms ease;
+}
+.kp-key:active {
+  transform: scale(0.94);
+  background: var(--kp-line);
+}
+.kp-key-quiet {
+  font-size: 16px;
+  color: var(--kp-muted);
+}
+.kp-key-primary {
+  background: var(--kp-accent);
+  border-color: transparent;
+  color: var(--kp-accent-text);
+}
+.kp-key svg {
+  font-size: 34px;
+}

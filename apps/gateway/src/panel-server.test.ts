@@ -1,4 +1,7 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import WebSocket from 'ws';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -188,6 +191,48 @@ describe('PIN-protected panels', () => {
     const p = new Panel();
     await until(() => p.of('hello').length > 0);
     expect(p.of('hello')[0]!.pinRequired).toBe(true);
+  });
+});
+
+describe('serving the built panel app', () => {
+  const site = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kestrel-panel-'));
+    mkdirSync(join(dir, 'assets'));
+    writeFileSync(join(dir, 'index.html'), '<!doctype html><title>Kestrel</title><div id="root"></div>');
+    writeFileSync(join(dir, 'assets', 'app.js'), 'console.log("panel")');
+    writeFileSync(join(dirname(dir), 'kestrel-secret.txt'), 'top secret');
+    return dir;
+  };
+
+  it('serves index.html for a running room, and its assets', async () => {
+    const dir = site();
+    await start(undefined, dir);
+    const page = await app.inject({ method: 'GET', url: `/room/${ROOM}` });
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain('<div id="root">');
+    const asset = await app.inject({ method: 'GET', url: '/assets/app.js' });
+    expect(asset.statusCode).toBe(200);
+    expect(asset.body).toBe('console.log("panel")');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('does not expose files outside the panel directory, or the directory itself', async () => {
+    const dir = site();
+    await start(undefined, dir);
+    for (const url of ['/assets/../../kestrel-secret.txt', '/assets/%2e%2e/%2e%2e/kestrel-secret.txt', '/index.html', '/assets']) {
+      const res = await app.inject({ method: 'GET', url });
+      expect(res.body, url).not.toContain('top secret');
+      expect(res.statusCode, url).toBeGreaterThanOrEqual(400);
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('still refuses to serve a room that is not running', async () => {
+    const dir = site();
+    await start(undefined, dir);
+    const res = await app.inject({ method: 'GET', url: '/room/33333333-3333-4333-8333-3333333333ff' });
+    expect(res.statusCode).toBe(404);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

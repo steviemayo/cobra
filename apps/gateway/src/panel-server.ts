@@ -45,7 +45,9 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
 
   const dir = resolve(opts.panelDir);
   const built = existsSync(resolve(dir, 'index.html'));
-  if (built) await app.register(fastifyStatic, { root: dir, prefix: '/assets-root/', decorateReply: true, wildcard: false });
+  // serve:false decorates reply.sendFile without exposing the whole directory over HTTP;
+  // only the routes below hand files out.
+  if (built) await app.register(fastifyStatic, { root: dir, serve: false });
 
   app.get('/health', async () => ({
     ok: true,
@@ -95,7 +97,7 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
       push();
     };
 
-    send({ t: 'hello', roomId, pinRequired });
+    send({ t: 'hello', roomId, pinRequired, branding: room.branding });
     if (authed) startStreaming();
 
     socket.on('message', (raw: Buffer) => {
