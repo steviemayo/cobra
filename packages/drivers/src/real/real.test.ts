@@ -312,7 +312,6 @@ describe('generic TCP liveness', () => {
 
     await new Promise<void>((r) => {
       server.close(() => r());
-      server.closeAllConnections?.();
     });
     await until(() => !d.getState().online);
 

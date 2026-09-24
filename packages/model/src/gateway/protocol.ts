@@ -193,6 +193,8 @@ export const HeartbeatResponse = z.object({
   serverTime: z.string().datetime(),
   /** Allowlisted commands to run now. */
   commands: z.array(GatewayCommand).default([]),
+  /** Rooms someone is controlling from the portal right now. Non-empty means: start polling fast. */
+  watch: z.array(z.string().uuid()).default([]),
 });
 export type HeartbeatResponse = z.infer<typeof HeartbeatResponse>;
 
@@ -214,6 +216,33 @@ export const ConfigResponse = z.object({
   publicKeys: z.array(PublicKey),
 });
 export type ConfigResponse = z.infer<typeof ConfigResponse>;
+
+// ---- Control from the portal ---------------------------------------------------------------------
+
+// While someone has a room's control page open, the gateway polls every second: it sends the
+// room's panel state up and takes panel intents down. It is still only outbound requests.
+export const ControlIntentMessage = z.object({
+  id: z.string().uuid(),
+  roomId: z.string().uuid(),
+  intent: PanelIntent,
+});
+export type ControlIntentMessage = z.infer<typeof ControlIntentMessage>;
+
+export const PollRequest = z.object({
+  protocol: z.literal(PROTOCOL_VERSION),
+  panels: z
+    .array(z.object({ roomId: z.string().uuid(), vm: PanelViewModel }))
+    .max(50)
+    .default([]),
+});
+export type PollRequest = z.infer<typeof PollRequest>;
+
+export const PollResponse = z.object({
+  /** Rooms still being controlled. Empty means the gateway can stop polling fast. */
+  watch: z.array(z.string().uuid()).default([]),
+  intents: z.array(ControlIntentMessage).default([]),
+});
+export type PollResponse = z.infer<typeof PollResponse>;
 
 // ---- Telemetry ---------------------------------------------------------------------------------
 

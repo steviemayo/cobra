@@ -4,6 +4,12 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ActivityFeed } from '@/components/common/activity-feed';
+import {
+  BrandingFields,
+  brandingToDraft,
+  draftToBranding,
+  type BrandingDraft,
+} from '@/components/common/branding-fields';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
@@ -63,7 +69,57 @@ export function GeneralSettings() {
           Save changes
         </Button>
       </form>
+      <OrgBrandingForm />
     </PageContainer>
+  );
+}
+
+/** The default look of every room's panel and the customer pages. Rooms follow it unless they set their own. */
+function OrgBrandingForm() {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const { orgId } = useOrg();
+  const current = useQuery(trpc.org.getBranding.queryOptions({ orgId }));
+  const [look, setLook] = useState<BrandingDraft>({
+    mode: 'dark',
+    accent: '',
+    logo: '',
+    language: 'en',
+  });
+  useEffect(() => {
+    if (current.data) setLook(brandingToDraft(current.data));
+  }, [current.data]);
+  const save = useMutation(
+    trpc.org.setBranding.mutationOptions({
+      onSuccess: async () => {
+        await qc.invalidateQueries({ queryKey: trpc.org.getBranding.queryKey() });
+        toast.success('Panel theme saved. Rooms pick it up on their next release.');
+      },
+    }),
+  );
+  if (current.isPending) return null;
+  return (
+    <form
+      className="space-y-4 border-t pt-6"
+      onSubmit={(e) => {
+        e.preventDefault();
+        save.mutate({ orgId, branding: draftToBranding(look) });
+      }}
+    >
+      <div>
+        <h2 className="text-sm font-medium">Panel theme</h2>
+        <p className="text-sm text-muted-foreground">
+          Your colours, logo and language on every room’s touch panel. Rooms follow this unless they
+          set their own, and pick up changes on their next release.
+        </p>
+      </div>
+      <BrandingFields id="org-brand" value={look} onChange={setLook} />
+      {save.error && <p className="text-sm text-destructive">{save.error.message}</p>}
+      <Button type="submit" disabled={save.isPending}>
+        {save.isPending && <Spinner />}
+        Save theme
+      </Button>
+    </form>
   );
 }
 

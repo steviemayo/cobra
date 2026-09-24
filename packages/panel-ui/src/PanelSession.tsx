@@ -1,7 +1,8 @@
 import { useState, useSyncExternalStore } from 'react';
 import { PanelApp } from './PanelApp';
 import { Icon } from './icons';
-import { createTranslator, type Translate } from './i18n';
+import type { Translate } from './i18n';
+import { translatorFor } from './languages';
 import { themeFromBranding } from './theme';
 import { themeStyle } from './theme';
 import type { WsPanelClient } from './ws-client';
@@ -84,23 +85,31 @@ export function PanelSession({
   translate?: Translate;
   className?: string;
 }) {
-  const t = translate ?? createTranslator();
   const conn = useSyncExternalStore(
     client.subscribeConnection,
     client.getConnection,
     client.getConnection,
   );
+  const t = translate ?? translatorFor(conn.branding?.language);
   const theme = themeFromBranding(conn.branding);
 
   if (conn.state === 'pin_required' || conn.state === 'connecting' || conn.state === 'error')
     return (
-      <div className={`kp-app kp-center ${className ?? ''}`} data-mode={theme.mode} style={themeStyle(theme)}>
+      <div
+        className={`kp-app kp-center ${className ?? ''}`}
+        data-mode={theme.mode}
+        style={themeStyle(theme)}
+      >
         {conn.state === 'pin_required' ? (
           <PinGate onSubmit={(pin) => client.submitPin(pin)} message={conn.message} t={t} />
         ) : (
           <div className="kp-splash" role="status">
             {conn.state === 'connecting' && <span className="kp-spinner" aria-hidden />}
-            <p>{conn.state === 'error' ? (conn.message ?? t('session.error')) : t('session.connecting')}</p>
+            <p>
+              {conn.state === 'error'
+                ? (conn.message ?? t('session.error'))
+                : t('session.connecting')}
+            </p>
           </div>
         )}
       </div>
@@ -108,7 +117,7 @@ export function PanelSession({
 
   return (
     <>
-      <PanelApp client={client} theme={theme} translate={translate} className={className} />
+      <PanelApp client={client} theme={theme} translate={t} className={className} />
       {conn.state === 'reconnecting' && (
         <div className="kp-offline" role="status" data-mode={theme.mode} style={themeStyle(theme)}>
           <span className="kp-spinner kp-spinner-sm" aria-hidden />

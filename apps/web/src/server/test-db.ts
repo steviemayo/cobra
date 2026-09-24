@@ -14,6 +14,8 @@ type Cond = {
 export function matches(row: Row, where: Row = {}): boolean {
   return Object.entries(where).every(([k, cond]) => {
     const v = row[k];
+    // Prisma always has a column; a row built without one means null.
+    if (cond === null) return v === null || v === undefined;
     if (cond && typeof cond === 'object' && !(cond instanceof Date)) {
       const c = cond as Cond;
       if ('not' in c) return v !== c.not;

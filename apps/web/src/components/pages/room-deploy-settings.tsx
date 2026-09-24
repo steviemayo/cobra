@@ -3,12 +3,19 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import {
+  BrandingFields,
+  brandingToDraft,
+  draftToBranding,
+  type BrandingDraft,
+} from '@/components/common/branding-fields';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useInvalidateEstate } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
@@ -27,7 +34,10 @@ export function GatewaySetting({ roomId }: { roomId: string }) {
   const assign = useMutation(
     trpc.room.assignGateway.mutationOptions({
       onSuccess: async () => {
-        await Promise.all([invalidate(), qc.invalidateQueries({ queryKey: trpc.gateway.list.queryKey() })]);
+        await Promise.all([
+          invalidate(),
+          qc.invalidateQueries({ queryKey: trpc.gateway.list.queryKey() }),
+        ]);
         toast.success('Gateway updated');
       },
       onError: (e) => toast.error(e.message),
@@ -46,9 +56,7 @@ export function GatewaySetting({ roomId }: { roomId: string }) {
       <SimpleSelect
         className="w-full max-w-sm"
         value={room.gatewayId ?? NONE}
-        onValueChange={(v) =>
-          assign.mutate({ orgId, roomId, gatewayId: v === NONE ? null : v })
-        }
+        onValueChange={(v) => assign.mutate({ orgId, roomId, gatewayId: v === NONE ? null : v })}
         disabled={assign.isPending}
         options={[
           { value: NONE, label: 'No gateway' },
@@ -58,7 +66,10 @@ export function GatewaySetting({ roomId }: { roomId: string }) {
       {gateways.isSuccess && here.length === 0 && (
         <p className="text-sm text-muted-foreground">
           No gateways at this site yet.{' '}
-          <Link href={orgPath(orgId, '/gateways')} className="text-foreground underline-offset-4 hover:underline">
+          <Link
+            href={orgPath(orgId, '/gateways')}
+            className="text-foreground underline-offset-4 hover:underline"
+          >
             Add one
           </Link>
           .
@@ -77,18 +88,21 @@ export function PanelSettings({ roomId }: { roomId: string }) {
   const [mode, setMode] = useState<'open' | 'pin'>('open');
   const [pin, setPin] = useState('');
   const [ips, setIps] = useState('');
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [accent, setAccent] = useState('');
-  const [logo, setLogo] = useState('');
+  const [inherit, setInherit] = useState(true);
+  const [look, setLook] = useState<BrandingDraft>({
+    mode: 'dark',
+    accent: '',
+    logo: '',
+    language: 'en',
+  });
 
   useEffect(() => {
     const p = current.data;
     if (!p) return;
     setMode(p.mode);
     setIps(p.trustedIps.join('\n'));
-    setTheme(p.branding.mode);
-    setAccent(p.branding.accent ?? '');
-    setLogo(p.branding.logoUrl ?? '');
+    setInherit(p.inheritBranding);
+    setLook(brandingToDraft(p.branding));
   }, [current.data]);
 
   const save = useMutation(
@@ -116,20 +130,16 @@ export function PanelSettings({ roomId }: { roomId: string }) {
             .split('\n')
             .map((s) => s.trim())
             .filter(Boolean),
-          branding: {
-            mode: theme,
-            language: 'en',
-            ...(accent.trim() && { accent: accent.trim() }),
-            ...(logo.trim() && { logoUrl: logo.trim() }),
-          },
+          branding: draftToBranding(look),
+          inheritBranding: inherit,
         });
       }}
     >
       <div>
         <h2 className="text-sm font-medium">Panel</h2>
         <p className="text-sm text-muted-foreground">
-          Who can use this room’s touch panel on the local network, and how it looks. Applies from the
-          next release.
+          Who can use this room’s touch panel on the local network, and how it looks. Applies from
+          the next release.
         </p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -154,7 +164,9 @@ export function PanelSettings({ roomId }: { roomId: string }) {
               inputMode="numeric"
               autoComplete="off"
               maxLength={8}
-              placeholder={current.data?.hasPin ? 'Leave blank to keep the current PIN' : 'e.g. 4821'}
+              placeholder={
+                current.data?.hasPin ? 'Leave blank to keep the current PIN' : 'e.g. 4821'
+              }
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
             />
@@ -177,40 +189,14 @@ export function PanelSettings({ roomId }: { roomId: string }) {
           </p>
         </div>
       )}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="space-y-2">
-          <Label htmlFor="panel-theme">Theme</Label>
-          <SimpleSelect
-            id="panel-theme"
-            className="w-full"
-            value={theme}
-            onValueChange={setTheme}
-            options={[
-              { value: 'dark', label: 'Dark' },
-              { value: 'light', label: 'Light' },
-            ]}
-          />
+      <div className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5">
+        <div>
+          <Label htmlFor="panel-inherit">Use the organisation’s theme</Label>
+          <p className="text-xs text-muted-foreground">Turn off to give this room its own look.</p>
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="panel-accent">Accent colour</Label>
-          <Input
-            id="panel-accent"
-            placeholder="#0f8a8c"
-            value={accent}
-            onChange={(e) => setAccent(e.target.value)}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="panel-logo">Logo URL</Label>
-          <Input
-            id="panel-logo"
-            type="url"
-            placeholder="https://…/logo.svg"
-            value={logo}
-            onChange={(e) => setLogo(e.target.value)}
-          />
-        </div>
+        <Switch id="panel-inherit" checked={inherit} onCheckedChange={setInherit} />
       </div>
+      <BrandingFields id="panel" value={look} onChange={setLook} disabled={inherit} />
       {save.error && <p className="text-sm text-destructive">{save.error.message}</p>}
       <Button type="submit" variant="outline" disabled={save.isPending}>
         {save.isPending && <Spinner />}

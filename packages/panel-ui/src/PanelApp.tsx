@@ -1,7 +1,8 @@
 import { useState, useSyncExternalStore } from 'react';
 import type { PanelActivity, PanelClient, PanelViewModel } from '@kestrel/model';
 import { Icon } from './icons';
-import { createTranslator, messageText, type Translate } from './i18n';
+import { messageText, type Translate } from './i18n';
+import { translatorFor } from './languages';
 import { darkTheme, themeStyle, type PanelTheme } from './theme';
 import { VolumeControl } from './VolumeControl';
 
@@ -118,6 +119,8 @@ export interface PanelAppProps {
   client: PanelClient;
   theme?: PanelTheme;
   translate?: Translate;
+  /** A language code such as "es". Ignored if `translate` is given. */
+  language?: string;
   className?: string;
 }
 
@@ -125,9 +128,15 @@ export interface PanelAppProps {
  * The generated room panel: activities, never devices. Everything it shows comes from the client's
  * view model, so the same component serves the browser simulator and a real gateway.
  */
-export function PanelApp({ client, theme = darkTheme, translate, className }: PanelAppProps) {
+export function PanelApp({
+  client,
+  theme = darkTheme,
+  translate,
+  language,
+  className,
+}: PanelAppProps) {
   const vm = usePanel(client);
-  const t = translate ?? createTranslator();
+  const t = translate ?? translatorFor(language);
   const dispatch: PanelClient['dispatch'] = (intent) => client.dispatch(intent);
   const [picked, setPicked] = useState<string | null>(null);
 

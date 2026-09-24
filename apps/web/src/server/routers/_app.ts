@@ -3,6 +3,7 @@ import { alertRouter } from './alert';
 import { auditRouter } from './audit';
 import { billingRouter } from './billing';
 import { commandRouter } from './command';
+import { controlRouter } from './control';
 import { deploymentRouter } from './deployment';
 import { draftRouter } from './draft';
 import { gatewayRouter } from './gateway';
@@ -33,5 +34,6 @@ export const appRouter = router({
   command: commandRouter,
   ticket: ticketRouter,
   billing: billingRouter,
+  control: controlRouter,
 });
 export type AppRouter = typeof appRouter;

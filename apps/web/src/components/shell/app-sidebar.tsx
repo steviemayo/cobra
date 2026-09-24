@@ -174,7 +174,7 @@ function EstateTree() {
 }
 
 export function AppSidebar() {
-  const { orgId, canEdit, canSeeTeam, isOwner } = useOrg();
+  const { orgId, canEdit, canSeeTeam, canSupport, isOwner } = useOrg();
   const { openNewSite } = useDialogs();
   const base = orgPath(orgId);
   const isActive = useActive();
@@ -212,15 +212,19 @@ export function AppSidebar() {
           <SidebarGroupLabel>Manage</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              <NavItem href={`${base}/sites`} icon={Building2} label="Sites" />
+              {canSupport && <NavItem href={`${base}/sites`} icon={Building2} label="Sites" />}
               <NavItem href={`${base}/rooms`} icon={DoorOpen} label="Rooms" />
               {canEdit && (
                 <NavItem href={`${base}/templates`} icon={LayoutTemplate} label="Templates" />
               )}
-              <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />
-              <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />
+              {canSupport && <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />}
+              {canSupport && (
+                <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />
+              )}
               <NavItem href={`${base}/monitoring`} icon={Activity} label="Monitoring" />
-              <NavItem href={`${base}/incidents`} icon={AlertTriangle} label="Incidents" />
+              {canSupport && (
+                <NavItem href={`${base}/incidents`} icon={AlertTriangle} label="Incidents" />
+              )}
               <NavItem href={`${base}/tickets`} icon={LifeBuoy} label="Support" />
             </SidebarMenu>
           </SidebarGroupContent>

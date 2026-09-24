@@ -65,6 +65,9 @@ export class Gateway {
   private readonly inbox: GatewayCommand[] = [];
   /** Outcomes still to be reported in the next heartbeat. */
   private readonly pendingResults: CommandResult[] = [];
+  /** Rooms someone is controlling from the portal; while there are any, the cloud is polled fast. */
+  private watch = new Set<string>();
+  private fastTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly cfg: GatewayConfig,
@@ -86,6 +89,7 @@ export class Gateway {
   stop() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.fastTimer) clearTimeout(this.fastTimer);
   }
 
   get identity(): Identity | null {
@@ -208,7 +212,44 @@ export class Gateway {
       });
     this.pendingResults.splice(0, results.length);
     this.inbox.push(...res.commands);
+    this.setWatch(res.watch);
     return res;
+  }
+
+  // ---- Control from the portal ----------------------------------------------------------------
+
+  private setWatch(rooms: string[]) {
+    this.watch = new Set(rooms);
+    if (this.watch.size > 0 && !this.fastTimer && !this.stopped) this.scheduleFast(0);
+  }
+
+  private scheduleFast(ms: number) {
+    this.fastTimer = setTimeout(() => void this.fastTick(), ms);
+  }
+
+  /** One round trip: send the watched rooms' panel state up, run the intents that come back. */
+  private async fastTick(): Promise<void> {
+    this.fastTimer = null;
+    const credential = this.store.get(KEY_CREDENTIAL);
+    if (this.stopped || !credential || this.watch.size === 0) return;
+    let next = 1000;
+    try {
+      const panels = [...this.watch].flatMap((roomId) => {
+        const room = this.host.get(roomId);
+        return room ? [{ roomId, vm: room.runtime.getSnapshot() }] : [];
+      });
+      const res = await this.cloud.poll(credential, { protocol: PROTOCOL_VERSION, panels });
+      this.watch = new Set(res.watch);
+      for (const { roomId, intent } of res.intents) this.host.get(roomId)?.runtime.dispatch(intent);
+      // Something just changed, so report it back quickly.
+      if (res.intents.length > 0) next = 250;
+    } catch (e) {
+      this.log('warn', 'Portal control poll failed', {
+        error: e instanceof Error ? e.message : String(e),
+      });
+      next = 3000;
+    }
+    if (this.watch.size > 0 && !this.stopped) this.scheduleFast(next);
   }
 
   /** Run what the cloud asked for, then report straight away rather than a heartbeat later. */

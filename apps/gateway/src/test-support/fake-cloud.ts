@@ -34,6 +34,10 @@ export class FakeCloud {
   readonly heartbeats: HeartbeatRequest[] = [];
   /** Commands handed to the gateway in its next heartbeat response. */
   readonly queuedCommands: GatewayCommand[] = [];
+  /** Rooms the fake portal is "controlling": the gateway is told to poll fast for them. */
+  watching: string[] = [];
+  readonly queuedIntents: { id: string; roomId: string; intent: unknown }[] = [];
+  readonly polls: { panels: { roomId: string; vm: unknown }[] }[] = [];
   readonly telemetry: TelemetryEvent[] = [];
   readonly manifestFetches: string[] = [];
   private assignments = new Map<string, Assignment>();
@@ -156,7 +160,12 @@ export class FakeCloud {
         configVersion: String(this.version),
         serverTime: new Date().toISOString(),
         commands: this.queuedCommands.splice(0),
+        watch: this.watching,
       });
+    }
+    if (req.method === 'POST' && path === '/poll') {
+      this.polls.push((await this.body(req)) as { panels: { roomId: string; vm: unknown }[] });
+      return this.json(res, 200, { watch: this.watching, intents: this.queuedIntents.splice(0) });
     }
     if (req.method === 'GET' && path === '/config') {
       return this.json(res, 200, {

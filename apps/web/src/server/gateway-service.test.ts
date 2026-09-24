@@ -110,6 +110,8 @@ function world() {
     { id: 'b1', orgId: ORG, plan: 'pro', status: 'active', trialEndsAt: new Date() },
   ]);
   const org = table([{ id: ORG, createdAt: new Date() }]);
+  const controlSession = table([]);
+  const controlIntent = table([]);
   const db = {
     gateway,
     room,
@@ -125,6 +127,8 @@ function world() {
     alertDelivery,
     orgBilling,
     org,
+    controlSession,
+    controlIntent,
   } as unknown as Db;
   return {
     db,
@@ -142,6 +146,8 @@ function world() {
     alertDelivery,
     orgBilling,
     org,
+    controlSession,
+    controlIntent,
   };
 }
 

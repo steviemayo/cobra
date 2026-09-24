@@ -232,3 +232,60 @@ describe('remote commands', () => {
     expect(g.host.get(ROOM)!.releaseId).toBe(first.releaseId);
   });
 });
+
+describe('control from the portal', () => {
+  it('polls fast while a room is watched, sends its panel state, runs intents, and stops when the page closes', async () => {
+    const port = await listen(device!);
+    cloud.assign(ROOM, modelWithDsp(port));
+    const { gateway, host } = boot();
+    gateway.start();
+    await until(() => host.ids().includes(ROOM));
+    await gateway.tick();
+    expect(cloud.polls).toHaveLength(0);
+
+    // Someone opens the control page: the next heartbeat tells the gateway to watch the room.
+    cloud.watching = [ROOM];
+    await gateway.tick();
+    await until(() => cloud.polls.length >= 2);
+    const last = cloud.polls.at(-1)!.panels[0]!;
+    expect(last.roomId).toBe(ROOM);
+    expect(last.vm).toMatchObject({ roomName: 'Test room', status: 'off' });
+
+    // They press Present: the intent reaches the room's runtime.
+    const present = host
+      .get(ROOM)!
+      .runtime.getSnapshot()
+      .activities.find((a) => a.kind !== 'room_off')!;
+    cloud.queuedIntents.push({
+      id: crypto.randomUUID(),
+      roomId: ROOM,
+      intent: { type: 'activity.start', activityId: present.id },
+    });
+    await until(() => host.get(ROOM)!.runtime.getSnapshot().status !== 'off');
+
+    // They close the page: the gateway settles back to the normal heartbeat.
+    cloud.watching = [];
+    await wait(1600);
+    const settled = cloud.polls.length;
+    await wait(2500);
+    expect(cloud.polls.length).toBe(settled);
+  }, 20_000);
+
+  it('ignores intents for rooms it is not running', async () => {
+    const port = await listen(device!);
+    cloud.assign(ROOM, modelWithDsp(port));
+    const { gateway, host } = boot();
+    gateway.start();
+    await until(() => host.ids().includes(ROOM));
+    cloud.watching = [ROOM];
+    cloud.queuedIntents.push({
+      id: crypto.randomUUID(),
+      roomId: '33333333-3333-4333-8333-333333333399',
+      intent: { type: 'volume.bump', delta: 5 },
+    });
+    await gateway.tick();
+    await until(() => cloud.polls.length >= 1);
+    expect(host.ids()).toEqual([ROOM]);
+    cloud.watching = [];
+  });
+});
