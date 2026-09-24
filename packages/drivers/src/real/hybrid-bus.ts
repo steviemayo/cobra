@@ -1,9 +1,4 @@
-import type {
-  DeviceBus,
-  DeviceCommand,
-  DeviceEvent,
-  DeviceState,
-} from '@kestrel/model';
+import type { DeviceBus, DeviceCommand, DeviceEvent, DeviceState } from '@kestrel/model';
 import type { Simulation } from '../sim/simulation';
 import type { DeviceDriver } from './types';
 

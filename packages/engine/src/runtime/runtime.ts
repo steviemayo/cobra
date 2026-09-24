@@ -4,12 +4,14 @@ import {
   type DeviceBus,
   type DeviceEvent,
   type PanelClient,
+  type PanelCombination,
   type PanelViewModel,
   type RoomModel,
   type RoomStatus,
+  type TriggerTarget,
 } from '@kestrel/model';
 import { executePlan } from '../plan/execute';
-import { activitySources, planActivity, planStopOverlay, type Plan } from '../plan/plan';
+import { activitySources, planActivity, planState, planStopOverlay, type Plan } from '../plan/plan';
 import { buildGraph, deviceCapabilities, type Graph } from '../validate/graph';
 import { availableActivities, detectorsFor, type SignalDetector } from './activities';
 
@@ -19,6 +21,8 @@ export interface RuntimeOptions {
   bus: DeviceBus;
   /** Per-step limit passed to the executor. */
   stepTimeoutMs?: number;
+  /** The panel asked to join or split the room with its combined partners. */
+  onCombine?: (combined: boolean) => void;
 }
 
 interface Primary {
@@ -73,6 +77,10 @@ export class RoomRuntime implements PanelClient {
   private warningDeadline: number | null = null;
   private savedUntil = 0;
   private lastPresence = new Map<string, boolean | null>();
+  private combination: PanelCombination | null = null;
+  private secondary: { video: 'follow' | 'blank'; audio: 'follow' | 'blank' } | null = null;
+  private followedActivity: string | null = null;
+  private lastOccupied = new Map<string, boolean | undefined>();
 
   private runId = 0;
   private abort: AbortController | null = null;
@@ -123,6 +131,8 @@ export class RoomRuntime implements PanelClient {
     const intent = parsed.data;
     // Any touch counts as someone being here: cancel a pending auto-off.
     if (intent.type !== 'warning.dismiss') this.userPresent();
+    // While combined as a secondary, the primary room's panel is in charge.
+    if (this.secondary && intent.type !== 'combine.set') return;
     switch (intent.type) {
       case 'activity.start':
         return void this.startActivity(intent.activityId, intent.sourceId);
@@ -138,6 +148,9 @@ export class RoomRuntime implements PanelClient {
         return this.respondToPrompt(intent.promptId, intent.accept);
       case 'warning.dismiss':
         return this.dismissWarning();
+      case 'combine.set':
+        if (this.combination?.role === 'primary') this.opts.onCombine?.(intent.combined);
+        return;
     }
   }
 
@@ -150,6 +163,119 @@ export class RoomRuntime implements PanelClient {
     this.clearWarning();
     this.stopTicker();
     this.listeners.clear();
+  }
+
+  // ---- Combined rooms -------------------------------------------------------------------------
+
+  /** What this room shows about being combinable. null: this room is not part of any combination. */
+  setCombination(info: PanelCombination | null) {
+    this.combination = info;
+    this.notify();
+  }
+
+  /**
+   * Put this room under another's control (or release it with null). Releasing turns the room off,
+   * so splitting always leaves both rooms in a known state.
+   */
+  setSecondary(mode: { video: 'follow' | 'blank'; audio: 'follow' | 'blank' } | null) {
+    if (this.disposed) return;
+    const was = this.secondary;
+    this.secondary = mode;
+    this.followedActivity = null;
+    if (was && !mode && this.status !== 'off') void this.roomOff();
+    this.notify();
+  }
+
+  /**
+   * Mirror the primary room. Video: run the primary's activity here (an activity with the same id,
+   * using the same source id if this room has it), or blank the displays. Audio: match its volume
+   * and mute, or keep this room's speakers muted.
+   */
+  follow(primary: PanelViewModel) {
+    const mode = this.secondary;
+    if (!mode || this.disposed) return;
+    const live = primary.status === 'on' || primary.status === 'starting';
+    const active = live
+      ? primary.activities.find((a) => a.active && a.kind !== 'room_off' && !a.overlay)
+      : undefined;
+
+    if (!active || mode.video === 'blank') {
+      this.followedActivity = null;
+      if (this.status !== 'off' && this.status !== 'stopping') void this.roomOff();
+    } else {
+      const chosen = active.sources.find((s) => s.selected)?.id;
+      const key = `${active.id}:${chosen ?? ''}`;
+      const mine = this.activities.find((a) => a.id === active.id);
+      if (mine && key !== this.followedActivity) {
+        this.followedActivity = key;
+        const source = mine.sources.some((s) => s.id === chosen) ? chosen : undefined;
+        void this.startActivity(mine.id, source);
+      }
+    }
+
+    if (mode.audio === 'follow') {
+      if (primary.volume.available && primary.volume.level !== this.volume)
+        this.setVolume(primary.volume.level);
+      if (primary.volume.available && primary.volume.muted !== this.muted)
+        void this.setMuted(primary.volume.muted);
+    } else if (!this.muted && this.volumeDevices.length > 0) void this.setMuted(true);
+  }
+
+  // ---- Triggers -------------------------------------------------------------------------------
+
+  /** Run what a trigger points at: an activity (with a source) or a state. Used by schedules, hooks and sensors. */
+  fire(target: TriggerTarget): void {
+    if (this.disposed) return;
+    if (target.type === 'activity')
+      return void this.startActivity(target.activityId, target.sourceId);
+    void this.runState(target.stateId);
+  }
+
+  /** Run one enabled trigger by id, whatever its kind (a calendar meeting starting, say). Returns whether it ran. */
+  fireTrigger(triggerId: string): boolean {
+    const t = this.model.triggers.find((x) => x.id === triggerId && x.enabled);
+    if (!t) return false;
+    this.fire(t.run);
+    return true;
+  }
+
+  /** An external call (webhook) by name. Returns how many triggers ran. */
+  fireHook(hookName: string): number {
+    const hooks = this.model.triggers.filter(
+      (t) => t.type === 'webhook' && t.enabled && t.hookName === hookName,
+    );
+    for (const t of hooks) this.fire(t.run);
+    return hooks.length;
+  }
+
+  private async runState(stateId: string) {
+    const state = this.model.states.find((s) => s.id === stateId);
+    if (!state) return;
+    if (state.kind === 'off') return this.roomOff();
+    const { run, signal } = this.begin(state.kind === 'on' ? 'starting' : this.status);
+    this.notify();
+    const ok = await this.run(planState(this.model, stateId), run, signal);
+    if (!ok) return;
+    if (state.kind === 'on') this.status = 'on';
+    else if (this.status === 'starting') this.status = this.primary ? 'on' : 'off';
+    this.adoptDeviceState();
+    this.evaluateIdle();
+    this.notify();
+  }
+
+  private occupancyChanged(event: DeviceEvent) {
+    const before = this.lastOccupied.get(event.deviceId);
+    const now = event.state.occupied;
+    this.lastOccupied.set(event.deviceId, now);
+    if (now === undefined || before === now) return;
+    for (const t of this.model.triggers)
+      if (
+        t.type === 'occupancy' &&
+        t.enabled &&
+        t.deviceId === event.deviceId &&
+        t.occupied === now
+      )
+        this.fire(t.run);
   }
 
   // ---- Activities -----------------------------------------------------------------------------
@@ -367,6 +493,7 @@ export class RoomRuntime implements PanelClient {
       if (event.state.volume !== undefined) this.volume = event.state.volume;
       if (event.state.muted !== undefined) this.muted = event.state.muted;
     }
+    this.occupancyChanged(event);
     for (const [source, detector] of this.detectors) {
       if (detector?.deviceId !== event.deviceId) continue;
       const now = this.presence(source);
@@ -580,6 +707,11 @@ export class RoomRuntime implements PanelClient {
     else if (this.status === 'on')
       message = { text: { key: 'ready', params: {} }, tone: 'success' };
     else message = { text: { key: 'room_off', params: {} }, tone: 'info' };
+    if (this.secondary && this.combination)
+      message = {
+        text: { key: 'combined_secondary', params: { room: this.combination.rooms[0] ?? '' } },
+        tone: 'info',
+      };
 
     const promptSource = this.prompt
       ? activitySources(
@@ -615,6 +747,7 @@ export class RoomRuntime implements PanelClient {
               secondsLeft: this.secondsLeft(this.warningDeadline) ?? 0,
             }
           : null,
+      ...(this.combination ? { combination: this.combination } : {}),
     };
   }
 }

@@ -25,23 +25,44 @@ enum GatewayStatus {
   offline
 }
 
+enum GatewayChannel {
+  stable
+  beta
+}
+
 model Org {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
   createdAt DateTime @default(now())
 
-  members       Member[]
-  sites         Site[]
-  gateways      Gateway[]
-  rooms         Room[]
-  audit         AuditLog[]
-  drafts        RoomDraft[]
-  draftVersions RoomDraftVersion[]
-  templates     Template[]
-  invites       Invite[]
-  releases      Release[]
-  gatewayEvents GatewayEvent[]
-  deployments   Deployment[]
+  members         Member[]
+  sites           Site[]
+  gateways        Gateway[]
+  rooms           Room[]
+  audit           AuditLog[]
+  drafts          RoomDraft[]
+  draftVersions   RoomDraftVersion[]
+  templates       Template[]
+  invites         Invite[]
+  releases        Release[]
+  gatewayEvents   GatewayEvent[]
+  deployments     Deployment[]
+  deviceStatus    DeviceStatus[]
+  incidents       Incident[]
+  alertChannels   AlertChannel[]
+  alertDeliveries AlertDelivery[]
+  commands        RemoteCommand[]
+  tickets         Ticket[]
+  ticketComments  TicketComment[]
+  branding        Json?
+  billing         OrgBilling?
+  controlIntents  ControlIntent[]
+  controlSessions ControlSession[]
+  combinations    RoomCombination[]
+  calendars       CalendarConnection[]
+  listings        MarketplaceListing[]
+  purchases       MarketplacePurchase[]
+  customDrivers   CustomDriver[]
 }
 
 model Member {
@@ -73,20 +94,21 @@ model Site {
 }
 
 model Gateway {
-  id                   String        @id @default(uuid()) @db.Uuid
-  orgId                String        @db.Uuid
-  siteId               String        @db.Uuid
+  id                   String         @id @default(uuid()) @db.Uuid
+  orgId                String         @db.Uuid
+  siteId               String         @db.Uuid
   name                 String
-  status               GatewayStatus @default(pending)
+  status               GatewayStatus  @default(pending)
   enrollTokenHash      String?
   enrollTokenExpiresAt DateTime?
-  credentialHash       String?       @unique
+  credentialHash       String?        @unique
   enrolledAt           DateTime?
   version              String?
+  channel              GatewayChannel @default(stable)
   hostname             String?
   os                   String?
   lastSeenAt           DateTime?
-  createdAt            DateTime      @default(now())
+  createdAt            DateTime       @default(now())
 
   org    Org            @relation(fields: [orgId], references: [id], onDelete: Cascade)
   site   Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
@@ -106,6 +128,8 @@ model Room {
   type                RoomType
   createdAt           DateTime  @default(now())
   panel               Json?
+  /// Hash of the secret webhook callers present. Null until someone generates one.
+  hookSecretHash      String?
   desiredReleaseId    String?   @db.Uuid
   desiredDeploymentId String?   @db.Uuid
   reportedReleaseId   String?   @db.Uuid
@@ -115,12 +139,16 @@ model Room {
   reportedAt          DateTime?
   updatedAt           DateTime  @default(now()) @updatedAt
 
-  org         Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site        Site         @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  gateway     Gateway?     @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  org         Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site        Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  gateway     Gateway?        @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
   draft       RoomDraft?
   releases    Release[]
   deployments Deployment[]
+  devices     DeviceStatus[]
+  incidents   Incident[]
+  commands    RemoteCommand[]
+  tickets     Ticket[]
 
   @@index([orgId])
   @@index([siteId])
@@ -289,4 +317,349 @@ model DeploymentEvent {
   deployment Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
 
   @@unique([deploymentId, stage])
+}
+
+// ---- Monitoring & support ---------------------------------------------------------------------
+
+// Latest reachability of each device in a room's running release, as reported by its gateway.
+model DeviceStatus {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  roomId    String   @db.Uuid
+  deviceId  String
+  name      String
+  online    Boolean
+  /// When the device last changed between online and offline.
+  since     DateTime
+  updatedAt DateTime @default(now()) @updatedAt
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, deviceId])
+  @@index([orgId])
+}
+
+// Something wrong that a person may need to act on. One open incident per (kind, subject).
+// kind: device_offline, gateway_offline, room_fault, deploy_failed. severity: info, warning, critical.
+model Incident {
+  id             String    @id @default(uuid()) @db.Uuid
+  orgId          String    @db.Uuid
+  roomId         String?   @db.Uuid
+  gatewayId      String?   @db.Uuid
+  kind           String
+  /// What the incident is about, so the same problem is never opened twice (e.g. "<roomId>:<deviceId>").
+  subject        String
+  severity       String
+  status         String    @default("open")
+  title          String
+  detail         String?
+  openedAt       DateTime
+  lastSeenAt     DateTime
+  resolvedAt     DateTime?
+  /// How many times it has come back inside the flap window.
+  occurrences    Int       @default(1)
+  /// Whether an "opened" alert went out, so resolution is only announced when the opening was.
+  alerted        Boolean   @default(false)
+  acknowledgedBy String?   @db.Uuid
+  acknowledgedAt DateTime?
+
+  org  Org   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status, openedAt])
+  @@index([orgId, kind, subject, status])
+  @@index([roomId])
+}
+
+// Where alerts go. `config` holds the destination (and any signing secret); it is never sent to a browser.
+// type: email, teams, webhook, itsm.
+model AlertChannel {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  name        String
+  type        String
+  config      Json
+  minSeverity String   @default("warning")
+  enabled     Boolean  @default(true)
+  createdBy   String?  @db.Uuid
+  createdAt   DateTime @default(now())
+
+  org        Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deliveries AlertDelivery[]
+
+  @@index([orgId])
+}
+
+model AlertDelivery {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String   @db.Uuid
+  channelId  String   @db.Uuid
+  incidentId String?  @db.Uuid
+  /// opened, resolved or test.
+  event      String
+  /// sent, failed, suppressed or skipped.
+  status     String
+  error      String?
+  at         DateTime @default(now())
+
+  org     Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  channel AlertChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, at])
+  @@index([orgId, at])
+}
+
+// A request for a gateway to run an allowlisted command. Delivered in a heartbeat response.
+// status: pending, sent, succeeded, failed, expired.
+model RemoteCommand {
+  id          String    @id @default(uuid()) @db.Uuid
+  orgId       String    @db.Uuid
+  gatewayId   String    @db.Uuid
+  roomId      String    @db.Uuid
+  type        String
+  args        Json      @default("{}")
+  status      String    @default("pending")
+  requestedBy String?   @db.Uuid
+  output      Json?
+  error       String?
+  createdAt   DateTime  @default(now())
+  sentAt      DateTime?
+  finishedAt  DateTime?
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([gatewayId, status])
+  @@index([roomId, createdAt])
+  @@index([orgId, createdAt])
+}
+
+// Support requests, raised by anyone in the org (customers included) and worked by support.
+// status: open, in_progress, resolved, closed. priority: low, normal, high, urgent.
+model Ticket {
+  id             String    @id @default(uuid()) @db.Uuid
+  orgId          String    @db.Uuid
+  roomId         String?   @db.Uuid
+  incidentId     String?   @db.Uuid
+  title          String
+  body           String
+  status         String    @default("open")
+  priority       String    @default("normal")
+  createdBy      String?   @db.Uuid
+  createdByEmail String?
+  assignedTo     String?   @db.Uuid
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+  closedAt       DateTime?
+
+  org      Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room     Room?           @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  comments TicketComment[]
+
+  @@index([orgId, status, createdAt])
+  @@index([roomId])
+}
+
+model TicketComment {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  ticketId    String   @db.Uuid
+  authorId    String?  @db.Uuid
+  authorEmail String?
+  body        String
+  createdAt   DateTime @default(now())
+
+  org    Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+}
+
+// ---- Billing ----------------------------------------------------------------------------------
+
+// One per organisation. `plan` is what they chose; entitlements are worked out from plan, Stripe
+// `status` and `trialEndsAt` (see @kestrel/model billing). Kestrel never stores card details.
+model OrgBilling {
+  id                   String    @id @default(uuid()) @db.Uuid
+  orgId                String    @unique @db.Uuid
+  plan                 String    @default("trial")
+  /// The Stripe subscription status, or "none" before there is one.
+  status               String    @default("none")
+  trialEndsAt          DateTime
+  stripeCustomerId     String?   @unique
+  stripeSubscriptionId String?   @unique
+  stripeItemId         String?
+  /// Rooms being billed for.
+  quantity             Int       @default(0)
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean   @default(false)
+  updatedAt            DateTime  @default(now()) @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// Stripe events already handled, so a redelivered webhook changes nothing.
+model StripeEvent {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now())
+}
+
+// ---- Control from the portal ------------------------------------------------------------------
+
+// While someone has a room's control page open, the gateway is asked for the room's panel state
+// and polled quickly. `snapshot` is the latest PanelViewModel the gateway sent.
+model ControlSession {
+  id           String    @id @default(uuid()) @db.Uuid
+  orgId        String    @db.Uuid
+  roomId       String    @unique @db.Uuid
+  lastActiveAt DateTime
+  snapshot     Json?
+  snapshotAt   DateTime?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// A panel intent (start an activity, change volume...) waiting for the gateway to pick it up.
+model ControlIntent {
+  id          String    @id @default(uuid()) @db.Uuid
+  orgId       String    @db.Uuid
+  roomId      String    @db.Uuid
+  gatewayId   String    @db.Uuid
+  intent      Json
+  createdBy   String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([gatewayId, deliveredAt])
+  @@index([roomId, createdAt])
+}
+
+// Rooms that can be joined into one. While combined, the primary's panel controls all of them.
+model RoomCombination {
+  id               String   @id @default(uuid()) @db.Uuid
+  orgId            String   @db.Uuid
+  name             String
+  primaryRoomId    String   @db.Uuid
+  secondaryRoomIds String[] @db.Uuid
+  /// follow: mirror what the primary shows. blank: keep the secondary's displays off.
+  secondaryVideo   String   @default("follow")
+  secondaryAudio   String   @default("follow")
+  /// What the gateway last reported. The gateway owns the live state.
+  combined         Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+// ---- Calendars ---------------------------------------------------------------------------------
+
+// How Kestrel reads an organisation's room calendars. `sealed` is the credentials, encrypted with
+// KESTREL_SECRETS_KEY; they are never sent to a browser. provider: graph or google.
+model CalendarConnection {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  provider  String
+  name      String
+  sealed    String
+  createdAt DateTime @default(now())
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, provider])
+}
+
+// A meeting that has already started a room's calendar trigger, so it never runs twice.
+model CalendarFire {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  roomId    String   @db.Uuid
+  triggerId String
+  eventKey  String
+  firedAt   DateTime @default(now())
+
+  @@unique([roomId, triggerId, eventKey])
+  @@index([firedAt])
+}
+
+// ---- Marketplace -------------------------------------------------------------------------------
+
+// A room design shared by one organisation with others. `model` is a snapshot with every device
+// setting removed (addresses and passwords never leave the publisher). status: pending (waiting for
+// review), published, rejected, withdrawn. priceCents 0 is free.
+model MarketplaceListing {
+  id             String    @id @default(uuid()) @db.Uuid
+  publisherOrgId String    @db.Uuid
+  templateId     String?   @db.Uuid
+  name           String
+  description    String    @default("")
+  roomType       RoomType
+  model          Json
+  version        Int       @default(1)
+  priceCents     Int       @default(0)
+  currency       String    @default("aud")
+  status         String    @default("pending")
+  reviewNote     String?
+  downloads      Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+  publishedAt    DateTime?
+
+  publisher Org                   @relation(fields: [publisherOrgId], references: [id], onDelete: Cascade)
+  purchases MarketplacePurchase[]
+
+  @@index([status, createdAt])
+  @@index([publisherOrgId])
+}
+
+// An organisation's right to a listing, from a free download or a paid checkout.
+model MarketplacePurchase {
+  id              String   @id @default(uuid()) @db.Uuid
+  listingId       String   @db.Uuid
+  buyerOrgId      String   @db.Uuid
+  priceCents      Int      @default(0)
+  stripeSessionId String?  @unique
+  createdAt       DateTime @default(now())
+
+  listing MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyer   Org                @relation(fields: [buyerOrgId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, buyerOrgId])
+}
+
+// ---- Custom drivers ----------------------------------------------------------------------------
+
+// A driver an organisation wrote in the Kestrel driver format. Each save is a new immutable
+// version; a release pins the exact version it used, so changing a driver never changes a room
+// that is already running.
+model CustomDriver {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @db.Uuid
+  slug          String
+  name          String
+  latestVersion Int      @default(1)
+  createdAt     DateTime @default(now())
+
+  org      Org                   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  versions CustomDriverVersion[]
+
+  @@unique([orgId, slug])
+}
+
+model CustomDriverVersion {
+  id        String   @id @default(uuid()) @db.Uuid
+  driverId  String   @db.Uuid
+  version   Int
+  spec      Json
+  createdBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+
+  driver CustomDriver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@unique([driverId, version])
 }

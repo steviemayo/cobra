@@ -1,0 +1,100 @@
+import type { PrismaClient } from '@kestrel/db';
+import { effectiveStatus } from './gateway-status';
+import { roomHealth, type Health } from './monitoring';
+
+export type OverviewDb = Pick<
+  PrismaClient,
+  'room' | 'gateway' | 'site' | 'deviceStatus' | 'incident'
+>;
+
+export interface RoomLive {
+  id: string;
+  name: string;
+  type: string;
+  siteId: string;
+  siteName: string;
+  gatewayId: string | null;
+  gatewayName: string | null;
+  gatewayStatus: 'pending' | 'online' | 'offline' | null;
+  /** What the room last said it was doing (off, on, fault...), or null if it has not reported. */
+  status: string | null;
+  reportedAt: Date | null;
+  health: Health;
+  devices: { total: number; online: number };
+  openIncidents: number;
+}
+
+export interface GatewayLive {
+  id: string;
+  name: string;
+  siteId: string;
+  siteName: string;
+  status: 'pending' | 'online' | 'offline';
+  lastSeenAt: Date | null;
+  version: string | null;
+  roomCount: number;
+  openIncidents: number;
+}
+
+/** Everything the live status pages show, in five queries. Every query is scoped to the org. */
+export async function orgOverview(db: OverviewDb, orgId: string, now = new Date()) {
+  const [rooms, gateways, sites, devices, incidents] = await Promise.all([
+    db.room.findMany({ where: { orgId }, orderBy: { name: 'asc' } }),
+    db.gateway.findMany({ where: { orgId }, orderBy: { name: 'asc' } }),
+    db.site.findMany({ where: { orgId } }),
+    db.deviceStatus.findMany({ where: { orgId } }),
+    db.incident.findMany({ where: { orgId, status: 'open' } }),
+  ]);
+  const siteName = new Map(sites.map((s) => [s.id, s.name]));
+  const gatewayById = new Map(
+    gateways.map((g) => [g.id, { name: g.name, status: effectiveStatus(g, now.getTime()) }]),
+  );
+
+  const roomRows: RoomLive[] = rooms.map((r) => {
+    const gw = r.gatewayId ? gatewayById.get(r.gatewayId) : undefined;
+    const own = devices.filter((d) => d.roomId === r.id);
+    const open = incidents.filter((i) => i.roomId === r.id);
+    return {
+      id: r.id,
+      name: r.name,
+      type: r.type,
+      siteId: r.siteId,
+      siteName: siteName.get(r.siteId) ?? '',
+      gatewayId: r.gatewayId,
+      gatewayName: gw?.name ?? null,
+      gatewayStatus: gw?.status ?? null,
+      status: r.reportedStatus,
+      reportedAt: r.reportedAt,
+      health: roomHealth({
+        gatewayStatus: gw?.status ?? null,
+        deployed: r.reportedReleaseId !== null,
+        status: r.reportedStatus,
+        devices: own,
+        openIncidents: open,
+      }),
+      devices: { total: own.length, online: own.filter((d) => d.online).length },
+      openIncidents: open.length,
+    };
+  });
+
+  const gatewayRows: GatewayLive[] = gateways.map((g) => ({
+    id: g.id,
+    name: g.name,
+    siteId: g.siteId,
+    siteName: siteName.get(g.siteId) ?? '',
+    status: effectiveStatus(g, now.getTime()),
+    lastSeenAt: g.lastSeenAt,
+    version: g.version,
+    roomCount: rooms.filter((r) => r.gatewayId === g.id).length,
+    openIncidents: incidents.filter((i) => i.gatewayId === g.id && i.roomId === null).length,
+  }));
+
+  return {
+    rooms: roomRows,
+    gateways: gatewayRows,
+    incidents: {
+      open: incidents.length,
+      critical: incidents.filter((i) => i.severity === 'critical').length,
+    },
+  };
+}

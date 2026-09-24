@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { db } from '@kestrel/db';
+import { TRIAL_DAYS } from '@kestrel/model';
 import { writeAudit } from '../audit';
+import { OrgBranding, readOrgBranding } from '../panel-settings';
 import { authedProcedure, orgProcedure, requireRole, router } from '../trpc';
 
 const name = z.string().trim().min(1).max(100);
@@ -25,6 +27,7 @@ export const orgRouter = router({
     const org = await db.org.create({
       data: {
         name: input.name,
+        billing: { create: { trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86_400_000) } },
         members: {
           create: { userId: ctx.user.id, email: ctx.user.email?.toLowerCase(), role: 'owner' },
         },
@@ -39,6 +42,27 @@ export const orgRouter = router({
     });
     return org;
   }),
+
+  // The default look of every room's panel. Rooms follow it unless they set their own.
+  getBranding: orgProcedure.input(z.object({ orgId: z.string().uuid() })).query(async ({ ctx }) => {
+    const org = await db.org.findFirst({ where: { id: ctx.orgId }, select: { branding: true } });
+    return readOrgBranding(org?.branding);
+  }),
+
+  setBranding: orgProcedure
+    .input(z.object({ orgId: z.string().uuid(), branding: OrgBranding }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      await db.org.update({ where: { id: ctx.orgId }, data: { branding: input.branding } });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'org.branding',
+        target: ctx.orgId,
+        meta: { mode: input.branding.mode, language: input.branding.language },
+      });
+      return input.branding;
+    }),
 
   rename: orgProcedure
     .input(z.object({ orgId: z.string().uuid(), name }))

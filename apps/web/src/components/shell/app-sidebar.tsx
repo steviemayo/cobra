@@ -4,16 +4,22 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Activity,
+  AlertTriangle,
+  BellRing,
   Building2,
   ChevronRight,
+  Cpu,
+  Link2,
   DoorOpen,
   LayoutDashboard,
   LayoutTemplate,
+  LifeBuoy,
   type LucideIcon,
   Plus,
   Rocket,
   Router,
   Settings,
+  Store,
   Users,
 } from 'lucide-react';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
@@ -171,7 +177,7 @@ function EstateTree() {
 }
 
 export function AppSidebar() {
-  const { orgId, canEdit, canSeeTeam, isOwner } = useOrg();
+  const { orgId, canEdit, canSeeTeam, canSupport, isOwner } = useOrg();
   const { openNewSite } = useDialogs();
   const base = orgPath(orgId);
   const isActive = useActive();
@@ -209,14 +215,25 @@ export function AppSidebar() {
           <SidebarGroupLabel>Manage</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              <NavItem href={`${base}/sites`} icon={Building2} label="Sites" />
+              {canSupport && <NavItem href={`${base}/sites`} icon={Building2} label="Sites" />}
               <NavItem href={`${base}/rooms`} icon={DoorOpen} label="Rooms" />
               {canEdit && (
                 <NavItem href={`${base}/templates`} icon={LayoutTemplate} label="Templates" />
               )}
-              <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />
-              <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />
-              <NavItem icon={Activity} label="Monitoring" soon />
+              {canEdit && <NavItem href={`${base}/marketplace`} icon={Store} label="Marketplace" />}
+              {canEdit && <NavItem href={`${base}/drivers`} icon={Cpu} label="Custom drivers" />}
+              {canSupport && <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />}
+              {canSupport && (
+                <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />
+              )}
+              {canSupport && (
+                <NavItem href={`${base}/combinations`} icon={Link2} label="Combined rooms" />
+              )}
+              <NavItem href={`${base}/monitoring`} icon={Activity} label="Monitoring" />
+              {canSupport && (
+                <NavItem href={`${base}/incidents`} icon={AlertTriangle} label="Incidents" />
+              )}
+              <NavItem href={`${base}/tickets`} icon={LifeBuoy} label="Support" />
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -227,6 +244,7 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu>
                 <NavItem href={`${base}/team`} icon={Users} label="Team" />
+                <NavItem href={`${base}/alerts`} icon={BellRing} label="Alerts" />
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={settingsOpen}
@@ -245,6 +263,16 @@ export function AppSidebar() {
                             render={<Link href={`${base}/settings`} />}
                           >
                             <span>General</span>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      )}
+                      {isOwner && (
+                        <SidebarMenuSubItem>
+                          <SidebarMenuSubButton
+                            isActive={isActive(`${base}/settings/billing`)}
+                            render={<Link href={`${base}/settings/billing`} />}
+                          >
+                            <span>Plan and billing</span>
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>
                       )}

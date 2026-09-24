@@ -1,4 +1,4 @@
-import { RoomRuntime } from '@kestrel/engine';
+import { RoomRuntime, TriggerScheduler } from '@kestrel/engine';
 import { createSimulation } from '@kestrel/drivers';
 import { HybridBus, createDriver, type DeviceDriver } from '@kestrel/drivers/real';
 import type {
@@ -24,6 +24,8 @@ export interface LoadedRoom {
   branding: PanelBranding;
   /** Ids of this room's real devices that are unreachable right now. */
   offline(): string[];
+  /** Starts anything that acts on its own (schedules). Called when the room goes live, not while staged. */
+  begin(): void;
   close(): void;
 }
 
@@ -42,7 +44,11 @@ export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger
   }
   const real = new Map<string, DeviceDriver>();
   for (const device of model.devices) {
-    const driver = createDriver(device, { log: (l, m, x) => log(l, m, { device: device.name, ...x }) });
+    const driver = createDriver(
+      device,
+      { log: (l, m, x) => log(l, m, { device: device.name, ...x }) },
+      signed.manifest.drivers,
+    );
     if (driver) real.set(device.id, driver);
   }
   const bus = new HybridBus(real, mode === 'missing' ? createSimulation(model) : null);
@@ -57,6 +63,7 @@ export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger
 export class RoomHost {
   private readonly rooms = new Map<string, LoadedRoom>();
   private readonly reloadListeners = new Set<(roomId: string) => void>();
+  private combineListener: ((roomId: string, combined: boolean) => void) | null = null;
 
   constructor(
     private readonly mode: SimulateMode,
@@ -82,6 +89,11 @@ export class RoomHost {
     return () => this.reloadListeners.delete(listener);
   }
 
+  /** Set by the combine coordinator: a room's panel asked to join or split its combination. */
+  onCombineRequest(listener: (roomId: string, combined: boolean) => void) {
+    this.combineListener = listener;
+  }
+
   /** Build a room and start connecting to its devices without replacing the one that is running. */
   stage(signed: SignedManifest): LoadedRoom {
     const { manifest } = signed;
@@ -90,7 +102,9 @@ export class RoomHost {
       model: manifest.model,
       roomName: manifest.roomName,
       bus: built.bus,
+      onCombine: (combined) => this.combineListener?.(manifest.roomId, combined),
     });
+    const scheduler = new TriggerScheduler(manifest.model, { fire: (t) => runtime.fire(t.run) });
     const room: LoadedRoom = {
       roomId: manifest.roomId,
       releaseId: manifest.releaseId,
@@ -100,7 +114,9 @@ export class RoomHost {
       access: manifest.panel.access,
       branding: manifest.panel.branding,
       offline: built.offline,
+      begin: () => scheduler.start(),
       close: () => {
+        scheduler.stop();
         runtime.dispose();
         built.close();
       },
@@ -128,6 +144,7 @@ export class RoomHost {
     this.unload(room.roomId, false);
     this.watch(room);
     this.rooms.set(room.roomId, room);
+    room.begin();
     this.log('info', 'Room loaded', {
       roomId: room.roomId,
       room: manifest.roomName,
@@ -156,6 +173,11 @@ export class RoomHost {
       releaseId: r.releaseId,
       manifestHash: r.signed.hash,
       status: r.runtime.getSnapshot().status,
+      devices: r.signed.manifest.model.devices.map((d) => ({
+        deviceId: d.id,
+        name: d.name,
+        online: r.bus.getState(d.id)?.online ?? true,
+      })),
     }));
   }
 
@@ -177,6 +199,26 @@ export class RoomHost {
         .activities.filter((a) => a.active && a.kind !== 'room_off')
         .map((a) => a.id),
     );
+    // Tell the cloud when a device drops off or comes back, with the time it happened.
+    const names = new Map(room.signed.manifest.model.devices.map((d) => [d.id, d.name]));
+    const reachable = new Map<string, boolean>(
+      [...names.keys()].map((id) => [id, room.bus.getState(id)?.online ?? true]),
+    );
+    const stopDevices = room.bus.subscribe(({ deviceId, state }) => {
+      if (!names.has(deviceId) || reachable.get(deviceId) === state.online) return;
+      reachable.set(deviceId, state.online);
+      this.emit({
+        at: at(),
+        type: state.online ? 'device.online' : 'device.offline',
+        roomId: room.roomId,
+        data: { deviceId, name: names.get(deviceId) },
+      });
+    });
+    const close = room.close;
+    room.close = () => {
+      stopDevices();
+      close();
+    };
     room.runtime.subscribe(() => {
       const vm = room.runtime.getSnapshot();
       if (vm.status !== status) {
@@ -190,13 +232,25 @@ export class RoomHost {
             data: { message: vm.message?.text.key ?? 'fault', ...(vm.message?.text.params ?? {}) },
           });
       }
-      const now = new Set(vm.activities.filter((a) => a.active && a.kind !== 'room_off').map((a) => a.id));
+      const now = new Set(
+        vm.activities.filter((a) => a.active && a.kind !== 'room_off').map((a) => a.id),
+      );
       for (const id of now)
         if (!active.has(id))
-          this.emit({ at: at(), type: 'activity.started', roomId: room.roomId, data: { activityId: id } });
+          this.emit({
+            at: at(),
+            type: 'activity.started',
+            roomId: room.roomId,
+            data: { activityId: id },
+          });
       for (const id of active)
         if (!now.has(id))
-          this.emit({ at: at(), type: 'activity.stopped', roomId: room.roomId, data: { activityId: id } });
+          this.emit({
+            at: at(),
+            type: 'activity.stopped',
+            roomId: room.roomId,
+            data: { activityId: id },
+          });
       active = now;
     });
   }

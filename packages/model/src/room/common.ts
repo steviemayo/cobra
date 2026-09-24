@@ -32,6 +32,7 @@ export const Capability = z.enum([
   'blinds',
   'hvac',
   'mechanical',
+  'occupancy',
 ]);
 export type Capability = z.infer<typeof Capability>;
 

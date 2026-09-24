@@ -5,10 +5,12 @@ import { dirname, join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import WebSocket from 'ws';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { generateKeyPair, hashPin, signManifest } from '@kestrel/crypto';
+import { generateKeyPair, hashPin, signManifest, verifyAccess } from '@kestrel/crypto';
 import { PanelServerMessage, STARTER_TEMPLATES, type PanelAccess } from '@kestrel/model';
 import { silentLogger } from './log';
 import { createPanelServer } from './panel-server';
+import { PhoneLinks } from './phone';
+import { Store } from './store';
 import { RoomHost } from './room-host';
 
 const ROOM = '33333333-3333-4333-8333-333333333331';
@@ -36,10 +38,10 @@ let app: FastifyInstance;
 let port: number;
 const clients: WebSocket[] = [];
 
-async function start(access?: Partial<PanelAccess>, panelDir = '/nonexistent') {
+async function start(access?: Partial<PanelAccess>, panelDir = '/nonexistent', extra: Partial<Parameters<typeof createPanelServer>[0]> = {}) {
   host = new RoomHost('all', silentLogger, () => undefined);
   host.load(signedRoom(access));
-  app = await createPanelServer({ host, log: silentLogger, panelDir });
+  app = await createPanelServer({ host, log: silentLogger, panelDir, ...extra });
   await app.listen({ port: 0, host: '127.0.0.1' });
   port = (app.server.address() as AddressInfo).port;
 }
@@ -251,5 +253,52 @@ describe('http', () => {
     const missing = await app.inject({ method: 'GET', url: '/room/33333333-3333-4333-8333-3333333333ff' });
     expect(missing.statusCode).toBe(404);
     expect((await app.inject({ method: 'GET', url: '/room/nope' })).statusCode).toBe(404);
+  });
+});
+
+describe('QR links for phones', () => {
+  const SECRET = 'phone-secret-for-the-boardroom-0123456789';
+  const links = () => {
+    const store = new Store(':memory:');
+    const phone = new PhoneLinks(store, 'https://kestrel.example');
+    phone.setSecrets([{ roomId: ROOM, roomName: 'Boardroom', releaseId: '44444444-4444-4444-8444-444444444441', releaseNumber: 1, manifestHash: 'h', deploymentId: '55555555-5555-4555-8555-555555555551', phoneSecret: SECRET }]);
+    return { store, phone };
+  };
+
+  it('are sent to an open panel as a signed link that the cloud can verify', async () => {
+    await start(undefined, '/nonexistent', { phone: links().phone });
+    const p = new Panel();
+    await until(() => p.of('qr').length > 0);
+    const qr = p.of('qr')[0]!;
+    const token = qr.url.replace('https://kestrel.example/c/', '');
+    expect(verifyAccess(SECRET, 'join', token)?.roomId).toBe(ROOM);
+    expect(verifyAccess(SECRET, 'session', token)).toBeNull();
+    expect(new Date(qr.expiresAt).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('are replaced regularly, and held back from a panel that has not entered its PIN', async () => {
+    await start({ mode: 'pin', pinHash: hashPin('4821') }, '/nonexistent', { phone: links().phone, qrRefreshMs: 60 });
+    const p = new Panel();
+    await until(() => p.of('hello').length > 0);
+    await wait(150);
+    expect(p.of('qr')).toHaveLength(0);
+    p.send({ t: 'auth', pin: '4821' });
+    await until(() => p.of('qr').length >= 3);
+  });
+
+  it('are not sent when the cloud has not given the gateway a secret', async () => {
+    const store = new Store(':memory:');
+    await start(undefined, '/nonexistent', { phone: new PhoneLinks(store, 'https://kestrel.example') });
+    const p = new Panel();
+    await until(() => !!p.last);
+    await wait(80);
+    expect(p.of('qr')).toHaveLength(0);
+  });
+
+  it('forget a room’s secret when the room is unassigned, and keep it across restarts', () => {
+    const { store, phone } = links();
+    expect(new PhoneLinks(store, 'https://k.example').link(ROOM)).not.toBeNull();
+    phone.setSecrets([]);
+    expect(phone.link(ROOM)).toBeNull();
   });
 });

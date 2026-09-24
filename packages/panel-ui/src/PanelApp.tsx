@@ -1,7 +1,8 @@
 import { useState, useSyncExternalStore } from 'react';
 import type { PanelActivity, PanelClient, PanelViewModel } from '@kestrel/model';
 import { Icon } from './icons';
-import { createTranslator, messageText, type Translate } from './i18n';
+import { messageText, type Translate } from './i18n';
+import { translatorFor } from './languages';
 import { darkTheme, themeStyle, type PanelTheme } from './theme';
 import { VolumeControl } from './VolumeControl';
 
@@ -20,6 +21,32 @@ const TONE_ICON = {
   warn: 'warning',
   error: 'warning',
 };
+
+function CombineBar({
+  vm,
+  t,
+  dispatch,
+}: {
+  vm: PanelViewModel;
+  t: Translate;
+  dispatch: PanelClient['dispatch'];
+}) {
+  const c = vm.combination;
+  if (c?.role !== 'primary') return null;
+  const rooms = c.rooms.join(', ');
+  return (
+    <div className="kp-banner kp-tone-info" role="group">
+      <span>{c.combined ? t('combine.status', { rooms }) : t('combine.join', { rooms })}</span>
+      <button
+        type="button"
+        className="kp-btn"
+        onClick={() => dispatch({ type: 'combine.set', combined: !c.combined })}
+      >
+        {c.combined ? t('combine.split') : t('combine.join', { rooms })}
+      </button>
+    </div>
+  );
+}
 
 function StatusBanner({ vm, t }: { vm: PanelViewModel; t: Translate }) {
   if (!vm.message) return null;
@@ -118,6 +145,8 @@ export interface PanelAppProps {
   client: PanelClient;
   theme?: PanelTheme;
   translate?: Translate;
+  /** A language code such as "es". Ignored if `translate` is given. */
+  language?: string;
   className?: string;
 }
 
@@ -125,9 +154,15 @@ export interface PanelAppProps {
  * The generated room panel: activities, never devices. Everything it shows comes from the client's
  * view model, so the same component serves the browser simulator and a real gateway.
  */
-export function PanelApp({ client, theme = darkTheme, translate, className }: PanelAppProps) {
+export function PanelApp({
+  client,
+  theme = darkTheme,
+  translate,
+  language,
+  className,
+}: PanelAppProps) {
   const vm = usePanel(client);
-  const t = translate ?? createTranslator();
+  const t = translate ?? translatorFor(language);
   const dispatch: PanelClient['dispatch'] = (intent) => client.dispatch(intent);
   const [picked, setPicked] = useState<string | null>(null);
 
@@ -137,6 +172,7 @@ export function PanelApp({ client, theme = darkTheme, translate, className }: Pa
     vm.activities.find((a) => a.kind !== 'room_off' && !a.overlay) ??
     vm.activities[0];
   const off = vm.status === 'off';
+  const following = vm.combination?.role === 'secondary' && vm.combination.combined;
 
   const choose = (a: PanelActivity) => {
     setPicked(a.id);
@@ -152,6 +188,21 @@ export function PanelApp({ client, theme = darkTheme, translate, className }: Pa
       dispatch({ type: 'activity.start', activityId: a.id, sourceId: defaultSource(a) });
     }
   };
+
+  if (following)
+    return (
+      <div className={`kp-app ${className ?? ''}`} data-mode={theme.mode} style={themeStyle(theme)}>
+        <header className="kp-header">
+          <div className="kp-brand">
+            {theme.logoUrl && <img className="kp-logo" src={theme.logoUrl} alt="" />}
+            <h1>{vm.roomName}</h1>
+          </div>
+        </header>
+        <main className="kp-main">
+          <StatusBanner vm={vm} t={t} />
+        </main>
+      </div>
+    );
 
   return (
     <div className={`kp-app ${className ?? ''}`} data-mode={theme.mode} style={themeStyle(theme)}>
@@ -184,6 +235,7 @@ export function PanelApp({ client, theme = darkTheme, translate, className }: Pa
 
         <main className="kp-main">
           <StatusBanner vm={vm} t={t} />
+          <CombineBar vm={vm} t={t} dispatch={dispatch} />
           <PromptBar vm={vm} t={t} dispatch={dispatch} />
           <WarningBar vm={vm} t={t} dispatch={dispatch} />
 

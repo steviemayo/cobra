@@ -1,4 +1,9 @@
-import { defaultDeviceState, type Device, type DeviceCommand, type DeviceState } from '@kestrel/model';
+import {
+  defaultDeviceState,
+  type Device,
+  type DeviceCommand,
+  type DeviceState,
+} from '@kestrel/model';
 import type { DeviceDriver, DriverContext } from './types';
 
 export abstract class BaseDriver implements DeviceDriver {

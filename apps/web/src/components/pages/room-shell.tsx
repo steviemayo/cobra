@@ -34,7 +34,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
   const trpc = useTRPC();
   const router = useRouter();
   const pathname = usePathname();
-  const { orgId, canEdit } = useOrg();
+  const { orgId, canEdit, canSupport } = useOrg();
   const { room, isPending } = useRoom(roomId);
   const onDesign = pathname.endsWith('/design') || pathname.endsWith('/simulate');
   const shellWidth = onDesign ? 'max-w-none' : 'max-w-6xl';
@@ -118,7 +118,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
           }
           actions={
             <>
-              {!onDesign && (
+              {!onDesign && canSupport && (
                 <Link href={`${base}/design`} className={buttonVariants({ size: 'sm' })}>
                   <PencilRuler data-icon="inline-start" />
                   {canEdit ? 'Open designer' : 'View design'}
@@ -147,12 +147,17 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
         />
         <NavTabs
           tabs={[
-            { label: 'Overview', href: base, exact: true },
-            { label: 'Design', href: `${base}/design` },
-            { label: 'Simulate', href: `${base}/simulate` },
-            { label: 'Devices', href: `${base}/devices` },
-            { label: 'Deployments', href: `${base}/deployments` },
-            { label: 'Monitoring', href: `${base}/monitoring`, soon: true },
+            ...(canSupport
+              ? [
+                  { label: 'Overview', href: base, exact: true },
+                  { label: 'Design', href: `${base}/design` },
+                  { label: 'Simulate', href: `${base}/simulate` },
+                  { label: 'Devices', href: `${base}/devices` },
+                  { label: 'Deployments', href: `${base}/deployments` },
+                ]
+              : []),
+            { label: 'Control', href: `${base}/control` },
+            { label: 'Monitoring', href: `${base}/monitoring` },
             ...(canEdit ? [{ label: 'Settings', href: `${base}/settings` }] : []),
           ]}
         />

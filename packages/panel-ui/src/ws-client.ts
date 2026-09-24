@@ -13,6 +13,8 @@ export interface Connection {
   /** Server message worth showing, e.g. "Wrong PIN." */
   message?: string;
   branding?: PanelBranding;
+  /** A link for controlling the room from a phone, replaced before it expires. */
+  qr?: { url: string; expiresAt: string };
 }
 
 /** What a panel shows before the first snapshot arrives. */
@@ -146,6 +148,9 @@ export class WsPanelClient implements PanelClient {
           this.view = msg.data.vm;
           if (this.connection.state !== 'live') this.setConnection({ state: 'live' });
           for (const l of this.viewListeners) l();
+          break;
+        case 'qr':
+          this.setConnection({ state: this.connection.state, qr: { url: msg.data.url, expiresAt: msg.data.expiresAt } });
           break;
         case 'error':
           this.setConnection({

@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { verifyPin } from '@kestrel/crypto';
 import { PanelBranding } from '@kestrel/model';
-import { PanelInput, applyPanelInput, publicPanel, readPanel } from './panel-settings';
+import {
+  PanelInput,
+  applyPanelInput,
+  effectivePanel,
+  publicPanel,
+  readOrgBranding,
+  readPanel,
+} from './panel-settings';
 
 const branding = () => PanelBranding.parse({});
 const input = (over: Partial<PanelInput> = {}): PanelInput => ({
   mode: 'open',
   trustedIps: [],
   branding: branding(),
+  inheritBranding: false,
   ...over,
 });
 
@@ -65,13 +73,63 @@ describe('PanelInput validation', () => {
     const ok = (pin: string) => PanelInput.safeParse(input({ mode: 'pin', pin })).success;
     expect(ok('4821')).toBe(true);
     expect(ok('12345678')).toBe(true);
-    for (const bad of ['123', '123456789', 'abcd', '12 34', ''])
-      expect(ok(bad), bad).toBe(false);
+    for (const bad of ['123', '123456789', 'abcd', '12 34', '']) expect(ok(bad), bad).toBe(false);
   });
 
   it('caps the number of trusted addresses', () => {
     expect(
-      PanelInput.safeParse(input({ trustedIps: Array.from({ length: 51 }, (_, i) => `10.0.0.${i}`) })).success,
+      PanelInput.safeParse(
+        input({ trustedIps: Array.from({ length: 51 }, (_, i) => `10.0.0.${i}`) }),
+      ).success,
     ).toBe(false);
+  });
+});
+
+describe('organisation branding', () => {
+  const orgTheme = PanelBranding.parse({ mode: 'light', accent: '#123456', language: 'fr' });
+
+  it('a room nobody has customised follows the organisation, and saved rooms keep their own', () => {
+    expect(readPanel(null).inheritBranding).toBe(true);
+    expect(readPanel(undefined).inheritBranding).toBe(true);
+    expect(
+      readPanel({ access: { mode: 'open' }, branding: { mode: 'light', language: 'en' } })
+        .inheritBranding,
+    ).toBe(false);
+  });
+
+  it('puts the organisation theme in the release when the room follows it', () => {
+    const p = effectivePanel(readPanel(null), orgTheme);
+    expect(p.branding).toEqual(orgTheme);
+    expect('inheritBranding' in p).toBe(false);
+  });
+
+  it('keeps the room’s own theme when it has one', () => {
+    const own = applyPanelInput(
+      readPanel(null),
+      input({ branding: PanelBranding.parse({ mode: 'dark', accent: '#ff0000' }) }),
+    );
+    expect(effectivePanel(own, orgTheme).branding).toMatchObject({
+      mode: 'dark',
+      accent: '#ff0000',
+    });
+  });
+
+  it('never lets the theme change who can open the panel', () => {
+    const pinned = applyPanelInput(
+      readPanel(null),
+      input({ mode: 'pin', pin: '4821', inheritBranding: true }),
+    );
+    const p = effectivePanel(pinned, orgTheme);
+    expect(p.access.mode).toBe('pin');
+    expect(p.access.pinHash).toBe(pinned.access.pinHash);
+  });
+
+  it('reads a damaged organisation theme as the default', () => {
+    expect(readOrgBranding(null).mode).toBe('dark');
+    expect(readOrgBranding({ mode: 'neon' }).mode).toBe('dark');
+    expect(readOrgBranding({ mode: 'light', language: 'de' })).toMatchObject({
+      mode: 'light',
+      language: 'de',
+    });
   });
 });

@@ -17,6 +17,8 @@ export const PanelIntent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('prompt.respond'), promptId: z.string().min(1), accept: z.boolean() }),
   /** "Stay on" during the auto-off warning. */
   z.object({ type: z.literal('warning.dismiss') }),
+  /** Join or split this room with the rooms it is set up to combine with. Only the primary room's panel offers it. */
+  z.object({ type: z.literal('combine.set'), combined: z.boolean() }),
 ]);
 export type PanelIntent = z.infer<typeof PanelIntent>;
 
@@ -34,6 +36,7 @@ export const MessageKey = z.enum([
   'fault_generic',
   'switch_source',
   'auto_off',
+  'combined_secondary',
 ]);
 export type MessageKey = z.infer<typeof MessageKey>;
 
@@ -71,6 +74,15 @@ export const PanelActivity = z.object({
 });
 export type PanelActivity = z.infer<typeof PanelActivity>;
 
+export const PanelCombination = z.object({
+  /** primary: this panel controls the combined rooms. secondary: another room is in charge. */
+  role: z.enum(['primary', 'secondary']),
+  combined: z.boolean(),
+  /** The other rooms, by name: the secondaries for a primary, the primary for a secondary. */
+  rooms: z.array(z.string()),
+});
+export type PanelCombination = z.infer<typeof PanelCombination>;
+
 export const PanelViewModel = z.object({
   roomName: z.string(),
   status: RoomStatus,
@@ -83,6 +95,8 @@ export const PanelViewModel = z.object({
     .nullable(),
   /** e.g. "Turning the room off in 30s". */
   warning: z.object({ text: PanelText, secondsLeft: z.number() }).nullable(),
+  /** Present only for rooms that can be combined. */
+  combination: PanelCombination.optional(),
 });
 export type PanelViewModel = z.infer<typeof PanelViewModel>;
 

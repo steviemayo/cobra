@@ -4,11 +4,17 @@ import { STARTER_TEMPLATES, type PublicKey } from '@kestrel/model';
 import {
   canonicalJson,
   generateKeyPair,
+  generateSealKey,
   generateSecret,
   hashManifest,
   hashPin,
   hashSecret,
+  parseAccess,
+  signAccess,
+  verifyAccess,
   publicKeyFromPrivate,
+  open,
+  seal,
   secretMatches,
   signManifest,
   verifyManifest,
@@ -72,7 +78,9 @@ describe('signing and verification', () => {
 
   it('rejects a swapped hash and signature from a different key', () => {
     const other = generateKeyPair();
-    const forged = wire(signManifest(manifestInput(), { privateKeyPem: other.privateKeyPem, keyId: 'k1' }));
+    const forged = wire(
+      signManifest(manifestInput(), { privateKeyPem: other.privateKeyPem, keyId: 'k1' }),
+    );
     expect(verifyManifest(forged, trusted)).toEqual({ ok: false, reason: 'bad_signature' });
   });
 
@@ -119,7 +127,10 @@ describe('signing and verification', () => {
     expect(verifyManifest(signed, pinned).ok).toBe(true);
     const other = generateKeyPair();
     const forged = wire(
-      signManifest(manifestInput(), { privateKeyPem: other.privateKeyPem, keyId: 'whatever-label' }),
+      signManifest(manifestInput(), {
+        privateKeyPem: other.privateKeyPem,
+        keyId: 'whatever-label',
+      }),
     );
     expect(verifyManifest(forged, pinned)).toEqual({ ok: false, reason: 'bad_signature' });
   });
@@ -127,7 +138,9 @@ describe('signing and verification', () => {
   it('accepts either of several trusted keys (rotation)', () => {
     const next = generateKeyPair();
     const both: PublicKey[] = [...trusted, { keyId: 'k2', publicKeyPem: next.publicKeyPem }];
-    const signed = wire(signManifest(manifestInput(), { privateKeyPem: next.privateKeyPem, keyId: 'k2' }));
+    const signed = wire(
+      signManifest(manifestInput(), { privateKeyPem: next.privateKeyPem, keyId: 'k2' }),
+    );
     expect(verifyManifest(signed, both).ok).toBe(true);
   });
 });
@@ -154,5 +167,59 @@ describe('secrets', () => {
     expect(verifyPin('4821', stored)).toBe(true);
     expect(verifyPin('4822', stored)).toBe(false);
     expect(verifyPin('4821', 'garbage')).toBe(false);
+  });
+});
+
+describe('sealed secrets', () => {
+  const key = generateSealKey();
+
+  it('round-trips, with a different ciphertext each time', () => {
+    const a = seal('{"clientSecret":"s3cret"}', key);
+    const b = seal('{"clientSecret":"s3cret"}', key);
+    expect(a).not.toBe(b);
+    expect(a).not.toContain('s3cret');
+    expect(open(a, key)).toBe('{"clientSecret":"s3cret"}');
+  });
+
+  it('refuses a different key, a changed value and junk', () => {
+    const sealed = seal('hello', key);
+    expect(() => open(sealed, generateSealKey())).toThrow();
+    const parts = sealed.split('.');
+    parts[3] = Buffer.from('tampered').toString('base64url');
+    expect(() => open(parts.join('.'), key)).toThrow();
+    expect(() => open('nonsense', key)).toThrow('Not a sealed value');
+  });
+
+  it('insists on a real 32-byte key', () => {
+    expect(() => seal('x', 'c2hvcnQ=')).toThrow('32 bytes');
+  });
+});
+
+describe('phone access tokens', () => {
+  const secret = generateSecret();
+  const room = '33333333-3333-4333-8333-333333333331';
+  const other = '33333333-3333-4333-8333-333333333332';
+  const now = 1_800_000_000;
+
+  it('verify for the room, kind and secret they were made for, until they expire', () => {
+    const t = signAccess(secret, 'join', room, now + 600);
+    expect(verifyAccess(secret, 'join', t, now)).toEqual({ roomId: room, exp: now + 600 });
+    expect(verifyAccess(secret, 'join', t, now + 599)).not.toBeNull();
+    expect(verifyAccess(secret, 'join', t, now + 600)).toBeNull();
+  });
+
+  it('refuse another kind, another secret, or a token edited to name another room or time', () => {
+    const t = signAccess(secret, 'join', room, now + 600);
+    expect(verifyAccess(secret, 'session', t, now)).toBeNull();
+    expect(verifyAccess(generateSecret(), 'join', t, now)).toBeNull();
+    expect(verifyAccess(secret, 'join', t.replace(room, other), now)).toBeNull();
+    expect(verifyAccess(secret, 'join', t.replace(String(now + 600), String(now + 6000)), now)).toBeNull();
+  });
+
+  it('read a token’s room without trusting it, and reject junk', () => {
+    expect(parseAccess(signAccess(secret, 'join', room, now))).toEqual({ roomId: room, exp: now });
+    for (const bad of ['', 'nope', `${room}.abc.xyz`, `${room}.${now}.short`, `${room}.${now}`])
+      expect(parseAccess(bad), bad).toBeNull();
+    expect(verifyAccess(secret, 'join', 'junk', now)).toBeNull();
   });
 });

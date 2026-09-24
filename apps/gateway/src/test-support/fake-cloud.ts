@@ -6,6 +6,7 @@ import {
   HeartbeatRequest,
   PROTOCOL_VERSION,
   TelemetryBatch,
+  type GatewayCommand,
   type RoomModel,
   type SignedManifest,
   type TelemetryEvent,
@@ -31,6 +32,14 @@ export class FakeCloud {
   readonly keyId = 'test-key';
   readonly enrols: unknown[] = [];
   readonly heartbeats: HeartbeatRequest[] = [];
+  /** Commands handed to the gateway in its next heartbeat response. */
+  readonly queuedCommands: GatewayCommand[] = [];
+  /** Rooms the fake portal is "controlling": the gateway is told to poll fast for them. */
+  watching: string[] = [];
+  /** Combinations the fake cloud reports in the gateway's config. */
+  combinations: unknown[] = [];
+  readonly queuedIntents: { id: string; roomId: string; intent: unknown }[] = [];
+  readonly polls: { panels: { roomId: string; vm: unknown }[] }[] = [];
   readonly telemetry: TelemetryEvent[] = [];
   readonly manifestFetches: string[] = [];
   private assignments = new Map<string, Assignment>();
@@ -39,6 +48,11 @@ export class FakeCloud {
   /** When false the cloud answers 503 to everything. */
   up = true;
   url = '';
+
+  setCombinations(list: unknown[]) {
+    this.combinations = list;
+    this.version++;
+  }
 
   async start(port = 0): Promise<this> {
     this.server = createServer((req, res) => void this.handle(req, res));
@@ -131,7 +145,8 @@ export class FakeCloud {
     if (req.method === 'POST' && path === '/enroll') {
       const parsed = EnrollRequest.safeParse(await this.body(req));
       if (!parsed.success) return this.json(res, 400, { error: 'bad request' });
-      if (parsed.data.token !== ENROLL_TOKEN) return this.json(res, 401, { error: 'Invalid or used token' });
+      if (parsed.data.token !== ENROLL_TOKEN)
+        return this.json(res, 401, { error: 'Invalid or used token' });
       this.enrols.push(parsed.data);
       return this.json(res, 200, {
         gatewayId: GATEWAY_ID,
@@ -148,7 +163,17 @@ export class FakeCloud {
       const parsed = HeartbeatRequest.safeParse(await this.body(req));
       if (!parsed.success) return this.json(res, 400, { error: 'bad request' });
       this.heartbeats.push(parsed.data);
-      return this.json(res, 200, { configVersion: String(this.version), serverTime: new Date().toISOString() });
+      return this.json(res, 200, {
+        configVersion: String(this.version),
+        serverTime: new Date().toISOString(),
+        commands: this.queuedCommands.splice(0),
+        watch: this.watching,
+        pollNow: this.queuedIntents.length > 0,
+      });
+    }
+    if (req.method === 'POST' && path === '/poll') {
+      this.polls.push((await this.body(req)) as { panels: { roomId: string; vm: unknown }[] });
+      return this.json(res, 200, { watch: this.watching, intents: this.queuedIntents.splice(0) });
     }
     if (req.method === 'GET' && path === '/config') {
       return this.json(res, 200, {
@@ -163,6 +188,7 @@ export class FakeCloud {
           manifestHash: (a.signed as { hash: string }).hash,
         })),
         publicKeys: this.extraKeys ?? this.publicKeys,
+        combinations: this.combinations,
       });
     }
     const m = /^\/rooms\/([^/]+)\/manifest$/.exec(path);
@@ -177,7 +203,10 @@ export class FakeCloud {
       const parsed = TelemetryBatch.safeParse(await this.body(req));
       if (!parsed.success) return this.json(res, 400, { error: 'bad request' });
       this.telemetry.push(...parsed.data.events);
-      return this.json(res, 200, { accepted: parsed.data.events.length, protocol: PROTOCOL_VERSION });
+      return this.json(res, 200, {
+        accepted: parsed.data.events.length,
+        protocol: PROTOCOL_VERSION,
+      });
     }
     return this.json(res, 404, { error: 'Not found' });
   }

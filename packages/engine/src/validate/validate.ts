@@ -14,6 +14,7 @@ import {
   roomCapabilities,
   type Graph,
 } from './graph';
+import { cronProblem, isValidTimezone } from '../schedule/cron';
 import type {
   IssueRef,
   Severity,
@@ -409,8 +410,12 @@ function checkTriggers(model: RoomModel, g: Graph, c: Collector) {
     }
     if (t.type === 'occupancy' && !g.devices.has(t.deviceId))
       c.error('trigger_device_missing', `Trigger "${t.name}" uses a missing device`, ref);
-    if (t.type === 'schedule' && t.cron.trim().split(/\s+/).length !== 5)
-      c.error('cron_invalid', `Trigger "${t.name}": schedule must have 5 fields`, ref);
+    if (t.type === 'schedule') {
+      const problem = cronProblem(t.cron);
+      if (problem) c.error('cron_invalid', `Trigger "${t.name}": ${problem}`, ref);
+      if (!isValidTimezone(t.timezone))
+        c.error('timezone_invalid', `Trigger "${t.name}": "${t.timezone}" is not a time zone`, ref);
+    }
   }
 }
 

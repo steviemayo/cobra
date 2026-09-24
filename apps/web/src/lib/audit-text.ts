@@ -52,6 +52,62 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `added gateway “${s(meta.name)}”`;
     case 'gateway.enroll':
       return `gateway “${s(meta.name)}” connected`;
+    case 'command.request':
+      return `asked “${s(meta.room)}” to ${s(meta.type).replace('_', ' ')}`;
+    case 'command.result':
+      return `the gateway finished a ${s(meta.type).replace('_', ' ')} command (${meta.ok ? 'worked' : 'failed'})`;
+    case 'driver.save':
+      return meta.created ? 'created a custom driver' : `saved version ${s(meta.version)} of a custom driver`;
+    case 'driver.delete':
+      return `deleted the custom driver “${s(meta.name)}”`;
+    case 'marketplace.publish':
+      return meta.updated
+        ? 'updated a marketplace listing'
+        : 'published a template to the marketplace for review';
+    case 'marketplace.withdraw':
+      return 'withdrew a marketplace listing';
+    case 'marketplace.get':
+      return `added “${s(meta.name)}” from the marketplace`;
+    case 'marketplace.checkout':
+      return `started a purchase of “${s(meta.name)}”`;
+    case 'calendar.connect':
+      return `connected the ${s(meta.provider) === 'graph' ? 'Microsoft 365' : 'Google'} calendar “${s(meta.name)}”`;
+    case 'calendar.remove':
+      return `disconnected the ${s(meta.provider) === 'graph' ? 'Microsoft 365' : 'Google'} calendar`;
+    case 'trigger.fire':
+      return `a trigger started “${s(meta.room)}”`;
+    case 'combination.create':
+      return `set up combined rooms “${s(meta.name)}”`;
+    case 'combination.update':
+      return `changed combined rooms “${s(meta.name)}”`;
+    case 'combination.delete':
+      return `removed combined rooms “${s(meta.name)}”`;
+    case 'combination.set':
+      return `${meta.combined ? 'joined' : 'split'} “${s(meta.name)}”`;
+    case 'room.hook_secret':
+      return `generated a new webhook secret for “${s(meta.room)}”`;
+    case 'hook.fire':
+      return `a webhook ran “${s(meta.hook)}” in “${s(meta.room)}”`;
+    case 'org.branding':
+      return 'changed the organisation’s panel theme';
+    case 'control.intent':
+      return `${meta.intent === 'activity.stop' ? 'stopped' : 'started'} an activity in “${s(meta.room)}” from the portal`;
+    case 'billing.subscribe':
+      return meta.changed
+        ? `changed the plan to ${s(meta.plan)}`
+        : `started checkout for the ${s(meta.plan)} plan`;
+    case 'incident.acknowledge':
+      return 'acknowledged an incident';
+    case 'alert_channel.create':
+      return `added alert channel “${s(meta.name)}” (${s(meta.type)})`;
+    case 'alert_channel.update':
+      return `changed alert channel “${s(meta.name)}”`;
+    case 'alert_channel.delete':
+      return `removed alert channel “${s(meta.name)}”`;
+    case 'ticket.create':
+      return `opened support request “${s(meta.title)}”`;
+    case 'ticket.update':
+      return 'updated a support request';
     default:
       return action;
   }

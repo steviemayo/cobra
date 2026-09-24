@@ -16,6 +16,7 @@ export const en = {
   fault_generic: 'Something went wrong. Try again, or contact support.',
   switch_source: '{source} was just plugged in. Switch to it?',
   auto_off: 'Nobody seems to be using this room. Turning it off soon.',
+  combined_secondary: 'This room is combined with {room}. Use that room’s panel.',
 
   // Panel chrome
   'nav.label': 'Activities',
@@ -44,9 +45,15 @@ export const en = {
   'session.connecting': 'Connecting to the room…',
   'session.reconnecting': 'Reconnecting to the room…',
   'session.error': 'This panel can’t reach the room right now.',
+  'phone.button': 'Control from your phone',
+  'phone.title': 'Scan with your phone’s camera to control this room.',
+  'phone.close': 'Close',
   'pin.title': 'Enter PIN',
   'pin.submit': 'Unlock',
   'pin.clear': 'Clear',
+  'combine.join': 'Combine with {rooms}',
+  'combine.split': 'Split rooms',
+  'combine.status': 'Combined with {rooms}',
 } as const;
 
 export type TextKey = keyof typeof en;

@@ -222,6 +222,14 @@ export function planActivity(model: RoomModel, activity: Activity, opts: PlanOpt
   return finish(b);
 }
 
+/** The device commands a state runs, e.g. "lights down" or a custom "after hours" state. */
+export function planState(model: RoomModel, stateId: string): Plan {
+  const ctx: Ctx = { model, graph: buildGraph(model) };
+  const b = new Builder();
+  expandActions(b, ctx, [{ id: '__state', type: 'run_state', stateId, dependsOn: [] }], new Set());
+  return finish(b);
+}
+
 /** Turning an overlay off (e.g. stop recording): the inverse of its device commands. */
 export function planStopOverlay(model: RoomModel, activity: Activity): Plan {
   const b = new Builder();

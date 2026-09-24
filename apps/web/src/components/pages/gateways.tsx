@@ -1,13 +1,14 @@
 'use client';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Copy, MoreHorizontal, Pencil, Plus, RefreshCw, Router, Trash2 } from 'lucide-react';
+import { Check, Copy, MoreHorizontal, Pencil, Plus, RefreshCw, Rocket, Router, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { useOrg } from '@/components/shell/org-context';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -91,6 +92,19 @@ export function GatewaysView() {
       onError: (e) => toast.error(e.message),
     }),
   );
+  const setChannel = useMutation(
+    trpc.gateway.setChannel.mutationOptions({
+      onSuccess: async (_res, vars) => {
+        await refresh();
+        toast.success(
+          vars.channel === 'beta'
+            ? 'Marked as following beta. Run the beta image on that machine to match.'
+            : 'Marked as following stable. Run the stable image on that machine to match.',
+        );
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
   const del = useMutation(
     trpc.gateway.delete.mutationOptions({
       onSuccess: async () => {
@@ -151,7 +165,17 @@ export function GatewaysView() {
                   <TableCell className="text-muted-foreground" title={g.rooms.map((r) => r.name).join(', ')}>
                     {plural(g.rooms.length, 'room')}
                   </TableCell>
-                  <TableCell className="tabular text-muted-foreground">{g.version ?? '—'}</TableCell>
+                  <TableCell className="tabular text-muted-foreground">
+                    <span className="inline-flex items-center gap-2">
+                      {g.version ?? '—'}
+                      {g.channel === 'beta' && <Badge variant="outline">beta</Badge>}
+                      {g.update.status === 'behind' && (
+                        <Badge variant="secondary" title={`Version ${g.update.latest} is available on the ${g.channel} channel`}>
+                          Update available
+                        </Badge>
+                      )}
+                    </span>
+                  </TableCell>
                   <TableCell className="text-right text-muted-foreground">
                     {g.lastSeenAt ? timeAgo(g.lastSeenAt) : 'Never'}
                   </TableCell>
@@ -168,6 +192,18 @@ export function GatewaysView() {
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={() => setRenaming(g)}>
                             <Pencil className="size-4" /> Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() =>
+                              setChannel.mutate({
+                                orgId,
+                                gatewayId: g.id,
+                                channel: g.channel === 'beta' ? 'stable' : 'beta',
+                              })
+                            }
+                          >
+                            <Rocket className="size-4" />{' '}
+                            {g.channel === 'beta' ? 'Follow the stable channel' : 'Follow the beta channel'}
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => setReenrolling(g)}>
                             <RefreshCw className="size-4" /> Re-enrol on a new machine

@@ -4,8 +4,10 @@ import {
   EnrollResponse,
   HeartbeatResponse,
   PROTOCOL_VERSION,
+  PollResponse,
   type EnrollRequest,
   type HeartbeatRequest,
+  type PollRequest,
   type TelemetryBatch,
 } from '@kestrel/model';
 
@@ -53,7 +55,10 @@ export class CloudClient {
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch (e) {
-      throw new CloudError(`Could not reach the cloud: ${e instanceof Error ? e.message : String(e)}`, 0);
+      throw new CloudError(
+        `Could not reach the cloud: ${e instanceof Error ? e.message : String(e)}`,
+        0,
+      );
     }
     if (!res.ok) {
       let detail = '';
@@ -79,13 +84,19 @@ export class CloudClient {
     return this.request('POST', '/heartbeat', HeartbeatResponse, { body, credential });
   }
 
+  poll(credential: string, body: PollRequest) {
+    return this.request('POST', '/poll', PollResponse, { body, credential });
+  }
+
   config(credential: string) {
     return this.request('GET', '/config', ConfigResponse, { credential });
   }
 
   /** The manifest is returned raw: it must be verified against its hash and signature before parsing. */
   manifest(credential: string, roomId: string, releaseId: string): Promise<unknown> {
-    return this.request('GET', `/rooms/${roomId}/manifest?release=${releaseId}`, null, { credential });
+    return this.request('GET', `/rooms/${roomId}/manifest?release=${releaseId}`, null, {
+      credential,
+    });
   }
 
   async telemetry(credential: string, body: TelemetryBatch): Promise<void> {

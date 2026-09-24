@@ -1,12 +1,16 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { after } from 'next/server';
 import { db } from '@kestrel/db';
+import { generateSecret, hashSecret } from '@kestrel/crypto';
 import { RoomType } from '@kestrel/model';
 import { writeAudit } from '../audit';
+import { canAddRoom, getEntitlements } from '../billing';
 import { createDeployment } from '../deployment-service';
 import { effectiveStatus } from '../gateway-service';
 import { PanelInput, applyPanelInput, publicPanel, readPanel } from '../panel-settings';
 import { summariseDraft } from '../room-summary';
+import { syncQuantity } from '../stripe';
 import { orgProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
@@ -14,7 +18,7 @@ const roomId = z.string().uuid();
 const name = z.string().trim().min(1).max(100);
 
 // Room.panel holds the panel PIN hash. It is server-only: never send it to a browser.
-const omit = { panel: true } as const;
+const omit = { panel: true, hookSecretHash: true } as const;
 
 async function assertSite(ctxOrgId: string, siteId: string) {
   const site = await db.site.findFirst({ where: { id: siteId, orgId: ctxOrgId } });
@@ -48,7 +52,9 @@ export const roomRouter = router({
     const { gateway, ...rest } = room;
     return {
       ...rest,
-      gateway: gateway ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) } : null,
+      gateway: gateway
+        ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) }
+        : null,
     };
   }),
 
@@ -60,14 +66,18 @@ export const roomRouter = router({
       omit,
       include: {
         site: { select: { id: true, name: true } },
-        gateway: { select: { id: true, name: true, status: true, lastSeenAt: true, enrolledAt: true } },
+        gateway: {
+          select: { id: true, name: true, status: true, lastSeenAt: true, enrolledAt: true },
+        },
         draft: { select: { revision: true, updatedAt: true, model: true } },
       },
     });
     return rooms.map(({ draft, gateway, ...room }) => ({
       ...room,
       draft: draft ? summariseDraft(draft) : null,
-      gateway: gateway ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) } : null,
+      gateway: gateway
+        ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) }
+        : null,
     }));
   }),
 
@@ -76,6 +86,12 @@ export const roomRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
       const site = await assertSite(ctx.orgId, input.siteId);
+      const entitlements = await getEntitlements(db, ctx.orgId);
+      if (!canAddRoom(entitlements, await db.room.count({ where: { orgId: ctx.orgId } })))
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `Your plan includes ${entitlements.maxRooms} rooms. Subscribe to add more.`,
+        });
       const room = await db.room.create({
         data: { orgId: ctx.orgId, siteId: site.id, name: input.name, type: input.type },
         omit,
@@ -87,6 +103,11 @@ export const roomRouter = router({
         target: room.id,
         meta: { name: room.name, site: site.name, type: room.type },
       });
+      after(() =>
+        syncQuantity(db, ctx.orgId).catch((e) =>
+          console.error('[billing] quantity sync failed', e),
+        ),
+      );
       return room;
     }),
 
@@ -126,6 +147,9 @@ export const roomRouter = router({
       target: room.id,
       meta: { name: room.name },
     });
+    after(() =>
+      syncQuantity(db, ctx.orgId).catch((e) => console.error('[billing] quantity sync failed', e)),
+    );
     return { ok: true };
   }),
 
@@ -179,6 +203,48 @@ export const roomRouter = router({
       return { ok: true };
     }),
 
+  // Webhook triggers: the names the design listens for, and whether a secret has been set.
+  hookInfo: orgProcedure.input(z.object({ orgId, roomId })).query(async ({ ctx, input }) => {
+    requireRole(ctx.role, ['owner', 'dev']);
+    const room = await db.room.findFirst({
+      where: { id: input.roomId, orgId: ctx.orgId },
+      select: { hookSecretHash: true },
+    });
+    if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
+    const draft = await db.roomDraft.findFirst({
+      where: { roomId: input.roomId, orgId: ctx.orgId },
+      select: { model: true },
+    });
+    const triggers =
+      (draft?.model as { triggers?: { type: string; hookName?: string; enabled?: boolean }[] })
+        ?.triggers ?? [];
+    return {
+      hasSecret: !!room.hookSecretHash,
+      hooks: triggers.flatMap((t) => (t.type === 'webhook' && t.hookName ? [t.hookName] : [])),
+    };
+  }),
+
+  // Shown once. Generating a new one stops the old one working straight away.
+  rotateHookSecret: orgProcedure
+    .input(z.object({ orgId, roomId }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const room = await findRoom(ctx.orgId, input.roomId);
+      const secret = generateSecret(24);
+      await db.room.update({
+        where: { id: room.id },
+        data: { hookSecretHash: hashSecret(secret) },
+      });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'room.hook_secret',
+        target: room.id,
+        meta: { room: room.name },
+      });
+      return { secret };
+    }),
+
   getPanel: orgProcedure.input(z.object({ orgId, roomId })).query(async ({ ctx, input }) => {
     requireRole(ctx.role, ['owner', 'dev']);
     return publicPanel(readPanel((await findRoom(ctx.orgId, input.roomId)).panel));
@@ -194,7 +260,10 @@ export const roomRouter = router({
       try {
         next = applyPanelInput(readPanel(room.panel), input);
       } catch (e) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: e instanceof Error ? e.message : 'Invalid' });
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: e instanceof Error ? e.message : 'Invalid',
+        });
       }
       await db.room.update({ where: { id: room.id }, data: { panel: next } });
       await writeAudit({

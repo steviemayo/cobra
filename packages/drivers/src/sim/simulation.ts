@@ -116,6 +116,15 @@ export class Simulation implements DeviceBus {
     this.recompute(true);
   }
 
+  /** Someone walks into (or out of) the room, for an occupancy sensor. */
+  setOccupied(deviceId: string, occupied: boolean) {
+    const state = this.states.get(deviceId);
+    if (!state || this.devices.get(deviceId)?.category !== 'occupancy_sensor')
+      throw new Error(`${deviceId} is not an occupancy sensor`);
+    state.occupied = occupied;
+    this.emit(deviceId);
+  }
+
   isPlugged(deviceId: string): boolean {
     return this.plugged.get(deviceId) ?? false;
   }
@@ -171,6 +180,9 @@ export class Simulation implements DeviceBus {
       }
       case 'recorder':
         s.recording = false;
+        break;
+      case 'occupancy_sensor':
+        s.occupied = false;
         break;
     }
     for (const p of d.ports)

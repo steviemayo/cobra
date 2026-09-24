@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { writeAudit } from '../audit';
 import { effectiveStatus, newEnrollToken } from '../gateway-service';
+import { latestVersions, updateStatus } from '../gateway-updates';
 import { orgProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
@@ -15,6 +16,7 @@ const safe = {
   name: true,
   siteId: true,
   version: true,
+  channel: true,
   hostname: true,
   os: true,
   enrolledAt: true,
@@ -37,7 +39,8 @@ export const gatewayRouter = router({
       orderBy: { createdAt: 'asc' },
       select: safe,
     });
-    return gateways.map((g) => ({ ...g, status: effectiveStatus(g) }));
+    const latest = latestVersions();
+    return gateways.map((g) => ({ ...g, status: effectiveStatus(g), update: updateStatus(g, latest) }));
   }),
 
   // The enrolment token is returned once, here. Only its hash is stored.
@@ -107,6 +110,24 @@ export const gatewayRouter = router({
         action: 'gateway.rename',
         target: gw.id,
         meta: { from: gw.name, to: input.name },
+      });
+      return { ok: true };
+    }),
+
+  // Which release channel the gateway's container follows. The machine's own update tool (Watchtower,
+  // the Windows service) follows the tag it was installed with; this records the choice for the portal.
+  setChannel: orgProcedure
+    .input(z.object({ orgId, gatewayId, channel: z.enum(['stable', 'beta']) }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const gw = await findGateway(ctx.orgId, input.gatewayId);
+      await db.gateway.update({ where: { id: gw.id }, data: { channel: input.channel } });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'gateway.channel',
+        target: gw.id,
+        meta: { name: gw.name, from: gw.channel, to: input.channel },
       });
       return { ok: true };
     }),

@@ -487,3 +487,117 @@ describe('multiple panels', () => {
     expect(snap()).toBe(before);
   });
 });
+
+describe('triggers', () => {
+  const withSensor = (extra: Partial<RoomModel> = {}): RoomModel => {
+    const m = meeting();
+    m.devices.push({
+      id: 'sensor',
+      name: 'Room sensor',
+      category: 'occupancy_sensor',
+      ports: [],
+      extraCapabilities: [],
+      settings: {},
+    });
+    Object.assign(m, extra);
+    return m;
+  };
+  const trigger = (t: Record<string, unknown>) =>
+    ({
+      id: 't1',
+      name: 'T',
+      enabled: true,
+      run: { type: 'activity', activityId: 'present' },
+      ...t,
+    }) as RoomModel['triggers'][number];
+
+  it('an external call (webhook) runs what the trigger points at, by name', async () => {
+    const m = meeting();
+    m.triggers.push(trigger({ type: 'webhook', hookName: 'start_present' }));
+    setup(m);
+    expect(rt.fireHook('nope')).toBe(0);
+    expect(rt.fireHook('start_present')).toBe(1);
+    await advance(3000);
+    expect(snap().status).toBe('on');
+    expect(activity('present').active).toBe(true);
+  });
+
+  it('a disabled webhook does nothing', async () => {
+    const m = meeting();
+    m.triggers.push(trigger({ type: 'webhook', hookName: 'start_present', enabled: false }));
+    setup(m);
+    expect(rt.fireHook('start_present')).toBe(0);
+    await advance(3000);
+    expect(snap().status).toBe('off');
+  });
+
+  it('a trigger can run a state, and an "off" state turns the room off', async () => {
+    const m = meeting();
+    m.states.push({ id: 'after_hours', name: 'After hours', kind: 'off', actions: [] });
+    m.triggers.push(
+      trigger({
+        type: 'webhook',
+        hookName: 'close',
+        run: { type: 'state', stateId: 'after_hours' },
+      }),
+    );
+    setup(m);
+    rt.dispatch({ type: 'activity.start', activityId: 'present', sourceId: 'laptop1' });
+    await advance(3000);
+    expect(snap().status).toBe('on');
+    rt.fireHook('close');
+    await advance(3000);
+    expect(snap().status).toBe('off');
+    expect(sim.getState('display1')!.power).toBe('off');
+  });
+
+  it('a custom state runs its device commands without touching what is showing', async () => {
+    const m = meeting();
+    m.states.push({
+      id: 'quiet',
+      name: 'Quiet',
+      kind: 'custom',
+      actions: [{ id: 'a1', type: 'volume', deviceId: 'dsp', level: 20, dependsOn: [] }],
+    });
+    m.triggers.push(
+      trigger({ type: 'webhook', hookName: 'quiet', run: { type: 'state', stateId: 'quiet' } }),
+    );
+    setup(m);
+    rt.fireHook('quiet');
+    await advance(3000);
+    expect(sim.getState('dsp')!.volume).toBe(20);
+    expect(snap().status).toBe('off');
+  });
+
+  it('someone walking in starts the room; leaving can turn it off', async () => {
+    const m = withSensor();
+    m.triggers.push(
+      trigger({ id: 'in', type: 'occupancy', deviceId: 'sensor', occupied: true }),
+      trigger({
+        id: 'out',
+        type: 'occupancy',
+        deviceId: 'sensor',
+        occupied: false,
+        run: { type: 'activity', activityId: 'room_off' },
+      }),
+    );
+    setup(m);
+    sim.setOccupied('sensor', true);
+    await advance(3000);
+    expect(snap().status).toBe('on');
+    sim.setOccupied('sensor', false);
+    await advance(3000);
+    expect(snap().status).toBe('off');
+  });
+
+  it('occupancy fires on a change, not on every report', async () => {
+    const m = withSensor();
+    m.triggers.push(trigger({ type: 'occupancy', deviceId: 'sensor', occupied: true }));
+    setup(m);
+    const spy = vi.spyOn(rt, 'fire');
+    sim.setOccupied('sensor', false);
+    sim.setOccupied('sensor', true);
+    sim.setOccupied('sensor', true);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});

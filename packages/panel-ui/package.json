@@ -13,7 +13,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@kestrel/model": "workspace:*"
+    "@kestrel/model": "workspace:*",
+    "qrcode-generator": "^2.0.4"
   },
   "peerDependencies": {
     "react": "^19.0.0"

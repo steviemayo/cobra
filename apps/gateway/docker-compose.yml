@@ -1,0 +1,41 @@
+# Kestrel gateway with automatic updates.
+#
+#   1. Copy this file to the gateway machine and create a .env next to it:
+#        KESTREL_CLOUD_URL=https://<your kestrel app>
+#        KESTREL_ENROLL_TOKEN=<token from the portal, first start only>
+#        KESTREL_CHANNEL=stable          # or beta
+#        KESTREL_IMAGE=ghcr.io/<org>/kestrel-gateway
+#   2. docker compose up -d
+#
+# Watchtower checks for a new image on the chosen channel every 10 minutes and restarts only the
+# gateway container. The /data volume (credential, cached releases, buffered telemetry) is kept, and
+# rooms carry on from their cached releases while the container restarts.
+services:
+  gateway:
+    image: ${KESTREL_IMAGE:?set KESTREL_IMAGE}:${KESTREL_CHANNEL:-stable}
+    container_name: kestrel-gateway
+    restart: unless-stopped
+    # Host networking lets trusted-IP panel access see each panel's real address.
+    network_mode: host
+    environment:
+      KESTREL_CLOUD_URL: ${KESTREL_CLOUD_URL:?set KESTREL_CLOUD_URL}
+      KESTREL_ENROLL_TOKEN: ${KESTREL_ENROLL_TOKEN:-}
+      KESTREL_SIMULATE: ${KESTREL_SIMULATE:-off}
+    volumes:
+      - kestrel-data:/data
+    labels:
+      com.centurylinklabs.watchtower.enable: 'true'
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: kestrel-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_POLL_INTERVAL: 600
+      WATCHTOWER_LABEL_ENABLE: 'true'
+      WATCHTOWER_CLEANUP: 'true'
+
+volumes:
+  kestrel-data:
