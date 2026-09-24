@@ -178,12 +178,12 @@ describe('verification', () => {
   it('never starts a room whose first release is tampered with, and reports why', async () => {
     cloud.assign(ROOM, model(), { tamper: true });
     const { gateway, host } = boot();
-    gateway.start();
-    // start() runs its own first tick, so a tick() here can return early: wait for the heartbeat that names the room.
-    const reported = () => cloud.heartbeats.at(-1)?.rooms.find((r) => r.roomId === ROOM);
-    await until(() => !!reported()?.error, 8000);
+    // Two ticks by hand: the first learns the assignment and refuses it, the second reports that.
+    // (Not start(): its own background tick could overlap these and make the last heartbeat a stale one.)
+    await gateway.tick();
+    await gateway.tick();
     expect(host.ids()).toEqual([]);
-    const report = reported()!;
+    const report = cloud.heartbeats.at(-1)!.rooms.find((r) => r.roomId === ROOM)!;
     expect(report).toMatchObject({ status: 'unloaded', releaseId: null });
     expect(report.error).toContain('rejected');
     await until(() => cloud.telemetry.some((e) => e.type === 'manifest.rejected'));
