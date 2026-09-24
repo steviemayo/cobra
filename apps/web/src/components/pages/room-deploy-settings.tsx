@@ -205,3 +205,64 @@ export function PanelSettings({ roomId }: { roomId: string }) {
     </form>
   );
 }
+
+/** Lets outside systems (a booking tool, a building controller) run this room's webhook triggers. */
+export function HookSettings({ roomId }: { roomId: string }) {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const { orgId } = useOrg();
+  const info = useQuery(trpc.room.hookInfo.queryOptions({ orgId, roomId }));
+  const [secret, setSecret] = useState<string | null>(null);
+  const rotate = useMutation(
+    trpc.room.rotateHookSecret.mutationOptions({
+      onSuccess: async (res) => {
+        setSecret(res.secret);
+        await qc.invalidateQueries({ queryKey: trpc.room.hookInfo.queryKey() });
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  if (info.isPending || !info.data) return null;
+  const origin = typeof window === 'undefined' ? '' : window.location.origin;
+  const first = info.data.hooks[0] ?? 'hook_name';
+  const curl = `curl -X POST ${origin}/api/hooks/${roomId}/${first} \\n  -H "Authorization: Bearer ${secret ?? '<secret>'}"`;
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-sm font-medium">Webhook triggers</h2>
+        <p className="text-sm text-muted-foreground">
+          Let another system start an activity in this room. Add a webhook trigger in the designer,
+          then call its address with this room’s secret. The room picks it up within about half a
+          minute.
+        </p>
+      </div>
+      {info.data.hooks.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Listening for: {info.data.hooks.map((h) => `“${h}”`).join(', ')}
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">This design has no webhook triggers yet.</p>
+      )}
+      {secret && (
+        <div className="space-y-1.5 rounded-lg border p-3">
+          <p className="text-xs font-medium">Copy this now. It’s shown once.</p>
+          <pre className="overflow-auto rounded bg-muted p-2 text-xs">{curl}</pre>
+        </div>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        disabled={rotate.isPending}
+        onClick={() => rotate.mutate({ orgId, roomId })}
+      >
+        {rotate.isPending && <Spinner />}
+        {info.data.hasSecret ? 'Generate a new secret' : 'Generate a secret'}
+      </Button>
+      {info.data.hasSecret && !secret && (
+        <p className="text-xs text-muted-foreground">
+          A secret is set. A new one stops the old one working.
+        </p>
+      )}
+    </section>
+  );
+}

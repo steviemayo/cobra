@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LocalId } from '../room/common';
 import { RoomModel } from '../room/room-model';
 import { PanelIntent, PanelViewModel, RoomStatus } from '../runtime/panel';
 
@@ -195,6 +196,8 @@ export const HeartbeatResponse = z.object({
   commands: z.array(GatewayCommand).default([]),
   /** Rooms someone is controlling from the portal right now. Non-empty means: start polling fast. */
   watch: z.array(z.string().uuid()).default([]),
+  /** Something is waiting for this gateway (a webhook): poll once now to collect it. */
+  pollNow: z.boolean().default(false),
 });
 export type HeartbeatResponse = z.infer<typeof HeartbeatResponse>;
 
@@ -221,10 +224,18 @@ export type ConfigResponse = z.infer<typeof ConfigResponse>;
 
 // While someone has a room's control page open, the gateway polls every second: it sends the
 // room's panel state up and takes panel intents down. It is still only outbound requests.
+/** An external call (webhook) for a room's webhook trigger. */
+export const HookIntent = z.object({ type: z.literal('hook'), hookName: LocalId });
+export type HookIntent = z.infer<typeof HookIntent>;
+
+/** Anything the cloud can ask a room to do on someone's behalf. */
+export const GatewayIntent = z.union([PanelIntent, HookIntent]);
+export type GatewayIntent = z.infer<typeof GatewayIntent>;
+
 export const ControlIntentMessage = z.object({
   id: z.string().uuid(),
   roomId: z.string().uuid(),
-  intent: PanelIntent,
+  intent: GatewayIntent,
 });
 export type ControlIntentMessage = z.infer<typeof ControlIntentMessage>;
 

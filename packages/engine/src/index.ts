@@ -22,3 +22,5 @@ export {
   type SignalDetector,
 } from './runtime/activities';
 export * from './diff/diff';
+export * from './schedule/cron';
+export * from './schedule/scheduler';

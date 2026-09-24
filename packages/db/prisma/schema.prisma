@@ -117,6 +117,8 @@ model Room {
   type                RoomType
   createdAt           DateTime  @default(now())
   panel               Json?
+  /// Hash of the secret webhook callers present. Null until someone generates one.
+  hookSecretHash      String?
   desiredReleaseId    String?   @db.Uuid
   desiredDeploymentId String?   @db.Uuid
   reportedReleaseId   String?   @db.Uuid

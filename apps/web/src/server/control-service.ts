@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@kestrel/db';
 import {
+  GatewayIntent,
   PanelIntent,
   PanelViewModel,
   PollRequest,
@@ -20,6 +21,9 @@ export const WATCH_TTL_MS = 30_000;
 export const LIVE_MS = 8_000;
 /** Intents the gateway did not collect within this long are dropped: nobody wants last minute's volume press. */
 export const INTENT_TTL_MS = 15_000;
+/** A webhook is worth waiting for: the gateway may not check in for half a minute. */
+export const HOOK_TTL_MS = 5 * 60_000;
+export const MAX_HOOKS_PER_MINUTE = 30;
 export const MAX_INTENTS_PER_10S = 40;
 
 const ok = (body: unknown) => ({ status: 200, body });
@@ -94,6 +98,60 @@ export async function portalIntent(
   return { ok: true };
 }
 
+/** Queues a webhook trigger for a room. The gateway picks it up in its next heartbeat. */
+export async function queueHook(
+  db: ControlDb,
+  input: { orgId: string; roomId: string; hookName: string },
+  now = new Date(),
+): Promise<IntentResult> {
+  const room = await db.room.findFirst({ where: { id: input.roomId, orgId: input.orgId } });
+  if (!room) return { ok: false, error: 'Room not found' };
+  if (!room.gatewayId) return { ok: false, error: 'This room isn’t running on a gateway yet' };
+  const parsed = GatewayIntent.safeParse({ type: 'hook', hookName: input.hookName });
+  if (!parsed.success) return { ok: false, error: 'Bad webhook name' };
+  const recent = await db.controlIntent.count({
+    where: { roomId: room.id, createdAt: { gte: new Date(now.getTime() - 60_000) } },
+  });
+  if (recent >= MAX_HOOKS_PER_MINUTE)
+    return { ok: false, error: 'Too many calls, try again in a minute' };
+  await db.controlIntent.create({
+    data: {
+      orgId: input.orgId,
+      roomId: room.id,
+      gatewayId: room.gatewayId,
+      intent: parsed.data as object,
+      createdBy: null,
+      createdAt: now,
+    },
+  });
+  await db.auditLog.create({
+    data: {
+      orgId: input.orgId,
+      actorId: null,
+      action: 'hook.fire',
+      target: room.id,
+      meta: { room: room.name, hook: input.hookName },
+    },
+  });
+  return { ok: true };
+}
+
+/** Whether a webhook is waiting for this gateway, so its next heartbeat can ask it to poll. */
+export async function hasWaitingIntents(
+  db: ControlDb,
+  gatewayId: string,
+  now = new Date(),
+): Promise<boolean> {
+  const n = await db.controlIntent.count({
+    where: {
+      gatewayId,
+      deliveredAt: null,
+      createdAt: { gte: new Date(now.getTime() - HOOK_TTL_MS) },
+    },
+  });
+  return n > 0;
+}
+
 /** Rooms of this gateway that someone is controlling right now. */
 export async function watchedRooms(
   db: ControlDb,
@@ -145,8 +203,9 @@ export async function poll(
       data: { deliveredAt: now },
     });
     if (count === 0) continue;
-    if (now.getTime() - (i.createdAt as Date).getTime() > INTENT_TTL_MS) continue;
-    const intent = PanelIntent.safeParse(i.intent);
+    const intent = GatewayIntent.safeParse(i.intent);
+    const ttl = intent.success && intent.data.type === 'hook' ? HOOK_TTL_MS : INTENT_TTL_MS;
+    if (now.getTime() - (i.createdAt as Date).getTime() > ttl) continue;
     if (intent.success && ownRooms.has(i.roomId))
       fresh.push({ id: i.id, roomId: i.roomId, intent: intent.data });
   }

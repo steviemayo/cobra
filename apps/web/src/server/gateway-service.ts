@@ -12,7 +12,7 @@ import { applyCommandResults, takePendingCommands } from './commands';
 import { applyReport, promoteDue } from './deployment-service';
 import { deliverAlerts } from './alerts';
 import { getEntitlements } from './billing';
-import { watchedRooms } from './control-service';
+import { hasWaitingIntents, watchedRooms } from './control-service';
 import { maybeSweep, recordReports } from './monitoring';
 
 // The cloud's half of the gateway protocol. Route handlers are thin wrappers over these functions,
@@ -202,6 +202,7 @@ export async function heartbeat(
       serverTime: now.toISOString(),
       commands,
       watch: await watchedRooms(db, gw.id, now),
+      pollNow: await hasWaitingIntents(db, gw.id, now),
     },
     after: jobs.length ? () => deliverAlerts(db, jobs) : undefined,
   };

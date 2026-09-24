@@ -1,4 +1,4 @@
-import { RoomRuntime } from '@kestrel/engine';
+import { RoomRuntime, TriggerScheduler } from '@kestrel/engine';
 import { createSimulation } from '@kestrel/drivers';
 import { HybridBus, createDriver, type DeviceDriver } from '@kestrel/drivers/real';
 import type {
@@ -24,6 +24,8 @@ export interface LoadedRoom {
   branding: PanelBranding;
   /** Ids of this room's real devices that are unreachable right now. */
   offline(): string[];
+  /** Starts anything that acts on its own (schedules). Called when the room goes live, not while staged. */
+  begin(): void;
   close(): void;
 }
 
@@ -93,6 +95,7 @@ export class RoomHost {
       roomName: manifest.roomName,
       bus: built.bus,
     });
+    const scheduler = new TriggerScheduler(manifest.model, { fire: (t) => runtime.fire(t.run) });
     const room: LoadedRoom = {
       roomId: manifest.roomId,
       releaseId: manifest.releaseId,
@@ -102,7 +105,9 @@ export class RoomHost {
       access: manifest.panel.access,
       branding: manifest.panel.branding,
       offline: built.offline,
+      begin: () => scheduler.start(),
       close: () => {
+        scheduler.stop();
         runtime.dispose();
         built.close();
       },
@@ -130,6 +135,7 @@ export class RoomHost {
     this.unload(room.roomId, false);
     this.watch(room);
     this.rooms.set(room.roomId, room);
+    room.begin();
     this.log('info', 'Room loaded', {
       roomId: room.roomId,
       room: manifest.roomName,

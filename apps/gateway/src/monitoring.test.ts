@@ -289,3 +289,50 @@ describe('control from the portal', () => {
     cloud.watching = [];
   });
 });
+
+describe('triggers from outside', () => {
+  it('collects a waiting webhook without anyone watching, and runs the trigger it names', async () => {
+    const port = await listen(device!);
+    const m = modelWithDsp(port);
+    m.triggers.push({
+      id: 'hook1',
+      name: 'Start from the booking system',
+      enabled: true,
+      type: 'webhook',
+      hookName: 'start_meeting',
+      run: { type: 'activity', activityId: 'present' },
+    });
+    cloud.assign(ROOM, m);
+    const { gateway, host } = boot();
+    gateway.start();
+    await until(() => host.ids().includes(ROOM));
+    await gateway.tick();
+    expect(host.get(ROOM)!.runtime.getSnapshot().status).toBe('off');
+
+    cloud.queuedIntents.push({
+      id: crypto.randomUUID(),
+      roomId: ROOM,
+      intent: { type: 'hook', hookName: 'start_meeting' },
+    });
+    await gateway.tick();
+    await until(() => host.get(ROOM)!.runtime.getSnapshot().status !== 'off');
+    expect(cloud.polls.length).toBeGreaterThan(0);
+  });
+
+  it('ignores a webhook no trigger is listening for', async () => {
+    const port = await listen(device!);
+    cloud.assign(ROOM, modelWithDsp(port));
+    const { gateway, host } = boot();
+    gateway.start();
+    await until(() => host.ids().includes(ROOM));
+    cloud.queuedIntents.push({
+      id: crypto.randomUUID(),
+      roomId: ROOM,
+      intent: { type: 'hook', hookName: 'nobody_listens' },
+    });
+    await gateway.tick();
+    await until(() => cloud.polls.length > 0);
+    await wait(300);
+    expect(host.get(ROOM)!.runtime.getSnapshot().status).toBe('off');
+  });
+});

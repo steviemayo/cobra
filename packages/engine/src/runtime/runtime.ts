@@ -7,9 +7,10 @@ import {
   type PanelViewModel,
   type RoomModel,
   type RoomStatus,
+  type TriggerTarget,
 } from '@kestrel/model';
 import { executePlan } from '../plan/execute';
-import { activitySources, planActivity, planStopOverlay, type Plan } from '../plan/plan';
+import { activitySources, planActivity, planState, planStopOverlay, type Plan } from '../plan/plan';
 import { buildGraph, deviceCapabilities, type Graph } from '../validate/graph';
 import { availableActivities, detectorsFor, type SignalDetector } from './activities';
 
@@ -73,6 +74,7 @@ export class RoomRuntime implements PanelClient {
   private warningDeadline: number | null = null;
   private savedUntil = 0;
   private lastPresence = new Map<string, boolean | null>();
+  private lastOccupied = new Map<string, boolean | undefined>();
 
   private runId = 0;
   private abort: AbortController | null = null;
@@ -150,6 +152,55 @@ export class RoomRuntime implements PanelClient {
     this.clearWarning();
     this.stopTicker();
     this.listeners.clear();
+  }
+
+  // ---- Triggers -------------------------------------------------------------------------------
+
+  /** Run what a trigger points at: an activity (with a source) or a state. Used by schedules, hooks and sensors. */
+  fire(target: TriggerTarget): void {
+    if (this.disposed) return;
+    if (target.type === 'activity')
+      return void this.startActivity(target.activityId, target.sourceId);
+    void this.runState(target.stateId);
+  }
+
+  /** An external call (webhook) by name. Returns how many triggers ran. */
+  fireHook(hookName: string): number {
+    const hooks = this.model.triggers.filter(
+      (t) => t.type === 'webhook' && t.enabled && t.hookName === hookName,
+    );
+    for (const t of hooks) this.fire(t.run);
+    return hooks.length;
+  }
+
+  private async runState(stateId: string) {
+    const state = this.model.states.find((s) => s.id === stateId);
+    if (!state) return;
+    if (state.kind === 'off') return this.roomOff();
+    const { run, signal } = this.begin(state.kind === 'on' ? 'starting' : this.status);
+    this.notify();
+    const ok = await this.run(planState(this.model, stateId), run, signal);
+    if (!ok) return;
+    if (state.kind === 'on') this.status = 'on';
+    else if (this.status === 'starting') this.status = this.primary ? 'on' : 'off';
+    this.adoptDeviceState();
+    this.evaluateIdle();
+    this.notify();
+  }
+
+  private occupancyChanged(event: DeviceEvent) {
+    const before = this.lastOccupied.get(event.deviceId);
+    const now = event.state.occupied;
+    this.lastOccupied.set(event.deviceId, now);
+    if (now === undefined || before === now) return;
+    for (const t of this.model.triggers)
+      if (
+        t.type === 'occupancy' &&
+        t.enabled &&
+        t.deviceId === event.deviceId &&
+        t.occupied === now
+      )
+        this.fire(t.run);
   }
 
   // ---- Activities -----------------------------------------------------------------------------
@@ -367,6 +418,7 @@ export class RoomRuntime implements PanelClient {
       if (event.state.volume !== undefined) this.volume = event.state.volume;
       if (event.state.muted !== undefined) this.muted = event.state.muted;
     }
+    this.occupancyChanged(event);
     for (const [source, detector] of this.detectors) {
       if (detector?.deviceId !== event.deviceId) continue;
       const now = this.presence(source);

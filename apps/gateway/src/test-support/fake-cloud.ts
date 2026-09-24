@@ -161,6 +161,7 @@ export class FakeCloud {
         serverTime: new Date().toISOString(),
         commands: this.queuedCommands.splice(0),
         watch: this.watching,
+        pollNow: this.queuedIntents.length > 0,
       });
     }
     if (req.method === 'POST' && path === '/poll') {

@@ -56,6 +56,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `asked “${s(meta.room)}” to ${s(meta.type).replace('_', ' ')}`;
     case 'command.result':
       return `the gateway finished a ${s(meta.type).replace('_', ' ')} command (${meta.ok ? 'worked' : 'failed'})`;
+    case 'room.hook_secret':
+      return `generated a new webhook secret for “${s(meta.room)}”`;
+    case 'hook.fire':
+      return `a webhook ran “${s(meta.hook)}” in “${s(meta.room)}”`;
     case 'org.branding':
       return 'changed the organisation’s panel theme';
     case 'control.intent':

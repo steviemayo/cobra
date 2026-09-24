@@ -22,6 +22,7 @@ export const DeviceCategory = z.enum([
   'blinds',
   'lifter',
   'screen',
+  'occupancy_sensor',
 ]);
 export type DeviceCategory = z.infer<typeof DeviceCategory>;
 
@@ -190,6 +191,13 @@ export const DEVICE_CATALOG: Record<DeviceCategory, CategoryInfo> = {
     label: 'Lifter',
     section: 'environment',
     capabilities: ['mechanical'],
+    controllable: true,
+    defaultPorts: [],
+  },
+  occupancy_sensor: {
+    label: 'Occupancy sensor',
+    section: 'environment',
+    capabilities: ['occupancy'],
     controllable: true,
     defaultPorts: [],
   },

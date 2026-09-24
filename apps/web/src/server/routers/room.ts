@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
+import { generateSecret, hashSecret } from '@kestrel/crypto';
 import { RoomType } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { canAddRoom, getEntitlements } from '../billing';
@@ -17,7 +18,7 @@ const roomId = z.string().uuid();
 const name = z.string().trim().min(1).max(100);
 
 // Room.panel holds the panel PIN hash. It is server-only: never send it to a browser.
-const omit = { panel: true } as const;
+const omit = { panel: true, hookSecretHash: true } as const;
 
 async function assertSite(ctxOrgId: string, siteId: string) {
   const site = await db.site.findFirst({ where: { id: siteId, orgId: ctxOrgId } });
@@ -200,6 +201,48 @@ export const roomRouter = router({
         meta: { room: room.name, gateway: gatewayName },
       });
       return { ok: true };
+    }),
+
+  // Webhook triggers: the names the design listens for, and whether a secret has been set.
+  hookInfo: orgProcedure.input(z.object({ orgId, roomId })).query(async ({ ctx, input }) => {
+    requireRole(ctx.role, ['owner', 'dev']);
+    const room = await db.room.findFirst({
+      where: { id: input.roomId, orgId: ctx.orgId },
+      select: { hookSecretHash: true },
+    });
+    if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
+    const draft = await db.roomDraft.findFirst({
+      where: { roomId: input.roomId, orgId: ctx.orgId },
+      select: { model: true },
+    });
+    const triggers =
+      (draft?.model as { triggers?: { type: string; hookName?: string; enabled?: boolean }[] })
+        ?.triggers ?? [];
+    return {
+      hasSecret: !!room.hookSecretHash,
+      hooks: triggers.flatMap((t) => (t.type === 'webhook' && t.hookName ? [t.hookName] : [])),
+    };
+  }),
+
+  // Shown once. Generating a new one stops the old one working straight away.
+  rotateHookSecret: orgProcedure
+    .input(z.object({ orgId, roomId }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const room = await findRoom(ctx.orgId, input.roomId);
+      const secret = generateSecret(24);
+      await db.room.update({
+        where: { id: room.id },
+        data: { hookSecretHash: hashSecret(secret) },
+      });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'room.hook_secret',
+        target: room.id,
+        meta: { room: room.name },
+      });
+      return { secret };
     }),
 
   getPanel: orgProcedure.input(z.object({ orgId, roomId })).query(async ({ ctx, input }) => {

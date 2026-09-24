@@ -38,6 +38,8 @@ export const DeviceState = z.object({
   volume: z.number().min(0).max(100).optional(),
   preset: z.string().optional(),
   recording: z.boolean().optional(),
+  /** Occupancy sensors: is anyone in the room. */
+  occupied: z.boolean().optional(),
   /** Input port -> is a signal present. Only devices with signal_detect report this. */
   signal: z.record(z.string(), z.boolean()).default({}),
 });

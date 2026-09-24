@@ -68,6 +68,8 @@ export class Gateway {
   /** Rooms someone is controlling from the portal; while there are any, the cloud is polled fast. */
   private watch = new Set<string>();
   private fastTimer: ReturnType<typeof setTimeout> | null = null;
+  /** One poll was asked for although nobody is watching (a webhook is waiting). */
+  private pollOnce = false;
 
   constructor(
     private readonly cfg: GatewayConfig,
@@ -213,6 +215,11 @@ export class Gateway {
     this.pendingResults.splice(0, results.length);
     this.inbox.push(...res.commands);
     this.setWatch(res.watch);
+    // A webhook is waiting: collect it now instead of waiting for someone to open a control page.
+    if (res.pollNow && !this.stopped) {
+      this.pollOnce = true;
+      if (!this.fastTimer) this.scheduleFast(0);
+    }
     return res;
   }
 
@@ -231,7 +238,8 @@ export class Gateway {
   private async fastTick(): Promise<void> {
     this.fastTimer = null;
     const credential = this.store.get(KEY_CREDENTIAL);
-    if (this.stopped || !credential || this.watch.size === 0) return;
+    if (this.stopped || !credential || (this.watch.size === 0 && !this.pollOnce)) return;
+    this.pollOnce = false;
     let next = 1000;
     try {
       const panels = [...this.watch].flatMap((roomId) => {
@@ -240,7 +248,14 @@ export class Gateway {
       });
       const res = await this.cloud.poll(credential, { protocol: PROTOCOL_VERSION, panels });
       this.watch = new Set(res.watch);
-      for (const { roomId, intent } of res.intents) this.host.get(roomId)?.runtime.dispatch(intent);
+      for (const { roomId, intent } of res.intents) {
+        const runtime = this.host.get(roomId)?.runtime;
+        if (!runtime) continue;
+        if (intent.type === 'hook') {
+          const ran = runtime.fireHook(intent.hookName);
+          this.log('info', 'Webhook received', { roomId, hook: intent.hookName, triggers: ran });
+        } else runtime.dispatch(intent);
+      }
       // Something just changed, so report it back quickly.
       if (res.intents.length > 0) next = 250;
     } catch (e) {

@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { PanelViewModel } from '@kestrel/model';
 import {
+  HOOK_TTL_MS,
   INTENT_TTL_MS,
   LIVE_MS,
+  MAX_HOOKS_PER_MINUTE,
   MAX_INTENTS_PER_10S,
   WATCH_TTL_MS,
+  hasWaitingIntents,
   poll,
   portalIntent,
   portalSnapshot,
+  queueHook,
   watchedRooms,
   type ControlDb,
 } from './control-service';
@@ -171,5 +175,54 @@ describe('gateway poll', () => {
     await send(w, { type: 'volume.bump', delta: 10 }, T0);
     expect(intentsOf(await poll(w.db, gw, { protocol: 1 }, at(INTENT_TTL_MS + 1)))).toEqual([]);
     expect(w.controlIntent.rows[0]!.deliveredAt).toBeTruthy();
+  });
+});
+
+describe('webhooks', () => {
+  const hook = (w: ReturnType<typeof world>, name: string, now: Date, roomId = ROOM, orgId = ORG) =>
+    queueHook(w.db, { orgId, roomId, hookName: name }, now);
+
+  it('queues a webhook for the room’s gateway and audits it', async () => {
+    const w = world();
+    expect(await hook(w, 'start_meeting', T0)).toEqual({ ok: true });
+    expect(w.controlIntent.rows[0]).toMatchObject({
+      gatewayId: GW,
+      roomId: ROOM,
+      intent: { type: 'hook', hookName: 'start_meeting' },
+    });
+    expect(w.auditLog.rows[0]).toMatchObject({ action: 'hook.fire', actorId: null });
+  });
+
+  it('refuses another organisation’s room, a room with no gateway, and a bad name', async () => {
+    const w = world();
+    expect((await hook(w, 'x', T0, ROOM, OTHER_ORG)).ok).toBe(false);
+    expect((await hook(w, 'x', T0, NO_GW)).ok).toBe(false);
+    expect((await hook(w, 'Not Valid!', T0)).ok).toBe(false);
+    expect(w.controlIntent.rows).toHaveLength(0);
+  });
+
+  it('limits how often a room can be called', async () => {
+    const w = world();
+    for (let i = 0; i < MAX_HOOKS_PER_MINUTE; i++) expect((await hook(w, 'go', T0)).ok).toBe(true);
+    expect((await hook(w, 'go', T0)).ok).toBe(false);
+    expect((await hook(w, 'go', at(61_000))).ok).toBe(true);
+  });
+
+  it('tells the gateway to poll, and hands the hook over even after a slow heartbeat', async () => {
+    const w = world();
+    await hook(w, 'go', T0);
+    expect(await hasWaitingIntents(w.db, GW, at(1000))).toBe(true);
+    expect(await hasWaitingIntents(w.db, GW2, at(1000))).toBe(false);
+    // Well past the panel-intent limit, but a webhook is still worth delivering.
+    const res = await poll(w.db, gw, { protocol: 1 }, at(INTENT_TTL_MS * 4));
+    expect(intentsOf(res).map((i) => i.intent.type)).toEqual(['hook']);
+    expect(await hasWaitingIntents(w.db, GW, at(INTENT_TTL_MS * 4 + 1))).toBe(false);
+  });
+
+  it('gives up on a webhook that nobody collected for minutes', async () => {
+    const w = world();
+    await hook(w, 'go', T0);
+    expect(await hasWaitingIntents(w.db, GW, at(HOOK_TTL_MS + 1))).toBe(false);
+    expect(intentsOf(await poll(w.db, gw, { protocol: 1 }, at(HOOK_TTL_MS + 1)))).toEqual([]);
   });
 });
