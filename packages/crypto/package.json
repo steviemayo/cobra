@@ -10,10 +10,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
-    "keygen": "node --experimental-strip-types src/keygen.ts"
+    "keygen": "tsx src/keygen.ts"
   },
   "devDependencies": {
-    "@kestrel/config": "workspace:*"
+    "@kestrel/config": "workspace:*",
+    "tsx": "^4.23.15"
   },
   "dependencies": {
     "@kestrel/model": "workspace:*"
