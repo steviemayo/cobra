@@ -1,0 +1,62 @@
+name: Gateway image
+
+# Builds the gateway container. Pull requests only check that it builds; pushes publish to GHCR.
+#   main            -> :stable (and :latest)
+#   dev             -> :beta
+#   gateway-v1.2.3  -> :1.2.3
+on:
+  pull_request:
+    paths:
+      - 'apps/gateway/**'
+      - 'apps/panel/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/gateway-image.yml'
+  push:
+    branches: [main, dev]
+    tags: ['gateway-v*']
+    paths:
+      - 'apps/gateway/**'
+      - 'apps/panel/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/gateway-image.yml'
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/kestrel-gateway
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=stable,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=beta,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=match,pattern=gateway-v(.*),group=1
+            type=sha
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/gateway/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
