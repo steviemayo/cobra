@@ -86,6 +86,7 @@ export class Gateway {
 
   /** Signs the QR links shown on room panels. */
   readonly phone: PhoneLinks;
+  private announcedUpdate: string | null = null;
 
   private readonly combine: CombineCoordinator;
 
@@ -226,6 +227,15 @@ export class Gateway {
     this.pendingResults.splice(0, results.length);
     this.inbox.push(...res.commands);
     this.setWatch(res.watch);
+    const { update } = res;
+    if (update?.latest && update.latest !== this.cfg.version && update.latest !== this.announcedUpdate) {
+      this.announcedUpdate = update.latest;
+      this.log('info', 'A different gateway version is published on this channel', {
+        channel: update.channel,
+        latest: update.latest,
+        running: this.cfg.version,
+      });
+    }
     // A webhook is waiting: collect it now instead of waiting for someone to open a control page.
     if (res.pollNow && !this.stopped) {
       this.pollOnce = true;

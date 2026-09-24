@@ -217,6 +217,10 @@ export const HeartbeatResponse = z.object({
   watch: z.array(z.string().uuid()).default([]),
   /** Something is waiting for this gateway (a webhook): poll once now to collect it. */
   pollNow: z.boolean().default(false),
+  /** The release channel this gateway follows, and the newest version on it, when the cloud knows. */
+  update: z
+    .object({ channel: z.enum(['stable', 'beta']), latest: z.string().max(50).nullable() })
+    .optional(),
 });
 export type HeartbeatResponse = z.infer<typeof HeartbeatResponse>;
 

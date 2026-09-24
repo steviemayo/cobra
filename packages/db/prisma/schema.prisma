@@ -25,6 +25,11 @@ enum GatewayStatus {
   offline
 }
 
+enum GatewayChannel {
+  stable
+  beta
+}
+
 model Org {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
@@ -89,20 +94,21 @@ model Site {
 }
 
 model Gateway {
-  id                   String        @id @default(uuid()) @db.Uuid
-  orgId                String        @db.Uuid
-  siteId               String        @db.Uuid
+  id                   String         @id @default(uuid()) @db.Uuid
+  orgId                String         @db.Uuid
+  siteId               String         @db.Uuid
   name                 String
-  status               GatewayStatus @default(pending)
+  status               GatewayStatus  @default(pending)
   enrollTokenHash      String?
   enrollTokenExpiresAt DateTime?
-  credentialHash       String?       @unique
+  credentialHash       String?        @unique
   enrolledAt           DateTime?
   version              String?
+  channel              GatewayChannel @default(stable)
   hostname             String?
   os                   String?
   lastSeenAt           DateTime?
-  createdAt            DateTime      @default(now())
+  createdAt            DateTime       @default(now())
 
   org    Org            @relation(fields: [orgId], references: [id], onDelete: Cascade)
   site   Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)

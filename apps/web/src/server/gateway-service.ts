@@ -48,6 +48,7 @@ export interface Result {
 
 export { HEARTBEAT_SECONDS, OFFLINE_AFTER_MS, effectiveStatus } from './gateway-status';
 import { HEARTBEAT_SECONDS } from './gateway-status';
+import { latestVersions } from './gateway-updates';
 
 const fail = (status: number, error: string): Result => ({ status, body: { error } });
 
@@ -211,6 +212,7 @@ export async function heartbeat(
       commands,
       watch: await watchedRooms(db, gw.id, now),
       pollNow: await hasWaitingIntents(db, gw.id, now),
+      update: { channel: gw.channel, latest: latestVersions()[gw.channel] },
     },
     after: jobs.length ? () => deliverAlerts(db, jobs) : undefined,
   };
