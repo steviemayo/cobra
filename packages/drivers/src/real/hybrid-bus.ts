@@ -45,6 +45,11 @@ export class HybridBus implements DeviceBus {
     for (const d of this.real.values()) d.start();
   }
 
+  /** Ids of real devices that are not currently reachable. Simulated devices are never offline. */
+  offline(): string[] {
+    return [...this.real].filter(([, d]) => !d.getState().online).map(([id]) => id);
+  }
+
   close() {
     for (const d of this.real.values()) d.close();
     this.sim?.dispose();

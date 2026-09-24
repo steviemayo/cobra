@@ -252,6 +252,27 @@ describe('generic TCP driver', () => {
     await expect(d.send({ type: 'power', on: true })).rejects.toThrow();
     expect(d.getState().online).toBe(false);
   });
+
+  it('checks the device is reachable when started, so a release can tell a wrong address', async () => {
+    const dev = await tcpDevice();
+    const up = new GenericTcpDriver(dsp({ host: '127.0.0.1', port: dev.port, commands }), ctx);
+    drivers.push(up);
+    expect(up.getState().online).toBe(false);
+    up.start();
+    await until(() => up.getState().online);
+
+    servers.at(-1)!.close();
+    const down = new GenericTcpDriver(dsp({ host: '127.0.0.1', port: dev.port, commands }), ctx);
+    drivers.push(down);
+    down.start();
+    await wait(150);
+    expect(down.getState().online).toBe(false);
+
+    const noHost = new GenericTcpDriver(dsp({ commands }), ctx);
+    drivers.push(noHost);
+    noHost.start();
+    expect(noHost.getState().online).toBe(false);
+  });
 });
 
 describe('createDriver', () => {
@@ -300,6 +321,24 @@ describe('HybridBus', () => {
     expect(ids).toContain('matrix');
     await real.send({ type: 'power', on: true });
     expect(ids).toContain('display1');
+    bus.close();
+  });
+
+  it('lists the real devices that are unreachable, and never the simulated ones', async () => {
+    const dev = await tcpDevice();
+    const reachable = new GenericTcpDriver(dsp({ host: '127.0.0.1', port: dev.port, commands: {} }), ctx);
+    const silent = new GenericTcpDriver({ ...dsp({ commands: {} }), id: 'silent' }, ctx);
+    drivers.push(reachable, silent);
+    const bus = new HybridBus(
+      new Map<string, DeviceDriver>([
+        [reachable.deviceId, reachable],
+        ['silent', silent],
+      ]),
+      createSimulation(model),
+    );
+    bus.start();
+    await until(() => reachable.getState().online);
+    expect(bus.offline()).toEqual(['silent']);
     bus.close();
   });
 
