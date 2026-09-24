@@ -60,6 +60,13 @@ export class Store {
     this.db.prepare('DELETE FROM kv WHERE key = ?').run(key);
   }
 
+  keysWithPrefix(prefix: string): string[] {
+    const rows = this.db
+      .prepare("SELECT key FROM kv WHERE substr(key, 1, ?) = ?")
+      .all(prefix.length, prefix) as { key: string }[];
+    return rows.map((r) => r.key);
+  }
+
   getJson<T>(key: string): T | null {
     const v = this.get(key);
     return v === null ? null : (JSON.parse(v) as T);

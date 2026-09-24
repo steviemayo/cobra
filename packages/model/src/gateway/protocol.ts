@@ -78,13 +78,40 @@ export type EnrollResponse = z.infer<typeof EnrollResponse>;
 
 // ---- Heartbeat and config ----------------------------------------------------------------------
 
+// The stages a gateway moves a release through. `rolled_back` means the new release was refused
+// and the previous one is still running; `failed` means there was nothing to fall back to.
+export const DeploymentStage = z.enum([
+  'downloading',
+  'verifying',
+  'staging',
+  'health_check',
+  'active',
+  'failed',
+  'rolled_back',
+]);
+export type DeploymentStage = z.infer<typeof DeploymentStage>;
+
+export const DeploymentReport = z.object({
+  deploymentId: z.string().uuid(),
+  /** Where the attempt got to (its latest stage). */
+  stage: DeploymentStage,
+  /** Every stage reached, with the gateway's own timestamps. */
+  history: z.array(z.object({ stage: DeploymentStage, at: z.string().datetime() })).max(20),
+  error: z.string().max(500).optional(),
+});
+export type DeploymentReport = z.infer<typeof DeploymentReport>;
+
 export const RoomReport = z.object({
   roomId: z.string().uuid(),
   /** Release currently running, or null if none loaded. */
   releaseId: z.string().uuid().nullable(),
+  /** Hash of the manifest actually running, so drift can be told from a mislabelled release. */
+  manifestHash: z.string().optional(),
   status: RoomStatus.or(z.literal('unloaded')),
   /** Non-fatal problem, e.g. a manifest that failed verification. */
   error: z.string().max(500).optional(),
+  /** The most recent deployment attempt for this room, until the cloud assigns another. */
+  deployment: DeploymentReport.optional(),
 });
 export type RoomReport = z.infer<typeof RoomReport>;
 
@@ -110,6 +137,8 @@ export const AssignedRoom = z.object({
   releaseId: z.string().uuid(),
   releaseNumber: z.number().int(),
   manifestHash: z.string(),
+  /** Which deployment asked for this release. A new id lets a gateway retry a release that failed. */
+  deploymentId: z.string().uuid(),
 });
 export type AssignedRoom = z.infer<typeof AssignedRoom>;
 

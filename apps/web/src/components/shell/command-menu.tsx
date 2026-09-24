@@ -10,6 +10,7 @@ import {
   LayoutTemplate,
   Moon,
   Plus,
+  Rocket,
   Router,
   Settings,
   Users,
@@ -91,6 +92,9 @@ export function CommandMenu({ children }: { children: React.ReactNode }) {
               )}
               <CommandItem onSelect={() => go('/gateways')}>
                 <Router /> Gateways
+              </CommandItem>
+              <CommandItem onSelect={() => go('/deployments')}>
+                <Rocket /> Deployments
               </CommandItem>
               {canSeeTeam && (
                 <>

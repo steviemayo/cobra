@@ -41,6 +41,7 @@ model Org {
   invites       Invite[]
   releases      Release[]
   gatewayEvents GatewayEvent[]
+  deployments   Deployment[]
 }
 
 model Member {
@@ -97,26 +98,29 @@ model Gateway {
 }
 
 model Room {
-  id                String    @id @default(uuid()) @db.Uuid
-  orgId             String    @db.Uuid
-  siteId            String    @db.Uuid
-  gatewayId         String?   @db.Uuid
-  name              String
-  type              RoomType
-  createdAt         DateTime  @default(now())
-  panel             Json?
-  desiredReleaseId  String?   @db.Uuid
-  reportedReleaseId String?   @db.Uuid
-  reportedStatus    String?
-  reportedError     String?
-  reportedAt        DateTime?
-  updatedAt         DateTime  @default(now()) @updatedAt
+  id                  String    @id @default(uuid()) @db.Uuid
+  orgId               String    @db.Uuid
+  siteId              String    @db.Uuid
+  gatewayId           String?   @db.Uuid
+  name                String
+  type                RoomType
+  createdAt           DateTime  @default(now())
+  panel               Json?
+  desiredReleaseId    String?   @db.Uuid
+  desiredDeploymentId String?   @db.Uuid
+  reportedReleaseId   String?   @db.Uuid
+  reportedHash        String?
+  reportedStatus      String?
+  reportedError       String?
+  reportedAt          DateTime?
+  updatedAt           DateTime  @default(now()) @updatedAt
 
-  org      Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site     Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  gateway  Gateway?   @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
-  draft    RoomDraft?
-  releases Release[]
+  org         Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site        Site         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  gateway     Gateway?     @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  draft       RoomDraft?
+  releases    Release[]
+  deployments Deployment[]
 
   @@index([orgId])
   @@index([siteId])
@@ -210,17 +214,20 @@ model Invite {
 
 // Immutable, signed snapshot of a room's design. `manifest` is the SignedManifest gateways run.
 model Release {
-  id        String   @id @default(uuid()) @db.Uuid
-  orgId     String   @db.Uuid
-  roomId    String   @db.Uuid
-  number    Int
-  manifest  Json
-  hash      String
-  createdBy String?  @db.Uuid
-  createdAt DateTime @default(now())
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @db.Uuid
+  roomId        String   @db.Uuid
+  number        Int
+  manifest      Json
+  hash          String
+  /// Which revision of the draft this release froze, to tell when the design has moved on since.
+  draftRevision Int?
+  createdBy     String?  @db.Uuid
+  createdAt     DateTime @default(now())
 
-  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  org         Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room        Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  deployments Deployment[]
 
   @@unique([roomId, number])
   @@index([orgId])
@@ -242,4 +249,44 @@ model GatewayEvent {
 
   @@index([gatewayId, at])
   @@index([orgId, at])
+}
+
+// One attempt to put a release on a room's gateway. `status` is scheduled, pending, one of the
+// gateway stages (downloading ... active, failed, rolled_back), cancelled or superseded.
+model Deployment {
+  id           String    @id @default(uuid()) @db.Uuid
+  orgId        String    @db.Uuid
+  roomId       String    @db.Uuid
+  releaseId    String    @db.Uuid
+  gatewayId    String?   @db.Uuid
+  status       String
+  /// deploy, or rollback when it re-deploys an older release than the one that was running.
+  kind         String    @default("deploy")
+  scheduledFor DateTime?
+  createdBy    String?   @db.Uuid
+  createdAt    DateTime  @default(now())
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  error        String?
+
+  org     Org               @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room    Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  release Release           @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  events  DeploymentEvent[]
+
+  @@index([roomId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([status, scheduledFor])
+}
+
+// A stage a deployment reached, with the gateway's own timestamp.
+model DeploymentEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  deploymentId String   @db.Uuid
+  stage        String
+  at           DateTime
+
+  deployment Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@unique([deploymentId, stage])
 }

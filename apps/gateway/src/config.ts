@@ -20,6 +20,8 @@ const Env = z.object({
   KESTREL_SIMULATE: z.enum(['off', 'all', 'missing']).default('off'),
   /** Optional pinned public key (PEM), trusted in addition to keys the cloud hands out. */
   KESTREL_PUBLIC_KEY: z.string().optional(),
+  /** How long a new release gets to reach its devices before it is refused and the old one kept. */
+  KESTREL_HEALTH_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(300).default(15),
   KESTREL_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
@@ -34,6 +36,7 @@ export interface GatewayConfig {
   pinnedPublicKey?: string;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   version: string;
+  healthTimeoutMs?: number;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): GatewayConfig {
@@ -54,5 +57,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     pinnedPublicKey: e.KESTREL_PUBLIC_KEY,
     logLevel: e.KESTREL_LOG_LEVEL,
     version: GATEWAY_VERSION,
+    healthTimeoutMs: e.KESTREL_HEALTH_TIMEOUT_SECONDS * 1000,
   };
 }

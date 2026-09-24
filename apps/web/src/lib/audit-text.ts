@@ -1,6 +1,6 @@
 import { ROLE_LABEL } from './format';
 
-const s = (v: unknown) => (typeof v === 'string' ? v : '');
+const s = (v: unknown) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '');
 const role = (v: unknown) => ROLE_LABEL[s(v) as keyof typeof ROLE_LABEL] ?? s(v);
 
 // Human wording for audit log rows: "<actor> <this text>".
@@ -34,6 +34,24 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `removed ${s(meta.email)} from the organisation`;
     case 'member.leave':
       return 'left the organisation';
+    case 'release.publish':
+      return `published release ${s(meta.number)} of “${s(meta.room)}”`;
+    case 'deployment.create':
+      return meta.kind === 'rollback'
+        ? `rolled “${s(meta.room)}” back to release ${s(meta.number)}`
+        : `deployed release ${s(meta.number)} to “${s(meta.room)}”`;
+    case 'deployment.schedule':
+      return `scheduled release ${s(meta.number)} for “${s(meta.room)}”`;
+    case 'deployment.cancel':
+      return `cancelled the scheduled deployment of release ${s(meta.number)} to “${s(meta.room)}”`;
+    case 'room.gateway':
+      return meta.gateway
+        ? `set “${s(meta.room)}” to run on gateway “${s(meta.gateway)}”`
+        : `removed the gateway from “${s(meta.room)}”`;
+    case 'gateway.create':
+      return `added gateway “${s(meta.name)}”`;
+    case 'gateway.enroll':
+      return `gateway “${s(meta.name)}” connected`;
     default:
       return action;
   }

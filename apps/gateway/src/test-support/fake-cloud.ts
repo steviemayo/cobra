@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { generateKeyPair, signManifest } from '@kestrel/crypto';
 import {
@@ -20,6 +21,7 @@ interface Assignment {
   roomName: string;
   releaseId: string;
   releaseNumber: number;
+  deploymentId: string;
   signed: unknown;
 }
 
@@ -82,10 +84,18 @@ export class FakeCloud {
       roomName: signed.manifest.roomName,
       releaseId,
       releaseNumber: number,
+      deploymentId: randomUUID(),
       signed: wire,
     });
     this.version++;
     return signed;
+  }
+
+  /** Ask for the current release again as a new deployment, so a refused one gets another go. */
+  redeploy(roomId: string) {
+    const a = this.assignments.get(roomId);
+    if (a) a.deploymentId = randomUUID();
+    this.version++;
   }
 
   unassign(roomId: string) {
@@ -149,6 +159,7 @@ export class FakeCloud {
           roomName: a.roomName,
           releaseId: a.releaseId,
           releaseNumber: a.releaseNumber,
+          deploymentId: a.deploymentId,
           manifestHash: (a.signed as { hash: string }).hash,
         })),
         publicKeys: this.extraKeys ?? this.publicKeys,

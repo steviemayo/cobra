@@ -1,13 +1,14 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer, type Server } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { STARTER_TEMPLATES, type RoomModel } from '@kestrel/model';
 import { CloudClient } from './cloud';
 import type { GatewayConfig } from './config';
 import { Gateway } from './gateway';
 import { silentLogger } from './log';
-import { RoomHost } from './room-host';
+import { RoomHost, type SimulateMode } from './room-host';
 import { Store } from './store';
 import { CREDENTIAL, ENROLL_TOKEN, FakeCloud, GATEWAY_ID } from './test-support/fake-cloud';
 
@@ -28,7 +29,7 @@ async function until(check: () => boolean, ms = 4000) {
   }
 }
 
-function boot(over: Partial<GatewayConfig> = {}, url = cloud.url) {
+function boot(over: Partial<GatewayConfig> = {}, url = cloud.url, mode: SimulateMode = 'all') {
   const cfg: GatewayConfig = {
     cloudUrl: url,
     enrollToken: ENROLL_TOKEN,
@@ -42,7 +43,7 @@ function boot(over: Partial<GatewayConfig> = {}, url = cloud.url) {
     ...over,
   };
   const store = new Store(join(dir, 'gateway.db'));
-  const host = new RoomHost('all', silentLogger, (e) => store.enqueue(e));
+  const host = new RoomHost(mode, silentLogger, (e) => store.enqueue(e));
   const gateway = new Gateway(cfg, store, new CloudClient(url), host, silentLogger);
   running.push({ gateway, host, store });
   return { gateway, host, store, cfg };
@@ -95,7 +96,9 @@ describe('enrolment and sync', () => {
     await until(() => host.ids().includes(ROOM));
     await gateway.tick();
     const last = cloud.heartbeats.at(-1)!;
-    expect(last.rooms).toEqual([{ roomId: ROOM, releaseId: signed.manifest.releaseId, status: 'off' }]);
+    expect(last.rooms).toHaveLength(1);
+    expect(last.rooms[0]).toMatchObject({ roomId: ROOM, releaseId: signed.manifest.releaseId, status: 'off' });
+    expect(last.rooms[0]!.deployment).toMatchObject({ stage: 'active' });
     expect(last.configVersion).not.toBeNull();
     expect(last.uptimeSeconds).toBeGreaterThanOrEqual(0);
   });
@@ -295,5 +298,169 @@ describe('telemetry', () => {
     expect(types).toContain('room.status');
     expect(types).toContain('activity.started');
     expect(cloud.telemetry.find((e) => e.type === 'activity.started')!.data).toEqual({ activityId: 'present' });
+  });
+});
+
+describe('staged deployments', () => {
+  const servers: Server[] = [];
+  afterEach(() => servers.splice(0).forEach((x) => x.close()));
+
+  /** The starter room with no device control, so nothing needs a real driver. */
+  const plain = (): RoomModel => {
+    const m = model();
+    for (const d of m.devices) delete d.control;
+    return m;
+  };
+  /** The plain room with its DSP configured as a real TCP device at the given port. */
+  const withDsp = (port: number): RoomModel => {
+    const m = plain();
+    const dsp = m.devices.find((d) => d.id === 'dsp')!;
+    dsp.control = { kind: 'generic', protocol: 'tcp' };
+    dsp.settings = { host: '127.0.0.1', port, timeoutMs: 200, commands: {} };
+    return m;
+  };
+  const listening = () =>
+    new Promise<number>((resolve) => {
+      const server = createServer((socket) => socket.on('error', () => undefined));
+      servers.push(server);
+      server.listen(0, '127.0.0.1', () => resolve((server.address() as { port: number }).port));
+    });
+  const deadPort = async () => {
+    const port = await listening();
+    await new Promise((r) => servers.pop()!.close(r));
+    return port;
+  };
+  const reportFor = (roomId = ROOM) => cloud.heartbeats.at(-1)?.rooms.find((r) => r.roomId === roomId);
+
+  it('walks a release through every stage and reports them in order', async () => {
+    cloud.assign(ROOM, plain());
+    const { gateway, host } = boot();
+    gateway.start();
+    await until(() => host.ids().includes(ROOM));
+    await until(() => reportFor()?.deployment?.stage === 'active');
+    const d = reportFor()!.deployment!;
+    expect(d.history.map((h) => h.stage)).toEqual(['downloading', 'verifying', 'staging', 'health_check', 'active']);
+    expect(new Date(d.history[0]!.at).getTime()).toBeLessThanOrEqual(new Date(d.history.at(-1)!.at).getTime());
+    expect(d.error).toBeUndefined();
+  });
+
+  it('tells the cloud the result straight away instead of waiting a heartbeat', async () => {
+    cloud.assign(ROOM, plain());
+    const { gateway, host } = boot();
+    await gateway.tick();
+    expect(host.ids()).toEqual([ROOM]);
+    expect(reportFor()?.deployment?.stage).toBe('active');
+  });
+
+  it('activates a release whose devices answer', async () => {
+    cloud.assign(ROOM, withDsp(await listening()));
+    const { gateway, host } = boot({ healthTimeoutMs: 2000 }, cloud.url, 'missing');
+    await gateway.tick();
+    expect(host.ids()).toEqual([ROOM]);
+    expect(reportFor()?.deployment?.stage).toBe('active');
+  });
+
+  it('keeps the running release when the new one cannot reach its devices, and reports rolled_back', async () => {
+    cloud.assign(ROOM, plain(), { name: 'Good v1' });
+    const { gateway, host } = boot({ healthTimeoutMs: 500 }, cloud.url, 'missing');
+    await gateway.tick();
+    const v1 = host.get(ROOM)!.runtime;
+
+    cloud.assign(ROOM, withDsp(await deadPort()), { name: 'Bad v2' });
+    await gateway.tick();
+    expect(host.get(ROOM)!.runtime).toBe(v1);
+    expect(host.get(ROOM)!.runtime.getSnapshot().roomName).toBe('Good v1');
+    const d = reportFor()!.deployment!;
+    expect(d.stage).toBe('rolled_back');
+    expect(d.history.map((h) => h.stage)).toEqual(['downloading', 'verifying', 'staging', 'health_check', 'rolled_back']);
+    expect(d.error).toMatch(/Release 2 rejected: could not reach DSP/);
+    expect(reportFor()!.releaseId).toBe(host.get(ROOM)!.releaseId);
+  });
+
+  it('reports failed when the very first release cannot reach its devices', async () => {
+    cloud.assign(ROOM, withDsp(await deadPort()));
+    const { gateway, host } = boot({ healthTimeoutMs: 300 }, cloud.url, 'missing');
+    await gateway.tick();
+    expect(host.ids()).toEqual([]);
+    expect(reportFor()?.deployment?.stage).toBe('failed');
+  });
+
+  it('does not retry a refused deployment, but does retry when the cloud starts a new one', async () => {
+    cloud.assign(ROOM, plain(), { name: 'Good v1' });
+    const { gateway } = boot({ healthTimeoutMs: 200 }, cloud.url, 'missing');
+    await gateway.tick();
+    cloud.assign(ROOM, withDsp(await deadPort()), { name: 'Bad v2' });
+    await gateway.tick();
+    const fetched = cloud.manifestFetches.length;
+    await gateway.tick();
+    await gateway.tick();
+    expect(cloud.manifestFetches).toHaveLength(fetched);
+
+    cloud.redeploy(ROOM);
+    await gateway.tick();
+    expect(cloud.manifestFetches).toHaveLength(fetched + 1);
+    expect(reportFor()?.deployment?.stage).toBe('rolled_back');
+  });
+
+  it('remembers a refused deployment across a restart', async () => {
+    cloud.assign(ROOM, plain(), { name: 'Good v1' });
+    const first = boot({ healthTimeoutMs: 200 }, cloud.url, 'missing');
+    await first.gateway.tick();
+    cloud.assign(ROOM, withDsp(await deadPort()), { name: 'Bad v2' });
+    await first.gateway.tick();
+    const fetched = cloud.manifestFetches.length;
+    first.gateway.stop();
+    first.host.shutdown();
+    first.store.close();
+    running.length = 0;
+
+    const second = boot({ enrollToken: undefined, healthTimeoutMs: 200 }, cloud.url, 'missing');
+    second.gateway.start();
+    await second.gateway.tick();
+    expect(cloud.manifestFetches).toHaveLength(fetched);
+    expect(second.host.get(ROOM)!.runtime.getSnapshot().roomName).toBe('Good v1');
+    expect(reportFor()?.deployment?.stage).toBe('rolled_back');
+  });
+
+  it('a bad signature is a refused deployment too, and the running release stays', async () => {
+    cloud.assign(ROOM, plain(), { name: 'Good v1' });
+    const { gateway, host } = boot();
+    await gateway.tick();
+    cloud.assign(ROOM, plain(), { name: 'Good v2', tamper: true });
+    await gateway.tick();
+    expect(host.get(ROOM)!.runtime.getSnapshot().roomName).toBe('Good v1');
+    const d = reportFor()!.deployment!;
+    expect(d.stage).toBe('rolled_back');
+    expect(d.history.map((h) => h.stage)).toEqual(['downloading', 'verifying', 'rolled_back']);
+    expect(d.error).toMatch(/hash_mismatch/);
+  });
+
+  it('counts a release already running from the cache as the deployment that asked for it', async () => {
+    cloud.assign(ROOM, plain());
+    const first = boot();
+    await first.gateway.tick();
+    first.gateway.stop();
+    first.host.shutdown();
+    first.store.close();
+    running.length = 0;
+
+    cloud.redeploy(ROOM);
+    const second = boot({ enrollToken: undefined });
+    second.gateway.start();
+    await second.gateway.tick();
+    const fetched = cloud.manifestFetches.length;
+    await second.gateway.tick();
+    expect(cloud.manifestFetches).toHaveLength(fetched);
+    expect(reportFor()?.deployment?.stage).toBe('active');
+  });
+
+  it('forgets a rooms deployment when the room is unassigned', async () => {
+    cloud.assign(ROOM, plain());
+    const { gateway, store } = boot();
+    await gateway.tick();
+    expect(store.keysWithPrefix('deployment:')).toHaveLength(1);
+    cloud.unassign(ROOM);
+    await gateway.tick();
+    expect(store.keysWithPrefix('deployment:')).toHaveLength(0);
   });
 });
