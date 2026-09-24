@@ -174,6 +174,36 @@ export async function queueCombine(
   return { ok: true };
 }
 
+/** Asks a room's gateway to run one of its triggers (used for calendar meetings). */
+export async function queueTrigger(
+  db: ControlDb,
+  input: { orgId: string; roomId: string; triggerId: string },
+  now = new Date(),
+): Promise<IntentResult> {
+  const room = await db.room.findFirst({ where: { id: input.roomId, orgId: input.orgId } });
+  if (!room?.gatewayId) return { ok: false, error: 'This room isn’t running on a gateway yet' };
+  await db.controlIntent.create({
+    data: {
+      orgId: input.orgId,
+      roomId: room.id,
+      gatewayId: room.gatewayId,
+      intent: { type: 'trigger', triggerId: input.triggerId },
+      createdBy: null,
+      createdAt: now,
+    },
+  });
+  await db.auditLog.create({
+    data: {
+      orgId: input.orgId,
+      actorId: null,
+      action: 'trigger.fire',
+      target: room.id,
+      meta: { room: room.name, trigger: input.triggerId },
+    },
+  });
+  return { ok: true };
+}
+
 /** Whether a webhook is waiting for this gateway, so its next heartbeat can ask it to poll. */
 export async function hasWaitingIntents(
   db: ControlDb,
@@ -243,7 +273,10 @@ export async function poll(
     if (count === 0) continue;
     const intent = GatewayIntent.safeParse(i.intent);
     const patient =
-      intent.success && (intent.data.type === 'hook' || intent.data.type === 'combination.set');
+      intent.success &&
+      (intent.data.type === 'hook' ||
+        intent.data.type === 'trigger' ||
+        intent.data.type === 'combination.set');
     const ttl = patient ? HOOK_TTL_MS : INTENT_TTL_MS;
     if (now.getTime() - (i.createdAt as Date).getTime() > ttl) continue;
     if (intent.success && ownRooms.has(i.roomId))

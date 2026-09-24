@@ -259,7 +259,10 @@ export class Gateway {
         if (!runtime) continue;
         if (intent.type === 'combination.set')
           this.combine.set(intent.combinationId, intent.combined);
-        else if (intent.type === 'hook') {
+        else if (intent.type === 'trigger') {
+          const ran = runtime.fireTrigger(intent.triggerId);
+          this.log('info', 'Trigger requested', { roomId, trigger: intent.triggerId, ran });
+        } else if (intent.type === 'hook') {
           const ran = runtime.fireHook(intent.hookName);
           this.log('info', 'Webhook received', { roomId, hook: intent.hookName, triggers: ran });
         } else runtime.dispatch(intent);

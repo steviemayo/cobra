@@ -54,6 +54,7 @@ model Org {
   controlIntents  ControlIntent[]
   controlSessions ControlSession[]
   combinations    RoomCombination[]
+  calendars       CalendarConnection[]
 }
 
 model Member {
@@ -545,4 +546,34 @@ model RoomCombination {
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
+}
+
+// ---- Calendars ---------------------------------------------------------------------------------
+
+// How Kestrel reads an organisation's room calendars. `sealed` is the credentials, encrypted with
+// KESTREL_SECRETS_KEY; they are never sent to a browser. provider: graph or google.
+model CalendarConnection {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  provider  String
+  name      String
+  sealed    String
+  createdAt DateTime @default(now())
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, provider])
+}
+
+// A meeting that has already started a room's calendar trigger, so it never runs twice.
+model CalendarFire {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  roomId    String   @db.Uuid
+  triggerId String
+  eventKey  String
+  firedAt   DateTime @default(now())
+
+  @@unique([roomId, triggerId, eventKey])
+  @@index([firedAt])
 }

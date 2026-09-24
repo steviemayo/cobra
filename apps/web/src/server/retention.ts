@@ -2,7 +2,13 @@ import type { PrismaClient } from '@kestrel/db';
 
 export type RetentionDb = Pick<
   PrismaClient,
-  'gatewayEvent' | 'incident' | 'alertDelivery' | 'remoteCommand' | 'deployment'
+  | 'gatewayEvent'
+  | 'incident'
+  | 'alertDelivery'
+  | 'remoteCommand'
+  | 'deployment'
+  | 'calendarFire'
+  | 'controlIntent'
 >;
 
 export const RETENTION_DAYS = 90;
@@ -15,6 +21,9 @@ export async function pruneOldData(db: RetentionDb, now = new Date(), days = RET
     db.incident.deleteMany({ where: { status: 'resolved', resolvedAt: { lt: cutoff } } }),
     db.alertDelivery.deleteMany({ where: { at: { lt: cutoff } } }),
     db.remoteCommand.deleteMany({ where: { finishedAt: { lt: cutoff } } }),
+    // Bookkeeping for calendar meetings and portal requests, of no use once they are long past.
+    db.calendarFire.deleteMany({ where: { firedAt: { lt: cutoff } } }),
+    db.controlIntent.deleteMany({ where: { createdAt: { lt: cutoff } } }),
   ]);
   return {
     events: events.count,

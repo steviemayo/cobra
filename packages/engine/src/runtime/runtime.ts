@@ -231,6 +231,14 @@ export class RoomRuntime implements PanelClient {
     void this.runState(target.stateId);
   }
 
+  /** Run one enabled trigger by id, whatever its kind (a calendar meeting starting, say). Returns whether it ran. */
+  fireTrigger(triggerId: string): boolean {
+    const t = this.model.triggers.find((x) => x.id === triggerId && x.enabled);
+    if (!t) return false;
+    this.fire(t.run);
+    return true;
+  }
+
   /** An external call (webhook) by name. Returns how many triggers ran. */
   fireHook(hookName: string): number {
     const hooks = this.model.triggers.filter(

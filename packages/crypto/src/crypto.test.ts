@@ -4,11 +4,14 @@ import { STARTER_TEMPLATES, type PublicKey } from '@kestrel/model';
 import {
   canonicalJson,
   generateKeyPair,
+  generateSealKey,
   generateSecret,
   hashManifest,
   hashPin,
   hashSecret,
   publicKeyFromPrivate,
+  open,
+  seal,
   secretMatches,
   signManifest,
   verifyManifest,
@@ -72,7 +75,9 @@ describe('signing and verification', () => {
 
   it('rejects a swapped hash and signature from a different key', () => {
     const other = generateKeyPair();
-    const forged = wire(signManifest(manifestInput(), { privateKeyPem: other.privateKeyPem, keyId: 'k1' }));
+    const forged = wire(
+      signManifest(manifestInput(), { privateKeyPem: other.privateKeyPem, keyId: 'k1' }),
+    );
     expect(verifyManifest(forged, trusted)).toEqual({ ok: false, reason: 'bad_signature' });
   });
 
@@ -119,7 +124,10 @@ describe('signing and verification', () => {
     expect(verifyManifest(signed, pinned).ok).toBe(true);
     const other = generateKeyPair();
     const forged = wire(
-      signManifest(manifestInput(), { privateKeyPem: other.privateKeyPem, keyId: 'whatever-label' }),
+      signManifest(manifestInput(), {
+        privateKeyPem: other.privateKeyPem,
+        keyId: 'whatever-label',
+      }),
     );
     expect(verifyManifest(forged, pinned)).toEqual({ ok: false, reason: 'bad_signature' });
   });
@@ -127,7 +135,9 @@ describe('signing and verification', () => {
   it('accepts either of several trusted keys (rotation)', () => {
     const next = generateKeyPair();
     const both: PublicKey[] = [...trusted, { keyId: 'k2', publicKeyPem: next.publicKeyPem }];
-    const signed = wire(signManifest(manifestInput(), { privateKeyPem: next.privateKeyPem, keyId: 'k2' }));
+    const signed = wire(
+      signManifest(manifestInput(), { privateKeyPem: next.privateKeyPem, keyId: 'k2' }),
+    );
     expect(verifyManifest(signed, both).ok).toBe(true);
   });
 });
@@ -154,5 +164,30 @@ describe('secrets', () => {
     expect(verifyPin('4821', stored)).toBe(true);
     expect(verifyPin('4822', stored)).toBe(false);
     expect(verifyPin('4821', 'garbage')).toBe(false);
+  });
+});
+
+describe('sealed secrets', () => {
+  const key = generateSealKey();
+
+  it('round-trips, with a different ciphertext each time', () => {
+    const a = seal('{"clientSecret":"s3cret"}', key);
+    const b = seal('{"clientSecret":"s3cret"}', key);
+    expect(a).not.toBe(b);
+    expect(a).not.toContain('s3cret');
+    expect(open(a, key)).toBe('{"clientSecret":"s3cret"}');
+  });
+
+  it('refuses a different key, a changed value and junk', () => {
+    const sealed = seal('hello', key);
+    expect(() => open(sealed, generateSealKey())).toThrow();
+    const parts = sealed.split('.');
+    parts[3] = Buffer.from('tampered').toString('base64url');
+    expect(() => open(parts.join('.'), key)).toThrow();
+    expect(() => open('nonsense', key)).toThrow('Not a sealed value');
+  });
+
+  it('insists on a real 32-byte key', () => {
+    expect(() => seal('x', 'c2hvcnQ=')).toThrow('32 bytes');
   });
 });

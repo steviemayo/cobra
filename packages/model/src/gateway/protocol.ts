@@ -246,6 +246,10 @@ export type ConfigResponse = z.infer<typeof ConfigResponse>;
 export const HookIntent = z.object({ type: z.literal('hook'), hookName: LocalId });
 export type HookIntent = z.infer<typeof HookIntent>;
 
+/** Run one of the room's own triggers, for example when a calendar meeting begins. */
+export const TriggerIntent = z.object({ type: z.literal('trigger'), triggerId: LocalId });
+export type TriggerIntent = z.infer<typeof TriggerIntent>;
+
 /** Join or split a combination of rooms from the portal. Sent to the primary room. */
 export const CombineIntent = z.object({
   type: z.literal('combination.set'),
@@ -255,7 +259,7 @@ export const CombineIntent = z.object({
 export type CombineIntent = z.infer<typeof CombineIntent>;
 
 /** Anything the cloud can ask a room to do on someone's behalf. */
-export const GatewayIntent = z.union([PanelIntent, HookIntent, CombineIntent]);
+export const GatewayIntent = z.union([PanelIntent, HookIntent, TriggerIntent, CombineIntent]);
 export type GatewayIntent = z.infer<typeof GatewayIntent>;
 
 export const ControlIntentMessage = z.object({

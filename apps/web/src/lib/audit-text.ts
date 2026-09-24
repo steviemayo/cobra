@@ -56,6 +56,12 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `asked “${s(meta.room)}” to ${s(meta.type).replace('_', ' ')}`;
     case 'command.result':
       return `the gateway finished a ${s(meta.type).replace('_', ' ')} command (${meta.ok ? 'worked' : 'failed'})`;
+    case 'calendar.connect':
+      return `connected the ${s(meta.provider) === 'graph' ? 'Microsoft 365' : 'Google'} calendar “${s(meta.name)}”`;
+    case 'calendar.remove':
+      return `disconnected the ${s(meta.provider) === 'graph' ? 'Microsoft 365' : 'Google'} calendar`;
+    case 'trigger.fire':
+      return `a trigger started “${s(meta.room)}”`;
     case 'combination.create':
       return `set up combined rooms “${s(meta.name)}”`;
     case 'combination.update':

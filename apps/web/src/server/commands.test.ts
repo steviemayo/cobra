@@ -162,17 +162,29 @@ describe('retention', () => {
       { id: 'c2', finishedAt: fresh },
       { id: 'c3', finishedAt: null },
     ]);
+    const calendarFire = table([
+      { id: 'f1', firedAt: old },
+      { id: 'f2', firedAt: fresh },
+    ]);
+    const controlIntent = table([
+      { id: 'n1', createdAt: old },
+      { id: 'n2', createdAt: fresh },
+    ]);
     const db = {
       gatewayEvent,
       incident,
       alertDelivery,
       remoteCommand,
       deployment: table([]),
+      calendarFire,
+      controlIntent,
     } as unknown as RetentionDb;
     const res = await pruneOldData(db, T0);
     expect(res).toMatchObject({ events: 1, incidents: 1, deliveries: 1, commands: 1 });
     expect(gatewayEvent.rows.map((r) => r.id)).toEqual(['e2']);
     expect(incident.rows.map((r) => r.id)).toEqual(['i2', 'i3']);
     expect(remoteCommand.rows.map((r) => r.id)).toEqual(['c2', 'c3']);
+    expect(calendarFire.rows.map((r) => r.id)).toEqual(['f2']);
+    expect(controlIntent.rows.map((r) => r.id)).toEqual(['n2']);
   });
 });
