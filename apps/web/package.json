@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@kestrel/db": "workspace:*",
+    "@kestrel/engine": "workspace:*",
     "@kestrel/model": "workspace:*",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.0",
@@ -19,6 +20,7 @@
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
     "@trpc/tanstack-react-query": "^11.19.0",
+    "@xyflow/react": "^12.11.6",
     "next": "^16.3.6",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

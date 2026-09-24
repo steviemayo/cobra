@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTRPC } from '@/trpc/client';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
@@ -110,7 +111,10 @@ export default function Dashboard() {
             <ul className="space-y-1">
               {rooms.data?.map((r) => (
                 <li key={r.id}>
-                  {r.name} <span className="text-sm text-slate-400">({r.type})</span>
+                  <Link href={`/rooms/${r.id}`} className="text-sky-400 hover:underline">
+                    {r.name}
+                  </Link>{' '}
+                  <span className="text-sm text-slate-400">({r.type})</span>
                 </li>
               ))}
             </ul>
