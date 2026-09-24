@@ -1,0 +1,1 @@
+{ "extends": "@kestrel/config/tsconfig.node.json", "include": ["src", "prisma.config.ts"] }
