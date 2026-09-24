@@ -240,4 +240,25 @@ describe('PanelSession', () => {
     expect(app.getAttribute('data-mode')).toBe('light');
     expect(app.style.getPropertyValue('--kp-accent')).toBe('#ff0066');
   });
+  it('offers a QR code for phones once the room sends a link, and keeps the newest one', () => {
+    const c = client();
+    const { container } = render(<PanelSession client={c} />);
+    act(() => {
+      socket().open();
+      socket().receive(hello());
+      socket().receive({ t: 'snapshot', vm: vm() });
+    });
+    expect(screen.queryByLabelText('Control from your phone')).toBeNull();
+    const link = (n: number): PanelServerMessage => ({ t: 'qr', url: `https://k.example/c/token${n}`, expiresAt: '2030-01-01T00:00:00.000Z' });
+    act(() => {
+      socket().receive(link(1));
+      socket().receive(link(2));
+    });
+    expect(container.querySelector('.kp-qr')).toBeNull();
+    fireEvent.click(screen.getByLabelText('Control from your phone'));
+    expect(container.querySelector('svg.kp-qr path')).not.toBeNull();
+    expect(c.getConnection().qr?.url).toBe('https://k.example/c/token2');
+    fireEvent.click(screen.getByText('Close'));
+    expect(container.querySelector('.kp-qr')).toBeNull();
+  });
 });

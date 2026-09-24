@@ -9,6 +9,9 @@ import {
   hashManifest,
   hashPin,
   hashSecret,
+  parseAccess,
+  signAccess,
+  verifyAccess,
   publicKeyFromPrivate,
   open,
   seal,
@@ -189,5 +192,34 @@ describe('sealed secrets', () => {
 
   it('insists on a real 32-byte key', () => {
     expect(() => seal('x', 'c2hvcnQ=')).toThrow('32 bytes');
+  });
+});
+
+describe('phone access tokens', () => {
+  const secret = generateSecret();
+  const room = '33333333-3333-4333-8333-333333333331';
+  const other = '33333333-3333-4333-8333-333333333332';
+  const now = 1_800_000_000;
+
+  it('verify for the room, kind and secret they were made for, until they expire', () => {
+    const t = signAccess(secret, 'join', room, now + 600);
+    expect(verifyAccess(secret, 'join', t, now)).toEqual({ roomId: room, exp: now + 600 });
+    expect(verifyAccess(secret, 'join', t, now + 599)).not.toBeNull();
+    expect(verifyAccess(secret, 'join', t, now + 600)).toBeNull();
+  });
+
+  it('refuse another kind, another secret, or a token edited to name another room or time', () => {
+    const t = signAccess(secret, 'join', room, now + 600);
+    expect(verifyAccess(secret, 'session', t, now)).toBeNull();
+    expect(verifyAccess(generateSecret(), 'join', t, now)).toBeNull();
+    expect(verifyAccess(secret, 'join', t.replace(room, other), now)).toBeNull();
+    expect(verifyAccess(secret, 'join', t.replace(String(now + 600), String(now + 6000)), now)).toBeNull();
+  });
+
+  it('read a token’s room without trusting it, and reject junk', () => {
+    expect(parseAccess(signAccess(secret, 'join', room, now))).toEqual({ roomId: room, exp: now });
+    for (const bad of ['', 'nope', `${room}.abc.xyz`, `${room}.${now}.short`, `${room}.${now}`])
+      expect(parseAccess(bad), bad).toBeNull();
+    expect(verifyAccess(secret, 'join', 'junk', now)).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { generateSecret, hashSecret } from '@kestrel/crypto';
+import { generateSecret, hashSecret, roomAccessSecret } from '@kestrel/crypto';
 import type { PrismaClient } from '@kestrel/db';
 import {
   EnrollRequest,
@@ -131,7 +131,7 @@ export async function enroll(db: Db, raw: unknown, keys: PublicKey[]): Promise<R
   };
 }
 
-async function assignments(db: Db, gatewayId: string) {
+async function assignments(db: Db, gatewayId: string, masterKey = process.env.KESTREL_SECRETS_KEY) {
   const rooms = await db.room.findMany({
     where: { gatewayId, desiredReleaseId: { not: null }, desiredDeploymentId: { not: null } },
     select: { id: true, name: true, desiredReleaseId: true, desiredDeploymentId: true },
@@ -153,6 +153,7 @@ async function assignments(db: Db, gatewayId: string) {
         releaseNumber: rel.number,
         manifestHash: rel.hash,
         deploymentId: room.desiredDeploymentId!,
+        ...(masterKey ? { phoneSecret: roomAccessSecret(masterKey, room.id) } : {}),
       });
   }
   return out;

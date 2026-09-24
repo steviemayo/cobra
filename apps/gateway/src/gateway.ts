@@ -16,6 +16,7 @@ import {
 } from '@kestrel/model';
 import { CloudClient, CloudError } from './cloud';
 import type { GatewayConfig } from './config';
+import { PhoneLinks } from './phone';
 import { CombineCoordinator } from './combine';
 import { runCommand } from './commands';
 import type { Logger } from './log';
@@ -80,7 +81,11 @@ export class Gateway {
     private readonly log: Logger,
   ) {
     this.combine = new CombineCoordinator(host, store, log);
+    this.phone = new PhoneLinks(store, cfg.cloudUrl);
   }
+
+  /** Signs the QR links shown on room panels. */
+  readonly phone: PhoneLinks;
 
   private readonly combine: CombineCoordinator;
 
@@ -365,6 +370,7 @@ export class Gateway {
     const config: ConfigResponse = await this.cloud.config(credential);
     if (config.publicKeys.length) this.store.setJson(KEY_PUBLIC_KEYS, config.publicKeys);
     this.combine.setConfig(config.combinations);
+    this.phone.setSecrets(config.rooms);
     const keys = this.trustedKeys();
     const wanted = new Map(config.rooms.map((r) => [r.roomId, r]));
     let progressed = false;

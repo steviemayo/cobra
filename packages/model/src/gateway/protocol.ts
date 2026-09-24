@@ -228,6 +228,8 @@ export const AssignedRoom = z.object({
   manifestHash: z.string(),
   /** Which deployment asked for this release. A new id lets a gateway retry a release that failed. */
   deploymentId: z.string().uuid(),
+  /** Lets this gateway sign the short-lived links on the panel's QR code. Absent when the server has no secrets key. */
+  phoneSecret: z.string().min(20).optional(),
 });
 export type AssignedRoom = z.infer<typeof AssignedRoom>;
 
@@ -325,6 +327,8 @@ export const PanelServerMessage = z.discriminatedUnion('t', [
     branding: PanelBranding,
   }),
   z.object({ t: z.literal('snapshot'), vm: PanelViewModel }),
+  /** A link that lets someone at the room control it from their phone; replaced before it expires. */
+  z.object({ t: z.literal('qr'), url: z.string().url(), expiresAt: z.string().datetime() }),
   z.object({ t: z.literal('error'), message: z.string() }),
 ]);
 export type PanelServerMessage = z.infer<typeof PanelServerMessage>;

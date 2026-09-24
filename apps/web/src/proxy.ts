@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
-const PUBLIC_PREFIXES = ['/login', '/signup', '/forgot-password', '/auth/', '/invite/'];
+const PUBLIC_PREFIXES = ['/login', '/signup', '/forgot-password', '/auth/', '/invite/', '/c/'];
 const GUEST_ONLY = ['/login', '/signup', '/forgot-password'];
 
 export async function proxy(request: NextRequest) {

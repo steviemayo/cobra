@@ -7,6 +7,7 @@ import { verifyPin } from '@kestrel/crypto';
 import { PanelClientMessage, type PanelServerMessage } from '@kestrel/model';
 import type { WebSocket } from 'ws';
 import type { Logger } from './log';
+import type { PhoneLinks } from './phone';
 import type { RoomHost } from './room-host';
 
 const MAX_PIN_FAILURES = 5;
@@ -20,6 +21,10 @@ export interface PanelServerOptions {
   panelDir: string;
   /** Behind a reverse proxy, trust X-Forwarded-For so trusted-IP checks see the real client. */
   trustProxy?: boolean;
+  /** When set, authorised panels are sent a QR link for controlling the room from a phone. */
+  phone?: PhoneLinks;
+  /** How often the QR link is replaced. */
+  qrRefreshMs?: number;
 }
 
 const PLACEHOLDER_PAGE = `<!doctype html><meta charset="utf-8"><title>Kestrel panel</title>
@@ -84,6 +89,7 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
     const pinRequired = access.mode === 'pin' && !!access.pinHash && !trusted;
     let authed = !pinRequired;
     let unsubscribe: (() => void) | null = null;
+    let qrTimer: ReturnType<typeof setInterval> | null = null;
     let windowStart = Date.now();
     let intents = 0;
 
@@ -95,6 +101,15 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
       const push = () => send({ t: 'snapshot', vm: room.runtime.getSnapshot() });
       unsubscribe = room.runtime.subscribe(push);
       push();
+      const sendQr = () => {
+        const link = opts.phone?.link(roomId);
+        if (link) send({ t: 'qr', ...link });
+      };
+      sendQr();
+      if (opts.phone) {
+        qrTimer = setInterval(sendQr, opts.qrRefreshMs ?? 5 * 60_000);
+        qrTimer.unref?.();
+      }
     };
 
     send({ t: 'hello', roomId, pinRequired, branding: room.branding });
@@ -142,6 +157,7 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
 
     socket.on('close', () => {
       unsubscribe?.();
+      if (qrTimer) clearInterval(qrTimer);
       sockets.get(roomId)?.delete(socket);
     });
     socket.on('error', () => socket.close());

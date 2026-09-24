@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from 'react';
 import { PanelApp } from './PanelApp';
 import { Icon } from './icons';
+import { QrCode } from './QrCode';
 import type { Translate } from './i18n';
 import { translatorFor } from './languages';
 import { themeFromBranding } from './theme';
@@ -92,6 +93,7 @@ export function PanelSession({
   );
   const t = translate ?? translatorFor(conn.branding?.language);
   const theme = themeFromBranding(conn.branding);
+  const [showQr, setShowQr] = useState(false);
 
   if (conn.state === 'pin_required' || conn.state === 'connecting' || conn.state === 'error')
     return (
@@ -118,6 +120,31 @@ export function PanelSession({
   return (
     <>
       <PanelApp client={client} theme={theme} translate={t} className={className} />
+      {conn.qr && (
+        <div data-mode={theme.mode} style={themeStyle(theme)}>
+          <button
+            type="button"
+            className="kp-phone-btn"
+            aria-label={t('phone.button')}
+            title={t('phone.button')}
+            onClick={() => setShowQr(true)}
+          >
+            <Icon name="phone" />
+          </button>
+          {showQr && (
+            <div className="kp-modal" role="dialog" aria-label={t('phone.button')} onClick={() => setShowQr(false)}>
+              <div className="kp-modal-card" onClick={(e) => e.stopPropagation()}>
+                <h2>{t('phone.button')}</h2>
+                <QrCode value={conn.qr.url} label={t('phone.title')} />
+                <p className="kp-muted">{t('phone.title')}</p>
+                <button type="button" className="kp-btn kp-btn-primary" onClick={() => setShowQr(false)}>
+                  {t('phone.close')}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       {conn.state === 'reconnecting' && (
         <div className="kp-offline" role="status" data-mode={theme.mode} style={themeStyle(theme)}>
           <span className="kp-spinner kp-spinner-sm" aria-hidden />

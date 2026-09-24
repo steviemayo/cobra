@@ -33,6 +33,12 @@ const paths: Record<string, React.ReactNode> = {
   record: <circle cx="12" cy="12" r="6" />,
   power: <path d="M12 3v9M6.3 6.6a8 8 0 1 0 11.4 0" />,
   custom: <path d="M5 12h14M12 5v14" />,
+  phone: (
+    <>
+      <rect x="7" y="3" width="10" height="18" rx="2" />
+      <path d="M11 18h2" />
+    </>
+  ),
   plug: <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4" />,
   check: <path d="m5 12 4.5 4.5L19 7" />,
   warning: <path d="M12 4 3 20h18zM12 10v4M12 17.5v.01" />,
