@@ -38,12 +38,14 @@ model Org {
   drafts        RoomDraft[]
   draftVersions RoomDraftVersion[]
   templates     Template[]
+  invites       Invite[]
 }
 
 model Member {
   id        String   @id @default(uuid()) @db.Uuid
   orgId     String   @db.Uuid
   userId    String   @db.Uuid // Supabase auth.users.id
+  email     String? // denormalised from auth.users for the team list
   role      OrgRole
   createdAt DateTime @default(now())
 
@@ -93,6 +95,7 @@ model Room {
   name      String
   type      RoomType
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   org     Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
   site    Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
@@ -168,4 +171,23 @@ model Template {
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
+}
+
+// Invite links (no email delivery yet). Only the token hash is stored.
+model Invite {
+  id         String    @id @default(uuid()) @db.Uuid
+  orgId      String    @db.Uuid
+  email      String
+  role       OrgRole
+  tokenHash  String    @unique
+  invitedBy  String?   @db.Uuid
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([email])
 }
