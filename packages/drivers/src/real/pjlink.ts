@@ -52,7 +52,10 @@ export class PjlinkDriver extends BaseDriver {
         if (err) reject(err);
         else resolve(value ?? '');
       };
-      const timer = setTimeout(() => finish(new Error(`${this.device.name} did not respond`)), 4000);
+      const timer = setTimeout(
+        () => finish(new Error(`${this.device.name} did not respond`)),
+        4000,
+      );
       socket.on('error', (e) => finish(new Error(`${this.device.name}: ${e.message}`)));
       socket.on('close', () => finish(new Error(`${this.device.name} closed the connection`)));
       socket.on('data', (chunk) => {
@@ -67,7 +70,9 @@ export class PjlinkDriver extends BaseDriver {
             let prefix = '';
             if (auth === '1') {
               const password = this.setting<string>('password', '');
-              prefix = createHash('md5').update(`${salt ?? ''}${password}`).digest('hex');
+              prefix = createHash('md5')
+                .update(`${salt ?? ''}${password}`)
+                .digest('hex');
             }
             socket.write(`${prefix}%1${body}\r`);
           } else {
@@ -102,7 +107,8 @@ export class PjlinkDriver extends BaseDriver {
         s.power = POWER[power] ?? s.power;
         if (input !== null) {
           const map = this.setting<Record<string, string>>('inputs', {});
-          s.selectedInput = Object.entries(map).find(([, code]) => code === input)?.[0] ?? s.selectedInput ?? null;
+          s.selectedInput =
+            Object.entries(map).find(([, code]) => code === input)?.[0] ?? s.selectedInput ?? null;
         } else if (POWER[power] === 'off') s.selectedInput = null;
       });
     } catch {
@@ -128,7 +134,8 @@ export class PjlinkDriver extends BaseDriver {
     while (!this.closed) {
       await this.refresh();
       if (this.state.power === target) return;
-      if (Date.now() - started > timeoutMs) this.fail(`did not turn ${target === 'on' ? 'on' : 'off'} in time`);
+      if (Date.now() - started > timeoutMs)
+        this.fail(`did not turn ${target === 'on' ? 'on' : 'off'} in time`);
       await sleep(1000);
     }
   }
@@ -158,7 +165,15 @@ export class PjlinkDriver extends BaseDriver {
       case 'select_input': {
         const map = this.setting<Record<string, string>>('inputs', {});
         const ports = this.device.ports.filter((p) => p.direction === 'in');
-        const code = map[command.portId] ?? String(31 + Math.max(0, ports.findIndex((p) => p.id === command.portId)));
+        const code =
+          map[command.portId] ??
+          String(
+            31 +
+              Math.max(
+                0,
+                ports.findIndex((p) => p.id === command.portId),
+              ),
+          );
         await this.command(`INPT ${code}`);
         this.update((s) => {
           s.selectedInput = command.portId;

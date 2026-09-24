@@ -1,12 +1,13 @@
 import type { Device } from '@kestrel/model';
 import { GenericTcpDriver } from './generic-tcp';
+import { NvxDriver } from './nvx';
 import { PjlinkDriver } from './pjlink';
+import { QsysDriver } from './qsys';
 import type { DeviceDriver, DriverContext } from './types';
 
 /**
  * Picks a real driver for a device from its control setting. Returns null when there isn't one
- * yet (serial, REST and the vendor drivers arrive later); the room then reports that device by
- * name if something needs it.
+ * yet; the room then reports that device by name if something needs it.
  */
 export function createDriver(device: Device, ctx: DriverContext): DeviceDriver | null {
   const control = device.control;
@@ -16,5 +17,12 @@ export function createDriver(device: Device, ctx: DriverContext): DeviceDriver |
     if (control.protocol === 'tcp') return new GenericTcpDriver(device, ctx);
     return null;
   }
-  return null;
+  return BUILT_IN[control.driverId]?.(device, ctx) ?? null;
 }
+
+/** Drivers that ship with Kestrel, by the id a device names in its control setting. */
+const BUILT_IN: Record<string, (device: Device, ctx: DriverContext) => DeviceDriver> = {
+  'crestron-dm-nvx': (d, c) => new NvxDriver(d, c),
+  'qsys-core': (d, c) => new QsysDriver(d, c),
+};
+export const BUILT_IN_DRIVER_IDS = Object.keys(BUILT_IN);

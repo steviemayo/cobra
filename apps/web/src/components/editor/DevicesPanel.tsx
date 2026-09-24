@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import {
+  BUILT_IN_DRIVERS,
   DEVICE_CATALOG,
   DeviceCategory,
   GenericProtocol,
@@ -23,7 +24,7 @@ import {
   type PanelProps,
 } from './ui';
 
-const DRIVER_HINTS = ['crestron-dm-nvx', 'qsys-core'];
+const DRIVER_HINTS = Object.keys(BUILT_IN_DRIVERS);
 const categoryOptions = DeviceCategory.options.map((c) => ({
   value: c,
   label: DEVICE_CATALOG[c].label,
@@ -134,6 +135,23 @@ function DeviceCard({
             </datalist>
           </Label>
         )}
+        {d.control?.kind === 'driver' && BUILT_IN_DRIVERS[d.control.driverId] && (
+          <div className="basis-full text-xs text-muted-foreground">
+            {BUILT_IN_DRIVERS[d.control.driverId]!.description}{' '}
+            <button
+              type="button"
+              className="text-foreground underline-offset-4 hover:underline"
+              onClick={() =>
+                edit((dev) => {
+                  if (dev.control?.kind === 'driver')
+                    dev.settings = structuredClone(BUILT_IN_DRIVERS[dev.control.driverId]!.example);
+                })
+              }
+            >
+              Use example settings
+            </button>
+          </div>
+        )}
         <div className="ml-auto">
           <ConfirmButton
             label="Delete"
@@ -218,6 +236,11 @@ function SettingsEditor({
   onChange: (v: Record<string, unknown>) => void;
 }) {
   const [text, setText] = useState(() => JSON.stringify(value, null, 2));
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) {
+    setSeen(value);
+    setText(JSON.stringify(value, null, 2));
+  }
   const [error, setError] = useState('');
   return (
     <details>

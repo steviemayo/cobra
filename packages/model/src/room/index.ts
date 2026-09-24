@@ -6,3 +6,4 @@ export * from './behaviour';
 export * from './room-model';
 export * from './room-types';
 export * from './templates';
+export * from './drivers';

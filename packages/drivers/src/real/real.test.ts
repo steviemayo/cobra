@@ -343,12 +343,15 @@ describe('createDriver', () => {
     expect(createDriver(dsp({}), ctx)).toBeInstanceOf(GenericTcpDriver);
   });
 
-  it('returns null for devices with no control, or with a driver that is not built yet', () => {
+  it('returns null for devices with no control, or with a driver Kestrel does not have', () => {
     const laptop = model.devices.find((d) => d.id === 'laptop1')!;
     expect(createDriver(laptop, ctx)).toBeNull();
     expect(
       createDriver(
-        model.devices.find((d) => d.id === 'matrix')!,
+        {
+          ...model.devices.find((d) => d.id === 'matrix')!,
+          control: { kind: 'driver', driverId: 'no-such-driver' },
+        },
         ctx,
       ),
     ).toBeNull();
