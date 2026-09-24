@@ -41,7 +41,9 @@ async function until(check: () => boolean, ms = 3000) {
 
 // ---- Mock PJLink projector -----------------------------------------------------------------
 
-async function pjlink(opts: { password?: string; warmMs?: number; power?: string; input?: string } = {}) {
+async function pjlink(
+  opts: { password?: string; warmMs?: number; power?: string; input?: string } = {},
+) {
   const state = { power: opts.power ?? '0', input: opts.input ?? '31' };
   const received: string[] = [];
   const salt = 'a1b2c3d4';
@@ -57,7 +59,9 @@ async function pjlink(opts: { password?: string; warmMs?: number; power?: string
           let line = buf.slice(0, i);
           buf = buf.slice(i + 1);
           if (opts.password) {
-            const digest = createHash('md5').update(salt + opts.password).digest('hex');
+            const digest = createHash('md5')
+              .update(salt + opts.password)
+              .digest('hex');
             if (!line.startsWith(digest)) {
               socket.end('PJLINK ERRA\r');
               return;
@@ -108,7 +112,10 @@ describe('PJLink driver', () => {
     expect(p.received).toContain('%1INPT 31');
     expect(a.getState().selectedInput).toBe('in');
 
-    const b = new PjlinkDriver(display({ host: '127.0.0.1', port: p.port, inputs: { in: '32' } }), ctx);
+    const b = new PjlinkDriver(
+      display({ host: '127.0.0.1', port: p.port, inputs: { in: '32' } }),
+      ctx,
+    );
     drivers.push(b);
     await b.send({ type: 'select_input', portId: 'in' });
     expect(p.received).toContain('%1INPT 32');
@@ -125,12 +132,18 @@ describe('PJLink driver', () => {
 
   it('authenticates with the MD5 digest when a password is required', async () => {
     const p = await pjlink({ password: 'secret', power: '1' });
-    const ok = new PjlinkDriver(display({ host: '127.0.0.1', port: p.port, password: 'secret' }), ctx);
+    const ok = new PjlinkDriver(
+      display({ host: '127.0.0.1', port: p.port, password: 'secret' }),
+      ctx,
+    );
     drivers.push(ok);
     await ok.send({ type: 'select_input', portId: 'in' });
     expect(ok.getState().online).toBe(true);
 
-    const bad = new PjlinkDriver(display({ host: '127.0.0.1', port: p.port, password: 'nope' }), ctx);
+    const bad = new PjlinkDriver(
+      display({ host: '127.0.0.1', port: p.port, password: 'nope' }),
+      ctx,
+    );
     drivers.push(bad);
     await expect(bad.send({ type: 'select_input', portId: 'in' })).rejects.toThrow();
   });
@@ -201,7 +214,10 @@ describe('generic TCP driver', () => {
 
   it('sends the configured command text with the terminator, and mirrors state', async () => {
     const dev = await tcpDevice();
-    const d = new GenericTcpDriver(dsp({ host: '127.0.0.1', port: dev.port, commands, terminator: '\r' }), ctx);
+    const d = new GenericTcpDriver(
+      dsp({ host: '127.0.0.1', port: dev.port, commands, terminator: '\r' }),
+      ctx,
+    );
     drivers.push(d);
     await d.send({ type: 'volume', level: 65 });
     await d.send({ type: 'mute', muted: true });
@@ -223,12 +239,17 @@ describe('generic TCP driver', () => {
     const dev = await tcpDevice();
     const d = new GenericTcpDriver(dsp({ host: '127.0.0.1', port: dev.port, commands }), ctx);
     drivers.push(d);
-    await expect(d.send({ type: 'power', on: false })).rejects.toThrow('no "power.off" command configured');
+    await expect(d.send({ type: 'power', on: false })).rejects.toThrow(
+      'no "power.off" command configured',
+    );
   });
 
   it('waits for an expected reply and fails if it never comes', async () => {
     const ok = await tcpDevice('OK\r\n');
-    const a = new GenericTcpDriver(dsp({ host: '127.0.0.1', port: ok.port, commands, expect: 'OK' }), ctx);
+    const a = new GenericTcpDriver(
+      dsp({ host: '127.0.0.1', port: ok.port, commands, expect: 'OK' }),
+      ctx,
+    );
     drivers.push(a);
     await a.send({ type: 'power', on: true });
     expect(a.getState().power).toBe('on');
@@ -275,6 +296,48 @@ describe('generic TCP driver', () => {
   });
 });
 
+describe('generic TCP liveness', () => {
+  it('notices a device that drops off the network, and that it came back', async () => {
+    const dev = await tcpDevice();
+    const server = servers.at(-1)!;
+    const d = new GenericTcpDriver(
+      dsp({ host: '127.0.0.1', port: dev.port, commands: {}, probeIntervalMs: 40, timeoutMs: 100 }),
+      ctx,
+    );
+    drivers.push(d);
+    const seen: boolean[] = [];
+    d.onChange((s) => seen.push(s.online));
+    d.start();
+    await until(() => d.getState().online);
+
+    await new Promise<void>((r) => {
+      server.close(() => r());
+      server.closeAllConnections?.();
+    });
+    await until(() => !d.getState().online);
+
+    // Listening again on the same port: the next probe finds it.
+    await new Promise<void>((r) => server.listen(dev.port, '127.0.0.1', r));
+    servers.push(server);
+    await until(() => d.getState().online);
+    expect(seen).toEqual([true, false, true]);
+  });
+
+  it('can be told never to probe', async () => {
+    const dev = await tcpDevice();
+    const d = new GenericTcpDriver(
+      dsp({ host: '127.0.0.1', port: dev.port, commands: {}, probeIntervalMs: 0 }),
+      ctx,
+    );
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    servers.at(-1)!.close();
+    await wait(200);
+    expect(d.getState().online).toBe(true);
+  });
+});
+
 describe('createDriver', () => {
   it('picks a driver from the device control setting', () => {
     expect(createDriver(display({}), ctx)).toBeInstanceOf(PjlinkDriver);
@@ -284,8 +347,15 @@ describe('createDriver', () => {
   it('returns null for devices with no control, or with a driver that is not built yet', () => {
     const laptop = model.devices.find((d) => d.id === 'laptop1')!;
     expect(createDriver(laptop, ctx)).toBeNull();
-    expect(createDriver(model.devices.find((d) => d.id === 'matrix')!, ctx)).toBeNull();
-    expect(createDriver({ ...dsp({}), control: { kind: 'generic', protocol: 'serial' } }, ctx)).toBeNull();
+    expect(
+      createDriver(
+        model.devices.find((d) => d.id === 'matrix')!,
+        ctx,
+      ),
+    ).toBeNull();
+    expect(
+      createDriver({ ...dsp({}), control: { kind: 'generic', protocol: 'serial' } }, ctx),
+    ).toBeNull();
   });
 });
 
@@ -326,7 +396,10 @@ describe('HybridBus', () => {
 
   it('lists the real devices that are unreachable, and never the simulated ones', async () => {
     const dev = await tcpDevice();
-    const reachable = new GenericTcpDriver(dsp({ host: '127.0.0.1', port: dev.port, commands: {} }), ctx);
+    const reachable = new GenericTcpDriver(
+      dsp({ host: '127.0.0.1', port: dev.port, commands: {} }),
+      ctx,
+    );
     const silent = new GenericTcpDriver({ ...dsp({ commands: {} }), id: 'silent' }, ctx);
     drivers.push(reachable, silent);
     const bus = new HybridBus(
@@ -344,7 +417,9 @@ describe('HybridBus', () => {
 
   it('rejects commands for a device with no driver and no simulator', async () => {
     const bus = new HybridBus(new Map(), null);
-    await expect(bus.send('matrix', { type: 'power', on: true })).rejects.toThrow('No driver available');
+    await expect(bus.send('matrix', { type: 'power', on: true })).rejects.toThrow(
+      'No driver available',
+    );
     expect(bus.getState('matrix')).toBeUndefined();
   });
 });

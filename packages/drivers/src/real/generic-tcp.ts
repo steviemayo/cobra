@@ -14,15 +14,29 @@ export class GenericTcpDriver extends BaseDriver {
   }
 
   private probeSocket: Socket | null = null;
+  private prober: ReturnType<typeof setInterval> | null = null;
 
   /**
    * This protocol has no feedback, so the device would look offline until the first command.
-   * Connect once at start so a release can tell a reachable device from a wrong address.
+   * Connect at start so a release can tell a reachable device from a wrong address, then keep
+   * checking (probeIntervalMs, default 20s, 0 = never) so an unplugged device is noticed.
    */
   override start() {
-    const host = this.setting<string>('host', '');
-    if (!host) return;
-    const socket = connect({ host, port: this.setting<number>('port', 23) });
+    if (!this.setting<string>('host', '')) return;
+    this.probe();
+    const every = this.setting<number>('probeIntervalMs', 20_000);
+    if (every > 0) {
+      this.prober = setInterval(() => this.probe(), every);
+      this.prober.unref?.();
+    }
+  }
+
+  private probe() {
+    if (this.probeSocket) return;
+    const socket = connect({
+      host: this.setting<string>('host', ''),
+      port: this.setting<number>('port', 23),
+    });
     this.probeSocket = socket;
     const settle = (online: boolean) => {
       socket.destroy();
@@ -37,6 +51,8 @@ export class GenericTcpDriver extends BaseDriver {
   }
 
   override close() {
+    if (this.prober) clearInterval(this.prober);
+    this.prober = null;
     this.probeSocket?.destroy();
   }
 
@@ -60,7 +76,8 @@ export class GenericTcpDriver extends BaseDriver {
       vars.input = command.inputPortId.replace(/\D+/g, '') || command.inputPortId;
       vars.output = command.outputPortId.replace(/\D+/g, '') || command.outputPortId;
     }
-    if (command.type === 'select_input') vars.input = command.portId.replace(/\D+/g, '') || command.portId;
+    if (command.type === 'select_input')
+      vars.input = command.portId.replace(/\D+/g, '') || command.portId;
     if (command.type === 'preset' || command.type === 'camera_preset' || command.type === 'scene')
       vars.name = command.name;
     return t.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? '');
@@ -102,7 +119,8 @@ export class GenericTcpDriver extends BaseDriver {
         if (expect?.test(reply)) finish();
       });
       socket.on('close', () => {
-        if (expect && !expect.test(reply)) finish(new Error(`${this.device.name} sent an unexpected reply`));
+        if (expect && !expect.test(reply))
+          finish(new Error(`${this.device.name} sent an unexpected reply`));
       });
     });
   }

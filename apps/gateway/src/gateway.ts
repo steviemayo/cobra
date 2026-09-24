@@ -4,16 +4,19 @@ import {
   PROTOCOL_VERSION,
   PublicKey,
   type AssignedRoom,
+  type CommandResult,
   type ConfigResponse,
   type DeploymentReport,
   type DeploymentStage,
   type EnrollResponse,
+  type GatewayCommand,
   type RoomReport,
   type SignedManifest,
   type TelemetryEvent,
 } from '@kestrel/model';
 import { CloudClient, CloudError } from './cloud';
 import type { GatewayConfig } from './config';
+import { runCommand } from './commands';
 import type { Logger } from './log';
 import type { RoomHost } from './room-host';
 import type { Store } from './store';
@@ -58,6 +61,10 @@ export class Gateway {
   private stopped = false;
   /** Problems with the latest attempt to load a release, reported per room. */
   private readonly roomErrors = new Map<string, string>();
+  /** Commands the cloud has handed over but that have not run yet. */
+  private readonly inbox: GatewayCommand[] = [];
+  /** Outcomes still to be reported in the next heartbeat. */
+  private readonly pendingResults: CommandResult[] = [];
 
   constructor(
     private readonly cfg: GatewayConfig,
@@ -93,7 +100,8 @@ export class Gateway {
 
   private trustedKeys(): PublicKey[] {
     const keys = this.store.getJson<PublicKey[]>(KEY_PUBLIC_KEYS) ?? [];
-    if (this.cfg.pinnedPublicKey) keys.push({ keyId: ANY_KEY_ID, publicKeyPem: this.cfg.pinnedPublicKey });
+    if (this.cfg.pinnedPublicKey)
+      keys.push({ keyId: ANY_KEY_ID, publicKeyPem: this.cfg.pinnedPublicKey });
     return keys;
   }
 
@@ -113,7 +121,10 @@ export class Gateway {
       try {
         this.host.load(result.signed);
       } catch (e) {
-        this.log('error', 'Could not start cached room', { roomId: cached.roomId, error: String(e) });
+        this.log('error', 'Could not start cached room', {
+          roomId: cached.roomId,
+          error: String(e),
+        });
       }
     }
   }
@@ -170,6 +181,8 @@ export class Gateway {
   private async heartbeat(): Promise<void> {
     const credential = this.store.get(KEY_CREDENTIAL)!;
     const res = await this.sendHeartbeat(credential);
+    // Support is waiting on these, so they go before any slow release work.
+    await this.processCommands(credential);
     if (res.configVersion !== this.store.get(KEY_CONFIG_VERSION)) {
       const progressed = await this.syncConfig(credential);
       // Tell the cloud how the deployment went now rather than a heartbeat later.
@@ -177,23 +190,66 @@ export class Gateway {
     }
   }
 
-  private sendHeartbeat(credential: string) {
-    return this.cloud
+  private async sendHeartbeat(credential: string) {
+    const results = this.pendingResults.slice(0, 50);
+    const res = await this.cloud
       .heartbeat(credential, {
         protocol: PROTOCOL_VERSION,
         gatewayVersion: this.cfg.version,
         uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
         configVersion: this.store.get(KEY_CONFIG_VERSION),
         rooms: this.roomReports(),
+        commandResults: results,
       })
       .catch((e: unknown) => {
-        if (e instanceof CloudError && e.unauthorised) this.log('error', 'The cloud rejected this gateway’s credential');
+        if (e instanceof CloudError && e.unauthorised)
+          this.log('error', 'The cloud rejected this gateway’s credential');
         throw e;
       });
+    this.pendingResults.splice(0, results.length);
+    this.inbox.push(...res.commands);
+    return res;
+  }
+
+  /** Run what the cloud asked for, then report straight away rather than a heartbeat later. */
+  private async processCommands(credential: string): Promise<void> {
+    for (let round = 0; round < 3 && this.inbox.length > 0; round++) {
+      for (const cmd of this.inbox.splice(0)) {
+        let result: CommandResult;
+        try {
+          result = runCommand(this.host, cmd, {
+            version: this.cfg.version,
+            uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
+            bufferedEvents: this.store.unsentCount(),
+          });
+        } catch (e) {
+          result = {
+            id: cmd.id,
+            ok: false,
+            output: {},
+            error: e instanceof Error ? e.message.slice(0, 300) : 'Command failed',
+          };
+        }
+        this.log('info', 'Ran a remote command', {
+          type: cmd.type,
+          roomId: cmd.roomId,
+          ok: result.ok,
+        });
+        this.record({
+          type: 'command.finished',
+          roomId: cmd.roomId,
+          data: { type: cmd.type, ok: result.ok },
+        });
+        this.pendingResults.push(result);
+      }
+      await this.sendHeartbeat(credential);
+    }
   }
 
   private deploymentRoomIds(): string[] {
-    return this.store.keysWithPrefix(DEPLOYMENT_PREFIX).map((k) => k.slice(DEPLOYMENT_PREFIX.length));
+    return this.store
+      .keysWithPrefix(DEPLOYMENT_PREFIX)
+      .map((k) => k.slice(DEPLOYMENT_PREFIX.length));
   }
 
   private roomReports(): RoomReport[] {
@@ -201,7 +257,8 @@ export class Gateway {
     // Rooms with no running release still get reported, so the portal can show why.
     const known = new Set(reports.map((r) => r.roomId));
     for (const roomId of new Set([...this.roomErrors.keys(), ...this.deploymentRoomIds()]))
-      if (!known.has(roomId)) reports.push({ roomId, releaseId: null, status: 'unloaded' });
+      if (!known.has(roomId))
+        reports.push({ roomId, releaseId: null, status: 'unloaded', devices: [] });
     return reports.map((r) => {
       const error = this.roomErrors.get(r.roomId);
       const deployment = this.deploymentReport(r.roomId);
@@ -227,7 +284,8 @@ export class Gateway {
   private mark(roomId: string, rec: DeploymentRecord, stage: DeploymentStage, error?: string) {
     rec.stage = stage;
     // A download retried every heartbeat is still one "downloading" step.
-    if (rec.history.at(-1)?.stage !== stage) rec.history.push({ stage, at: new Date().toISOString() });
+    if (rec.history.at(-1)?.stage !== stage)
+      rec.history.push({ stage, at: new Date().toISOString() });
     if (rec.history.length > 20) rec.history.splice(0, rec.history.length - 20);
     if (error) rec.error = error;
     this.store.setJson(keyDeployment(roomId), rec);
@@ -304,7 +362,12 @@ export class Gateway {
     const rec: DeploymentRecord =
       existing && existing.deploymentId === assigned.deploymentId && !isRefused(existing.stage)
         ? existing
-        : { deploymentId: assigned.deploymentId, releaseId: assigned.releaseId, stage: 'downloading', history: [] };
+        : {
+            deploymentId: assigned.deploymentId,
+            releaseId: assigned.releaseId,
+            stage: 'downloading',
+            history: [],
+          };
     this.mark(roomId, rec, 'downloading');
 
     let raw: unknown;
@@ -333,16 +396,27 @@ export class Gateway {
     try {
       staged = this.host.stage(result.signed);
     } catch (e) {
-      return this.refuse(rec, assigned, `could not start the room (${e instanceof Error ? e.message : String(e)})`);
+      return this.refuse(
+        rec,
+        assigned,
+        `could not start the room (${e instanceof Error ? e.message : String(e)})`,
+      );
     }
 
     this.mark(roomId, rec, 'health_check');
     let unreachable: string[];
     try {
-      unreachable = await this.host.healthCheck(staged, this.cfg.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS);
+      unreachable = await this.host.healthCheck(
+        staged,
+        this.cfg.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS,
+      );
     } catch (e) {
       staged.close();
-      return this.refuse(rec, assigned, `health check failed (${e instanceof Error ? e.message : String(e)})`);
+      return this.refuse(
+        rec,
+        assigned,
+        `health check failed (${e instanceof Error ? e.message : String(e)})`,
+      );
     }
     if (unreachable.length > 0) {
       staged.close();

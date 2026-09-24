@@ -30,18 +30,25 @@ model Org {
   name      String
   createdAt DateTime @default(now())
 
-  members       Member[]
-  sites         Site[]
-  gateways      Gateway[]
-  rooms         Room[]
-  audit         AuditLog[]
-  drafts        RoomDraft[]
-  draftVersions RoomDraftVersion[]
-  templates     Template[]
-  invites       Invite[]
-  releases      Release[]
-  gatewayEvents GatewayEvent[]
-  deployments   Deployment[]
+  members         Member[]
+  sites           Site[]
+  gateways        Gateway[]
+  rooms           Room[]
+  audit           AuditLog[]
+  drafts          RoomDraft[]
+  draftVersions   RoomDraftVersion[]
+  templates       Template[]
+  invites         Invite[]
+  releases        Release[]
+  gatewayEvents   GatewayEvent[]
+  deployments     Deployment[]
+  deviceStatus    DeviceStatus[]
+  incidents       Incident[]
+  alertChannels   AlertChannel[]
+  alertDeliveries AlertDelivery[]
+  commands        RemoteCommand[]
+  tickets         Ticket[]
+  ticketComments  TicketComment[]
 }
 
 model Member {
@@ -115,12 +122,16 @@ model Room {
   reportedAt          DateTime?
   updatedAt           DateTime  @default(now()) @updatedAt
 
-  org         Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site        Site         @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  gateway     Gateway?     @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  org         Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site        Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  gateway     Gateway?        @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
   draft       RoomDraft?
   releases    Release[]
   deployments Deployment[]
+  devices     DeviceStatus[]
+  incidents   Incident[]
+  commands    RemoteCommand[]
+  tickets     Ticket[]
 
   @@index([orgId])
   @@index([siteId])
@@ -289,4 +300,161 @@ model DeploymentEvent {
   deployment Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
 
   @@unique([deploymentId, stage])
+}
+
+// ---- Monitoring & support ---------------------------------------------------------------------
+
+// Latest reachability of each device in a room's running release, as reported by its gateway.
+model DeviceStatus {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  roomId    String   @db.Uuid
+  deviceId  String
+  name      String
+  online    Boolean
+  /// When the device last changed between online and offline.
+  since     DateTime
+  updatedAt DateTime @default(now()) @updatedAt
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, deviceId])
+  @@index([orgId])
+}
+
+// Something wrong that a person may need to act on. One open incident per (kind, subject).
+// kind: device_offline, gateway_offline, room_fault, deploy_failed. severity: info, warning, critical.
+model Incident {
+  id             String    @id @default(uuid()) @db.Uuid
+  orgId          String    @db.Uuid
+  roomId         String?   @db.Uuid
+  gatewayId      String?   @db.Uuid
+  kind           String
+  /// What the incident is about, so the same problem is never opened twice (e.g. "<roomId>:<deviceId>").
+  subject        String
+  severity       String
+  status         String    @default("open")
+  title          String
+  detail         String?
+  openedAt       DateTime
+  lastSeenAt     DateTime
+  resolvedAt     DateTime?
+  /// How many times it has come back inside the flap window.
+  occurrences    Int       @default(1)
+  /// Whether an "opened" alert went out, so resolution is only announced when the opening was.
+  alerted        Boolean   @default(false)
+  acknowledgedBy String?   @db.Uuid
+  acknowledgedAt DateTime?
+
+  org  Org   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status, openedAt])
+  @@index([orgId, kind, subject, status])
+  @@index([roomId])
+}
+
+// Where alerts go. `config` holds the destination (and any signing secret); it is never sent to a browser.
+// type: email, teams, webhook, itsm.
+model AlertChannel {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  name        String
+  type        String
+  config      Json
+  minSeverity String   @default("warning")
+  enabled     Boolean  @default(true)
+  createdBy   String?  @db.Uuid
+  createdAt   DateTime @default(now())
+
+  org        Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deliveries AlertDelivery[]
+
+  @@index([orgId])
+}
+
+model AlertDelivery {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String   @db.Uuid
+  channelId  String   @db.Uuid
+  incidentId String?  @db.Uuid
+  /// opened, resolved or test.
+  event      String
+  /// sent, failed, suppressed or skipped.
+  status     String
+  error      String?
+  at         DateTime @default(now())
+
+  org     Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  channel AlertChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, at])
+  @@index([orgId, at])
+}
+
+// A request for a gateway to run an allowlisted command. Delivered in a heartbeat response.
+// status: pending, sent, succeeded, failed, expired.
+model RemoteCommand {
+  id          String    @id @default(uuid()) @db.Uuid
+  orgId       String    @db.Uuid
+  gatewayId   String    @db.Uuid
+  roomId      String    @db.Uuid
+  type        String
+  args        Json      @default("{}")
+  status      String    @default("pending")
+  requestedBy String?   @db.Uuid
+  output      Json?
+  error       String?
+  createdAt   DateTime  @default(now())
+  sentAt      DateTime?
+  finishedAt  DateTime?
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([gatewayId, status])
+  @@index([roomId, createdAt])
+  @@index([orgId, createdAt])
+}
+
+// Support requests, raised by anyone in the org (customers included) and worked by support.
+// status: open, in_progress, resolved, closed. priority: low, normal, high, urgent.
+model Ticket {
+  id             String    @id @default(uuid()) @db.Uuid
+  orgId          String    @db.Uuid
+  roomId         String?   @db.Uuid
+  incidentId     String?   @db.Uuid
+  title          String
+  body           String
+  status         String    @default("open")
+  priority       String    @default("normal")
+  createdBy      String?   @db.Uuid
+  createdByEmail String?
+  assignedTo     String?   @db.Uuid
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+  closedAt       DateTime?
+
+  org      Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room     Room?           @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  comments TicketComment[]
+
+  @@index([orgId, status, createdAt])
+  @@index([roomId])
+}
+
+model TicketComment {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  ticketId    String   @db.Uuid
+  authorId    String?  @db.Uuid
+  authorEmail String?
+  body        String
+  createdAt   DateTime @default(now())
+
+  org    Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
 }

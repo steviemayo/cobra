@@ -6,6 +6,7 @@ import {
   HeartbeatRequest,
   PROTOCOL_VERSION,
   TelemetryBatch,
+  type GatewayCommand,
   type RoomModel,
   type SignedManifest,
   type TelemetryEvent,
@@ -31,6 +32,8 @@ export class FakeCloud {
   readonly keyId = 'test-key';
   readonly enrols: unknown[] = [];
   readonly heartbeats: HeartbeatRequest[] = [];
+  /** Commands handed to the gateway in its next heartbeat response. */
+  readonly queuedCommands: GatewayCommand[] = [];
   readonly telemetry: TelemetryEvent[] = [];
   readonly manifestFetches: string[] = [];
   private assignments = new Map<string, Assignment>();
@@ -131,7 +134,8 @@ export class FakeCloud {
     if (req.method === 'POST' && path === '/enroll') {
       const parsed = EnrollRequest.safeParse(await this.body(req));
       if (!parsed.success) return this.json(res, 400, { error: 'bad request' });
-      if (parsed.data.token !== ENROLL_TOKEN) return this.json(res, 401, { error: 'Invalid or used token' });
+      if (parsed.data.token !== ENROLL_TOKEN)
+        return this.json(res, 401, { error: 'Invalid or used token' });
       this.enrols.push(parsed.data);
       return this.json(res, 200, {
         gatewayId: GATEWAY_ID,
@@ -148,7 +152,11 @@ export class FakeCloud {
       const parsed = HeartbeatRequest.safeParse(await this.body(req));
       if (!parsed.success) return this.json(res, 400, { error: 'bad request' });
       this.heartbeats.push(parsed.data);
-      return this.json(res, 200, { configVersion: String(this.version), serverTime: new Date().toISOString() });
+      return this.json(res, 200, {
+        configVersion: String(this.version),
+        serverTime: new Date().toISOString(),
+        commands: this.queuedCommands.splice(0),
+      });
     }
     if (req.method === 'GET' && path === '/config') {
       return this.json(res, 200, {
@@ -177,7 +185,10 @@ export class FakeCloud {
       const parsed = TelemetryBatch.safeParse(await this.body(req));
       if (!parsed.success) return this.json(res, 400, { error: 'bad request' });
       this.telemetry.push(...parsed.data.events);
-      return this.json(res, 200, { accepted: parsed.data.events.length, protocol: PROTOCOL_VERSION });
+      return this.json(res, 200, {
+        accepted: parsed.data.events.length,
+        protocol: PROTOCOL_VERSION,
+      });
     }
     return this.json(res, 404, { error: 'Not found' });
   }

@@ -42,7 +42,9 @@ export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger
   }
   const real = new Map<string, DeviceDriver>();
   for (const device of model.devices) {
-    const driver = createDriver(device, { log: (l, m, x) => log(l, m, { device: device.name, ...x }) });
+    const driver = createDriver(device, {
+      log: (l, m, x) => log(l, m, { device: device.name, ...x }),
+    });
     if (driver) real.set(device.id, driver);
   }
   const bus = new HybridBus(real, mode === 'missing' ? createSimulation(model) : null);
@@ -156,6 +158,11 @@ export class RoomHost {
       releaseId: r.releaseId,
       manifestHash: r.signed.hash,
       status: r.runtime.getSnapshot().status,
+      devices: r.signed.manifest.model.devices.map((d) => ({
+        deviceId: d.id,
+        name: d.name,
+        online: r.bus.getState(d.id)?.online ?? true,
+      })),
     }));
   }
 
@@ -177,6 +184,26 @@ export class RoomHost {
         .activities.filter((a) => a.active && a.kind !== 'room_off')
         .map((a) => a.id),
     );
+    // Tell the cloud when a device drops off or comes back, with the time it happened.
+    const names = new Map(room.signed.manifest.model.devices.map((d) => [d.id, d.name]));
+    const reachable = new Map<string, boolean>(
+      [...names.keys()].map((id) => [id, room.bus.getState(id)?.online ?? true]),
+    );
+    const stopDevices = room.bus.subscribe(({ deviceId, state }) => {
+      if (!names.has(deviceId) || reachable.get(deviceId) === state.online) return;
+      reachable.set(deviceId, state.online);
+      this.emit({
+        at: at(),
+        type: state.online ? 'device.online' : 'device.offline',
+        roomId: room.roomId,
+        data: { deviceId, name: names.get(deviceId) },
+      });
+    });
+    const close = room.close;
+    room.close = () => {
+      stopDevices();
+      close();
+    };
     room.runtime.subscribe(() => {
       const vm = room.runtime.getSnapshot();
       if (vm.status !== status) {
@@ -190,13 +217,25 @@ export class RoomHost {
             data: { message: vm.message?.text.key ?? 'fault', ...(vm.message?.text.params ?? {}) },
           });
       }
-      const now = new Set(vm.activities.filter((a) => a.active && a.kind !== 'room_off').map((a) => a.id));
+      const now = new Set(
+        vm.activities.filter((a) => a.active && a.kind !== 'room_off').map((a) => a.id),
+      );
       for (const id of now)
         if (!active.has(id))
-          this.emit({ at: at(), type: 'activity.started', roomId: room.roomId, data: { activityId: id } });
+          this.emit({
+            at: at(),
+            type: 'activity.started',
+            roomId: room.roomId,
+            data: { activityId: id },
+          });
       for (const id of active)
         if (!now.has(id))
-          this.emit({ at: at(), type: 'activity.stopped', roomId: room.roomId, data: { activityId: id } });
+          this.emit({
+            at: at(),
+            type: 'activity.stopped',
+            roomId: room.roomId,
+            data: { activityId: id },
+          });
       active = now;
     });
   }
