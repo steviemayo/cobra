@@ -4,11 +4,14 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Activity,
+  AlertTriangle,
+  BellRing,
   Building2,
   ChevronRight,
   DoorOpen,
   LayoutDashboard,
   LayoutTemplate,
+  LifeBuoy,
   type LucideIcon,
   Plus,
   Rocket,
@@ -216,7 +219,9 @@ export function AppSidebar() {
               )}
               <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />
               <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />
-              <NavItem icon={Activity} label="Monitoring" soon />
+              <NavItem href={`${base}/monitoring`} icon={Activity} label="Monitoring" />
+              <NavItem href={`${base}/incidents`} icon={AlertTriangle} label="Incidents" />
+              <NavItem href={`${base}/tickets`} icon={LifeBuoy} label="Support" />
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -227,6 +232,7 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu>
                 <NavItem href={`${base}/team`} icon={Users} label="Team" />
+                <NavItem href={`${base}/alerts`} icon={BellRing} label="Alerts" />
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={settingsOpen}

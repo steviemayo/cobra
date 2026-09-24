@@ -4,10 +4,13 @@ import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import {
   Activity,
+  AlertTriangle,
+  BellRing,
   Building2,
   DoorOpen,
   LayoutDashboard,
   LayoutTemplate,
+  LifeBuoy,
   Moon,
   Plus,
   Rocket,
@@ -96,10 +99,22 @@ export function CommandMenu({ children }: { children: React.ReactNode }) {
               <CommandItem onSelect={() => go('/deployments')}>
                 <Rocket /> Deployments
               </CommandItem>
+              <CommandItem onSelect={() => go('/monitoring')}>
+                <Activity /> Monitoring
+              </CommandItem>
+              <CommandItem onSelect={() => go('/incidents')}>
+                <AlertTriangle /> Incidents
+              </CommandItem>
+              <CommandItem onSelect={() => go('/tickets')}>
+                <LifeBuoy /> Support requests
+              </CommandItem>
               {canSeeTeam && (
                 <>
                   <CommandItem onSelect={() => go('/team')}>
                     <Users /> Team
+                  </CommandItem>
+                  <CommandItem onSelect={() => go('/alerts')}>
+                    <BellRing /> Alerts
                   </CommandItem>
                   <CommandItem onSelect={() => go('/settings/activity')}>
                     <Activity /> Activity log

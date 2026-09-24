@@ -52,6 +52,22 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `added gateway “${s(meta.name)}”`;
     case 'gateway.enroll':
       return `gateway “${s(meta.name)}” connected`;
+    case 'command.request':
+      return `asked “${s(meta.room)}” to ${s(meta.type).replace('_', ' ')}`;
+    case 'command.result':
+      return `the gateway finished a ${s(meta.type).replace('_', ' ')} command (${meta.ok ? 'worked' : 'failed'})`;
+    case 'incident.acknowledge':
+      return 'acknowledged an incident';
+    case 'alert_channel.create':
+      return `added alert channel “${s(meta.name)}” (${s(meta.type)})`;
+    case 'alert_channel.update':
+      return `changed alert channel “${s(meta.name)}”`;
+    case 'alert_channel.delete':
+      return `removed alert channel “${s(meta.name)}”`;
+    case 'ticket.create':
+      return `opened support request “${s(meta.title)}”`;
+    case 'ticket.update':
+      return 'updated a support request';
     default:
       return action;
   }

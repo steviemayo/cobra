@@ -152,7 +152,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
             { label: 'Simulate', href: `${base}/simulate` },
             { label: 'Devices', href: `${base}/devices` },
             { label: 'Deployments', href: `${base}/deployments` },
-            { label: 'Monitoring', href: `${base}/monitoring`, soon: true },
+            { label: 'Monitoring', href: `${base}/monitoring` },
             ...(canEdit ? [{ label: 'Settings', href: `${base}/settings` }] : []),
           ]}
         />

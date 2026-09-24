@@ -20,6 +20,8 @@ interface OrgContextValue {
   isOwner: boolean;
   /** Owners, developers and support can see team and activity. */
   canSeeTeam: boolean;
+  /** Owners, developers and support can work incidents, tickets and remote tools. */
+  canSupport: boolean;
 }
 
 const OrgContext = createContext<OrgContextValue | null>(null);
@@ -46,6 +48,7 @@ export function OrgProvider({
       canEdit: org.role === 'owner' || org.role === 'dev',
       isOwner: org.role === 'owner',
       canSeeTeam: org.role !== 'customer_viewer',
+      canSupport: org.role !== 'customer_viewer',
     };
   }, [orgId, orgs, user]);
 
