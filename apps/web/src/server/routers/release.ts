@@ -7,6 +7,7 @@ import { diffRoomModels, summariseChanges, validateRoomModel } from '@kestrel/en
 import { RoomModel, SignedManifest } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { createDeployment } from '../deployment-service';
+import { pinDrivers } from '../custom-drivers';
 import { effectivePanel, readOrgBranding, readPanel } from '../panel-settings';
 import { SigningNotConfigured, loadSigningKey } from '../signing';
 import { orgProcedure, requireRole, router } from '../trpc';
@@ -108,6 +109,10 @@ export const releaseRouter = router({
           message: `Fix ${errors.length} design problem${errors.length === 1 ? '' : 's'} first: ${errors[0]!.message}`,
         });
 
+      const pinned = await pinDrivers(db, ctx.orgId, model);
+      if (!pinned.ok)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: pinned.problems[0]! });
+
       let key;
       try {
         key = loadSigningKey();
@@ -140,6 +145,7 @@ export const releaseRouter = router({
             releaseNumber: number,
             createdAt: new Date().toISOString(),
             model,
+            drivers: pinned.drivers,
             panel: effectivePanel(readPanel(room.panel), orgBranding),
           },
           key,

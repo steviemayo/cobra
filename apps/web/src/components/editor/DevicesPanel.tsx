@@ -9,7 +9,10 @@ import {
   SignalKind,
   type Device,
 } from '@kestrel/model';
+import { useQuery } from '@tanstack/react-query';
+import { useOrg } from '@/components/shell/org-context';
 import { addDevice, addPort, removeDevice, removePort } from '@/lib/editor/ops';
+import { useTRPC } from '@/trpc/client';
 import {
   Card,
   ConfirmButton,
@@ -24,7 +27,7 @@ import {
   type PanelProps,
 } from './ui';
 
-const DRIVER_HINTS = Object.keys(BUILT_IN_DRIVERS);
+const BUILT_IN_HINTS = Object.keys(BUILT_IN_DRIVERS);
 const categoryOptions = DeviceCategory.options.map((c) => ({
   value: c,
   label: DEVICE_CATALOG[c].label,
@@ -81,6 +84,10 @@ function DeviceCard({
   update: PanelProps['update'];
   issues: PanelProps['issues'];
 }) {
+  const trpc = useTRPC();
+  const { orgId } = useOrg();
+  const custom = useQuery({ ...trpc.driver.options.queryOptions({ orgId }), staleTime: 60_000 });
+  const customIds = (custom.data ?? []).map((d) => d.id);
   const edit = (fn: (dev: Device) => void) =>
     update((m) => {
       const dev = m.devices.find((x) => x.id === d.id);
@@ -111,7 +118,7 @@ function DeviceCard({
               edit((dev) => {
                 if (v === 'none') delete dev.control;
                 else if (v === 'driver')
-                  dev.control = { kind: 'driver', driverId: DRIVER_HINTS[0]! };
+                  dev.control = { kind: 'driver', driverId: BUILT_IN_HINTS[0]! };
                 else dev.control = { kind: 'generic', protocol: v };
               })
             }
@@ -129,7 +136,7 @@ function DeviceCard({
               }
             />
             <datalist id="driver-hints">
-              {DRIVER_HINTS.map((h) => (
+              {[...BUILT_IN_HINTS, ...customIds].map((h) => (
                 <option key={h} value={h} />
               ))}
             </datalist>

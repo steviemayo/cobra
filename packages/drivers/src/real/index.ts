@@ -4,6 +4,7 @@ export * from './base';
 export * from './pjlink';
 export * from './nvx';
 export * from './qsys';
+export * from './declarative';
 export * from './generic-tcp';
 export * from './registry';
 export * from './hybrid-bus';

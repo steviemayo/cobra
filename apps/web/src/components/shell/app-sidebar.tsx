@@ -8,6 +8,7 @@ import {
   BellRing,
   Building2,
   ChevronRight,
+  Cpu,
   Link2,
   DoorOpen,
   LayoutDashboard,
@@ -220,6 +221,7 @@ export function AppSidebar() {
                 <NavItem href={`${base}/templates`} icon={LayoutTemplate} label="Templates" />
               )}
               {canEdit && <NavItem href={`${base}/marketplace`} icon={Store} label="Marketplace" />}
+              {canEdit && <NavItem href={`${base}/drivers`} icon={Cpu} label="Custom drivers" />}
               {canSupport && <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />}
               {canSupport && (
                 <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />

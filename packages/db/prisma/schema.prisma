@@ -57,6 +57,7 @@ model Org {
   calendars       CalendarConnection[]
   listings        MarketplaceListing[]
   purchases       MarketplacePurchase[]
+  customDrivers   CustomDriver[]
 }
 
 model Member {
@@ -623,4 +624,36 @@ model MarketplacePurchase {
   buyer   Org                @relation(fields: [buyerOrgId], references: [id], onDelete: Cascade)
 
   @@unique([listingId, buyerOrgId])
+}
+
+// ---- Custom drivers ----------------------------------------------------------------------------
+
+// A driver an organisation wrote in the Kestrel driver format. Each save is a new immutable
+// version; a release pins the exact version it used, so changing a driver never changes a room
+// that is already running.
+model CustomDriver {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @db.Uuid
+  slug          String
+  name          String
+  latestVersion Int      @default(1)
+  createdAt     DateTime @default(now())
+
+  org      Org                   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  versions CustomDriverVersion[]
+
+  @@unique([orgId, slug])
+}
+
+model CustomDriverVersion {
+  id        String   @id @default(uuid()) @db.Uuid
+  driverId  String   @db.Uuid
+  version   Int
+  spec      Json
+  createdBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+
+  driver CustomDriver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@unique([driverId, version])
 }

@@ -44,9 +44,11 @@ export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger
   }
   const real = new Map<string, DeviceDriver>();
   for (const device of model.devices) {
-    const driver = createDriver(device, {
-      log: (l, m, x) => log(l, m, { device: device.name, ...x }),
-    });
+    const driver = createDriver(
+      device,
+      { log: (l, m, x) => log(l, m, { device: device.name, ...x }) },
+      signed.manifest.drivers,
+    );
     if (driver) real.set(device.id, driver);
   }
   const bus = new HybridBus(real, mode === 'missing' ? createSimulation(model) : null);

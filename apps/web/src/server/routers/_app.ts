@@ -8,6 +8,7 @@ import { commandRouter } from './command';
 import { controlRouter } from './control';
 import { deploymentRouter } from './deployment';
 import { draftRouter } from './draft';
+import { driverRouter } from './driver';
 import { gatewayRouter } from './gateway';
 import { inviteRouter } from './invite';
 import { marketplaceRouter } from './marketplace';
@@ -37,6 +38,7 @@ export const appRouter = router({
   command: commandRouter,
   ticket: ticketRouter,
   billing: billingRouter,
+  driver: driverRouter,
   marketplace: marketplaceRouter,
   calendar: calendarRouter,
   combination: combinationRouter,

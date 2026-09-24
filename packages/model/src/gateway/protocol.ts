@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PinnedDriver } from '../driver-spec';
 import { LocalId } from '../room/common';
 import { RoomModel } from '../room/room-model';
 import { PanelIntent, PanelViewModel, RoomStatus } from '../runtime/panel';
@@ -36,6 +37,8 @@ export const RoomManifest = z.object({
   releaseNumber: z.number().int().min(1),
   createdAt: z.string().datetime(),
   model: RoomModel,
+  /** Custom drivers this release uses, pinned at the version it was built with. */
+  drivers: z.record(z.string(), PinnedDriver).default({}),
   panel: z
     .object({
       access: PanelAccess.default(() => PanelAccess.parse({})),

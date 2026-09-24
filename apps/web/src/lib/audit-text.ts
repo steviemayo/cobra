@@ -56,6 +56,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `asked “${s(meta.room)}” to ${s(meta.type).replace('_', ' ')}`;
     case 'command.result':
       return `the gateway finished a ${s(meta.type).replace('_', ' ')} command (${meta.ok ? 'worked' : 'failed'})`;
+    case 'driver.save':
+      return meta.created ? 'created a custom driver' : `saved version ${s(meta.version)} of a custom driver`;
+    case 'driver.delete':
+      return `deleted the custom driver “${s(meta.name)}”`;
     case 'marketplace.publish':
       return meta.updated
         ? 'updated a marketplace listing'
