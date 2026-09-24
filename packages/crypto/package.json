@@ -1,0 +1,21 @@
+{
+  "name": "@kestrel/crypto",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests",
+    "keygen": "node --experimental-strip-types src/keygen.ts"
+  },
+  "devDependencies": {
+    "@kestrel/config": "workspace:*"
+  },
+  "dependencies": {
+    "@kestrel/model": "workspace:*"
+  }
+}

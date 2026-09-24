@@ -302,6 +302,16 @@ importers:
 
   packages/config: {}
 
+  packages/crypto:
+    dependencies:
+      '@kestrel/model':
+        specifier: workspace:*
+        version: link:../model
+    devDependencies:
+      '@kestrel/config':
+        specifier: workspace:*
+        version: link:../config
+
   packages/db:
     dependencies:
       '@kestrel/model':
