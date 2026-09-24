@@ -107,33 +107,10 @@ Words used below:
 
 ### 0. Where things stand (read once)
 
-- All phases are built on local branches that stack: `feat/phase-3-gateway` (PR #9, open) → `feat/phase-4-deployments` → `feat/phase-5-monitoring` (holds phases 5 to 7). The last two are not pushed.
-- PR #9's CI check was failing on one gateway test that raced against a background timer. It is fixed on `feat/phase-5-monitoring` (commit "fix(gateway): wait for the heartbeat that names the room"). Step 1 gets that fix onto PR #9.
+- All phases are built and merged to `dev` and `main` (PRs #9, #10 and the phases 5 to 7 PR). CI on them is green. What follows is setup and real-world checks that need you.
 - Use `docs/phase-4-preread.md` as the status source, and `.env.example` as the list of every env var.
 
-### 1. Get the code merged
-
-Why first: the env vars and migrations below only matter once the code that uses them is on `main`.
-
-1. **Fix PR #9's CI.** Ask Claude to "cherry-pick the gateway test fix onto `feat/phase-3-gateway` and push it", or run it yourself:
-   ```powershell
-   git checkout feat/phase-3-gateway
-   git cherry-pick <sha of the "wait for the heartbeat that names the room" commit>   # find it with: git log feat/phase-5-monitoring --oneline -5
-   git push
-   git checkout feat/phase-5-monitoring
-   ```
-2. Open PR #9 on GitHub (https://github.com/steviemayo/cobra/pull/9). Wait for the **CI** check to go green and the **Vercel** preview to build. Then **Merge** (base is `dev`).
-3. Push and open the next PRs, one at a time, oldest first. After #9 merges, GitHub shows only that PR's own commits once its base has merged.
-   ```powershell
-   git push -u origin feat/phase-4-deployments
-   gh pr create --base dev --head feat/phase-4-deployments --title "feat: phase 4 releases and deployments"
-   ```
-   Merge it, then repeat for `feat/phase-5-monitoring` (title "feat: phases 5-7 monitoring, billing, expansion"). Update the branch first if GitHub says it is behind (`git rebase origin/dev`, then `git push --force-with-lease`).
-4. When `dev` looks right, open a PR from `dev` to `main` and merge it. `main` is production.
-
-Working when: `main` on GitHub contains the phase 7 commits and CI is green.
-
-### 2. Generate the secrets
+### 1. Generate the secrets
 
 Three values need creating. Run each and keep the output somewhere private (a password manager), not in chat or git.
 
@@ -149,7 +126,7 @@ Rules that matter:
 - **Changing `KESTREL_SECRETS_KEY` breaks stored calendar connections** (they must be re-entered) and invalidates open phone links. Set it once.
 - Add all three to your local `.env` too if you want to run the features locally.
 
-### 3. Put the env vars on Vercel
+### 2. Put the env vars on Vercel
 
 Docs: https://vercel.com/docs/cli and https://vercel.com/docs/environment-variables
 
@@ -184,19 +161,19 @@ Full list (from `.env.example`). "Now" means set it before anything else works; 
 | `KESTREL_SIGNING_KEY`, `KESTREL_SIGNING_KEY_ID` | now | from your local `.env` |
 | `DATABASE_URL`, `DIRECT_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | now (check they exist) | see `docs/getting-started.md` |
 | `NEXT_PUBLIC_APP_URL` | now | your real public URL with no trailing slash, e.g. `https://<your-domain>`. Used for links in alert emails and Stripe return links |
-| `CRON_SECRET` | now | step 2 |
-| `KESTREL_SECRETS_KEY` | now | step 2 |
+| `CRON_SECRET` | now | step 1 |
+| `KESTREL_SECRETS_KEY` | now | step 1 |
 | `KESTREL_ADMIN_EMAILS` | now | your email, comma-separated for more. Lets you review marketplace listings at `/admin/marketplace` |
-| `RESEND_API_KEY`, `ALERT_FROM_EMAIL` | step 7 | Resend |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_BASIC`, `STRIPE_PRICE_PRO` | step 8 | Stripe |
-| `GATEWAY_LATEST_STABLE`, `GATEWAY_LATEST_BETA` | step 10 | newest gateway version per channel, e.g. `0.1.0` |
+| `RESEND_API_KEY`, `ALERT_FROM_EMAIL` | step 6 | Resend |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_BASIC`, `STRIPE_PRICE_PRO` | step 7 | Stripe |
+| `GATEWAY_LATEST_STABLE`, `GATEWAY_LATEST_BETA` | step 9 | newest gateway version per channel, e.g. `0.1.0` |
 | `NEXT_PUBLIC_GATEWAY_IMAGE` | optional | e.g. `ghcr.io/steviemayo/kestrel-gateway:stable`, shown in the "add gateway" instructions |
 
 Working when: the **Vercel preview for PR #9** builds, and opening a preview URL loads `/login`. (The three preview checks from PR #9 need the signing key: sign in, create a room, deploy a release; a deploy that fails with "Release signing is not configured" means the key is missing on that environment.)
 
 Note: Vercel's free (Hobby) plan is for non-commercial use. Before real customers, move to Pro (https://vercel.com/pricing).
 
-### 4. Apply the new database migrations
+### 3. Apply the new database migrations
 
 The dev database (`kestrel-dev`) already has all 13 migrations because I ran them there. Any **other** database, especially the one production uses, needs them applied. Never do this in a Vercel build.
 
@@ -213,13 +190,13 @@ The dev database (`kestrel-dev`) already has all 13 migrations because I ran the
 
 Better long term: make a separate `kestrel-prod` Supabase project (Sydney) before real customers, keep `kestrel-dev` for development, and point Vercel Production at prod and Preview at dev.
 
-### 5. Supabase housekeeping
+### 4. Supabase housekeeping
 
-1. **Rotate the database password** (it was pasted into a chat earlier): Supabase > Project Settings > **Database** > **Reset database password**. Then update `DATABASE_URL` and `DIRECT_URL` in `.env`, `apps/web/.env.local` and Vercel (step 3), and redeploy.
+1. **Rotate the database password** (it was pasted into a chat earlier): Supabase > Project Settings > **Database** > **Reset database password**. Then update `DATABASE_URL` and `DIRECT_URL` in `.env`, `apps/web/.env.local` and Vercel (step 2), and redeploy.
 2. **Auth redirect URLs**: Supabase > **Authentication** > **URL Configuration**. Set Site URL to your production URL. Add Redirect URLs: `http://localhost:3000/auth/callback`, `https://<your production domain>/auth/callback`, and `https://*-kestrel9.vercel.app/**` (covers previews). Docs: https://supabase.com/docs/guides/auth/redirect-urls
 3. Working when: signing up or resetting a password from the production site lands back in the app.
 
-### 6. Run the scheduled jobs
+### 5. Run the scheduled jobs
 
 Two jobs must be called every minute or two from *outside* Vercel, because the free plan only allows one cron per day (the daily data-retention job is already in `apps/web/vercel.json`).
 
@@ -253,16 +230,16 @@ Working when: this returns `{"alerts":0}` (test it; a wrong secret gives 401):
 curl.exe -H "Authorization: Bearer <CRON_SECRET>" https://<app>/api/cron/sweep
 ```
 
-### 7. Email alerts (Resend)
+### 6. Email alerts (Resend)
 
 Alerts by email need a sender. Teams and webhook alerts do not.
 
 1. Sign up at https://resend.com, then **Domains** > add your domain and add the DNS records it shows (https://resend.com/docs/dashboard/domains/introduction). Wait until it says Verified. (You cannot send from a domain you have not verified; testing with Resend's `onboarding@resend.dev` sender only delivers to your own email.)
 2. **API Keys** (https://resend.com/api-keys) > create one with "Sending access".
-3. Set `RESEND_API_KEY` to it and `ALERT_FROM_EMAIL` to an address on your verified domain, e.g. `alerts@<your domain>` (step 3).
+3. Set `RESEND_API_KEY` to it and `ALERT_FROM_EMAIL` to an address on your verified domain, e.g. `alerts@<your domain>` (step 2).
 4. Working when: in the portal, **Alerts** > add an email channel > send a test, and it arrives.
 
-### 8. Billing (Stripe)
+### 7. Billing (Stripe)
 
 Do this in Stripe **test mode** first (toggle at the top right of the dashboard). Real cards are not charged in test mode. Docs: https://docs.stripe.com/billing/subscriptions/build-subscriptions
 
@@ -270,18 +247,18 @@ Do this in Stripe **test mode** first (toggle at the top right of the dashboard)
 2. **Products** > add product **Kestrel Basic**: recurring, monthly, price per unit (per room), e.g. `10.00 AUD`. Copy the **price** id (starts `price_`) to `STRIPE_PRICE_BASIC`. Repeat for **Kestrel Pro** into `STRIPE_PRICE_PRO`. Kestrel sets the quantity to the number of rooms itself.
 3. **Developers** > **API keys** (https://dashboard.stripe.com/test/apikeys): copy the **Secret key** (`sk_test_...`) into `STRIPE_SECRET_KEY`.
 4. **Developers** > **Webhooks** > **Add endpoint** (https://dashboard.stripe.com/test/webhooks): URL `https://<app>/api/stripe/webhook`, and select these events: `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `checkout.session.completed`. After saving, click **Reveal** on the **Signing secret** (`whsec_...`) and put it in `STRIPE_WEBHOOK_SECRET`.
-5. Set the four env vars (step 3) and redeploy.
+5. Set the four env vars (step 2) and redeploy.
 6. Working when: in the portal, **Settings > Billing** > choose a plan > pay with Stripe's test card `4242 4242 4242 4242` (any future expiry, any CVC). You return to the billing page showing the plan, and the Stripe dashboard shows a subscription. Add a room and the quantity in Stripe goes up by one.
 7. To try webhooks against your **local** machine instead: install the Stripe CLI (https://docs.stripe.com/stripe-cli), run `stripe listen --forward-to localhost:3000/api/stripe/webhook`, and use the `whsec_` it prints as `STRIPE_WEBHOOK_SECRET` in `.env`.
 8. Going live later: repeat with **Test mode off** (new products, keys, webhook), swap the values in Production only, and read https://docs.stripe.com/get-started/checklist/go-live.
 
 Not built: paying marketplace publishers (needs Stripe Connect, https://docs.stripe.com/connect). Purchases are one-off payments to Kestrel.
 
-### 9. Marketplace review
+### 8. Marketplace review
 
-Publishing is limited to Pro orgs, and a listing is invisible until a Kestrel admin approves it. Set `KESTREL_ADMIN_EMAILS` (step 3), sign in with that email, and open `https://<app>/admin/marketplace` to approve or reject. Working when: you publish a template from **Templates** in a Pro org, approve it there, and it shows in **Marketplace** for another org.
+Publishing is limited to Pro orgs, and a listing is invisible until a Kestrel admin approves it. Set `KESTREL_ADMIN_EMAILS` (step 2), sign in with that email, and open `https://<app>/admin/marketplace` to approve or reject. Working when: you publish a template from **Templates** in a Pro org, approve it there, and it shows in **Marketplace** for another org.
 
-### 10. Ship a gateway release (Docker images and Windows bundle)
+### 9. Ship a gateway release (Docker images and Windows bundle)
 
 GitHub Actions builds these for you when code is pushed:
 
@@ -291,10 +268,10 @@ GitHub Actions builds these for you when code is pushed:
 One-time setup:
 
 1. **Make the image pullable.** GitHub profile > **Packages** > `kestrel-gateway` > **Package settings** > **Change visibility**. Public is simplest; if private, machines need `docker login ghcr.io` with a token that has `read:packages` (https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
-2. **Windows bundle releases need the repo to allow workflow writes**: GitHub repo > **Settings** > **Actions** > **General** > **Workflow permissions** > "Read and write permissions". The bundle workflow only runs once on `main`/`dev` after the merge in step 1; check the **Actions** tab shows "Gateway Windows bundle" green, then **Releases** shows `gateway-stable`.
+2. **Windows bundle releases need the repo to allow workflow writes**: GitHub repo > **Settings** > **Actions** > **General** > **Workflow permissions** > "Read and write permissions". The bundle workflow only runs once on `main`/`dev` after the merge in step 0; check the **Actions** tab shows "Gateway Windows bundle" green, then **Releases** shows `gateway-stable`.
 3. **Each time you release a new gateway version:** bump `GATEWAY_VERSION` in `apps/gateway/src/config.ts`, merge, and set `GATEWAY_LATEST_STABLE` (or `_BETA`) on Vercel to the same number. The portal uses that to show "Update available" on older gateways.
 
-### 11. Try a gateway on a real machine
+### 10. Try a gateway on a real machine
 
 Do the **Docker** route first, on any Linux or Windows machine with Docker on the same network as your room devices (https://docs.docker.com/get-started/get-docker/).
 
@@ -310,15 +287,15 @@ Do the **Docker** route first, on any Linux or Windows machine with Docker on th
 3. Working when: the gateway shows **Online** in the portal within about a minute, and `docker compose logs gateway` shows "Enrolled with the cloud". Assign a room to it, deploy a release, and open `http://<machine>:8080/room/<room id>` on a tablet on the same network to see the panel.
 4. If it does not connect: `docker compose logs gateway` prints the reason. A wrong `KESTREL_CLOUD_URL` or an expired token are the usual causes (use **Re-enrol** in the gateway's **...** menu for a new token).
 
-**Windows** route (test once on a clean Windows VM or spare PC, since I could only syntax-check these scripts): needs step 10 done so the `gateway-stable` release exists. In an **administrator** PowerShell, after downloading `install.ps1` from the repo's `apps/gateway/windows` folder:
+**Windows** route (test once on a clean Windows VM or spare PC, since I could only syntax-check these scripts): needs step 9 done so the `gateway-stable` release exists. In an **administrator** PowerShell, after downloading `install.ps1` from the repo's `apps/gateway/windows` folder:
 ```powershell
 .\install.ps1 -CloudUrl https://<app> -EnrollToken <token>
 ```
 Working when: the gateway shows Online, `Get-ScheduledTask "Kestrel Gateway*"` lists two tasks, and logs appear in `C:\ProgramData\Kestrel Gateway\logs\gateway.log`. Undo with `& "C:\Program Files\Kestrel Gateway\uninstall.ps1"`. If something fails, send Claude the error and the log.
 
-### 12. Test with real room hardware
+### 11. Test with real room hardware
 
-Nothing has been run against real devices yet, so budget time for surprises. Do this on the gateway from step 11, with the machine on the same network as the devices.
+Nothing has been run against real devices yet, so budget time for surprises. Do this on the gateway from step 10, with the machine on the same network as the devices.
 
 1. In the room's **Devices** panel, set each device's IP or port and pick its driver. First try just one device at a time.
 2. **Crestron DM-NVX** (E30 encoder, D30 decoder): needs the device's IP and the login the units are configured with. Make the room a virtual matrix, then use **Simulate** vs the real panel to compare. Manuals and the control reference are on Crestron's support site (https://www.crestron.com, search "DM-NVX-E30" and "DM-NVX-D30").
@@ -328,7 +305,7 @@ Nothing has been run against real devices yet, so budget time for surprises. Do 
 6. **Offline test** (the Kestrel promise): unplug the gateway's internet, confirm the panel still works, plug it back in, and confirm telemetry catches up.
 7. Anything that fails: copy the gateway log (`docker compose logs gateway`) and the device name to Claude; drivers are quick to adjust once we see the real replies.
 
-### 13. Calendar triggers (optional, per customer)
+### 12. Calendar triggers (optional, per customer)
 
 A customer's owner connects their calendar under **Settings > Calendars**, then rooms with a calendar trigger start when a meeting begins. It reads room mailboxes only.
 
@@ -344,9 +321,9 @@ A customer's owner connects their calendar under **Settings > Calendars**, then 
 2. Share each room's calendar with the service account's email (Calendar settings > **Share with specific people** > "See all event details").
 3. In Kestrel: **Settings > Calendars** > Google, paste the JSON's `client_email` and `private_key`.
 
-Working when: a meeting starting in a test room mailbox starts the room's activity within about two minutes (needs the `/api/cron/calendar` job from step 6).
+Working when: a meeting starting in a test room mailbox starts the room's activity within about two minutes (needs the `/api/cron/calendar` job from step 5).
 
-### 14. A walk through the screens I could not open
+### 13. A walk through the screens I could not open
 
 I have never opened these while signed in. Use a test org and click through, and tell Claude (or note here) anything that looks wrong or errors:
 
@@ -356,11 +333,11 @@ I have never opened these while signed in. Use a test org and click through, and
 - **Combinations** `/o/<org>/combinations`, then a room's **Control** page for the join/split bar
 - **Gateways** `/o/<org>/gateways` (channel badge, "Follow the beta channel" in the **...** menu)
 - **Monitoring**, **Incidents**, **Alerts**, **Tickets**, room **Control**, **Settings** (theme, language, calendars)
-- **Phone control**: on a running gateway's panel, tap the phone button bottom-left, scan the QR code with a phone, and control the room from it (needs `KESTREL_SECRETS_KEY` set on Vercel, step 2).
+- **Phone control**: on a running gateway's panel, tap the phone button bottom-left, scan the QR code with a phone, and control the room from it (needs `KESTREL_SECRETS_KEY` set on Vercel, step 1).
 
-### 15. Decisions still yours
+### 14. Decisions still yours
 
 - Confirm the **MVP definition** (bottom of the earlier section of this file).
 - Pick the **first vendors** for matrix, DSP, display and camera drivers beyond NVX/Q-SYS.
-- Check the **domain**: is `kestrel` available? Point it at Vercel (Settings > Domains) and update `NEXT_PUBLIC_APP_URL` and the Supabase URLs (step 5).
+- Check the **domain**: is `kestrel` available? Point it at Vercel (Settings > Domains) and update `NEXT_PUBLIC_APP_URL` and the Supabase URLs (step 4).
 - Create a separate **`kestrel-prod`** Supabase project and a **Vercel Pro** plan before real customers.

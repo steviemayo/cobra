@@ -16,11 +16,11 @@
 | 1 Room modelling | Done, merged (PR #6) |
 | Web app shell (extra) | Done, merged (PR #7): shadcn, IBM Plex, `/o/[orgId]/…` routes, invites, team, audit log |
 | 2 Engine/simulator/panel UI | Done, merged (PR #8) |
-| 3 Gateway | Built; **PR #9 open, not merged** (`feat/phase-3-gateway`) |
-| 4 Releases & deployments | Built, verified in Docker (`feat/phase-4-deployments`, stacked on 3, not pushed) |
-| 5 Monitoring & support | Built on **`feat/phase-5-monitoring`** (stacked on 4, not pushed): health, incidents, alerts (email/Teams/webhook/ITSM stub), allowlisted remote commands + audit, tickets, 90-day retention. Verified end-to-end in Docker + Chrome |
-| 6 Billing & customer portal | Built (same branch): plans/entitlements (trial/basic/pro), Stripe checkout + webhooks, plan gating (never gates control), portal control, customer dashboard, org theme, language packs (es/fr/de) |
-| 7 Expansion | Built (same branch): schedule/occupancy/webhook/calendar (M365, Google) triggers, combined rooms, marketplace (publish/review/buy), driver SDK (custom declarative drivers, Pro) + bundled library, serial/REST/VISCA drivers, DM-NVX + Q-SYS drivers, QR-to-phone control, gateway update channels + compose/Watchtower, Windows bundle + installer |
+| 3 Gateway | Done, merged (PR #9) |
+| 4 Releases & deployments | Done, merged (PR #10), verified in Docker |
+| 5 Monitoring & support | Merged with 6 and 7 (`feat/phase-5-monitoring`): health, incidents, alerts (email/Teams/webhook/ITSM stub), allowlisted remote commands + audit, tickets, 90-day retention. Verified end-to-end in Docker + Chrome |
+| 6 Billing & customer portal | Merged (same PR): plans/entitlements (trial/basic/pro), Stripe checkout + webhooks, plan gating (never gates control), portal control, customer dashboard, org theme, language packs (es/fr/de) |
+| 7 Expansion | Merged (same PR): schedule/occupancy/webhook/calendar (M365, Google) triggers, combined rooms, marketplace (publish/review/buy), driver SDK (custom declarative drivers, Pro) + bundled library, serial/REST/VISCA drivers, DM-NVX + Q-SYS drivers, QR-to-phone control, gateway update channels + compose/Watchtower, Windows bundle + installer |
 
 ### What is verified vs only unit-tested
 
@@ -81,7 +81,5 @@
 
 ## Suggested next steps (in order)
 
-1. **Merge PR #9** (user) → push `feat/phase-4-deployments`, then `feat/phase-5-monitoring` and open PRs in order (each diff shrinks once its base merges) → `dev` → `main`
-2. Set the env vars and scheduler above; run one real-hardware pass; run the Windows installer once on a clean VM
-3. Browser pass over billing, marketplace, drivers, combinations, gateways pages
-4. Candidates after that: WSS push to remove the first-connect lag, Stripe Connect payouts, MSP/reseller tier, third-party driver marketplace, sandboxed custom-logic hooks
+1. Work through "Next steps by dev" at the bottom of `docs/plan.md` (secrets, Vercel env vars, migrations, scheduler, Stripe, real gateway and hardware, browser pass)
+2. Candidates after that: WSS push to remove the first-connect lag, Stripe Connect payouts, MSP/reseller tier, third-party driver marketplace, sandboxed custom-logic hooks
