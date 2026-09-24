@@ -87,7 +87,10 @@ describe('Present', () => {
     rt.dispatch({ type: 'activity.start', activityId: 'present', sourceId: 'laptop1' });
     await advance(3000);
     expect(text()).toBe('plug_in_source');
-    expect(snap().message).toMatchObject({ tone: 'warn', text: { params: { source: 'Laptop 1' } } });
+    expect(snap().message).toMatchObject({
+      tone: 'warn',
+      text: { params: { source: 'Laptop 1' } },
+    });
     sim.plug('laptop1', true);
     expect(text()).toBe('presenting');
   });
@@ -462,6 +465,17 @@ describe('multiple panels', () => {
   it('hands out a stable snapshot until something changes', () => {
     setup(meeting());
     expect(snap()).toBe(snap());
+  });
+
+  it('works when a panel passes its methods around as callbacks', async () => {
+    setup(training());
+    const { dispatch, getSnapshot, subscribe } = rt;
+    const seen: string[] = [];
+    subscribe(() => seen.push(getSnapshot().status));
+    dispatch({ type: 'activity.start', activityId: 'record' });
+    await advance(1500);
+    expect(sim.getState('recorder')!.recording).toBe(true);
+    expect(seen.length).toBeGreaterThan(0);
   });
 
   it('ignores malformed intents from a misbehaving panel', () => {

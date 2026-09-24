@@ -13,7 +13,13 @@ export function usePanel(client: PanelClient): PanelViewModel {
   );
 }
 
-const TONE_ICON = { info: 'info', progress: 'info', success: 'check', warn: 'warning', error: 'warning' };
+const TONE_ICON = {
+  info: 'info',
+  progress: 'info',
+  success: 'check',
+  warn: 'warning',
+  error: 'warning',
+};
 
 function StatusBanner({ vm, t }: { vm: PanelViewModel; t: Translate }) {
   if (!vm.message) return null;
@@ -30,7 +36,15 @@ function StatusBanner({ vm, t }: { vm: PanelViewModel; t: Translate }) {
   );
 }
 
-function PromptBar({ vm, t, dispatch }: { vm: PanelViewModel; t: Translate; dispatch: PanelClient['dispatch'] }) {
+function PromptBar({
+  vm,
+  t,
+  dispatch,
+}: {
+  vm: PanelViewModel;
+  t: Translate;
+  dispatch: PanelClient['dispatch'];
+}) {
   if (!vm.prompt) return null;
   const { prompt } = vm;
   return (
@@ -61,16 +75,30 @@ function PromptBar({ vm, t, dispatch }: { vm: PanelViewModel; t: Translate; disp
   );
 }
 
-function WarningBar({ vm, t, dispatch }: { vm: PanelViewModel; t: Translate; dispatch: PanelClient['dispatch'] }) {
+function WarningBar({
+  vm,
+  t,
+  dispatch,
+}: {
+  vm: PanelViewModel;
+  t: Translate;
+  dispatch: PanelClient['dispatch'];
+}) {
   if (!vm.warning) return null;
   return (
     <div className="kp-alert kp-alert-warn" role="alert">
       <div className="kp-alert-body">
         <strong>{messageText(t, vm.warning.text)}</strong>
-        <span className="kp-muted">{t('warning.seconds', { seconds: vm.warning.secondsLeft })}</span>
+        <span className="kp-muted">
+          {t('warning.seconds', { seconds: vm.warning.secondsLeft })}
+        </span>
       </div>
       <div className="kp-alert-actions">
-        <button type="button" className="kp-btn kp-btn-primary" onClick={() => dispatch({ type: 'warning.dismiss' })}>
+        <button
+          type="button"
+          className="kp-btn kp-btn-primary"
+          onClick={() => dispatch({ type: 'warning.dismiss' })}
+        >
           {t('warning.stay')}
         </button>
       </div>
@@ -100,7 +128,7 @@ export interface PanelAppProps {
 export function PanelApp({ client, theme = darkTheme, translate, className }: PanelAppProps) {
   const vm = usePanel(client);
   const t = translate ?? createTranslator();
-  const { dispatch } = client;
+  const dispatch: PanelClient['dispatch'] = (intent) => client.dispatch(intent);
   const [picked, setPicked] = useState<string | null>(null);
 
   const current =
@@ -113,7 +141,11 @@ export function PanelApp({ client, theme = darkTheme, translate, className }: Pa
   const choose = (a: PanelActivity) => {
     setPicked(a.id);
     if (a.overlay) {
-      dispatch(a.active ? { type: 'activity.stop', activityId: a.id } : { type: 'activity.start', activityId: a.id });
+      dispatch(
+        a.active
+          ? { type: 'activity.stop', activityId: a.id }
+          : { type: 'activity.start', activityId: a.id },
+      );
     } else if (a.kind === 'room_off') {
       dispatch({ type: 'activity.start', activityId: a.id });
     } else if (!a.active || vm.status === 'fault') {
@@ -162,7 +194,12 @@ export function PanelApp({ client, theme = darkTheme, translate, className }: Pa
                 {vm.activities
                   .filter((a) => a.kind !== 'room_off')
                   .map((a) => (
-                    <button key={a.id} type="button" className="kp-tile kp-tile-big" onClick={() => choose(a)}>
+                    <button
+                      key={a.id}
+                      type="button"
+                      className="kp-tile kp-tile-big"
+                      onClick={() => choose(a)}
+                    >
                       <Icon name={a.icon ?? a.kind} />
                       <span>{a.name}</span>
                     </button>
@@ -193,7 +230,13 @@ export function PanelApp({ client, theme = darkTheme, translate, className }: Pa
                           type="button"
                           className="kp-tile"
                           aria-pressed={s.selected}
-                          onClick={() => dispatch({ type: 'activity.start', activityId: current.id, sourceId: s.id })}
+                          onClick={() =>
+                            dispatch({
+                              type: 'activity.start',
+                              activityId: current.id,
+                              sourceId: s.id,
+                            })
+                          }
                         >
                           <span className="kp-tile-title">{s.label}</span>
                           {s.present !== null && (

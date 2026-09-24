@@ -18,8 +18,22 @@ export const darkTheme: PanelTheme = { mode: 'dark', accent: '#3db8b8', accentTe
 export const lightTheme: PanelTheme = { mode: 'light', accent: '#0f8a8c', accentText: '#ffffff' };
 
 const PALETTE = {
-  dark: { bg: '#0d1216', surface: '#161d23', raised: '#1e272f', text: '#eef2f5', muted: '#9aa8b3', line: '#ffffff1f' },
-  light: { bg: '#f4f6f8', surface: '#ffffff', raised: '#eef1f4', text: '#141b21', muted: '#5b6a76', line: '#0000001f' },
+  dark: {
+    bg: '#0d1216',
+    surface: '#161d23',
+    raised: '#1e272f',
+    text: '#eef2f5',
+    muted: '#9aa8b3',
+    line: '#ffffff1f',
+  },
+  light: {
+    bg: '#f4f6f8',
+    surface: '#ffffff',
+    raised: '#eef1f4',
+    text: '#141b21',
+    muted: '#5b6a76',
+    line: '#0000001f',
+  },
 };
 
 export function themeStyle(theme: PanelTheme): CSSProperties {

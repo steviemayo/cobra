@@ -66,7 +66,7 @@ export class Simulation implements DeviceBus {
   private readonly listeners = new Set<(e: DeviceEvent) => void>();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly latency: SimLatency;
-  private readonly scale: number;
+  private scale: number;
   private flowing = new Set<string>();
 
   constructor(model: RoomModel, opts: SimulationOptions = {}) {
@@ -103,6 +103,11 @@ export class Simulation implements DeviceBus {
   }
 
   // ---- Simulator controls (what a person or a test does to the room) ---------------------------
+
+  /** Change how long devices take to respond, from now on. */
+  setLatencyScale(scale: number) {
+    this.scale = scale;
+  }
 
   /** Plug or unplug a laptop's cable. */
   plug(deviceId: string, present: boolean) {

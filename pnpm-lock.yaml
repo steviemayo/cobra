@@ -199,12 +199,18 @@ importers:
       '@kestrel/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@kestrel/drivers':
+        specifier: workspace:*
+        version: link:../../packages/drivers
       '@kestrel/engine':
         specifier: workspace:*
         version: link:../../packages/engine
       '@kestrel/model':
         specifier: workspace:*
         version: link:../../packages/model
+      '@kestrel/panel-ui':
+        specifier: workspace:*
+        version: link:../../packages/panel-ui
       '@supabase/ssr':
         specifier: ^0.12.7
         version: 0.12.7(@supabase/supabase-js@2.117.0)

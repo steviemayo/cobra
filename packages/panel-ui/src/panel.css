@@ -13,6 +13,8 @@
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   user-select: none;
+  /* Respond to the panel's own width, not the browser window: it may sit in a small frame. */
+  container-type: inline-size;
 }
 .kp-app *,
 .kp-app *::before,
@@ -409,8 +411,8 @@
   transition: width 120ms ease-out;
 }
 
-/* Narrow screens (phones, small tablets in portrait): nav becomes a row */
-@media (max-width: 720px) {
+/* Narrow panels (phones, small tablets in portrait, embedded previews): nav becomes a row */
+@container (max-width: 720px) {
   .kp-body {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;

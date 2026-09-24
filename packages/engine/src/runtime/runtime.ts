@@ -100,6 +100,10 @@ export class RoomRuntime implements PanelClient {
     for (const [source] of this.detectors) this.lastPresence.set(source, this.presence(source));
     this.snapshot = this.buildSnapshot();
     this.unsubscribe = this.bus.subscribe((e) => this.onDeviceEvent(e));
+    // Panels pass these around as callbacks; keep `this` attached.
+    this.getSnapshot = this.getSnapshot.bind(this);
+    this.subscribe = this.subscribe.bind(this);
+    this.dispatch = this.dispatch.bind(this);
   }
 
   // ---- PanelClient ----------------------------------------------------------------------------

@@ -35,7 +35,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
   const pathname = usePathname();
   const { orgId, canEdit } = useOrg();
   const { room, isPending } = useRoom(roomId);
-  const onDesign = pathname.endsWith('/design');
+  const onDesign = pathname.endsWith('/design') || pathname.endsWith('/simulate');
   const shellWidth = onDesign ? 'max-w-none' : 'max-w-6xl';
   const invalidate = useInvalidateEstate();
   const [deleting, setDeleting] = useState(false);
@@ -136,6 +136,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
           tabs={[
             { label: 'Overview', href: base, exact: true },
             { label: 'Design', href: `${base}/design` },
+            { label: 'Simulate', href: `${base}/simulate` },
             { label: 'Devices', href: `${base}/devices` },
             { label: 'Deployments', href: `${base}/deployments`, soon: true },
             { label: 'Monitoring', href: `${base}/monitoring`, soon: true },

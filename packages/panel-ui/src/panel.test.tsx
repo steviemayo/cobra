@@ -21,8 +21,24 @@ const base = (): PanelViewModel => ({
         { id: 'laptop2', label: 'Laptop 2', present: true, selected: false },
       ],
     },
-    { id: 'record', name: 'Record', kind: 'record', active: false, busy: false, overlay: true, sources: [] },
-    { id: 'room_off', name: 'Room Off', kind: 'room_off', active: true, busy: false, overlay: false, sources: [] },
+    {
+      id: 'record',
+      name: 'Record',
+      kind: 'record',
+      active: false,
+      busy: false,
+      overlay: true,
+      sources: [],
+    },
+    {
+      id: 'room_off',
+      name: 'Room Off',
+      kind: 'room_off',
+      active: true,
+      busy: false,
+      overlay: false,
+      sources: [],
+    },
   ],
   volume: { available: true, level: 50, muted: false },
   message: { text: { key: 'room_off', params: {} }, tone: 'info' },
@@ -84,7 +100,9 @@ describe('when the room is off', () => {
     const { client, dispatched } = fakeClient(base());
     render(<PanelApp client={client} />);
     fireEvent.click(screen.getAllByRole('button', { name: /Present/ }).at(-1)!);
-    expect(dispatched).toEqual([{ type: 'activity.start', activityId: 'present', sourceId: 'laptop2' }]);
+    expect(dispatched).toEqual([
+      { type: 'activity.start', activityId: 'present', sourceId: 'laptop2' },
+    ]);
   });
 
   it('falls back to the first source when none has a cable', () => {
@@ -112,14 +130,18 @@ describe('when the room is on', () => {
     const { client, dispatched } = fakeClient(on());
     render(<PanelApp client={client} />);
     fireEvent.click(screen.getByRole('button', { name: /Laptop 2/ }));
-    expect(dispatched).toEqual([{ type: 'activity.start', activityId: 'present', sourceId: 'laptop2' }]);
+    expect(dispatched).toEqual([
+      { type: 'activity.start', activityId: 'present', sourceId: 'laptop2' },
+    ]);
   });
 
   it('tapping Room Off in the nav sends it', () => {
     const { client, dispatched } = fakeClient(on());
     render(<PanelApp client={client} />);
     fireEvent.click(screen.getByRole('button', { name: 'Room Off' }));
-    expect(dispatched).toEqual([{ type: 'activity.start', activityId: 'room_off', sourceId: undefined }]);
+    expect(dispatched).toEqual([
+      { type: 'activity.start', activityId: 'room_off', sourceId: undefined },
+    ]);
   });
 
   it('Record toggles: start, then stop', () => {
@@ -143,10 +165,15 @@ describe('when the room is on', () => {
       { id: 'laptop1', label: 'Laptop 1', present: false, selected: false },
       { id: 'laptop2', label: 'Laptop 2', present: true, selected: true },
     ];
-    changed.message = { text: { key: 'presenting', params: { source: 'Laptop 2' } }, tone: 'success' };
+    changed.message = {
+      text: { key: 'presenting', params: { source: 'Laptop 2' } },
+      tone: 'success',
+    };
     set(changed);
     expect(screen.getByText('Showing Laptop 2.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Laptop 2/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: /Laptop 2/ }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
   });
 
   it('shows progress while starting', () => {
@@ -163,7 +190,9 @@ describe('when the room is on', () => {
     vm.message = { text: { key: 'fault_device', params: { device: 'Display 2' } }, tone: 'error' };
     const { client } = fakeClient(vm);
     render(<PanelApp client={client} />);
-    expect(screen.getByText("Display 2 isn't responding. Try again, or contact support.")).toBeTruthy();
+    expect(
+      screen.getByText("Display 2 isn't responding. Try again, or contact support."),
+    ).toBeTruthy();
   });
 });
 
@@ -200,7 +229,9 @@ describe('volume', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mute' }));
     expect(dispatched).toEqual([{ type: 'mute.set', muted: true }]);
     set(on({ volume: { available: true, level: 50, muted: true } }));
-    expect(screen.getByRole('button', { name: 'Unmute' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Unmute' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
     expect(screen.getByText('—')).toBeTruthy();
   });
 
@@ -214,7 +245,11 @@ describe('volume', () => {
 describe('prompts and warnings', () => {
   it('asks to switch source, with a countdown, and sends the answer', () => {
     const vm = on({
-      prompt: { id: 'p1', text: { key: 'switch_source', params: { source: 'Laptop 2' } }, secondsLeft: 8 },
+      prompt: {
+        id: 'p1',
+        text: { key: 'switch_source', params: { source: 'Laptop 2' } },
+        secondsLeft: 8,
+      },
     });
     const { client, dispatched } = fakeClient(vm);
     render(<PanelApp client={client} />);
@@ -257,11 +292,16 @@ describe('translation and theming', () => {
   });
 
   it('applies an organisation theme through CSS variables', () => {
-    const style = themeStyle({ ...lightTheme, accent: '#ff0066', logoUrl: 'x.png' }) as Record<string, string>;
+    const style = themeStyle({ ...lightTheme, accent: '#ff0066', logoUrl: 'x.png' }) as Record<
+      string,
+      string
+    >;
     expect(style['--kp-accent']).toBe('#ff0066');
     expect(style['--kp-bg']).toBe('#f4f6f8');
     const { client } = fakeClient(base());
-    const { container } = render(<PanelApp client={client} theme={{ ...lightTheme, logoUrl: 'logo.png' }} />);
+    const { container } = render(
+      <PanelApp client={client} theme={{ ...lightTheme, logoUrl: 'logo.png' }} />,
+    );
     expect(container.querySelector('.kp-app')!.getAttribute('data-mode')).toBe('light');
     expect(container.querySelector('img.kp-logo')!.getAttribute('src')).toBe('logo.png');
   });

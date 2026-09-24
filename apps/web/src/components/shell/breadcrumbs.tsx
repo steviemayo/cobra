@@ -29,6 +29,7 @@ const SECTION_LABEL: Record<string, string> = {
 
 const ROOM_TAB_LABEL: Record<string, string> = {
   design: 'Design',
+  simulate: 'Simulate',
   devices: 'Devices',
   settings: 'Settings',
 };
