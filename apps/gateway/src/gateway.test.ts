@@ -175,8 +175,9 @@ describe('verification', () => {
   it('never starts a room whose first release is tampered with, and reports why', async () => {
     cloud.assign(ROOM, model(), { tamper: true });
     const { gateway, host } = boot();
-    gateway.start();
-    await until(() => cloud.heartbeats.length >= 1);
+    // Two ticks by hand: the first learns the assignment and refuses it, the second reports that.
+    // (Not start(): its own background tick could overlap these and make the last heartbeat a stale one.)
+    await gateway.tick();
     await gateway.tick();
     expect(host.ids()).toEqual([]);
     const report = cloud.heartbeats.at(-1)!.rooms.find((r) => r.roomId === ROOM)!;
