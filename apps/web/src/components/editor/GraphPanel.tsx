@@ -170,7 +170,7 @@ export function GraphPanel({ model, update, issues }: PanelProps) {
         to remove it. Layout is for this session only.
       </p>
       {message && <p className="text-sm text-destructive">{message}</p>}
-      <div className="h-[620px] overflow-hidden rounded-lg border border-border">
+      <div className="h-[max(440px,calc(100vh-26rem))] overflow-hidden rounded-lg border border-border">
         <ReactFlow
           colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
           nodes={nodes}

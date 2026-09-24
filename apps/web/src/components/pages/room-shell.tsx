@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { DoorOpen, MoreHorizontal, PencilRuler, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -32,8 +32,11 @@ export function useRoom(roomId: string) {
 export function RoomShell({ roomId, children }: { roomId: string; children: React.ReactNode }) {
   const trpc = useTRPC();
   const router = useRouter();
+  const pathname = usePathname();
   const { orgId, canEdit } = useOrg();
   const { room, isPending } = useRoom(roomId);
+  const onDesign = pathname.endsWith('/design');
+  const shellWidth = onDesign ? 'max-w-none' : 'max-w-6xl';
   const invalidate = useInvalidateEstate();
   const [deleting, setDeleting] = useState(false);
 
@@ -79,7 +82,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
   const base = orgPath(orgId, `/rooms/${roomId}`);
   return (
     <>
-      <div className="space-y-4 px-4 pt-6 sm:px-6">
+      <div className={`mx-auto w-full space-y-4 px-4 pt-6 sm:px-6 ${shellWidth}`}>
         <PageHeader
           title={room.name}
           meta={
@@ -102,10 +105,12 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
           }
           actions={
             <>
-              <Link href={`${base}/design`} className={buttonVariants({ size: 'sm' })}>
-                <PencilRuler data-icon="inline-start" />
-                {canEdit ? 'Open designer' : 'View design'}
-              </Link>
+              {!onDesign && (
+                <Link href={`${base}/design`} className={buttonVariants({ size: 'sm' })}>
+                  <PencilRuler data-icon="inline-start" />
+                  {canEdit ? 'Open designer' : 'View design'}
+                </Link>
+              )}
               {canEdit && (
                 <DropdownMenu>
                   <DropdownMenuTrigger

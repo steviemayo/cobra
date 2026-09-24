@@ -15,6 +15,7 @@ import {
   Users,
 } from 'lucide-react';
 import {
+  Command,
   CommandDialog,
   CommandEmpty,
   CommandGroup,
@@ -69,93 +70,95 @@ export function CommandMenu({ children }: { children: React.ReactNode }) {
         title="Search Kestrel"
         description="Jump to a site, room or page"
       >
-        <CommandInput placeholder="Search sites, rooms and pages…" />
-        <CommandList>
-          <CommandEmpty>Nothing found.</CommandEmpty>
-          <CommandGroup heading="Go to">
-            <CommandItem onSelect={() => go('')}>
-              <LayoutDashboard /> Overview
-            </CommandItem>
-            <CommandItem onSelect={() => go('/sites')}>
-              <Building2 /> Sites
-            </CommandItem>
-            <CommandItem onSelect={() => go('/rooms')}>
-              <DoorOpen /> Rooms
-            </CommandItem>
-            {canEdit && (
-              <CommandItem onSelect={() => go('/templates')}>
-                <LayoutTemplate /> Templates
+        <Command>
+          <CommandInput placeholder="Search sites, rooms and pages…" />
+          <CommandList>
+            <CommandEmpty>Nothing found.</CommandEmpty>
+            <CommandGroup heading="Go to">
+              <CommandItem onSelect={() => go('')}>
+                <LayoutDashboard /> Overview
               </CommandItem>
-            )}
-            <CommandItem onSelect={() => go('/gateways')}>
-              <Router /> Gateways
-            </CommandItem>
-            {canSeeTeam && (
+              <CommandItem onSelect={() => go('/sites')}>
+                <Building2 /> Sites
+              </CommandItem>
+              <CommandItem onSelect={() => go('/rooms')}>
+                <DoorOpen /> Rooms
+              </CommandItem>
+              {canEdit && (
+                <CommandItem onSelect={() => go('/templates')}>
+                  <LayoutTemplate /> Templates
+                </CommandItem>
+              )}
+              <CommandItem onSelect={() => go('/gateways')}>
+                <Router /> Gateways
+              </CommandItem>
+              {canSeeTeam && (
+                <>
+                  <CommandItem onSelect={() => go('/team')}>
+                    <Users /> Team
+                  </CommandItem>
+                  <CommandItem onSelect={() => go('/settings/activity')}>
+                    <Activity /> Activity log
+                  </CommandItem>
+                  <CommandItem onSelect={() => go('/settings')}>
+                    <Settings /> Organisation settings
+                  </CommandItem>
+                </>
+              )}
+            </CommandGroup>
+            {sites.length > 0 && (
               <>
-                <CommandItem onSelect={() => go('/team')}>
-                  <Users /> Team
-                </CommandItem>
-                <CommandItem onSelect={() => go('/settings/activity')}>
-                  <Activity /> Activity log
-                </CommandItem>
-                <CommandItem onSelect={() => go('/settings')}>
-                  <Settings /> Organisation settings
-                </CommandItem>
+                <CommandSeparator />
+                <CommandGroup heading="Sites">
+                  {sites.map((s) => (
+                    <CommandItem
+                      key={s.id}
+                      value={`site ${s.name}`}
+                      onSelect={() => go(`/sites/${s.id}`)}
+                    >
+                      <Building2 /> {s.name}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
               </>
             )}
-          </CommandGroup>
-          {sites.length > 0 && (
-            <>
-              <CommandSeparator />
-              <CommandGroup heading="Sites">
-                {sites.map((s) => (
-                  <CommandItem
-                    key={s.id}
-                    value={`site ${s.name}`}
-                    onSelect={() => go(`/sites/${s.id}`)}
-                  >
-                    <Building2 /> {s.name}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </>
-          )}
-          {rooms.length > 0 && (
-            <>
-              <CommandSeparator />
-              <CommandGroup heading="Rooms">
-                {rooms.map((r) => (
-                  <CommandItem
-                    key={r.id}
-                    value={`room ${r.name} ${r.site.name}`}
-                    onSelect={() => go(`/rooms/${r.id}`)}
-                  >
-                    <DoorOpen /> {r.name}
-                    <span className="ml-auto text-xs text-muted-foreground">{r.site.name}</span>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </>
-          )}
-          <CommandSeparator />
-          <CommandGroup heading="Actions">
-            {canEdit && (
+            {rooms.length > 0 && (
               <>
-                <CommandItem onSelect={() => run(openNewSite)}>
-                  <Plus /> New site
-                </CommandItem>
-                <CommandItem onSelect={() => run(() => openNewRoom())}>
-                  <Plus /> New room
-                </CommandItem>
+                <CommandSeparator />
+                <CommandGroup heading="Rooms">
+                  {rooms.map((r) => (
+                    <CommandItem
+                      key={r.id}
+                      value={`room ${r.name} ${r.site.name}`}
+                      onSelect={() => go(`/rooms/${r.id}`)}
+                    >
+                      <DoorOpen /> {r.name}
+                      <span className="ml-auto text-xs text-muted-foreground">{r.site.name}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
               </>
             )}
-            <CommandItem
-              onSelect={() => run(() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark'))}
-            >
-              <Moon /> Toggle dark mode
-            </CommandItem>
-          </CommandGroup>
-        </CommandList>
+            <CommandSeparator />
+            <CommandGroup heading="Actions">
+              {canEdit && (
+                <>
+                  <CommandItem onSelect={() => run(openNewSite)}>
+                    <Plus /> New site
+                  </CommandItem>
+                  <CommandItem onSelect={() => run(() => openNewRoom())}>
+                    <Plus /> New room
+                  </CommandItem>
+                </>
+              )}
+              <CommandItem
+                onSelect={() => run(() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark'))}
+              >
+                <Moon /> Toggle dark mode
+              </CommandItem>
+            </CommandGroup>
+          </CommandList>
+        </Command>
       </CommandDialog>
     </PaletteContext.Provider>
   );
