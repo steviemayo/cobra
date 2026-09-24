@@ -22,6 +22,32 @@ const TONE_ICON = {
   error: 'warning',
 };
 
+function CombineBar({
+  vm,
+  t,
+  dispatch,
+}: {
+  vm: PanelViewModel;
+  t: Translate;
+  dispatch: PanelClient['dispatch'];
+}) {
+  const c = vm.combination;
+  if (c?.role !== 'primary') return null;
+  const rooms = c.rooms.join(', ');
+  return (
+    <div className="kp-banner kp-tone-info" role="group">
+      <span>{c.combined ? t('combine.status', { rooms }) : t('combine.join', { rooms })}</span>
+      <button
+        type="button"
+        className="kp-btn"
+        onClick={() => dispatch({ type: 'combine.set', combined: !c.combined })}
+      >
+        {c.combined ? t('combine.split') : t('combine.join', { rooms })}
+      </button>
+    </div>
+  );
+}
+
 function StatusBanner({ vm, t }: { vm: PanelViewModel; t: Translate }) {
   if (!vm.message) return null;
   const { text, tone } = vm.message;
@@ -146,6 +172,7 @@ export function PanelApp({
     vm.activities.find((a) => a.kind !== 'room_off' && !a.overlay) ??
     vm.activities[0];
   const off = vm.status === 'off';
+  const following = vm.combination?.role === 'secondary' && vm.combination.combined;
 
   const choose = (a: PanelActivity) => {
     setPicked(a.id);
@@ -161,6 +188,21 @@ export function PanelApp({
       dispatch({ type: 'activity.start', activityId: a.id, sourceId: defaultSource(a) });
     }
   };
+
+  if (following)
+    return (
+      <div className={`kp-app ${className ?? ''}`} data-mode={theme.mode} style={themeStyle(theme)}>
+        <header className="kp-header">
+          <div className="kp-brand">
+            {theme.logoUrl && <img className="kp-logo" src={theme.logoUrl} alt="" />}
+            <h1>{vm.roomName}</h1>
+          </div>
+        </header>
+        <main className="kp-main">
+          <StatusBanner vm={vm} t={t} />
+        </main>
+      </div>
+    );
 
   return (
     <div className={`kp-app ${className ?? ''}`} data-mode={theme.mode} style={themeStyle(theme)}>
@@ -193,6 +235,7 @@ export function PanelApp({
 
         <main className="kp-main">
           <StatusBanner vm={vm} t={t} />
+          <CombineBar vm={vm} t={t} dispatch={dispatch} />
           <PromptBar vm={vm} t={t} dispatch={dispatch} />
           <WarningBar vm={vm} t={t} dispatch={dispatch} />
 

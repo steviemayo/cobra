@@ -53,6 +53,7 @@ model Org {
   billing         OrgBilling?
   controlIntents  ControlIntent[]
   controlSessions ControlSession[]
+  combinations    RoomCombination[]
 }
 
 model Member {
@@ -525,4 +526,23 @@ model ControlIntent {
 
   @@index([gatewayId, deliveredAt])
   @@index([roomId, createdAt])
+}
+
+// Rooms that can be joined into one. While combined, the primary's panel controls all of them.
+model RoomCombination {
+  id               String   @id @default(uuid()) @db.Uuid
+  orgId            String   @db.Uuid
+  name             String
+  primaryRoomId    String   @db.Uuid
+  secondaryRoomIds String[] @db.Uuid
+  /// follow: mirror what the primary shows. blank: keep the secondary's displays off.
+  secondaryVideo   String   @default("follow")
+  secondaryAudio   String   @default("follow")
+  /// What the gateway last reported. The gateway owns the live state.
+  combined         Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
 }

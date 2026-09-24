@@ -16,6 +16,7 @@ const es: Dictionary = {
   fault_generic: 'Algo salió mal. Inténtelo de nuevo o contacte con soporte.',
   switch_source: 'Se acaba de conectar {source}. ¿Cambiar a él?',
   auto_off: 'Parece que nadie usa esta sala. Se apagará en breve.',
+  combined_secondary: 'Esta sala está combinada con {room}. Use el panel de esa sala.',
   'nav.label': 'Actividades',
   'status.off': 'Apagada',
   'status.starting': 'Iniciando',
@@ -45,6 +46,9 @@ const es: Dictionary = {
   'pin.title': 'Introduzca el PIN',
   'pin.submit': 'Desbloquear',
   'pin.clear': 'Borrar',
+  'combine.join': 'Combinar con {rooms}',
+  'combine.split': 'Separar salas',
+  'combine.status': 'Combinada con {rooms}',
 };
 
 const fr: Dictionary = {
@@ -60,6 +64,7 @@ const fr: Dictionary = {
   fault_generic: 'Un problème est survenu. Réessayez ou contactez l’assistance.',
   switch_source: '{source} vient d’être branché. Basculer dessus ?',
   auto_off: 'Personne ne semble utiliser cette salle. Extinction imminente.',
+  combined_secondary: 'Cette salle est associée à {room}. Utilisez le panneau de cette salle.',
   'nav.label': 'Activités',
   'status.off': 'Éteinte',
   'status.starting': 'Démarrage',
@@ -89,6 +94,9 @@ const fr: Dictionary = {
   'pin.title': 'Saisissez le code PIN',
   'pin.submit': 'Déverrouiller',
   'pin.clear': 'Effacer',
+  'combine.join': 'Associer avec {rooms}',
+  'combine.split': 'Séparer les salles',
+  'combine.status': 'Associée avec {rooms}',
 };
 
 const de: Dictionary = {
@@ -106,6 +114,8 @@ const de: Dictionary = {
     'Etwas ist schiefgelaufen. Versuchen Sie es erneut oder wenden Sie sich an den Support.',
   switch_source: '{source} wurde gerade angeschlossen. Dorthin wechseln?',
   auto_off: 'Anscheinend nutzt niemand diesen Raum. Er wird gleich ausgeschaltet.',
+  combined_secondary:
+    'Dieser Raum ist mit {room} verbunden. Nutzen Sie das Bedienfeld dieses Raums.',
   'nav.label': 'Aktivitäten',
   'status.off': 'Aus',
   'status.starting': 'Startet',
@@ -135,6 +145,9 @@ const de: Dictionary = {
   'pin.title': 'PIN eingeben',
   'pin.submit': 'Entsperren',
   'pin.clear': 'Löschen',
+  'combine.join': 'Mit {rooms} verbinden',
+  'combine.split': 'Räume trennen',
+  'combine.status': 'Verbunden mit {rooms}',
 };
 
 export const LANGUAGES: Record<string, { label: string; dictionary: Dictionary }> = {

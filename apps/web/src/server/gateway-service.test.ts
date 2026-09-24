@@ -112,6 +112,7 @@ function world() {
   const org = table([{ id: ORG, createdAt: new Date() }]);
   const controlSession = table([]);
   const controlIntent = table([]);
+  const roomCombination = table([]);
   const db = {
     gateway,
     room,
@@ -129,6 +130,7 @@ function world() {
     org,
     controlSession,
     controlIntent,
+    roomCombination,
   } as unknown as Db;
   return {
     db,
@@ -148,6 +150,7 @@ function world() {
     org,
     controlSession,
     controlIntent,
+    roomCombination,
   };
 }
 

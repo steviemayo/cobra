@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   LayoutTemplate,
   LifeBuoy,
+  Link2,
   Moon,
   Plus,
   Rocket,
@@ -98,6 +99,9 @@ export function CommandMenu({ children }: { children: React.ReactNode }) {
               </CommandItem>
               <CommandItem onSelect={() => go('/deployments')}>
                 <Rocket /> Deployments
+              </CommandItem>
+              <CommandItem onSelect={() => go('/combinations')}>
+                <Link2 /> Combined rooms
               </CommandItem>
               <CommandItem onSelect={() => go('/monitoring')}>
                 <Activity /> Monitoring

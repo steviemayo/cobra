@@ -136,6 +136,44 @@ export async function queueHook(
   return { ok: true };
 }
 
+/** Asks a combination's gateway to join or split it. The gateway confirms in its next heartbeat. */
+export async function queueCombine(
+  db: ControlDb & Pick<PrismaClient, 'roomCombination'>,
+  input: { orgId: string; combinationId: string; combined: boolean; by: string | null },
+  now = new Date(),
+): Promise<IntentResult> {
+  const combo = await db.roomCombination.findFirst({
+    where: { id: input.combinationId, orgId: input.orgId },
+  });
+  if (!combo) return { ok: false, error: 'Combination not found' };
+  const room = await db.room.findFirst({ where: { id: combo.primaryRoomId, orgId: input.orgId } });
+  if (!room?.gatewayId) return { ok: false, error: 'The main room is not running on a gateway' };
+  const recent = await db.controlIntent.count({
+    where: { roomId: room.id, createdAt: { gte: new Date(now.getTime() - 60_000) } },
+  });
+  if (recent >= MAX_HOOKS_PER_MINUTE) return { ok: false, error: 'Slow down a little' };
+  await db.controlIntent.create({
+    data: {
+      orgId: input.orgId,
+      roomId: room.id,
+      gatewayId: room.gatewayId,
+      intent: { type: 'combination.set', combinationId: combo.id, combined: input.combined },
+      createdBy: input.by,
+      createdAt: now,
+    },
+  });
+  await db.auditLog.create({
+    data: {
+      orgId: input.orgId,
+      actorId: input.by,
+      action: 'combination.set',
+      target: combo.id,
+      meta: { name: combo.name, combined: input.combined },
+    },
+  });
+  return { ok: true };
+}
+
 /** Whether a webhook is waiting for this gateway, so its next heartbeat can ask it to poll. */
 export async function hasWaitingIntents(
   db: ControlDb,
@@ -204,7 +242,9 @@ export async function poll(
     });
     if (count === 0) continue;
     const intent = GatewayIntent.safeParse(i.intent);
-    const ttl = intent.success && intent.data.type === 'hook' ? HOOK_TTL_MS : INTENT_TTL_MS;
+    const patient =
+      intent.success && (intent.data.type === 'hook' || intent.data.type === 'combination.set');
+    const ttl = patient ? HOOK_TTL_MS : INTENT_TTL_MS;
     if (now.getTime() - (i.createdAt as Date).getTime() > ttl) continue;
     if (intent.success && ownRooms.has(i.roomId))
       fresh.push({ id: i.id, roomId: i.roomId, intent: intent.data });

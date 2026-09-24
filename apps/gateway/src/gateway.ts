@@ -16,6 +16,7 @@ import {
 } from '@kestrel/model';
 import { CloudClient, CloudError } from './cloud';
 import type { GatewayConfig } from './config';
+import { CombineCoordinator } from './combine';
 import { runCommand } from './commands';
 import type { Logger } from './log';
 import type { RoomHost } from './room-host';
@@ -77,7 +78,11 @@ export class Gateway {
     private readonly cloud: CloudClient,
     private readonly host: RoomHost,
     private readonly log: Logger,
-  ) {}
+  ) {
+    this.combine = new CombineCoordinator(host, store, log);
+  }
+
+  private readonly combine: CombineCoordinator;
 
   // ---- Lifecycle ------------------------------------------------------------------------------
 
@@ -206,6 +211,7 @@ export class Gateway {
         configVersion: this.store.get(KEY_CONFIG_VERSION),
         rooms: this.roomReports(),
         commandResults: results,
+        combinations: this.combine.report(),
       })
       .catch((e: unknown) => {
         if (e instanceof CloudError && e.unauthorised)
@@ -251,7 +257,9 @@ export class Gateway {
       for (const { roomId, intent } of res.intents) {
         const runtime = this.host.get(roomId)?.runtime;
         if (!runtime) continue;
-        if (intent.type === 'hook') {
+        if (intent.type === 'combination.set')
+          this.combine.set(intent.combinationId, intent.combined);
+        else if (intent.type === 'hook') {
           const ran = runtime.fireHook(intent.hookName);
           this.log('info', 'Webhook received', { roomId, hook: intent.hookName, triggers: ran });
         } else runtime.dispatch(intent);
@@ -353,6 +361,7 @@ export class Gateway {
   private async syncConfig(credential: string): Promise<boolean> {
     const config: ConfigResponse = await this.cloud.config(credential);
     if (config.publicKeys.length) this.store.setJson(KEY_PUBLIC_KEYS, config.publicKeys);
+    this.combine.setConfig(config.combinations);
     const keys = this.trustedKeys();
     const wanted = new Map(config.rooms.map((r) => [r.roomId, r]));
     let progressed = false;

@@ -8,6 +8,7 @@ import {
   BellRing,
   Building2,
   ChevronRight,
+  Link2,
   DoorOpen,
   LayoutDashboard,
   LayoutTemplate,
@@ -220,6 +221,9 @@ export function AppSidebar() {
               {canSupport && <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />}
               {canSupport && (
                 <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />
+              )}
+              {canSupport && (
+                <NavItem href={`${base}/combinations`} icon={Link2} label="Combined rooms" />
               )}
               <NavItem href={`${base}/monitoring`} icon={Activity} label="Monitoring" />
               {canSupport && (

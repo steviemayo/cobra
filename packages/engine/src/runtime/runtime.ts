@@ -4,6 +4,7 @@ import {
   type DeviceBus,
   type DeviceEvent,
   type PanelClient,
+  type PanelCombination,
   type PanelViewModel,
   type RoomModel,
   type RoomStatus,
@@ -20,6 +21,8 @@ export interface RuntimeOptions {
   bus: DeviceBus;
   /** Per-step limit passed to the executor. */
   stepTimeoutMs?: number;
+  /** The panel asked to join or split the room with its combined partners. */
+  onCombine?: (combined: boolean) => void;
 }
 
 interface Primary {
@@ -74,6 +77,9 @@ export class RoomRuntime implements PanelClient {
   private warningDeadline: number | null = null;
   private savedUntil = 0;
   private lastPresence = new Map<string, boolean | null>();
+  private combination: PanelCombination | null = null;
+  private secondary: { video: 'follow' | 'blank'; audio: 'follow' | 'blank' } | null = null;
+  private followedActivity: string | null = null;
   private lastOccupied = new Map<string, boolean | undefined>();
 
   private runId = 0;
@@ -125,6 +131,8 @@ export class RoomRuntime implements PanelClient {
     const intent = parsed.data;
     // Any touch counts as someone being here: cancel a pending auto-off.
     if (intent.type !== 'warning.dismiss') this.userPresent();
+    // While combined as a secondary, the primary room's panel is in charge.
+    if (this.secondary && intent.type !== 'combine.set') return;
     switch (intent.type) {
       case 'activity.start':
         return void this.startActivity(intent.activityId, intent.sourceId);
@@ -140,6 +148,9 @@ export class RoomRuntime implements PanelClient {
         return this.respondToPrompt(intent.promptId, intent.accept);
       case 'warning.dismiss':
         return this.dismissWarning();
+      case 'combine.set':
+        if (this.combination?.role === 'primary') this.opts.onCombine?.(intent.combined);
+        return;
     }
   }
 
@@ -152,6 +163,62 @@ export class RoomRuntime implements PanelClient {
     this.clearWarning();
     this.stopTicker();
     this.listeners.clear();
+  }
+
+  // ---- Combined rooms -------------------------------------------------------------------------
+
+  /** What this room shows about being combinable. null: this room is not part of any combination. */
+  setCombination(info: PanelCombination | null) {
+    this.combination = info;
+    this.notify();
+  }
+
+  /**
+   * Put this room under another's control (or release it with null). Releasing turns the room off,
+   * so splitting always leaves both rooms in a known state.
+   */
+  setSecondary(mode: { video: 'follow' | 'blank'; audio: 'follow' | 'blank' } | null) {
+    if (this.disposed) return;
+    const was = this.secondary;
+    this.secondary = mode;
+    this.followedActivity = null;
+    if (was && !mode && this.status !== 'off') void this.roomOff();
+    this.notify();
+  }
+
+  /**
+   * Mirror the primary room. Video: run the primary's activity here (an activity with the same id,
+   * using the same source id if this room has it), or blank the displays. Audio: match its volume
+   * and mute, or keep this room's speakers muted.
+   */
+  follow(primary: PanelViewModel) {
+    const mode = this.secondary;
+    if (!mode || this.disposed) return;
+    const live = primary.status === 'on' || primary.status === 'starting';
+    const active = live
+      ? primary.activities.find((a) => a.active && a.kind !== 'room_off' && !a.overlay)
+      : undefined;
+
+    if (!active || mode.video === 'blank') {
+      this.followedActivity = null;
+      if (this.status !== 'off' && this.status !== 'stopping') void this.roomOff();
+    } else {
+      const chosen = active.sources.find((s) => s.selected)?.id;
+      const key = `${active.id}:${chosen ?? ''}`;
+      const mine = this.activities.find((a) => a.id === active.id);
+      if (mine && key !== this.followedActivity) {
+        this.followedActivity = key;
+        const source = mine.sources.some((s) => s.id === chosen) ? chosen : undefined;
+        void this.startActivity(mine.id, source);
+      }
+    }
+
+    if (mode.audio === 'follow') {
+      if (primary.volume.available && primary.volume.level !== this.volume)
+        this.setVolume(primary.volume.level);
+      if (primary.volume.available && primary.volume.muted !== this.muted)
+        void this.setMuted(primary.volume.muted);
+    } else if (!this.muted && this.volumeDevices.length > 0) void this.setMuted(true);
   }
 
   // ---- Triggers -------------------------------------------------------------------------------
@@ -632,6 +699,11 @@ export class RoomRuntime implements PanelClient {
     else if (this.status === 'on')
       message = { text: { key: 'ready', params: {} }, tone: 'success' };
     else message = { text: { key: 'room_off', params: {} }, tone: 'info' };
+    if (this.secondary && this.combination)
+      message = {
+        text: { key: 'combined_secondary', params: { room: this.combination.rooms[0] ?? '' } },
+        tone: 'info',
+      };
 
     const promptSource = this.prompt
       ? activitySources(
@@ -667,6 +739,7 @@ export class RoomRuntime implements PanelClient {
               secondsLeft: this.secondsLeft(this.warningDeadline) ?? 0,
             }
           : null,
+      ...(this.combination ? { combination: this.combination } : {}),
     };
   }
 }

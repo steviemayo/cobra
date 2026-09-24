@@ -56,6 +56,14 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `asked “${s(meta.room)}” to ${s(meta.type).replace('_', ' ')}`;
     case 'command.result':
       return `the gateway finished a ${s(meta.type).replace('_', ' ')} command (${meta.ok ? 'worked' : 'failed'})`;
+    case 'combination.create':
+      return `set up combined rooms “${s(meta.name)}”`;
+    case 'combination.update':
+      return `changed combined rooms “${s(meta.name)}”`;
+    case 'combination.delete':
+      return `removed combined rooms “${s(meta.name)}”`;
+    case 'combination.set':
+      return `${meta.combined ? 'joined' : 'split'} “${s(meta.name)}”`;
     case 'room.hook_secret':
       return `generated a new webhook secret for “${s(meta.room)}”`;
     case 'hook.fire':

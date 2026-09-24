@@ -61,6 +61,7 @@ export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger
 export class RoomHost {
   private readonly rooms = new Map<string, LoadedRoom>();
   private readonly reloadListeners = new Set<(roomId: string) => void>();
+  private combineListener: ((roomId: string, combined: boolean) => void) | null = null;
 
   constructor(
     private readonly mode: SimulateMode,
@@ -86,6 +87,11 @@ export class RoomHost {
     return () => this.reloadListeners.delete(listener);
   }
 
+  /** Set by the combine coordinator: a room's panel asked to join or split its combination. */
+  onCombineRequest(listener: (roomId: string, combined: boolean) => void) {
+    this.combineListener = listener;
+  }
+
   /** Build a room and start connecting to its devices without replacing the one that is running. */
   stage(signed: SignedManifest): LoadedRoom {
     const { manifest } = signed;
@@ -94,6 +100,7 @@ export class RoomHost {
       model: manifest.model,
       roomName: manifest.roomName,
       bus: built.bus,
+      onCombine: (combined) => this.combineListener?.(manifest.roomId, combined),
     });
     const scheduler = new TriggerScheduler(manifest.model, { fire: (t) => runtime.fire(t.run) });
     const room: LoadedRoom = {

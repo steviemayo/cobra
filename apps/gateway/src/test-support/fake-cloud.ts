@@ -36,6 +36,8 @@ export class FakeCloud {
   readonly queuedCommands: GatewayCommand[] = [];
   /** Rooms the fake portal is "controlling": the gateway is told to poll fast for them. */
   watching: string[] = [];
+  /** Combinations the fake cloud reports in the gateway's config. */
+  combinations: unknown[] = [];
   readonly queuedIntents: { id: string; roomId: string; intent: unknown }[] = [];
   readonly polls: { panels: { roomId: string; vm: unknown }[] }[] = [];
   readonly telemetry: TelemetryEvent[] = [];
@@ -46,6 +48,11 @@ export class FakeCloud {
   /** When false the cloud answers 503 to everything. */
   up = true;
   url = '';
+
+  setCombinations(list: unknown[]) {
+    this.combinations = list;
+    this.version++;
+  }
 
   async start(port = 0): Promise<this> {
     this.server = createServer((req, res) => void this.handle(req, res));
@@ -181,6 +188,7 @@ export class FakeCloud {
           manifestHash: (a.signed as { hash: string }).hash,
         })),
         publicKeys: this.extraKeys ?? this.publicKeys,
+        combinations: this.combinations,
       });
     }
     const m = /^\/rooms\/([^/]+)\/manifest$/.exec(path);
