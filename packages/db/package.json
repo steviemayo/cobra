@@ -1,0 +1,30 @@
+{
+  "name": "@kestrel/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "prisma generate",
+    "build": "prisma generate",
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@kestrel/config": "workspace:*",
+    "@types/pg": "^8.23.1",
+    "prisma": "7.10.0"
+  },
+  "dependencies": {
+    "@kestrel/model": "workspace:*",
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "dotenv": "^18.0.3",
+    "pg": "^8.23.0"
+  }
+}

@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrgRole {
+  owner
+  dev
+  support
+  customer_viewer
+}
+
+enum RoomType {
+  meeting
+  training
+}
+
+enum GatewayStatus {
+  pending
+  online
+  offline
+}
+
+model Org {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+
+  members  Member[]
+  sites    Site[]
+  gateways Gateway[]
+  rooms    Room[]
+  audit    AuditLog[]
+}
+
+model Member {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  userId    String   @db.Uuid // Supabase auth.users.id
+  role      OrgRole
+  createdAt DateTime @default(now())
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@index([userId])
+}
+
+model Site {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  name      String
+  timezone  String   @default("Australia/Sydney")
+  createdAt DateTime @default(now())
+
+  org      Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  gateways Gateway[]
+  rooms    Room[]
+
+  @@index([orgId])
+}
+
+model Gateway {
+  id             String        @id @default(uuid()) @db.Uuid
+  orgId          String        @db.Uuid
+  siteId         String        @db.Uuid
+  name           String
+  status         GatewayStatus @default(pending)
+  enrollTokenHash String?
+  lastSeenAt     DateTime?
+  createdAt      DateTime      @default(now())
+
+  org   Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site  Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  rooms Room[]
+
+  @@index([orgId])
+  @@index([siteId])
+}
+
+model Room {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  siteId    String   @db.Uuid
+  gatewayId String?  @db.Uuid
+  name      String
+  type      RoomType
+  createdAt DateTime @default(now())
+
+  org     Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site    Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  gateway Gateway? @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([siteId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  actorId   String?  @db.Uuid
+  action    String
+  target    String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+}
