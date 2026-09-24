@@ -179,10 +179,11 @@ describe('verification', () => {
     cloud.assign(ROOM, model(), { tamper: true });
     const { gateway, host } = boot();
     gateway.start();
-    await until(() => cloud.heartbeats.length >= 1);
-    await gateway.tick();
+    // start() runs its own first tick, so a tick() here can return early: wait for the heartbeat that names the room.
+    const reported = () => cloud.heartbeats.at(-1)?.rooms.find((r) => r.roomId === ROOM);
+    await until(() => !!reported()?.error, 8000);
     expect(host.ids()).toEqual([]);
-    const report = cloud.heartbeats.at(-1)!.rooms.find((r) => r.roomId === ROOM)!;
+    const report = reported()!;
     expect(report).toMatchObject({ status: 'unloaded', releaseId: null });
     expect(report.error).toContain('rejected');
     await until(() => cloud.telemetry.some((e) => e.type === 'manifest.rejected'));

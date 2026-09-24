@@ -13,7 +13,19 @@
         "KESTREL_SIGNING_KEY",
         "KESTREL_SIGNING_KEY_ID",
         "KESTREL_EXTRA_PUBLIC_KEYS",
-        "NEXT_PUBLIC_GATEWAY_IMAGE"
+        "NEXT_PUBLIC_GATEWAY_IMAGE",
+        "NEXT_PUBLIC_APP_URL",
+        "CRON_SECRET",
+        "RESEND_API_KEY",
+        "ALERT_FROM_EMAIL",
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "STRIPE_PRICE_BASIC",
+        "STRIPE_PRICE_PRO",
+        "KESTREL_SECRETS_KEY",
+        "KESTREL_ADMIN_EMAILS",
+        "GATEWAY_LATEST_STABLE",
+        "GATEWAY_LATEST_BETA"
       ],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
