@@ -60,7 +60,7 @@ export function DevicesPanel({ model, update, issues }: PanelProps) {
         </button>
       </div>
       {model.devices.length === 0 && (
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-muted-foreground">
           No devices yet. Add sources, a matrix, displays and so on.
         </p>
       )}
@@ -98,7 +98,7 @@ function DeviceCard({
         <Label text="Name">
           <TextInput value={d.name} onChange={(v) => edit((dev) => (dev.name = v))} />
         </Label>
-        <div className="text-xs text-slate-400">
+        <div className="text-xs text-muted-foreground">
           <div>{DEVICE_CATALOG[d.category].label}</div>
           <div className="font-mono">{d.id}</div>
         </div>
@@ -144,8 +144,8 @@ function DeviceCard({
       </div>
 
       <div className="space-y-1">
-        <div className="text-xs text-slate-400">Ports</div>
-        {d.ports.length === 0 && <p className="text-xs text-slate-500">No ports.</p>}
+        <div className="text-xs text-muted-foreground">Ports</div>
+        {d.ports.length === 0 && <p className="text-xs text-muted-foreground">No ports.</p>}
         {d.ports.map((p) => (
           <div key={p.id} className="flex flex-wrap items-center gap-2">
             <TextInput
@@ -221,7 +221,7 @@ function SettingsEditor({
   const [error, setError] = useState('');
   return (
     <details>
-      <summary className="cursor-pointer text-xs text-slate-400">
+      <summary className="cursor-pointer text-xs text-muted-foreground">
         Driver settings (JSON)
         {Object.keys(value).length ? ` — ${Object.keys(value).length} set` : ''}
       </summary>
@@ -241,7 +241,7 @@ function SettingsEditor({
           }
         }}
       />
-      {error && <p className="text-xs text-red-300">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </details>
   );
 }

@@ -49,7 +49,7 @@ export function StatesPanel({ model, update, issues }: PanelProps) {
           Generate Off / On from device power
         </button>
       </div>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted-foreground">
         A state is a named set of actions the room can be put into, such as Off or On.
       </p>
       {model.states.map((s) => (
@@ -69,7 +69,7 @@ export function StatesPanel({ model, update, issues }: PanelProps) {
                 onChange={(v) => edit(s.id, (x) => (x.kind = v))}
               />
             </Label>
-            <span className="font-mono text-xs text-slate-500">{s.id}</span>
+            <span className="font-mono text-xs text-muted-foreground">{s.id}</span>
             <div className="ml-auto">
               <ConfirmButton
                 label="Delete"

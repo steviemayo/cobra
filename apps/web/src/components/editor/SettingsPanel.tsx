@@ -55,7 +55,7 @@ export function SettingsPanel({ model, update }: PanelProps) {
             onChange={(v) => update((m) => void (m.settings.autoOff.warnSeconds = v))}
           />
         </Label>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted-foreground">
           Auto-off never runs in rooms that cannot detect signal.
         </p>
       </div>
@@ -68,7 +68,7 @@ export function SettingsPanel({ model, update }: PanelProps) {
         />
       </Label>
       <div className="space-y-1">
-        <div className="text-xs text-slate-400">Extra controls shown to users</div>
+        <div className="text-xs text-muted-foreground">Extra controls shown to users</div>
         {(['lights', 'blinds', 'camera'] as const).map((k) => (
           <label key={k} className="flex items-center gap-2 text-sm capitalize">
             <input

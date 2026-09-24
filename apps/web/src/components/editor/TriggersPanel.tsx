@@ -45,7 +45,7 @@ export function TriggersPanel({ model, update, issues }: PanelProps) {
           Add trigger
         </button>
       </div>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted-foreground">
         Triggers start an activity or state automatically, e.g. when a laptop is plugged in.
       </p>
       {model.triggers.map((t) => (
@@ -54,7 +54,7 @@ export function TriggersPanel({ model, update, issues }: PanelProps) {
             <Label text="Name">
               <TextInput value={t.name} onChange={(v) => edit(t.id, (x) => (x.name = v))} />
             </Label>
-            <span className="pb-1 text-xs text-slate-400">
+            <span className="pb-1 text-xs text-muted-foreground">
               {TRIGGER_TYPES.find((x) => x.type === t.type)?.label}
             </span>
             <label className="flex items-center gap-1.5 pb-1 text-sm">
