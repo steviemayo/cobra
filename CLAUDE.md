@@ -96,21 +96,23 @@
 - Templates: Kestrel-global + per-org (shareable in org); marketplace (Pro publishes, Basic buys)
 - Data region: AU
 
-## Repo Layout (scaffold — not yet created)
+## Repo Layout
 
 ```
 /
 ├── apps/
 │   ├── web/              ← Next.js portal (tRPC routers, Tailwind)
-│   └── gateway/          ← Node/TS gateway service + Dockerfile
+│   ├── gateway/          ← Node/TS gateway service + Dockerfile, docker-compose.yml, windows/ installer
+│   └── panel/            ← Vite panel SPA (built into the gateway image/bundle)
 ├── packages/
 │   ├── db/               ← Prisma schema + client
+│   ├── crypto/           ← signed manifests, tokens, PIN hashing, sealed secrets, phone-access tokens
 │   ├── model/            ← zod schemas: room model, manifest, activities, protocol messages
 │   ├── engine/           ← room interpreter + activity generator + validator (shared: gateway + browser simulator)
-│   ├── drivers/          ← driver framework + in-house drivers + simulated devices
+│   ├── drivers/          ← driver framework, in-house + declarative drivers, bundled library, simulated devices
 │   ├── panel-ui/         ← generated panel SPA (served by gateway)
 │   └── config/           ← eslint/tsconfig/tailwind presets
-├── docs/                 ← diagrams.md, plan.md, architecture.md (later)
+├── docs/                 ← diagrams.md, plan.md, driver-sdk.md, phase-4-preread.md (status source)
 └── CLAUDE.md
 ```
 
@@ -128,7 +130,7 @@
 - TypeScript strict everywhere, zod as single source of truth for shared schemas (model, protocol, manifest)
 - API responses via tRPC types; gateway↔cloud protocol versioned and defined in `packages/model`
 - Never omit `orgId` scoping; never hardcode secrets
-- Status: Phases 0-3 built (PR #9 for Phase 3 open), Phase 4 built on `feat/phase-4-deployments` (unpushed). **Read `docs/phase-4-preread.md` first** (status table, rules learned, next steps). Progress lives there, not in plan.md
+- Status: Phases 0-7 built (PR #9 for Phase 3 open; phases 4-7 are stacked local branches `feat/phase-4-deployments` → `feat/phase-5-monitoring`, unpushed). **Read `docs/phase-4-preread.md` first** (status table, verified-vs-untested list, ops setup, rules learned, next steps). Progress lives there, not in plan.md
 - Pins: TypeScript ^6 (typescript-eslint lacks TS7 support), Prisma 7.x (CLI must match client), pnpm 12, Next 16 (`proxy.ts` replaces middleware)
 - Env: see `.env.example`; Prisma CLI reads `DIRECT_URL`, runtime uses `DATABASE_URL`
 - Every org-scoped tRPC procedure uses `orgProcedure` (membership check) and filters by `ctx.orgId`

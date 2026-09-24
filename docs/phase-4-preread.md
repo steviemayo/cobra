@@ -8,7 +8,7 @@
 - Git flow: `feat/*`/`fix/*` from `dev` → PR to `dev` → **user merges** → PR `dev` → `main` (user merges). Never commit to `main`/`dev` directly. Trailer: `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`
 - Never push/PR/merge unasked. Never commit `.env*`. Multiple sessions have worked in this repo — always check `git log`, branches, `gh pr list` before assuming state
 
-## Status (as of 2026-09-24)
+## Status (as of 2026-09-25)
 
 | Phase | State |
 |---|---|
@@ -17,19 +17,34 @@
 | Web app shell (extra) | Done, merged (PR #7): shadcn, IBM Plex, `/o/[orgId]/…` routes, invites, team, audit log |
 | 2 Engine/simulator/panel UI | Done, merged (PR #8) |
 | 3 Gateway | Built; **PR #9 open, not merged** (`feat/phase-3-gateway`) |
-| 4 Releases & deployments | Built on **`feat/phase-4-deployments`** (stacked on phase 3; not pushed, no PR). Commits: `de05fcf` TCP reachability on start, `6d40c3b` engine design diff, `d4971b0` staged deploys/health check/rollback/scheduling/drift |
-| 5 Monitoring, 6 Billing, 7 Expansion | Not started |
+| 4 Releases & deployments | Built, verified in Docker (`feat/phase-4-deployments`, stacked on 3, not pushed) |
+| 5 Monitoring & support | Built on **`feat/phase-5-monitoring`** (stacked on 4, not pushed): health, incidents, alerts (email/Teams/webhook/ITSM stub), allowlisted remote commands + audit, tickets, 90-day retention. Verified end-to-end in Docker + Chrome |
+| 6 Billing & customer portal | Built (same branch): plans/entitlements (trial/basic/pro), Stripe checkout + webhooks, plan gating (never gates control), portal control, customer dashboard, org theme, language packs (es/fr/de) |
+| 7 Expansion | Built (same branch): schedule/occupancy/webhook/calendar (M365, Google) triggers, combined rooms, marketplace (publish/review/buy), driver SDK (custom declarative drivers, Pro) + bundled library, serial/REST/VISCA drivers, DM-NVX + Q-SYS drivers, QR-to-phone control, gateway update channels + compose/Watchtower, Windows bundle + installer |
 
-- Phase 4 verified by a temporary e2e (`apps/web/scripts/e2e-deploy.mts`, header says "Not committed"): 11/11 PASS — clean deploy timeline (downloading > verifying > staging > health_check > active), bad release rolled back ("could not reach DSP") with gateway staying on release 1, room state `failed`, scheduled deploy starts on time, in_sync after. It starts a cloud on :3200 + a real gateway against the **dev database** and deletes its temp org. Decide: commit as a proper script/test, or delete
-- Uncommitted working tree on the Phase 4 branch: `CLAUDE.md` (status pointer), `docs/phase-1-preread.md` (stale, delete), this file, `apps/web/scripts/`
+### What is verified vs only unit-tested
+
+- **Verified against the real thing:** phases 4 and 5 (Docker gateway image + local cloud, Chrome for the monitoring UI)
+- **Unit/integration tests only** (fake clouds, fake devices, in-memory DB helper): billing/Stripe, calendar (Graph/Google), marketplace, combined rooms, driver SDK, NVX, Q-SYS, serial, VISCA, phone control, update channels, Phase 6/7 UI (not opened in a browser)
+- **Not run at all:** Windows installer/updater scripts (only parse-checked; the bundle layout was round-tripped with PowerShell 5.1), the Windows CI workflow, the Watchtower compose file (only `config`-validated)
+- Never tested on real hardware: DM-NVX, Q-SYS, PJLink, serial, VISCA, Extron/Cisco/Lutron/Shelly
+
+### Known limitations
+
+- Portal/phone control has up to ~30s first-connect lag (gateway polls on the 30s heartbeat until someone is watching, then every second). No WSS push yet
+- Marketplace publisher payouts are not implemented (no Stripe Connect); purchases are one-off Stripe payments to Kestrel
+- Gateway-offline detection and calendar polling need an external scheduler (see Ops). Vercel Hobby cron is daily only, so `vercel.json` only has retention
+- Calendar triggers use meeting starts only; combined "follow" mirrors activity ids (no cross-room routing model)
+- Phone sessions are stateless two-hour tokens: they cannot be revoked, only expire
+- Windows update script does not replace itself (the installer does); `GATEWAY_VERSION` must be bumped by hand per release along with `GATEWAY_LATEST_STABLE/BETA` on the server
 
 ## Repo map (added since Phase 0)
 
 - `apps/web` — portal (+ browser simulator); routers: audit, deployment, draft, gateway, invite, member, org, release, room, site, template; server modules `deployment-service`, `deployment-queries`, `gateway-service`
 - `apps/gateway` — Node gateway service, `Dockerfile`, README (GHCR image, stable/beta channels)
 - `apps/panel` — Vite panel SPA served by gateways (PIN gate, reconnecting WebSocket)
-- `packages/model` (room schemas, device catalog, templates, protocol schemas) · `engine` (validator, RoomRuntime, activity planner, executor, design diff) · `drivers` (`sim/` simulated devices, `real/` PJLink + generic TCP + hybrid real/simulated bus + registry) · `crypto` (Ed25519 signed manifests, tokens, PIN hashing) · `panel-ui` (generated panel) · `db` · `config`
-- Migrations: init, room_drafts_templates, members_email_invites, gateway_releases_events, deployments
+- `packages/model` (room schemas, device catalog, templates, protocol schemas) · `engine` (validator, RoomRuntime, activity planner, executor, design diff) · `drivers` (`sim/` simulated devices, `real/` PJLink, NVX, Q-SYS, generic TCP/serial/REST, VISCA, declarative + bundled `library/`, hybrid real/simulated bus, registry) · `crypto` (Ed25519 signed manifests, tokens, PIN hashing) · `panel-ui` (generated panel) · `db` · `config`
+- Migrations: init, room_drafts_templates, members_email_invites, gateway_releases_events, deployments, monitoring, billing_and_control, room_hook_secret, room_combinations, calendars, marketplace, custom_drivers, gateway_channel
 
 ## Rules learned (don't relearn)
 
@@ -51,16 +66,22 @@
 - Vercel env: `SUPABASE_SERVICE_ROLE_KEY` (member email lookup), DB/Supabase vars for Production + Preview
 - Apply new migrations to whichever DB Vercel points at; separate `kestrel-prod` project before customers; Vercel Pro for commercial use; domain for Kestrel unchecked
 
+## Ops (things a person must set up)
+
+- **Env vars** (all in `.env.example`): `KESTREL_SIGNING_KEY(_ID)` (generate with `pnpm --filter @kestrel/crypto keygen`), `CRON_SECRET`, `RESEND_API_KEY`, `ALERT_FROM_EMAIL`, `NEXT_PUBLIC_APP_URL`, `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`/`STRIPE_PRICE_BASIC`/`STRIPE_PRICE_PRO`, `KESTREL_SECRETS_KEY` (calendar credentials + phone-control secrets), `KESTREL_ADMIN_EMAILS` (marketplace review), `GATEWAY_LATEST_STABLE`/`GATEWAY_LATEST_BETA`. Set for Production and Preview on Vercel (`vercel login`, `vercel link` in `apps/web`, then `vercel env add`)
+- **Scheduled jobs** (authorise with `Authorization: Bearer $CRON_SECRET`): `GET /api/cron/retention` (daily, in `vercel.json`), `GET /api/cron/sweep` (every 1-2 min: marks silent gateways offline and raises incidents), `GET /api/cron/calendar` (every 1-5 min). Use an external scheduler, Vercel Pro cron, or Supabase `pg_cron` + `pg_net`
+- **Stripe:** webhook endpoint `/api/stripe/webhook` (subscription + checkout events); create Basic and Pro prices
+- **Migrations:** apply to any DB other than `kestrel-dev` (`prisma migrate deploy`)
+- **Gateway releases:** bump `GATEWAY_VERSION` in `apps/gateway/src/config.ts`; `main` publishes the `stable` image + Windows bundle, `dev` the `beta` ones
+
 ## MVP gaps
 
-- MVP real hardware not yet written: **Crestron DM-NVX** virtual matrix (1× DM-NVX-E30 encoder, 1× DM-NVX-D30 decoder) and **Q-SYS Core** DSP (gain component script name `gain`). Existing real drivers: PJLink, generic TCP only
-- "Gateway runs a room against real devices, panel on LAN offline" not yet verified on hardware
-- Phase 5 thin slice for MVP = live status only
+- Real-hardware runs (DM-NVX, Q-SYS) and "gateway runs a room against real devices, panel on LAN offline" are unverified
+- Deploy/monitoring UIs for phases 6-7 have not had a browser pass
 
 ## Suggested next steps (in order)
 
-1. **Merge PR #9** (Phase 3, user merges) → push `feat/phase-4-deployments` and open its PR to `dev` (diff should shrink to Phase 4 commits once #9 is merged; rebase if needed) → `dev`→`main` PR
-2. Decide fate of `apps/web/scripts/e2e-deploy.mts` (promote to committed script/CI-safe test, or delete); commit/delete stale `docs/phase-1-preread.md`; refresh `CLAUDE.md` status + repo layout ("scaffold — not yet created" is stale)
-3. Write DM-NVX and Q-SYS drivers (`packages/drivers/src/real/`, register in `registry.ts`) + tests; run a real-hardware test with the Docker gateway
-4. Start **Phase 5**: telemetry ingest, room/device health, events/incidents, live status (Supabase Realtime), alerts (email/Teams/webhook/ITSM stub), allowlisted remote commands + audit, 90-day retention
-5. Then Phase 6 billing (Stripe per-room tiers), Phase 7 expansion (triggers, combined rooms, marketplace, gateway self-update, Windows installer)
+1. **Merge PR #9** (user) → push `feat/phase-4-deployments`, then `feat/phase-5-monitoring` and open PRs in order (each diff shrinks once its base merges) → `dev` → `main`
+2. Set the env vars and scheduler above; run one real-hardware pass; run the Windows installer once on a clean VM
+3. Browser pass over billing, marketplace, drivers, combinations, gateways pages
+4. Candidates after that: WSS push to remove the first-connect lag, Stripe Connect payouts, MSP/reseller tier, third-party driver marketplace, sandboxed custom-logic hooks
