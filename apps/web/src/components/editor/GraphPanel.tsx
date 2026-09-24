@@ -17,6 +17,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { useTheme } from 'next-themes';
 import { DEVICE_CATALOG, type Device, type RoomModel } from '@kestrel/model';
+import { autoLayout } from '@/lib/editor/layout';
 import { addConnection, removeConnection } from '@/lib/editor/ops';
 import { issuesForDevice, type PanelProps } from './ui';
 
@@ -28,27 +29,6 @@ const SIGNAL_DOT: Record<string, string> = {
   video: 'bg-info',
   audio: 'bg-warning',
 };
-
-const COLUMN: Record<string, number> = {
-  source: 0,
-  camera: 0,
-  mic: 0,
-  conference: 1,
-  matrix: 1,
-  destination: 2,
-  environment: 3,
-};
-
-function autoLayout(devices: Device[]): Record<string, { x: number; y: number }> {
-  const rows: Record<number, number> = {};
-  const out: Record<string, { x: number; y: number }> = {};
-  for (const d of devices) {
-    const col = COLUMN[DEVICE_CATALOG[d.category].section] ?? 0;
-    const row = (rows[col] = (rows[col] ?? -1) + 1);
-    out[d.id] = { x: col * 320, y: row * 180 };
-  }
-  return out;
-}
 
 function DeviceNodeView({ data }: NodeProps<DeviceNode>) {
   const { device, hasError, hasWarning } = data;

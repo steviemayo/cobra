@@ -22,6 +22,16 @@ describe('validateRoomModel', () => {
     expect(r.valid).toBe(true);
   });
 
+  it('passes every populated starter template with no errors', () => {
+    for (const t of STARTER_TEMPLATES.filter((x) => !x.id.endsWith('blank'))) {
+      const r = validateRoomModel(t.model);
+      expect(
+        r.issues.filter((i) => i.severity === 'error'),
+        t.id,
+      ).toEqual([]);
+    }
+  });
+
   it('passes blank templates (warnings only)', () => {
     for (const t of STARTER_TEMPLATES.filter((x) => x.id.endsWith('blank'))) {
       expect(validateRoomModel(t.model).valid, t.id).toBe(true);
