@@ -1,0 +1,34 @@
+import { z } from 'zod';
+import { db } from '@kestrel/db';
+import { orgProcedure, requireRole, router } from '../trpc';
+
+export const auditRouter = router({
+  list: orgProcedure
+    .input(
+      z.object({ orgId: z.string().uuid(), limit: z.number().int().min(1).max(200).default(50) }),
+    )
+    .query(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev', 'support']);
+      const rows = await db.auditLog.findMany({
+        where: { orgId: ctx.orgId },
+        orderBy: { createdAt: 'desc' },
+        take: input.limit,
+      });
+      const actors = await db.member.findMany({
+        where: {
+          orgId: ctx.orgId,
+          userId: { in: [...new Set(rows.flatMap((r) => (r.actorId ? [r.actorId] : [])))] },
+        },
+        select: { userId: true, email: true },
+      });
+      const emailById = new Map(actors.map((a) => [a.userId, a.email]));
+      return rows.map((r) => ({
+        id: r.id,
+        action: r.action,
+        target: r.target,
+        meta: (r.meta ?? {}) as Record<string, unknown>,
+        createdAt: r.createdAt,
+        actor: r.actorId ? (emailById.get(r.actorId) ?? 'Former member') : 'System',
+      }));
+    }),
+});

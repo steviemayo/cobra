@@ -1,0 +1,5 @@
+{
+  "extends": "@kestrel/config/tsconfig.react.json",
+  "compilerOptions": { "jsx": "react-jsx", "noEmit": true, "types": ["node", "vite/client"] },
+  "include": ["src", "vite.config.ts"]
+}

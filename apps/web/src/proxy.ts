@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
+const PUBLIC_PREFIXES = ['/login', '/signup', '/forgot-password', '/auth/', '/invite/', '/c/'];
+const GUEST_ONLY = ['/login', '/signup', '/forgot-password'];
+
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
   const supabase = createServerClient(
@@ -17,7 +20,25 @@ export async function proxy(request: NextRequest) {
       },
     },
   );
-  await supabase.auth.getUser();
+  const { data } = await supabase.auth.getUser();
+  const { pathname, search } = request.nextUrl;
+
+  // API routes enforce auth themselves (tRPC procedures), so leave them alone.
+  if (pathname.startsWith('/api/')) return response;
+
+  const isPublic = PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
+  if (!data.user && !isPublic && pathname !== '/') {
+    const url = request.nextUrl.clone();
+    url.pathname = '/login';
+    url.search = `?next=${encodeURIComponent(pathname + search)}`;
+    return NextResponse.redirect(url);
+  }
+  if (data.user && GUEST_ONLY.includes(pathname)) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/';
+    url.search = '';
+    return NextResponse.redirect(url);
+  }
   return response;
 }
 

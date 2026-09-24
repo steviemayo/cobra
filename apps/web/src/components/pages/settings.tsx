@@ -1,0 +1,332 @@
+'use client';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { ActivityFeed } from '@/components/common/activity-feed';
+import {
+  BrandingFields,
+  brandingToDraft,
+  draftToBranding,
+  type BrandingDraft,
+} from '@/components/common/branding-fields';
+import { PageContainer, PageHeader } from '@/components/common/page-header';
+import { orgPath, useOrg } from '@/components/shell/org-context';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { SimpleSelect } from '@/components/common/simple-select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Spinner } from '@/components/ui/spinner';
+import { Textarea } from '@/components/ui/textarea';
+import { ROLE_LABEL } from '@/lib/format';
+import { useTRPC } from '@/trpc/client';
+
+export function GeneralSettings() {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const router = useRouter();
+  const { orgId, org, isOwner } = useOrg();
+  const [name, setName] = useState(org.name);
+
+  const rename = useMutation(
+    trpc.org.rename.mutationOptions({
+      onSuccess: async () => {
+        await qc.invalidateQueries({ queryKey: trpc.audit.list.queryKey() });
+        toast.success('Organisation renamed');
+        router.refresh();
+      },
+    }),
+  );
+
+  useEffect(() => {
+    if (!isOwner) router.replace(orgPath(orgId, '/settings/activity'));
+  }, [isOwner, orgId, router]);
+  if (!isOwner) return null;
+
+  return (
+    <PageContainer className="max-w-2xl">
+      <PageHeader title="Settings" description="Organisation-wide settings." />
+      <form
+        className="space-y-5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          rename.mutate({ orgId, name });
+        }}
+      >
+        <div className="space-y-2">
+          <Label htmlFor="org-name">Organisation name</Label>
+          <Input id="org-name" required value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label>Your role</Label>
+          <p className="text-sm text-muted-foreground">{ROLE_LABEL[org.role]}</p>
+        </div>
+        {rename.error && <p className="text-sm text-destructive">{rename.error.message}</p>}
+        <Button
+          type="submit"
+          disabled={rename.isPending || !name.trim() || name.trim() === org.name}
+        >
+          {rename.isPending && <Spinner />}
+          Save changes
+        </Button>
+      </form>
+      <OrgBrandingForm />
+      <CalendarSettings />
+    </PageContainer>
+  );
+}
+
+/** The default look of every room's panel and the customer pages. Rooms follow it unless they set their own. */
+function OrgBrandingForm() {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const { orgId } = useOrg();
+  const current = useQuery(trpc.org.getBranding.queryOptions({ orgId }));
+  const [look, setLook] = useState<BrandingDraft>({
+    mode: 'dark',
+    accent: '',
+    logo: '',
+    language: 'en',
+  });
+  useEffect(() => {
+    if (current.data) setLook(brandingToDraft(current.data));
+  }, [current.data]);
+  const save = useMutation(
+    trpc.org.setBranding.mutationOptions({
+      onSuccess: async () => {
+        await qc.invalidateQueries({ queryKey: trpc.org.getBranding.queryKey() });
+        toast.success('Panel theme saved. Rooms pick it up on their next release.');
+      },
+    }),
+  );
+  if (current.isPending) return null;
+  return (
+    <form
+      className="space-y-4 border-t pt-6"
+      onSubmit={(e) => {
+        e.preventDefault();
+        save.mutate({ orgId, branding: draftToBranding(look) });
+      }}
+    >
+      <div>
+        <h2 className="text-sm font-medium">Panel theme</h2>
+        <p className="text-sm text-muted-foreground">
+          Your colours, logo and language on every room’s touch panel. Rooms follow this unless they
+          set their own, and pick up changes on their next release.
+        </p>
+      </div>
+      <BrandingFields id="org-brand" value={look} onChange={setLook} />
+      {save.error && <p className="text-sm text-destructive">{save.error.message}</p>}
+      <Button type="submit" disabled={save.isPending}>
+        {save.isPending && <Spinner />}
+        Save theme
+      </Button>
+    </form>
+  );
+}
+
+export function ActivityLog() {
+  const trpc = useTRPC();
+  const { orgId } = useOrg();
+  const log = useQuery(trpc.audit.list.queryOptions({ orgId, limit: 100 }));
+  return (
+    <PageContainer className="max-w-3xl">
+      <PageHeader
+        title="Activity log"
+        description="Changes to sites, rooms, members and invitations."
+      />
+      {log.isPending ? (
+        <Skeleton className="h-48 w-full" />
+      ) : log.error ? (
+        <p className="text-sm text-destructive">{log.error.message}</p>
+      ) : (
+        <ActivityFeed rows={log.data ?? []} />
+      )}
+    </PageContainer>
+  );
+}
+
+/** Lets rooms start themselves when a meeting begins in their calendar. */
+function CalendarSettings() {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const { orgId } = useOrg();
+  const info = useQuery(trpc.calendar.list.queryOptions({ orgId }));
+  const [provider, setProvider] = useState<'graph' | 'google'>('graph');
+  const [label, setLabel] = useState('');
+  const [tenantId, setTenantId] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [secret, setSecret] = useState('');
+  const [email, setEmail] = useState('');
+  const [key, setKey] = useState('');
+  const refresh = () => qc.invalidateQueries({ queryKey: trpc.calendar.list.queryKey() });
+  const connect = useMutation(
+    trpc.calendar.connect.mutationOptions({
+      onSuccess: async () => {
+        setSecret('');
+        setKey('');
+        await refresh();
+        toast.success('Calendar connected');
+      },
+    }),
+  );
+  const remove = useMutation(
+    trpc.calendar.remove.mutationOptions({
+      onSuccess: async () => {
+        await refresh();
+        toast.success('Calendar disconnected');
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  if (info.isPending || !info.data) return null;
+  const graph = { provider: 'graph' as const, tenantId, clientId, clientSecret: secret };
+  const google = { provider: 'google' as const, clientEmail: email, privateKey: key };
+  return (
+    <section className="space-y-4 border-t pt-6">
+      <div>
+        <h2 className="text-sm font-medium">Calendars</h2>
+        <p className="text-sm text-muted-foreground">
+          Connect Microsoft 365 or Google so a room can start itself when a meeting begins in its
+          calendar. Add a calendar trigger to the room’s design and give it the room’s calendar
+          address.
+        </p>
+      </div>
+      {!info.data.available && (
+        <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+          Calendars aren’t set up on this Kestrel server yet (it needs KESTREL_SECRETS_KEY).
+        </p>
+      )}
+      {info.data.connections.length > 0 && (
+        <ul className="divide-y rounded-lg border">
+          {info.data.connections.map((c) => (
+            <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+              <span>
+                {c.name}{' '}
+                <span className="text-muted-foreground">
+                  ({c.provider === 'graph' ? 'Microsoft 365' : 'Google'})
+                </span>
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={remove.isPending}
+                onClick={() => remove.mutate({ orgId, connectionId: c.id })}
+              >
+                Disconnect
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {info.data.available && (
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            connect.mutate({
+              orgId,
+              name: label,
+              credentials: provider === 'graph' ? graph : google,
+            });
+          }}
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="cal-provider">Calendar service</Label>
+              <SimpleSelect
+                id="cal-provider"
+                className="w-full"
+                value={provider}
+                onValueChange={setProvider}
+                options={[
+                  { value: 'graph', label: 'Microsoft 365' },
+                  { value: 'google', label: 'Google Workspace' },
+                ]}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cal-name">Name</Label>
+              <Input
+                id="cal-name"
+                required
+                placeholder="Company calendar"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+              />
+            </div>
+          </div>
+          {provider === 'graph' ? (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="cal-tenant">Tenant ID</Label>
+                <Input
+                  id="cal-tenant"
+                  required
+                  value={tenantId}
+                  onChange={(e) => setTenantId(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cal-client">Application (client) ID</Label>
+                <Input
+                  id="cal-client"
+                  required
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cal-secret">Client secret</Label>
+                <Input
+                  id="cal-secret"
+                  type="password"
+                  autoComplete="off"
+                  required
+                  value={secret}
+                  onChange={(e) => setSecret(e.target.value)}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="cal-email">Service account email</Label>
+                <Input
+                  id="cal-email"
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cal-key">Private key</Label>
+                <Textarea
+                  id="cal-key"
+                  required
+                  rows={4}
+                  className="font-mono text-xs"
+                  placeholder="-----BEGIN PRIVATE KEY-----"
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Kestrel only reads meeting start times. Credentials are encrypted before they are stored
+            and never shown again.
+          </p>
+          {connect.error && <p className="text-sm text-destructive">{connect.error.message}</p>}
+          <Button type="submit" disabled={connect.isPending || !label.trim()}>
+            {connect.isPending && <Spinner />}
+            Connect calendar
+          </Button>
+        </form>
+      )}
+    </section>
+  );
+}

@@ -1,0 +1,354 @@
+import type { PrismaClient } from '@kestrel/db';
+import type { RoomReport } from '@kestrel/model';
+import { getEntitlements } from './billing';
+import { effectiveStatus } from './gateway-status';
+
+// Turns what gateways report into device status and incidents. Functions take the database as a
+// parameter so they can be tested without one. They return alert jobs instead of sending anything,
+// so a slow webhook can never hold up a heartbeat.
+export type MonitoringDb = Pick<
+  PrismaClient,
+  'deviceStatus' | 'incident' | 'room' | 'gateway' | 'remoteCommand' | 'orgBilling' | 'org'
+>;
+
+export type Severity = 'info' | 'warning' | 'critical';
+export type IncidentKind = 'device_offline' | 'gateway_offline' | 'room_fault' | 'deploy_failed';
+
+export interface AlertJob {
+  incidentId: string;
+  event: 'opened' | 'resolved';
+}
+
+/** A device must stay offline this long (about two heartbeats) before it becomes an incident. */
+export const DEVICE_GRACE_MS = 45_000;
+/** A problem that comes back within this long of being resolved reopens the same incident, quietly. */
+export const FLAP_WINDOW_MS = 5 * 60_000;
+export const COMMAND_PENDING_EXPIRY_MS = 5 * 60_000;
+export const COMMAND_SENT_EXPIRY_MS = 10 * 60_000;
+
+interface NewIncident {
+  orgId: string;
+  roomId?: string | null;
+  gatewayId?: string | null;
+  kind: IncidentKind;
+  subject: string;
+  severity: Severity;
+  title: string;
+  detail?: string | null;
+}
+
+export async function openIncident(
+  db: MonitoringDb,
+  input: NewIncident,
+  now: Date,
+): Promise<AlertJob | null> {
+  const key = { orgId: input.orgId, kind: input.kind, subject: input.subject };
+  const open = await db.incident.findFirst({ where: { ...key, status: 'open' } });
+  if (open) {
+    await db.incident.update({
+      where: { id: open.id },
+      data: { lastSeenAt: now, title: input.title, detail: input.detail ?? null },
+    });
+    return null;
+  }
+  const recent = await db.incident.findFirst({
+    where: {
+      ...key,
+      status: 'resolved',
+      resolvedAt: { gte: new Date(now.getTime() - FLAP_WINDOW_MS) },
+    },
+    orderBy: { resolvedAt: 'desc' },
+  });
+  if (recent) {
+    await db.incident.update({
+      where: { id: recent.id },
+      data: {
+        status: 'open',
+        resolvedAt: null,
+        lastSeenAt: now,
+        occurrences: recent.occurrences + 1,
+        title: input.title,
+        detail: input.detail ?? null,
+      },
+    });
+    return null;
+  }
+  const created = await db.incident.create({
+    data: {
+      orgId: input.orgId,
+      roomId: input.roomId ?? null,
+      gatewayId: input.gatewayId ?? null,
+      kind: input.kind,
+      subject: input.subject,
+      severity: input.severity,
+      status: 'open',
+      title: input.title,
+      detail: input.detail ?? null,
+      openedAt: now,
+      lastSeenAt: now,
+      occurrences: 1,
+      alerted: true,
+    },
+  });
+  return { incidentId: created.id, event: 'opened' };
+}
+
+export async function resolveIncident(
+  db: MonitoringDb,
+  key: { orgId: string; kind: IncidentKind; subject: string },
+  now: Date,
+): Promise<AlertJob | null> {
+  const open = await db.incident.findFirst({ where: { ...key, status: 'open' } });
+  if (!open) return null;
+  await db.incident.update({
+    where: { id: open.id },
+    data: { status: 'resolved', resolvedAt: now },
+  });
+  return open.alerted ? { incidentId: open.id, event: 'resolved' } : null;
+}
+
+/** Applies one heartbeat's room reports for a gateway: device status first, then incidents. */
+export async function recordReports(
+  db: MonitoringDb,
+  gw: { id: string; orgId: string },
+  reports: RoomReport[],
+  now: Date,
+): Promise<AlertJob[]> {
+  const jobs: AlertJob[] = [];
+  const add = (j: AlertJob | null) => void (j && jobs.push(j));
+  const rooms = await db.room.findMany({ where: { gatewayId: gw.id, orgId: gw.orgId } });
+  const byId = new Map(rooms.map((r) => [r.id, r]));
+
+  for (const report of reports) {
+    const room = byId.get(report.roomId);
+    if (!room) continue;
+    const base = { orgId: gw.orgId, roomId: room.id, gatewayId: gw.id };
+
+    if (report.status !== 'unloaded') {
+      const known = new Map(
+        (await db.deviceStatus.findMany({ where: { roomId: room.id } })).map((d) => [
+          d.deviceId,
+          d,
+        ]),
+      );
+      const seen = new Set<string>();
+      for (const d of report.devices) {
+        seen.add(d.deviceId);
+        const subject = `${room.id}:${d.deviceId}`;
+        let since = now;
+        const row = known.get(d.deviceId);
+        if (!row) {
+          await db.deviceStatus.create({
+            data: {
+              orgId: gw.orgId,
+              roomId: room.id,
+              deviceId: d.deviceId,
+              name: d.name,
+              online: d.online,
+              since: now,
+            },
+          });
+        } else if (row.online !== d.online) {
+          await db.deviceStatus.update({
+            where: { id: row.id },
+            data: { online: d.online, since: now, name: d.name },
+          });
+        } else {
+          since = row.since;
+          if (row.name !== d.name)
+            await db.deviceStatus.update({ where: { id: row.id }, data: { name: d.name } });
+        }
+        if (d.online)
+          add(await resolveIncident(db, { orgId: gw.orgId, kind: 'device_offline', subject }, now));
+        else if (now.getTime() - since.getTime() >= DEVICE_GRACE_MS)
+          add(
+            await openIncident(
+              db,
+              {
+                ...base,
+                kind: 'device_offline',
+                subject,
+                severity: 'warning',
+                title: `${d.name} is offline`,
+                detail: `${d.name} in ${room.name} has not answered since ${since.toISOString()}.`,
+              },
+              now,
+            ),
+          );
+      }
+      // A new release may have dropped devices; forget them and close anything open for them.
+      for (const [deviceId, row] of known)
+        if (!seen.has(deviceId)) {
+          await db.deviceStatus.delete({ where: { id: row.id } });
+          add(
+            await resolveIncident(
+              db,
+              { orgId: gw.orgId, kind: 'device_offline', subject: `${room.id}:${deviceId}` },
+              now,
+            ),
+          );
+        }
+    }
+
+    if (report.status === 'fault')
+      add(
+        await openIncident(
+          db,
+          {
+            ...base,
+            kind: 'room_fault',
+            subject: room.id,
+            severity: 'critical',
+            title: `${room.name} has a fault`,
+            detail: report.error ?? null,
+          },
+          now,
+        ),
+      );
+    else
+      add(
+        await resolveIncident(db, { orgId: gw.orgId, kind: 'room_fault', subject: room.id }, now),
+      );
+
+    if (report.error)
+      add(
+        await openIncident(
+          db,
+          {
+            ...base,
+            kind: 'deploy_failed',
+            subject: room.id,
+            severity: 'warning',
+            title: `${room.name} could not take its new release`,
+            detail: report.error,
+          },
+          now,
+        ),
+      );
+    else
+      add(
+        await resolveIncident(
+          db,
+          { orgId: gw.orgId, kind: 'deploy_failed', subject: room.id },
+          now,
+        ),
+      );
+  }
+  return jobs;
+}
+
+/**
+ * Checks what heartbeats can't: gateways that have gone quiet, and commands nobody picked up.
+ * Safe to run as often as you like.
+ */
+export async function sweep(db: MonitoringDb, now = new Date()): Promise<AlertJob[]> {
+  const jobs: AlertJob[] = [];
+  const gateways = await db.gateway.findMany({ where: { enrolledAt: { not: null } } });
+  const monitored = new Map<string, boolean>();
+  for (const gw of gateways) {
+    if (!monitored.has(gw.orgId))
+      monitored.set(gw.orgId, (await getEntitlements(db, gw.orgId, now)).monitoring);
+    if (!monitored.get(gw.orgId)) continue;
+    const status = effectiveStatus(gw, now.getTime());
+    const key = { orgId: gw.orgId, kind: 'gateway_offline' as const, subject: gw.id };
+    const job =
+      status === 'offline'
+        ? await openIncident(
+            db,
+            {
+              orgId: gw.orgId,
+              gatewayId: gw.id,
+              kind: 'gateway_offline',
+              subject: gw.id,
+              severity: 'critical',
+              title: `Gateway ${gw.name} is offline`,
+              detail: gw.lastSeenAt
+                ? `Last heard from at ${gw.lastSeenAt.toISOString()}. Rooms keep running on site.`
+                : null,
+            },
+            now,
+          )
+        : await resolveIncident(db, key, now);
+    if (job) jobs.push(job);
+  }
+  await db.remoteCommand.updateMany({
+    where: {
+      status: 'pending',
+      createdAt: { lt: new Date(now.getTime() - COMMAND_PENDING_EXPIRY_MS) },
+    },
+    data: {
+      status: 'expired',
+      finishedAt: now,
+      error: 'The gateway did not pick this up in time.',
+    },
+  });
+  await db.remoteCommand.updateMany({
+    where: { status: 'sent', sentAt: { lt: new Date(now.getTime() - COMMAND_SENT_EXPIRY_MS) } },
+    data: { status: 'expired', finishedAt: now, error: 'The gateway never reported a result.' },
+  });
+  return jobs;
+}
+
+let lastSweep = 0;
+/** Sweeps at most once per interval per server instance. */
+export async function maybeSweep(
+  db: MonitoringDb,
+  now = new Date(),
+  everyMs = 30_000,
+): Promise<AlertJob[]> {
+  if (now.getTime() - lastSweep < everyMs) return [];
+  lastSweep = now.getTime();
+  return sweep(db, now);
+}
+
+export const SEVERITY_RANK: Record<Severity, number> = { info: 0, warning: 1, critical: 2 };
+
+export type HealthLevel = 'healthy' | 'degraded' | 'down' | 'unknown';
+export interface Health {
+  level: HealthLevel;
+  /** 0-100, or null when the room's state can't be known. */
+  score: number | null;
+  reasons: string[];
+}
+
+export function roomHealth(input: {
+  gatewayStatus: 'pending' | 'online' | 'offline' | null;
+  deployed: boolean;
+  status: string | null;
+  devices: { online: boolean }[];
+  openIncidents: { severity: string }[];
+}): Health {
+  if (!input.gatewayStatus)
+    return { level: 'unknown', score: null, reasons: ['Not assigned to a gateway'] };
+  if (input.gatewayStatus !== 'online')
+    return {
+      level: 'unknown',
+      score: null,
+      reasons: [
+        input.gatewayStatus === 'offline'
+          ? 'Gateway offline, so the room’s state is unknown'
+          : 'Gateway has not connected yet',
+      ],
+    };
+  if (!input.deployed) return { level: 'unknown', score: null, reasons: ['Nothing deployed yet'] };
+
+  const reasons: string[] = [];
+  let score = 100;
+  const fault = input.status === 'fault';
+  if (fault) {
+    score -= 40;
+    reasons.push('The room reports a fault');
+  }
+  const offline = input.devices.filter((d) => !d.online).length;
+  if (offline > 0) {
+    score -= 20 + Math.round((60 * offline) / input.devices.length);
+    reasons.push(`${offline} of ${input.devices.length} devices offline`);
+  }
+  for (const i of input.openIncidents)
+    score -= i.severity === 'critical' ? 20 : i.severity === 'warning' ? 10 : 0;
+  score = Math.max(0, Math.min(100, score));
+  const level: HealthLevel = fault || score < 50 ? 'down' : score < 90 ? 'degraded' : 'healthy';
+  if (reasons.length === 0 && input.openIncidents.length > 0)
+    reasons.push(`${input.openIncidents.length} open incident(s)`);
+  return { level, score, reasons };
+}

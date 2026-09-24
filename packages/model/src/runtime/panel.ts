@@ -1,0 +1,108 @@
+import { z } from 'zod';
+import { LocalId } from '../room/common';
+import { ActivityKind } from '../room/behaviour';
+
+// Panels send intents, never device commands. Validated at the gateway boundary.
+export const PanelIntent = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('activity.start'),
+    activityId: LocalId,
+    sourceId: LocalId.optional(),
+  }),
+  /** Stops an overlay activity such as Record. Primary activities end by starting Room Off. */
+  z.object({ type: z.literal('activity.stop'), activityId: LocalId }),
+  z.object({ type: z.literal('volume.set'), level: z.number().int().min(0).max(100) }),
+  z.object({ type: z.literal('volume.bump'), delta: z.number().int().min(-25).max(25) }),
+  z.object({ type: z.literal('mute.set'), muted: z.boolean() }),
+  z.object({ type: z.literal('prompt.respond'), promptId: z.string().min(1), accept: z.boolean() }),
+  /** "Stay on" during the auto-off warning. */
+  z.object({ type: z.literal('warning.dismiss') }),
+  /** Join or split this room with the rooms it is set up to combine with. Only the primary room's panel offers it. */
+  z.object({ type: z.literal('combine.set'), combined: z.boolean() }),
+]);
+export type PanelIntent = z.infer<typeof PanelIntent>;
+
+// Plain-language messages are keys + params so panels can translate them.
+export const MessageKey = z.enum([
+  'ready',
+  'starting',
+  'stopping',
+  'room_off',
+  'presenting',
+  'plug_in_source',
+  'recording',
+  'recording_saved',
+  'fault_device',
+  'fault_generic',
+  'switch_source',
+  'auto_off',
+  'combined_secondary',
+]);
+export type MessageKey = z.infer<typeof MessageKey>;
+
+export const PanelText = z.object({
+  key: MessageKey,
+  params: z.record(z.string(), z.union([z.string(), z.number()])).default({}),
+});
+export type PanelText = z.infer<typeof PanelText>;
+
+export const MessageTone = z.enum(['info', 'progress', 'success', 'warn', 'error']);
+
+export const RoomStatus = z.enum(['off', 'starting', 'on', 'stopping', 'fault']);
+export type RoomStatus = z.infer<typeof RoomStatus>;
+
+export const PanelSource = z.object({
+  id: LocalId,
+  label: z.string(),
+  /** null = this room cannot tell whether a cable is plugged in. */
+  present: z.boolean().nullable(),
+  selected: z.boolean(),
+});
+export type PanelSource = z.infer<typeof PanelSource>;
+
+export const PanelActivity = z.object({
+  id: LocalId,
+  name: z.string(),
+  icon: z.string().optional(),
+  kind: ActivityKind,
+  sources: z.array(PanelSource),
+  active: z.boolean(),
+  /** Being started right now. */
+  busy: z.boolean(),
+  /** Runs alongside another activity (Record) instead of replacing it. */
+  overlay: z.boolean(),
+});
+export type PanelActivity = z.infer<typeof PanelActivity>;
+
+export const PanelCombination = z.object({
+  /** primary: this panel controls the combined rooms. secondary: another room is in charge. */
+  role: z.enum(['primary', 'secondary']),
+  combined: z.boolean(),
+  /** The other rooms, by name: the secondaries for a primary, the primary for a secondary. */
+  rooms: z.array(z.string()),
+});
+export type PanelCombination = z.infer<typeof PanelCombination>;
+
+export const PanelViewModel = z.object({
+  roomName: z.string(),
+  status: RoomStatus,
+  activities: z.array(PanelActivity),
+  volume: z.object({ available: z.boolean(), level: z.number(), muted: z.boolean() }),
+  message: z.object({ text: PanelText, tone: MessageTone }).nullable(),
+  /** e.g. "Switch to Laptop 2?", auto-accepts when secondsLeft reaches 0. */
+  prompt: z
+    .object({ id: z.string(), text: PanelText, secondsLeft: z.number().nullable() })
+    .nullable(),
+  /** e.g. "Turning the room off in 30s". */
+  warning: z.object({ text: PanelText, secondsLeft: z.number() }).nullable(),
+  /** Present only for rooms that can be combined. */
+  combination: PanelCombination.optional(),
+});
+export type PanelViewModel = z.infer<typeof PanelViewModel>;
+
+/** Anything a panel can be bound to: the local runtime in the simulator, a WebSocket to the gateway later. */
+export interface PanelClient {
+  getSnapshot(): PanelViewModel;
+  subscribe(listener: () => void): () => void;
+  dispatch(intent: PanelIntent): void;
+}

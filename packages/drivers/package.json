@@ -1,0 +1,25 @@
+{
+  "name": "@kestrel/drivers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./real": "./src/real/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests",
+    "driver": "tsx src/cli.ts"
+  },
+  "devDependencies": {
+    "@kestrel/config": "workspace:*",
+    "tsx": "^4.23.15"
+  },
+  "dependencies": {
+    "@kestrel/engine": "workspace:*",
+    "@kestrel/model": "workspace:*",
+    "serialport": "^13.0.0"
+  }
+}
