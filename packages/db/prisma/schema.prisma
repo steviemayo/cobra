@@ -30,11 +30,14 @@ model Org {
   name      String
   createdAt DateTime @default(now())
 
-  members  Member[]
-  sites    Site[]
-  gateways Gateway[]
-  rooms    Room[]
-  audit    AuditLog[]
+  members       Member[]
+  sites         Site[]
+  gateways      Gateway[]
+  rooms         Room[]
+  audit         AuditLog[]
+  drafts        RoomDraft[]
+  draftVersions RoomDraftVersion[]
+  templates     Template[]
 }
 
 model Member {
@@ -65,14 +68,14 @@ model Site {
 }
 
 model Gateway {
-  id             String        @id @default(uuid()) @db.Uuid
-  orgId          String        @db.Uuid
-  siteId         String        @db.Uuid
-  name           String
-  status         GatewayStatus @default(pending)
+  id              String        @id @default(uuid()) @db.Uuid
+  orgId           String        @db.Uuid
+  siteId          String        @db.Uuid
+  name            String
+  status          GatewayStatus @default(pending)
   enrollTokenHash String?
-  lastSeenAt     DateTime?
-  createdAt      DateTime      @default(now())
+  lastSeenAt      DateTime?
+  createdAt       DateTime      @default(now())
 
   org   Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
   site  Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
@@ -91,9 +94,10 @@ model Room {
   type      RoomType
   createdAt DateTime @default(now())
 
-  org     Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site    Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  gateway Gateway? @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  org     Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site    Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  gateway Gateway?   @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  draft   RoomDraft?
 
   @@index([orgId])
   @@index([siteId])
@@ -111,4 +115,57 @@ model AuditLog {
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId, createdAt])
+}
+
+// One mutable working copy per room. `revision` gives optimistic concurrency for autosave.
+model RoomDraft {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  roomId    String   @unique @db.Uuid
+  revision  Int      @default(1)
+  model     Json
+  updatedBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org      Org                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room     Room               @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  versions RoomDraftVersion[]
+
+  @@index([orgId])
+}
+
+// Named snapshots of a draft (manual checkpoints / restore points).
+model RoomDraftVersion {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  draftId   String   @db.Uuid
+  revision  Int
+  label     String?
+  model     Json
+  createdBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+
+  org   Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  draft RoomDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@index([draftId, createdAt])
+  @@index([orgId])
+}
+
+// Org-scoped room templates. Kestrel-global starters live in code (@kestrel/model).
+model Template {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  name        String
+  description String   @default("")
+  roomType    RoomType
+  model       Json
+  createdBy   String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
 }
