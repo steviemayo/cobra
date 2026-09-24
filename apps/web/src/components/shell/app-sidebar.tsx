@@ -215,7 +215,7 @@ export function AppSidebar() {
                 <NavItem href={`${base}/templates`} icon={LayoutTemplate} label="Templates" />
               )}
               <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />
-              <NavItem icon={Rocket} label="Deployments" soon />
+              <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />
               <NavItem icon={Activity} label="Monitoring" soon />
             </SidebarMenu>
           </SidebarGroupContent>

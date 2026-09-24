@@ -21,45 +21,7 @@ import {
   type Db,
 } from './gateway-service';
 
-// ---- A tiny in-memory stand-in for the parts of Prisma the service uses -------------------------
-
-type Row = Record<string, unknown>;
-function matches(row: Row, where: Row = {}): boolean {
-  return Object.entries(where).every(([k, cond]) => {
-    const v = row[k];
-    if (cond && typeof cond === 'object' && !(cond instanceof Date)) {
-      const c = cond as { not?: unknown; in?: unknown[] };
-      if ('not' in c) return v !== c.not;
-      if ('in' in c) return c.in!.includes(v);
-    }
-    return v === cond;
-  });
-}
-function table(rows: Row[]) {
-  return {
-    rows,
-    findFirst: async ({ where }: { where?: Row }) => rows.find((r) => matches(r, where)) ?? null,
-    findMany: async ({ where }: { where?: Row }) => rows.filter((r) => matches(r, where)),
-    update: async ({ where, data }: { where: Row; data: Row }) => {
-      const row = rows.find((r) => matches(r, where))!;
-      Object.assign(row, data);
-      return row;
-    },
-    updateMany: async ({ where, data }: { where?: Row; data: Row }) => {
-      const hit = rows.filter((r) => matches(r, where));
-      hit.forEach((r) => Object.assign(r, data));
-      return { count: hit.length };
-    },
-    create: async ({ data }: { data: Row }) => {
-      rows.push(data);
-      return data;
-    },
-    createMany: async ({ data }: { data: Row[] }) => {
-      rows.push(...data);
-      return { count: data.length };
-    },
-  };
-}
+import { table, type Row } from './test-db';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
 const GW = '99999999-9999-4999-8999-999999999991';
@@ -68,6 +30,8 @@ const ROOM = '33333333-3333-4333-8333-333333333331';
 const ROOM2 = '33333333-3333-4333-8333-333333333332';
 const REL = '44444444-4444-4444-8444-444444444441';
 const REL2 = '44444444-4444-4444-8444-444444444442';
+const DEP = '55555555-5555-4555-8555-555555555551';
+const DEP2 = '55555555-5555-4555-8555-555555555552';
 const HASH = 'a'.repeat(64);
 
 function world() {
@@ -76,8 +40,8 @@ function world() {
     { id: GW2, orgId: ORG, name: 'Other gateway', enrollTokenHash: null, enrolledAt: null, credentialHash: null },
   ]);
   const room = table([
-    { id: ROOM, name: 'Boardroom', gatewayId: GW, desiredReleaseId: REL, reportedReleaseId: null },
-    { id: ROOM2, name: 'Studio', gatewayId: GW2, desiredReleaseId: REL2, reportedReleaseId: null },
+    { id: ROOM, name: 'Boardroom', gatewayId: GW, desiredReleaseId: REL, desiredDeploymentId: DEP, reportedReleaseId: null },
+    { id: ROOM2, name: 'Studio', gatewayId: GW2, desiredReleaseId: REL2, desiredDeploymentId: DEP2, reportedReleaseId: null },
   ]);
   const release = table([
     { id: REL, roomId: ROOM, number: 3, hash: HASH, manifest: { signed: 'boardroom' } },
@@ -85,8 +49,13 @@ function world() {
   ]);
   const gatewayEvent = table([]);
   const auditLog = table([]);
-  const db = { gateway, room, release, gatewayEvent, auditLog } as unknown as Db;
-  return { db, gateway, room, release, gatewayEvent, auditLog };
+  const deployment = table([
+    { id: DEP, orgId: ORG, roomId: ROOM, releaseId: REL, gatewayId: GW, status: 'pending', startedAt: null },
+    { id: DEP2, orgId: ORG, roomId: ROOM2, releaseId: REL2, gatewayId: GW2, status: 'pending', startedAt: null },
+  ]);
+  const deploymentEvent = table([], ['deploymentId', 'stage']);
+  const db = { gateway, room, release, gatewayEvent, auditLog, deployment, deploymentEvent } as unknown as Db;
+  return { db, gateway, room, release, gatewayEvent, auditLog, deployment, deploymentEvent };
 }
 
 const keys: PublicKey[] = [{ keyId: 'k1', publicKeyPem: generateKeyPair().publicKeyPem }];
@@ -258,7 +227,7 @@ describe('config and manifests', () => {
     const res = await config(w.db, w.gateway.rows[0]! as never, keys);
     const body = ConfigResponse.parse(res.body);
     expect(body.rooms).toEqual([
-      { roomId: ROOM, roomName: 'Boardroom', releaseId: REL, releaseNumber: 3, manifestHash: HASH },
+      { roomId: ROOM, roomName: 'Boardroom', releaseId: REL, releaseNumber: 3, manifestHash: HASH, deploymentId: DEP },
     ]);
     expect(body.publicKeys).toEqual(keys);
   });
@@ -321,5 +290,76 @@ describe('telemetry', () => {
     expect((await telemetry(w.db, gw, batch([{ at, type: 'made.up' }]))).status).toBe(400);
     const many = Array.from({ length: 501 }, () => ({ at, type: 'gateway.started' }));
     expect((await telemetry(w.db, gw, batch(many))).status).toBe(400);
+  });
+});
+
+describe('deployments over the heartbeat', () => {
+  const stages = (...names: string[]) => ({
+    deploymentId: DEP,
+    stage: names.at(-1),
+    history: names.map((stage, i) => ({ stage, at: new Date(Date.UTC(2026, 8, 24, 10, i)).toISOString() })),
+  });
+
+  it('applies the deployment a room reports, and stores the running manifest hash', async () => {
+    const w = world();
+    const gw = w.gateway.rows[0]! as never;
+    await heartbeat(
+      w.db,
+      gw,
+      hb([
+        {
+          roomId: ROOM,
+          releaseId: REL,
+          manifestHash: HASH,
+          status: 'off',
+          deployment: stages('downloading', 'verifying', 'staging', 'health_check', 'active'),
+        },
+      ]),
+      keys,
+    );
+    expect(w.deployment.rows.find((d) => d.id === DEP)).toMatchObject({ status: 'active' });
+    expect(w.deploymentEvent.rows).toHaveLength(5);
+    expect(w.room.rows[0]).toMatchObject({ reportedHash: HASH });
+  });
+
+  it('will not let a gateway report on a room or deployment that is not its own', async () => {
+    const w = world();
+    const gw2 = w.gateway.rows[1]! as never;
+    await heartbeat(w.db, gw2, hb([{ roomId: ROOM, releaseId: REL, status: 'off', deployment: stages('active') }]), keys);
+    expect(w.deployment.rows.find((d) => d.id === DEP)).toMatchObject({ status: 'pending' });
+  });
+
+  it('starts a scheduled deployment when the gateway next checks in, and tells it about it', async () => {
+    const w = world();
+    const gw = w.gateway.rows[0]! as never;
+    const before = (await heartbeat(w.db, gw, hb(), keys)).body as { configVersion: string };
+    const NEW = '55555555-5555-4555-8555-555555555559';
+    w.deployment.rows.push({
+      id: NEW,
+      orgId: ORG,
+      roomId: ROOM,
+      releaseId: REL,
+      gatewayId: GW,
+      status: 'scheduled',
+      scheduledFor: new Date(Date.now() - 1000),
+    });
+    const after = (await heartbeat(w.db, gw, hb(), keys)).body as { configVersion: string };
+    expect(w.deployment.rows.find((d) => d.id === NEW)!.status).toBe('pending');
+    expect(w.deployment.rows.find((d) => d.id === DEP)!.status).toBe('superseded');
+    expect(after.configVersion).not.toBe(before.configVersion);
+    const cfg = ConfigResponse.parse((await config(w.db, gw, keys)).body);
+    expect(cfg.rooms[0]!.deploymentId).toBe(NEW);
+  });
+
+  it('a new deployment of the same release changes the config version, so the gateway retries', () => {
+    const a = [{ roomId: 'r1', releaseId: 'x', deploymentId: 'd1' }];
+    expect(configVersion(a, ['k'])).not.toBe(configVersion([{ ...a[0]!, deploymentId: 'd2' }], ['k']));
+  });
+
+  it('does not send a room that has no deployment to a gateway', async () => {
+    const w = world();
+    w.room.rows[0]!.desiredDeploymentId = null;
+    const cfg = ConfigResponse.parse((await config(w.db, w.gateway.rows[0]! as never, keys)).body);
+    expect(cfg.rooms).toEqual([]);
   });
 });

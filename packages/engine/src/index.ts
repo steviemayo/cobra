@@ -21,3 +21,4 @@ export {
   detectorsFor,
   type SignalDetector,
 } from './runtime/activities';
+export * from './diff/diff';

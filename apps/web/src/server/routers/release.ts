@@ -3,9 +3,10 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db, Prisma } from '@kestrel/db';
 import { signManifest } from '@kestrel/crypto';
-import { validateRoomModel } from '@kestrel/engine';
-import { RoomModel } from '@kestrel/model';
+import { diffRoomModels, summariseChanges, validateRoomModel } from '@kestrel/engine';
+import { RoomModel, SignedManifest } from '@kestrel/model';
 import { writeAudit } from '../audit';
+import { createDeployment } from '../deployment-service';
 import { readPanel } from '../panel-settings';
 import { SigningNotConfigured, loadSigningKey } from '../signing';
 import { orgProcedure, requireRole, router } from '../trpc';
@@ -29,12 +30,54 @@ export const releaseRouter = router({
       reportedStatus: room.reportedStatus,
       reportedError: room.reportedError,
       reportedAt: room.reportedAt,
+      hasGateway: !!room.gatewayId,
       releases,
     };
   }),
 
-  // Freeze the current design as an immutable, signed release and make it the one to run.
-  publish: orgProcedure.input(z.object({ orgId, roomId })).mutation(async ({ ctx, input }) => {
+  // What changed, in plain words. `to` defaults to the current design; `from` to the release
+  // before `to` (or the latest release, when `to` is the current design).
+  diff: orgProcedure
+    .input(
+      z.object({
+        orgId,
+        roomId,
+        toReleaseId: z.string().uuid().optional(),
+        fromReleaseId: z.string().uuid().nullable().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const room = await assertRoom(ctx.orgId, input.roomId);
+      const load = async (id: string) => {
+        const r = await db.release.findFirst({ where: { id, roomId: room.id, orgId: ctx.orgId } });
+        if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Release not found' });
+        return { number: r.number, model: SignedManifest.parse(r.manifest).manifest.model };
+      };
+      let to: { number: number | null; model: RoomModel };
+      if (input.toReleaseId) to = await load(input.toReleaseId);
+      else {
+        const draft = await db.roomDraft.findFirst({ where: { roomId: room.id, orgId: ctx.orgId } });
+        if (!draft) throw new TRPCError({ code: 'BAD_REQUEST', message: 'This room has no design yet' });
+        to = { number: null, model: RoomModel.parse(draft.model) };
+      }
+      let from: { number: number; model: RoomModel } | null = null;
+      if (input.fromReleaseId) from = await load(input.fromReleaseId);
+      else if (input.fromReleaseId === undefined) {
+        const before = await db.release.findFirst({
+          where: { roomId: room.id, orgId: ctx.orgId, ...(to.number !== null && { number: { lt: to.number } }) },
+          orderBy: { number: 'desc' },
+        });
+        if (before) from = { number: before.number, model: SignedManifest.parse(before.manifest).manifest.model };
+      }
+      const changes = diffRoomModels(from?.model ?? null, to.model);
+      return { from: from?.number ?? null, to: to.number, changes, summary: summariseChanges(changes) };
+    }),
+
+  // Freeze the current design as an immutable, signed release. With `deploy` it also starts running
+  // on the room's gateway straight away; otherwise it waits to be deployed.
+  publish: orgProcedure
+    .input(z.object({ orgId, roomId, deploy: z.boolean().default(false) }))
+    .mutation(async ({ ctx, input }) => {
     requireRole(ctx.role, ['owner', 'dev']);
     const room = await assertRoom(ctx.orgId, input.roomId);
     const draft = await db.roomDraft.findFirst({ where: { roomId: room.id, orgId: ctx.orgId } });
@@ -83,6 +126,7 @@ export const releaseRouter = router({
           number,
           manifest: signed as unknown as Prisma.InputJsonValue,
           hash: signed.hash,
+          draftRevision: draft.revision,
           createdBy: ctx.user.id,
         },
       });
@@ -95,7 +139,6 @@ export const releaseRouter = router({
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') release = await create();
       else throw e;
     }
-    await db.room.update({ where: { id: room.id }, data: { desiredReleaseId: release.id } });
     await writeAudit({
       orgId: ctx.orgId,
       actorId: ctx.user.id,
@@ -103,27 +146,26 @@ export const releaseRouter = router({
       target: release.id,
       meta: { room: room.name, number: release.number },
     });
-    return { id: release.id, number: release.number };
-  }),
-
-  // Point the room at any existing release. Choosing an older one is a rollback.
-  deploy: orgProcedure
-    .input(z.object({ orgId, roomId, releaseId: z.string().uuid() }))
-    .mutation(async ({ ctx, input }) => {
-      requireRole(ctx.role, ['owner', 'dev']);
-      const room = await assertRoom(ctx.orgId, input.roomId);
-      const release = await db.release.findFirst({
-        where: { id: input.releaseId, roomId: room.id, orgId: ctx.orgId },
+    let deploymentId: string | null = null;
+    if (input.deploy && room.gatewayId) {
+      const deployment = await createDeployment(db, {
+        orgId: ctx.orgId,
+        roomId: room.id,
+        gatewayId: room.gatewayId,
+        releaseId: release.id,
+        kind: 'deploy',
+        createdBy: ctx.user.id,
+        scheduledFor: null,
       });
-      if (!release) throw new TRPCError({ code: 'NOT_FOUND', message: 'Release not found' });
-      await db.room.update({ where: { id: room.id }, data: { desiredReleaseId: release.id } });
+      deploymentId = deployment.id;
       await writeAudit({
         orgId: ctx.orgId,
         actorId: ctx.user.id,
-        action: 'release.deploy',
-        target: release.id,
+        action: 'deployment.create',
+        target: deployment.id,
         meta: { room: room.name, number: release.number },
       });
-      return { number: release.number };
-    }),
+    }
+    return { id: release.id, number: release.number, deploymentId };
+  }),
 });

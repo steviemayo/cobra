@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { RoomType } from '@kestrel/model';
 import { writeAudit } from '../audit';
+import { createDeployment } from '../deployment-service';
 import { effectiveStatus } from '../gateway-service';
 import { PanelInput, applyPanelInput, publicPanel, readPanel } from '../panel-settings';
 import { summariseDraft } from '../room-summary';
@@ -151,11 +152,23 @@ export const roomRouter = router({
           gatewayId: input.gatewayId,
           // The new gateway has not reported on this room yet.
           reportedReleaseId: null,
+          reportedHash: null,
           reportedStatus: null,
           reportedError: null,
           reportedAt: null,
         },
       });
+      // A room that already has a release follows it to its new gateway.
+      if (input.gatewayId && room.desiredReleaseId)
+        await createDeployment(db, {
+          orgId: ctx.orgId,
+          roomId: room.id,
+          gatewayId: input.gatewayId,
+          releaseId: room.desiredReleaseId,
+          kind: 'deploy',
+          createdBy: ctx.user.id,
+          scheduledFor: null,
+        });
       await writeAudit({
         orgId: ctx.orgId,
         actorId: ctx.user.id,

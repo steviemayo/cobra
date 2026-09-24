@@ -1,4 +1,4 @@
-import { connect } from 'node:net';
+import { connect, type Socket } from 'node:net';
 import type { Device, DeviceCommand } from '@kestrel/model';
 import { BaseDriver } from './base';
 import type { DriverContext } from './types';
@@ -11,6 +11,33 @@ export class GenericTcpDriver extends BaseDriver {
   constructor(device: Device, ctx: DriverContext) {
     super(device, ctx);
     this.state.online = false;
+  }
+
+  private probeSocket: Socket | null = null;
+
+  /**
+   * This protocol has no feedback, so the device would look offline until the first command.
+   * Connect once at start so a release can tell a reachable device from a wrong address.
+   */
+  override start() {
+    const host = this.setting<string>('host', '');
+    if (!host) return;
+    const socket = connect({ host, port: this.setting<number>('port', 23) });
+    this.probeSocket = socket;
+    const settle = (online: boolean) => {
+      socket.destroy();
+      if (this.probeSocket === socket) this.probeSocket = null;
+      this.update((s) => {
+        s.online = online;
+      });
+    };
+    socket.setTimeout(this.setting<number>('timeoutMs', 2000), () => settle(false));
+    socket.on('connect', () => settle(true));
+    socket.on('error', () => settle(false));
+  }
+
+  override close() {
+    this.probeSocket?.destroy();
   }
 
   private template(command: DeviceCommand): string {

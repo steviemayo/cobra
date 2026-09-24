@@ -22,11 +22,14 @@ export interface LoadedRoom {
   bus: DeviceBus;
   access: PanelAccess;
   branding: PanelBranding;
+  /** Ids of this room's real devices that are unreachable right now. */
+  offline(): string[];
   close(): void;
 }
 
 interface BuiltBus {
   bus: DeviceBus;
+  offline(): string[];
   close(): void;
 }
 
@@ -35,7 +38,7 @@ export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger
   const model = signed.manifest.model;
   if (mode === 'all') {
     const sim = createSimulation(model);
-    return { bus: sim, close: () => sim.dispose() };
+    return { bus: sim, offline: () => [], close: () => sim.dispose() };
   }
   const real = new Map<string, DeviceDriver>();
   for (const device of model.devices) {
@@ -44,7 +47,7 @@ export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger
   }
   const bus = new HybridBus(real, mode === 'missing' ? createSimulation(model) : null);
   bus.start();
-  return { bus, close: () => bus.close() };
+  return { bus, offline: () => bus.offline(), close: () => bus.close() };
 }
 
 /**
@@ -79,9 +82,9 @@ export class RoomHost {
     return () => this.reloadListeners.delete(listener);
   }
 
-  load(signed: SignedManifest): LoadedRoom {
+  /** Build a room and start connecting to its devices without replacing the one that is running. */
+  stage(signed: SignedManifest): LoadedRoom {
     const { manifest } = signed;
-    this.unload(manifest.roomId, false);
     const built = buildBus(signed, this.mode, this.log);
     const runtime = new RoomRuntime({
       model: manifest.model,
@@ -96,11 +99,33 @@ export class RoomHost {
       bus: built.bus,
       access: manifest.panel.access,
       branding: manifest.panel.branding,
+      offline: built.offline,
       close: () => {
         runtime.dispose();
         built.close();
       },
     };
+    return room;
+  }
+
+  /**
+   * Wait for the staged room's devices to answer. Returns the names of devices that stayed
+   * unreachable, ignoring any that were already unreachable in the room being replaced, so an
+   * unrelated outage doesn't block a release that didn't cause it.
+   */
+  async healthCheck(staged: LoadedRoom, timeoutMs: number): Promise<string[]> {
+    const alreadyDown = new Set(this.rooms.get(staged.roomId)?.offline() ?? []);
+    const down = () => staged.offline().filter((id) => !alreadyDown.has(id));
+    const deadline = Date.now() + timeoutMs;
+    while (down().length > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+    const names = new Map(staged.signed.manifest.model.devices.map((d) => [d.id, d.name]));
+    return down().map((id) => names.get(id) ?? id);
+  }
+
+  /** Swap a staged room in for the running one. */
+  activate(room: LoadedRoom): LoadedRoom {
+    const { manifest } = room.signed;
+    this.unload(room.roomId, false);
     this.watch(room);
     this.rooms.set(room.roomId, room);
     this.log('info', 'Room loaded', {
@@ -110,6 +135,10 @@ export class RoomHost {
     });
     this.notify(room.roomId);
     return room;
+  }
+
+  load(signed: SignedManifest): LoadedRoom {
+    return this.activate(this.stage(signed));
   }
 
   unload(roomId: string, notify = true) {
@@ -125,6 +154,7 @@ export class RoomHost {
     return [...this.rooms.values()].map((r) => ({
       roomId: r.roomId,
       releaseId: r.releaseId,
+      manifestHash: r.signed.hash,
       status: r.runtime.getSnapshot().status,
     }));
   }

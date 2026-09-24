@@ -5,7 +5,10 @@ import {
   PublicKey,
   type AssignedRoom,
   type ConfigResponse,
+  type DeploymentReport,
+  type DeploymentStage,
   type EnrollResponse,
+  type RoomReport,
   type SignedManifest,
   type TelemetryEvent,
 } from '@kestrel/model';
@@ -20,6 +23,21 @@ const KEY_IDENTITY = 'identity';
 const KEY_PUBLIC_KEYS = 'publicKeys';
 const KEY_CONFIG_VERSION = 'configVersion';
 const MAX_BACKOFF_MS = 60_000;
+const DEFAULT_HEALTH_TIMEOUT_MS = 15_000;
+const MAX_PARALLEL_DEPLOYS = 8;
+const DEPLOYMENT_PREFIX = 'deployment:';
+const keyDeployment = (roomId: string) => `${DEPLOYMENT_PREFIX}${roomId}`;
+const isRefused = (stage: DeploymentStage) => stage === 'failed' || stage === 'rolled_back';
+
+interface DeploymentRecord {
+  deploymentId: string;
+  releaseId: string;
+  stage: DeploymentStage;
+  history: { stage: DeploymentStage; at: string }[];
+  error?: string;
+}
+
+type DeployOutcome = 'applied' | 'refused' | 'retry';
 
 interface Identity {
   gatewayId: string;
@@ -151,83 +169,200 @@ export class Gateway {
 
   private async heartbeat(): Promise<void> {
     const credential = this.store.get(KEY_CREDENTIAL)!;
-    const reports = this.host.reports();
-    // Rooms that failed to load still get reported, so the portal can show why.
-    for (const [roomId, error] of this.roomErrors)
-      if (!reports.some((r) => r.roomId === roomId))
-        reports.push({ roomId, releaseId: null, status: 'unloaded', error });
-    const res = await this.cloud
+    const res = await this.sendHeartbeat(credential);
+    if (res.configVersion !== this.store.get(KEY_CONFIG_VERSION)) {
+      const progressed = await this.syncConfig(credential);
+      // Tell the cloud how the deployment went now rather than a heartbeat later.
+      if (progressed) await this.sendHeartbeat(credential);
+    }
+  }
+
+  private sendHeartbeat(credential: string) {
+    return this.cloud
       .heartbeat(credential, {
         protocol: PROTOCOL_VERSION,
         gatewayVersion: this.cfg.version,
         uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
         configVersion: this.store.get(KEY_CONFIG_VERSION),
-        rooms: reports.map((r) => ({ ...r, ...(this.roomErrors.has(r.roomId) ? { error: this.roomErrors.get(r.roomId) } : {}) })),
+        rooms: this.roomReports(),
       })
       .catch((e: unknown) => {
         if (e instanceof CloudError && e.unauthorised) this.log('error', 'The cloud rejected this gateway’s credential');
         throw e;
       });
-    if (res.configVersion !== this.store.get(KEY_CONFIG_VERSION)) await this.syncConfig(credential);
+  }
+
+  private deploymentRoomIds(): string[] {
+    return this.store.keysWithPrefix(DEPLOYMENT_PREFIX).map((k) => k.slice(DEPLOYMENT_PREFIX.length));
+  }
+
+  private roomReports(): RoomReport[] {
+    const reports = this.host.reports();
+    // Rooms with no running release still get reported, so the portal can show why.
+    const known = new Set(reports.map((r) => r.roomId));
+    for (const roomId of new Set([...this.roomErrors.keys(), ...this.deploymentRoomIds()]))
+      if (!known.has(roomId)) reports.push({ roomId, releaseId: null, status: 'unloaded' });
+    return reports.map((r) => {
+      const error = this.roomErrors.get(r.roomId);
+      const deployment = this.deploymentReport(r.roomId);
+      return { ...r, ...(error ? { error } : {}), ...(deployment ? { deployment } : {}) };
+    });
+  }
+
+  private deploymentRecord(roomId: string): DeploymentRecord | null {
+    return this.store.getJson<DeploymentRecord>(keyDeployment(roomId));
+  }
+
+  private deploymentReport(roomId: string): DeploymentReport | undefined {
+    const rec = this.deploymentRecord(roomId);
+    if (!rec) return undefined;
+    return {
+      deploymentId: rec.deploymentId,
+      stage: rec.stage,
+      history: rec.history.slice(-20),
+      ...(rec.error ? { error: rec.error } : {}),
+    };
+  }
+
+  private mark(roomId: string, rec: DeploymentRecord, stage: DeploymentStage, error?: string) {
+    rec.stage = stage;
+    // A download retried every heartbeat is still one "downloading" step.
+    if (rec.history.at(-1)?.stage !== stage) rec.history.push({ stage, at: new Date().toISOString() });
+    if (rec.history.length > 20) rec.history.splice(0, rec.history.length - 20);
+    if (error) rec.error = error;
+    this.store.setJson(keyDeployment(roomId), rec);
   }
 
   // ---- Config sync ----------------------------------------------------------------------------
 
-  private async syncConfig(credential: string): Promise<void> {
+  /** Returns true if any room's deployment moved on, so the cloud should hear about it. */
+  private async syncConfig(credential: string): Promise<boolean> {
     const config: ConfigResponse = await this.cloud.config(credential);
     if (config.publicKeys.length) this.store.setJson(KEY_PUBLIC_KEYS, config.publicKeys);
     const keys = this.trustedKeys();
     const wanted = new Map(config.rooms.map((r) => [r.roomId, r]));
+    let progressed = false;
 
-    for (const id of this.host.ids())
+    for (const id of new Set([...this.host.ids(), ...this.deploymentRoomIds()]))
       if (!wanted.has(id)) {
         this.host.unload(id);
         this.store.deleteManifest(id);
+        this.store.delete(keyDeployment(id));
         this.roomErrors.delete(id);
+        progressed = true;
       }
 
-    let allApplied = true;
+    const todo: AssignedRoom[] = [];
     for (const assigned of config.rooms) {
+      const rec = this.deploymentRecord(assigned.roomId);
       if (this.host.releaseOf(assigned.roomId) === assigned.releaseId) {
         this.roomErrors.delete(assigned.roomId);
+        if (rec?.deploymentId !== assigned.deploymentId) {
+          // Already running (from the cache, or set up before deployments existed): that is this deployment's result.
+          this.store.setJson(keyDeployment(assigned.roomId), {
+            deploymentId: assigned.deploymentId,
+            releaseId: assigned.releaseId,
+            stage: 'active',
+            history: [{ stage: 'active', at: new Date().toISOString() }],
+          } satisfies DeploymentRecord);
+          progressed = true;
+        }
         continue;
       }
-      const ok = await this.applyRelease(credential, assigned, keys);
-      if (!ok) allApplied = false;
+      // A refused deployment stays refused; only a new deployment earns another attempt.
+      if (rec?.deploymentId === assigned.deploymentId && isRefused(rec.stage)) continue;
+      todo.push(assigned);
     }
-    // Only remember this config version once everything in it is running, so failures get retried.
+
+    let allApplied = true;
+    for (let i = 0; i < todo.length; i += MAX_PARALLEL_DEPLOYS) {
+      const outcomes = await Promise.all(
+        todo.slice(i, i + MAX_PARALLEL_DEPLOYS).map((a) => this.deploy(credential, a, keys)),
+      );
+      for (const outcome of outcomes) {
+        if (outcome === 'retry') allApplied = false;
+        else progressed = true;
+      }
+    }
+    // Only remember this config version once every room is settled, so failed downloads get retried.
     if (allApplied) this.store.set(KEY_CONFIG_VERSION, config.configVersion);
+    return progressed;
   }
 
-  private async applyRelease(
+  /**
+   * Move one room to its assigned release without ever leaving it broken: download, check the
+   * signature, build the new room alongside the running one, wait for its devices to answer, and
+   * only then swap. If any step fails the running release is untouched.
+   */
+  private async deploy(
     credential: string,
     assigned: AssignedRoom,
     keys: PublicKey[],
-  ): Promise<boolean> {
+  ): Promise<DeployOutcome> {
+    const { roomId } = assigned;
+    const existing = this.deploymentRecord(roomId);
+    const rec: DeploymentRecord =
+      existing && existing.deploymentId === assigned.deploymentId && !isRefused(existing.stage)
+        ? existing
+        : { deploymentId: assigned.deploymentId, releaseId: assigned.releaseId, stage: 'downloading', history: [] };
+    this.mark(roomId, rec, 'downloading');
+
+    let raw: unknown;
     try {
-      const raw = await this.cloud.manifest(credential, assigned.roomId, assigned.releaseId);
-      const result = verifyManifest(raw, keys);
-      const m = result.ok ? result.signed.manifest : null;
-      const problem = !result.ok
-        ? `signature check failed (${result.reason})`
-        : result.signed.hash !== assigned.manifestHash
-          ? 'hash does not match what was assigned'
-          : m!.roomId !== assigned.roomId || m!.releaseId !== assigned.releaseId
-            ? 'manifest is for a different room or release'
-            : null;
-      if (problem || !result.ok) {
-        this.reject(assigned, problem ?? 'unknown');
-        return false;
-      }
-      this.host.load(result.signed);
-      this.store.saveManifest(result.signed);
-      this.roomErrors.delete(assigned.roomId);
-      return true;
+      raw = await this.cloud.manifest(credential, roomId, assigned.releaseId);
     } catch (e) {
       // Network trouble: keep whatever is running and try again next heartbeat.
-      this.log('warn', 'Could not download a release', { roomId: assigned.roomId, error: String(e) });
-      return false;
+      this.log('warn', 'Could not download a release', { roomId, error: String(e) });
+      return 'retry';
     }
+
+    this.mark(roomId, rec, 'verifying');
+    const result = verifyManifest(raw, keys);
+    const m = result.ok ? result.signed.manifest : null;
+    const problem = !result.ok
+      ? `signature check failed (${result.reason})`
+      : result.signed.hash !== assigned.manifestHash
+        ? 'hash does not match what was assigned'
+        : m!.roomId !== roomId || m!.releaseId !== assigned.releaseId
+          ? 'manifest is for a different room or release'
+          : null;
+    if (problem || !result.ok) return this.refuse(rec, assigned, problem ?? 'unknown');
+
+    this.mark(roomId, rec, 'staging');
+    let staged;
+    try {
+      staged = this.host.stage(result.signed);
+    } catch (e) {
+      return this.refuse(rec, assigned, `could not start the room (${e instanceof Error ? e.message : String(e)})`);
+    }
+
+    this.mark(roomId, rec, 'health_check');
+    let unreachable: string[];
+    try {
+      unreachable = await this.host.healthCheck(staged, this.cfg.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS);
+    } catch (e) {
+      staged.close();
+      return this.refuse(rec, assigned, `health check failed (${e instanceof Error ? e.message : String(e)})`);
+    }
+    if (unreachable.length > 0) {
+      staged.close();
+      return this.refuse(rec, assigned, `could not reach ${unreachable.join(', ')}`);
+    }
+
+    this.host.activate(staged);
+    this.store.saveManifest(result.signed);
+    this.roomErrors.delete(roomId);
+    delete rec.error;
+    this.mark(roomId, rec, 'active');
+    return 'applied';
+  }
+
+  private refuse(rec: DeploymentRecord, assigned: AssignedRoom, problem: string): DeployOutcome {
+    const keptRunning = this.host.releaseOf(assigned.roomId) !== null;
+    const message = `Release ${assigned.releaseNumber} rejected: ${problem}`;
+    this.mark(assigned.roomId, rec, keptRunning ? 'rolled_back' : 'failed', message);
+    this.reject(assigned, problem);
+    return 'refused';
   }
 
   private reject(assigned: AssignedRoom, problem: string) {

@@ -23,6 +23,7 @@ const SECTION_LABEL: Record<string, string> = {
   rooms: 'Rooms',
   templates: 'Templates',
   gateways: 'Gateways',
+  deployments: 'Deployments',
   team: 'Team',
   settings: 'Settings',
 };
@@ -31,6 +32,7 @@ const ROOM_TAB_LABEL: Record<string, string> = {
   design: 'Design',
   simulate: 'Simulate',
   devices: 'Devices',
+  deployments: 'Deployments',
   settings: 'Settings',
 };
 

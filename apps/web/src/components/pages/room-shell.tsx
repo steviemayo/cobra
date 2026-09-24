@@ -2,13 +2,14 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { DoorOpen, MoreHorizontal, PencilRuler, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { NavTabs } from '@/components/common/nav-tabs';
 import { PageHeader } from '@/components/common/page-header';
+import { SyncBadge } from '@/components/common/deploy-status';
 import { HealthBadge } from '@/components/common/status';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -39,6 +40,10 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
   const shellWidth = onDesign ? 'max-w-none' : 'max-w-6xl';
   const invalidate = useInvalidateEstate();
   const [deleting, setDeleting] = useState(false);
+  const deploy = useQuery({
+    ...trpc.deployment.roomStatus.queryOptions({ orgId, roomId }),
+    refetchInterval: (q) => (q.state.data?.state === 'deploying' ? 3_000 : 15_000),
+  });
 
   const del = useMutation(
     trpc.room.delete.mutationOptions({
@@ -101,6 +106,14 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
                 ·
               </span>
               <HealthBadge draft={room.draft} />
+              {deploy.data && room.gateway && (
+                <>
+                  <span aria-hidden className="text-muted-foreground/50">
+                    ·
+                  </span>
+                  <SyncBadge state={deploy.data.state} />
+                </>
+              )}
             </>
           }
           actions={
@@ -138,7 +151,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
             { label: 'Design', href: `${base}/design` },
             { label: 'Simulate', href: `${base}/simulate` },
             { label: 'Devices', href: `${base}/devices` },
-            { label: 'Deployments', href: `${base}/deployments`, soon: true },
+            { label: 'Deployments', href: `${base}/deployments` },
             { label: 'Monitoring', href: `${base}/monitoring`, soon: true },
             ...(canEdit ? [{ label: 'Settings', href: `${base}/settings` }] : []),
           ]}

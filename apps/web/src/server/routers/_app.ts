@@ -1,5 +1,6 @@
 import { router } from '../trpc';
 import { auditRouter } from './audit';
+import { deploymentRouter } from './deployment';
 import { draftRouter } from './draft';
 import { gatewayRouter } from './gateway';
 import { inviteRouter } from './invite';
@@ -21,5 +22,6 @@ export const appRouter = router({
   audit: auditRouter,
   gateway: gatewayRouter,
   release: releaseRouter,
+  deployment: deploymentRouter,
 });
 export type AppRouter = typeof appRouter;

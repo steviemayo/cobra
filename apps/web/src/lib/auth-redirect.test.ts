@@ -28,6 +28,18 @@ describe('safeNext', () => {
 });
 
 describe('describeAudit', () => {
+  it('words deployments, including rollbacks', () => {
+    expect(describeAudit('deployment.create', { room: 'Boardroom', number: 3, kind: 'deploy' })).toBe(
+      'deployed release 3 to “Boardroom”',
+    );
+    expect(describeAudit('deployment.create', { room: 'Boardroom', number: 2, kind: 'rollback' })).toBe(
+      'rolled “Boardroom” back to release 2',
+    );
+    expect(describeAudit('deployment.schedule', { room: 'Boardroom', number: 4 })).toBe(
+      'scheduled release 4 for “Boardroom”',
+    );
+  });
+
   it('words known actions in plain language', () => {
     expect(describeAudit('room.create', { name: 'Boardroom', site: 'HQ' })).toBe(
       'created room “Boardroom” in HQ',

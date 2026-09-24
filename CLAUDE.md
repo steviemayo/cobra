@@ -128,7 +128,7 @@
 - TypeScript strict everywhere, zod as single source of truth for shared schemas (model, protocol, manifest)
 - API responses via tRPC types; gateway↔cloud protocol versioned and defined in `packages/model`
 - Never omit `orgId` scoping; never hardcode secrets
-- Status: Phase 0 scaffold written on branch `feat/phase-0-scaffold` (uncommitted). Next: Supabase project + env, then Phase 1 (`packages/model` schemas). See `docs/plan.md`
+- Status: Phases 0-3 built (PR #9 for Phase 3 open), Phase 4 built on `feat/phase-4-deployments` (unpushed). **Read `docs/phase-4-preread.md` first** (status table, rules learned, next steps). Progress lives there, not in plan.md
 - Pins: TypeScript ^6 (typescript-eslint lacks TS7 support), Prisma 7.x (CLI must match client), pnpm 12, Next 16 (`proxy.ts` replaces middleware)
 - Env: see `.env.example`; Prisma CLI reads `DIRECT_URL`, runtime uses `DATABASE_URL`
 - Every org-scoped tRPC procedure uses `orgProcedure` (membership check) and filters by `ctx.orgId`

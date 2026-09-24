@@ -8,10 +8,14 @@ import {
   type AssignedRoom,
   type PublicKey,
 } from '@kestrel/model';
+import { applyReport, promoteDue } from './deployment-service';
 
 // The cloud's half of the gateway protocol. Route handlers are thin wrappers over these functions,
 // which take the database as a parameter so they can be tested without one.
-export type Db = Pick<PrismaClient, 'gateway' | 'room' | 'release' | 'gatewayEvent' | 'auditLog'>;
+export type Db = Pick<
+  PrismaClient,
+  'gateway' | 'room' | 'release' | 'gatewayEvent' | 'auditLog' | 'deployment' | 'deploymentEvent'
+>;
 type GatewayRow = NonNullable<Awaited<ReturnType<Db['gateway']['findFirst']>>>;
 export interface Result {
   status: number;
@@ -35,7 +39,7 @@ export function effectiveStatus(
 
 /** Changes whenever what a gateway should be running (or trust) changes. */
 export function configVersion(
-  assignments: { roomId: string; releaseId: string }[],
+  assignments: { roomId: string; releaseId: string; deploymentId?: string }[],
   keyIds: string[],
 ): string {
   const canonical = JSON.stringify({
@@ -112,8 +116,8 @@ export async function enroll(db: Db, raw: unknown, keys: PublicKey[]): Promise<R
 
 async function assignments(db: Db, gatewayId: string) {
   const rooms = await db.room.findMany({
-    where: { gatewayId, desiredReleaseId: { not: null } },
-    select: { id: true, name: true, desiredReleaseId: true },
+    where: { gatewayId, desiredReleaseId: { not: null }, desiredDeploymentId: { not: null } },
+    select: { id: true, name: true, desiredReleaseId: true, desiredDeploymentId: true },
     orderBy: { name: 'asc' },
   });
   const releases = await db.release.findMany({
@@ -131,6 +135,7 @@ async function assignments(db: Db, gatewayId: string) {
         releaseId: rel.id,
         releaseNumber: rel.number,
         manifestHash: rel.hash,
+        deploymentId: room.desiredDeploymentId!,
       });
   }
   return out;
@@ -146,18 +151,22 @@ export async function heartbeat(db: Db, gw: GatewayRow, raw: unknown, keys: Publ
   });
   // Rooms report themselves; a gateway can only report rooms assigned to it.
   await Promise.all(
-    parsed.data.rooms.map((r) =>
-      db.room.updateMany({
+    parsed.data.rooms.map(async (r) => {
+      const { count } = await db.room.updateMany({
         where: { id: r.roomId, gatewayId: gw.id },
         data: {
           reportedReleaseId: r.releaseId,
+          reportedHash: r.manifestHash ?? null,
           reportedStatus: r.status,
           reportedError: r.error ?? null,
           reportedAt: now,
         },
-      }),
-    ),
+      });
+      if (count > 0 && r.deployment) await applyReport(db, gw.orgId, r.roomId, r.deployment, now);
+    }),
   );
+  // Reports first, so a deployment that just finished is settled before the next one starts.
+  await promoteDue(db, gw.id, now);
   const list = await assignments(db, gw.id);
   return {
     status: 200,
