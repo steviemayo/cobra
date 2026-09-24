@@ -1,5 +1,6 @@
 import { db } from '@kestrel/db';
 import { priceMapFromEnv, handleStripeEvent } from '@/server/billing';
+import { fulfilOrder, type MarketplaceSession } from '@/server/marketplace';
 import { getStripe } from '@/server/stripe';
 
 export const dynamic = 'force-dynamic';
@@ -17,6 +18,12 @@ export async function POST(req: Request) {
     event = await getStripe().webhooks.constructEventAsync(body, signature, secret);
   } catch {
     return Response.json({ error: 'Bad signature' }, { status: 400 });
+  }
+  // Marketplace purchases are one-off payments, told apart by the metadata Kestrel put on them.
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object as unknown as MarketplaceSession;
+    if (session.metadata?.kind === 'marketplace')
+      return Response.json({ received: true, result: await fulfilOrder(db, session) });
   }
   const result = await handleStripeEvent(db, event, priceMapFromEnv());
   return Response.json({ received: true, result });

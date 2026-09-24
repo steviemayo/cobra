@@ -10,6 +10,7 @@ import { deploymentRouter } from './deployment';
 import { draftRouter } from './draft';
 import { gatewayRouter } from './gateway';
 import { inviteRouter } from './invite';
+import { marketplaceRouter } from './marketplace';
 import { memberRouter } from './member';
 import { monitoringRouter } from './monitoring';
 import { orgRouter } from './org';
@@ -36,6 +37,7 @@ export const appRouter = router({
   command: commandRouter,
   ticket: ticketRouter,
   billing: billingRouter,
+  marketplace: marketplaceRouter,
   calendar: calendarRouter,
   combination: combinationRouter,
   control: controlRouter,

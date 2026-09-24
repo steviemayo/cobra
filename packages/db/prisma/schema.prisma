@@ -55,6 +55,8 @@ model Org {
   controlSessions ControlSession[]
   combinations    RoomCombination[]
   calendars       CalendarConnection[]
+  listings        MarketplaceListing[]
+  purchases       MarketplacePurchase[]
 }
 
 model Member {
@@ -576,4 +578,49 @@ model CalendarFire {
 
   @@unique([roomId, triggerId, eventKey])
   @@index([firedAt])
+}
+
+// ---- Marketplace -------------------------------------------------------------------------------
+
+// A room design shared by one organisation with others. `model` is a snapshot with every device
+// setting removed (addresses and passwords never leave the publisher). status: pending (waiting for
+// review), published, rejected, withdrawn. priceCents 0 is free.
+model MarketplaceListing {
+  id             String    @id @default(uuid()) @db.Uuid
+  publisherOrgId String    @db.Uuid
+  templateId     String?   @db.Uuid
+  name           String
+  description    String    @default("")
+  roomType       RoomType
+  model          Json
+  version        Int       @default(1)
+  priceCents     Int       @default(0)
+  currency       String    @default("aud")
+  status         String    @default("pending")
+  reviewNote     String?
+  downloads      Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+  publishedAt    DateTime?
+
+  publisher Org                   @relation(fields: [publisherOrgId], references: [id], onDelete: Cascade)
+  purchases MarketplacePurchase[]
+
+  @@index([status, createdAt])
+  @@index([publisherOrgId])
+}
+
+// An organisation's right to a listing, from a free download or a paid checkout.
+model MarketplacePurchase {
+  id              String   @id @default(uuid()) @db.Uuid
+  listingId       String   @db.Uuid
+  buyerOrgId      String   @db.Uuid
+  priceCents      Int      @default(0)
+  stripeSessionId String?  @unique
+  createdAt       DateTime @default(now())
+
+  listing MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyer   Org                @relation(fields: [buyerOrgId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, buyerOrgId])
 }

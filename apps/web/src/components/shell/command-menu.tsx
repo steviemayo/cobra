@@ -17,6 +17,7 @@ import {
   Rocket,
   Router,
   Settings,
+  Store,
   Users,
 } from 'lucide-react';
 import {
@@ -100,6 +101,11 @@ export function CommandMenu({ children }: { children: React.ReactNode }) {
               <CommandItem onSelect={() => go('/deployments')}>
                 <Rocket /> Deployments
               </CommandItem>
+              {canEdit && (
+                <CommandItem onSelect={() => go('/marketplace')}>
+                  <Store /> Marketplace
+                </CommandItem>
+              )}
               <CommandItem onSelect={() => go('/combinations')}>
                 <Link2 /> Combined rooms
               </CommandItem>

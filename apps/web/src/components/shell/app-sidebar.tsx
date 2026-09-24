@@ -18,6 +18,7 @@ import {
   Rocket,
   Router,
   Settings,
+  Store,
   Users,
 } from 'lucide-react';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
@@ -218,6 +219,7 @@ export function AppSidebar() {
               {canEdit && (
                 <NavItem href={`${base}/templates`} icon={LayoutTemplate} label="Templates" />
               )}
+              {canEdit && <NavItem href={`${base}/marketplace`} icon={Store} label="Marketplace" />}
               {canSupport && <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />}
               {canSupport && (
                 <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />

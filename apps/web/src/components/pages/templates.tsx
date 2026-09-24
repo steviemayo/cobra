@@ -1,12 +1,13 @@
 'use client';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, Eye, LayoutTemplate, Trash2 } from 'lucide-react';
+import { Copy, Eye, LayoutTemplate, Share2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DEVICE_CATALOG } from '@kestrel/model';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
+import { useBilling } from '@/components/common/plan-gate';
 import { useOrg } from '@/components/shell/org-context';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -39,6 +40,7 @@ import {
 } from '@/components/ui/table';
 import { ROOM_TYPE_LABEL, formatDate } from '@/lib/format';
 import { useTRPC } from '@/trpc/client';
+import { PublishDialog } from './marketplace';
 
 interface Row {
   id: string;
@@ -57,6 +59,8 @@ export function TemplatesView() {
   const [preview, setPreview] = useState<Row | null>(null);
   const [cloning, setCloning] = useState<Row | null>(null);
   const [deleting, setDeleting] = useState<Row | null>(null);
+  const [publishing, setPublishing] = useState<Row | null>(null);
+  const canPublish = !!useBilling().data?.entitlements.marketplacePublish;
 
   const del = useMutation(
     trpc.template.delete.mutationOptions({
@@ -135,6 +139,16 @@ export function TemplatesView() {
                           <Copy />
                         </Button>
                       )}
+                      {canEdit && canPublish && t.source === 'org' && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Publish ${t.name} to the marketplace`}
+                          onClick={() => setPublishing(t)}
+                        >
+                          <Share2 />
+                        </Button>
+                      )}
                       {canEdit && t.source === 'org' && (
                         <Button
                           variant="ghost"
@@ -156,6 +170,7 @@ export function TemplatesView() {
 
       <PreviewSheet template={preview} onClose={() => setPreview(null)} />
       <CloneDialog template={cloning} onClose={() => setCloning(null)} />
+      <PublishDialog template={publishing} onClose={() => setPublishing(null)} />
       <ConfirmDialog
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}

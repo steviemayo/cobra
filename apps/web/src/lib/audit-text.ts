@@ -56,6 +56,16 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `asked “${s(meta.room)}” to ${s(meta.type).replace('_', ' ')}`;
     case 'command.result':
       return `the gateway finished a ${s(meta.type).replace('_', ' ')} command (${meta.ok ? 'worked' : 'failed'})`;
+    case 'marketplace.publish':
+      return meta.updated
+        ? 'updated a marketplace listing'
+        : 'published a template to the marketplace for review';
+    case 'marketplace.withdraw':
+      return 'withdrew a marketplace listing';
+    case 'marketplace.get':
+      return `added “${s(meta.name)}” from the marketplace`;
+    case 'marketplace.checkout':
+      return `started a purchase of “${s(meta.name)}”`;
     case 'calendar.connect':
       return `connected the ${s(meta.provider) === 'graph' ? 'Microsoft 365' : 'Google'} calendar “${s(meta.name)}”`;
     case 'calendar.remove':

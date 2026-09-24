@@ -101,3 +101,33 @@ export async function syncQuantity(db: BillingDb, orgId: string): Promise<void> 
   });
   await db.orgBilling.update({ where: { id: billing.id }, data: { quantity: rooms } });
 }
+
+/** Checkout for a one-off marketplace purchase. The template is granted when Stripe confirms payment. */
+export async function startMarketplaceCheckout(input: {
+  orgId: string;
+  listing: { id: string; name: string; priceCents: number; currency: string };
+  email: string | null;
+}): Promise<string> {
+  const stripe = getStripe();
+  const back = `${await baseUrl()}/o/${input.orgId}/marketplace`;
+  const session = await stripe.checkout.sessions.create({
+    mode: 'payment',
+    ...(input.email ? { customer_email: input.email } : {}),
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: input.listing.currency,
+          unit_amount: input.listing.priceCents,
+          product_data: { name: input.listing.name },
+        },
+      },
+    ],
+    // Read back by the webhook, which is what actually grants the template.
+    metadata: { kind: 'marketplace', listingId: input.listing.id, orgId: input.orgId },
+    success_url: `${back}?purchase=success`,
+    cancel_url: `${back}?purchase=cancelled`,
+  });
+  if (!session.url) throw new Error('Stripe did not return a checkout address');
+  return session.url;
+}
