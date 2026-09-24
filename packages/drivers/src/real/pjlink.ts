@@ -85,6 +85,8 @@ export class PjlinkDriver extends BaseDriver {
     this.update((s) => {
       s.online = true;
     });
+    // A rejected password is answered with "PJLINK ERRA" rather than a normal reply.
+    if (reply.startsWith('PJLINK ERRA')) this.fail(ERRORS.ERRA!);
     const value = reply.split('=')[1] ?? '';
     if (value in ERRORS) this.fail(ERRORS[value]!);
     if (/^ERR/.test(value)) this.fail(`error ${value}`);
