@@ -5,6 +5,7 @@ import { gatewayRouter } from './gateway';
 import { inviteRouter } from './invite';
 import { memberRouter } from './member';
 import { orgRouter } from './org';
+import { releaseRouter } from './release';
 import { roomRouter } from './room';
 import { siteRouter } from './site';
 import { templateRouter } from './template';
@@ -19,5 +20,6 @@ export const appRouter = router({
   invite: inviteRouter,
   audit: auditRouter,
   gateway: gatewayRouter,
+  release: releaseRouter,
 });
 export type AppRouter = typeof appRouter;

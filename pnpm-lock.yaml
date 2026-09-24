@@ -267,6 +267,9 @@ importers:
       '@base-ui/react':
         specifier: ^1.8.0
         version: 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@kestrel/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@kestrel/db':
         specifier: workspace:*
         version: link:../../packages/db

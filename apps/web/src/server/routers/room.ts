@@ -3,6 +3,8 @@ import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { RoomType } from '@kestrel/model';
 import { writeAudit } from '../audit';
+import { effectiveStatus } from '../gateway-service';
+import { PanelInput, applyPanelInput, publicPanel, readPanel } from '../panel-settings';
 import { summariseDraft } from '../room-summary';
 import { orgProcedure, requireRole, router } from '../trpc';
 
@@ -10,29 +12,43 @@ const orgId = z.string().uuid();
 const roomId = z.string().uuid();
 const name = z.string().trim().min(1).max(100);
 
+// Room.panel holds the panel PIN hash. It is server-only: never send it to a browser.
+const omit = { panel: true } as const;
+
 async function assertSite(ctxOrgId: string, siteId: string) {
   const site = await db.site.findFirst({ where: { id: siteId, orgId: ctxOrgId } });
   if (!site) throw new TRPCError({ code: 'NOT_FOUND', message: 'Site not found' });
   return site;
 }
 
+async function findRoom(ctxOrgId: string, id: string) {
+  const room = await db.room.findFirst({ where: { id, orgId: ctxOrgId } });
+  if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
+  return room;
+}
+
 export const roomRouter = router({
   list: orgProcedure
     .input(z.object({ orgId }))
     .query(({ ctx }) =>
-      db.room.findMany({ where: { orgId: ctx.orgId }, orderBy: { createdAt: 'asc' } }),
+      db.room.findMany({ where: { orgId: ctx.orgId }, orderBy: { createdAt: 'asc' }, omit }),
     ),
 
   get: orgProcedure.input(z.object({ orgId, roomId })).query(async ({ ctx, input }) => {
     const room = await db.room.findFirst({
       where: { id: input.roomId, orgId: ctx.orgId },
+      omit,
       include: {
         site: { select: { id: true, name: true } },
-        gateway: { select: { id: true, name: true, status: true } },
+        gateway: { select: { id: true, name: true, lastSeenAt: true, enrolledAt: true } },
       },
     });
     if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
-    return room;
+    const { gateway, ...rest } = room;
+    return {
+      ...rest,
+      gateway: gateway ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) } : null,
+    };
   }),
 
   // Rooms with their site, gateway and a summary of the design draft, for lists and dashboards.
@@ -40,15 +56,17 @@ export const roomRouter = router({
     const rooms = await db.room.findMany({
       where: { orgId: ctx.orgId },
       orderBy: [{ createdAt: 'asc' }],
+      omit,
       include: {
         site: { select: { id: true, name: true } },
-        gateway: { select: { id: true, name: true, status: true } },
+        gateway: { select: { id: true, name: true, status: true, lastSeenAt: true, enrolledAt: true } },
         draft: { select: { revision: true, updatedAt: true, model: true } },
       },
     });
-    return rooms.map(({ draft, ...room }) => ({
+    return rooms.map(({ draft, gateway, ...room }) => ({
       ...room,
       draft: draft ? summariseDraft(draft) : null,
+      gateway: gateway ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) } : null,
     }));
   }),
 
@@ -59,6 +77,7 @@ export const roomRouter = router({
       const site = await assertSite(ctx.orgId, input.siteId);
       const room = await db.room.create({
         data: { orgId: ctx.orgId, siteId: site.id, name: input.name, type: input.type },
+        omit,
       });
       await writeAudit({
         orgId: ctx.orgId,
@@ -74,12 +93,16 @@ export const roomRouter = router({
     .input(z.object({ orgId, roomId, name: name.optional(), siteId: z.string().uuid().optional() }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
-      const room = await db.room.findFirst({ where: { id: input.roomId, orgId: ctx.orgId } });
-      if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
+      const room = await findRoom(ctx.orgId, input.roomId);
       const site = input.siteId ? await assertSite(ctx.orgId, input.siteId) : null;
       const updated = await db.room.update({
         where: { id: room.id },
-        data: { name: input.name ?? room.name, ...(site && { siteId: site.id }) },
+        data: {
+          name: input.name ?? room.name,
+          // A room that moves site can no longer be served by a gateway at the old one.
+          ...(site && { siteId: site.id, ...(site.id !== room.siteId && { gatewayId: null }) }),
+        },
+        omit,
       });
       await writeAudit({
         orgId: ctx.orgId,
@@ -93,8 +116,7 @@ export const roomRouter = router({
 
   delete: orgProcedure.input(z.object({ orgId, roomId })).mutation(async ({ ctx, input }) => {
     requireRole(ctx.role, ['owner', 'dev']);
-    const room = await db.room.findFirst({ where: { id: input.roomId, orgId: ctx.orgId } });
-    if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
+    const room = await findRoom(ctx.orgId, input.roomId);
     await db.room.delete({ where: { id: room.id } });
     await writeAudit({
       orgId: ctx.orgId,
@@ -105,4 +127,70 @@ export const roomRouter = router({
     });
     return { ok: true };
   }),
+
+  // Which gateway runs this room. Must be at the same site; null unassigns.
+  assignGateway: orgProcedure
+    .input(z.object({ orgId, roomId, gatewayId: z.string().uuid().nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const room = await findRoom(ctx.orgId, input.roomId);
+      let gatewayName: string | null = null;
+      if (input.gatewayId) {
+        const gw = await db.gateway.findFirst({ where: { id: input.gatewayId, orgId: ctx.orgId } });
+        if (!gw) throw new TRPCError({ code: 'NOT_FOUND', message: 'Gateway not found' });
+        if (gw.siteId !== room.siteId)
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'A room can only use a gateway at its own site',
+          });
+        gatewayName = gw.name;
+      }
+      await db.room.update({
+        where: { id: room.id },
+        data: {
+          gatewayId: input.gatewayId,
+          // The new gateway has not reported on this room yet.
+          reportedReleaseId: null,
+          reportedStatus: null,
+          reportedError: null,
+          reportedAt: null,
+        },
+      });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'room.gateway',
+        target: room.id,
+        meta: { room: room.name, gateway: gatewayName },
+      });
+      return { ok: true };
+    }),
+
+  getPanel: orgProcedure.input(z.object({ orgId, roomId })).query(async ({ ctx, input }) => {
+    requireRole(ctx.role, ['owner', 'dev']);
+    return publicPanel(readPanel((await findRoom(ctx.orgId, input.roomId)).panel));
+  }),
+
+  // Panel access and branding. Takes effect from the next release.
+  setPanel: orgProcedure
+    .input(PanelInput.extend({ orgId, roomId }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const room = await findRoom(ctx.orgId, input.roomId);
+      let next;
+      try {
+        next = applyPanelInput(readPanel(room.panel), input);
+      } catch (e) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: e instanceof Error ? e.message : 'Invalid' });
+      }
+      await db.room.update({ where: { id: room.id }, data: { panel: next } });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'room.panel',
+        target: room.id,
+        meta: { room: room.name, mode: next.access.mode },
+      });
+      return publicPanel(next);
+    }),
 });
