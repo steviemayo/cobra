@@ -55,6 +55,9 @@ export function signManifest(
   return { manifest, hash, signature, keyId: key.keyId };
 }
 
+/** Marks a trusted key that applies to every signer label, e.g. a key pinned on the gateway. */
+export const ANY_KEY_ID = '*';
+
 export type VerifyResult =
   | { ok: true; signed: SignedManifest }
   | { ok: false; reason: 'malformed' | 'hash_mismatch' | 'unknown_key' | 'bad_signature' | 'invalid_manifest' };
@@ -77,19 +80,21 @@ export function verifyManifest(raw: unknown, trusted: PublicKey[]): VerifyResult
 
   if (hashManifest(r.manifest) !== r.hash) return { ok: false, reason: 'hash_mismatch' };
 
-  const key = trusted.find((k) => k.keyId === r.keyId);
-  if (!key) return { ok: false, reason: 'unknown_key' };
-  let valid: boolean;
-  try {
-    valid = verify(
-      null,
-      Buffer.from(r.hash),
-      createPublicKey(key.publicKeyPem),
-      Buffer.from(r.signature, 'base64'),
-    );
-  } catch {
-    valid = false;
-  }
+  // A trusted key with keyId "*" (a key pinned by the operator) is accepted for any signer label.
+  const candidates = trusted.filter((k) => k.keyId === r.keyId || k.keyId === ANY_KEY_ID);
+  if (candidates.length === 0) return { ok: false, reason: 'unknown_key' };
+  const valid = candidates.some((key) => {
+    try {
+      return verify(
+        null,
+        Buffer.from(r.hash as string),
+        createPublicKey(key.publicKeyPem),
+        Buffer.from(r.signature as string, 'base64'),
+      );
+    } catch {
+      return false;
+    }
+  });
   if (!valid) return { ok: false, reason: 'bad_signature' };
 
   const parsed = RoomManifest.safeParse(r.manifest);

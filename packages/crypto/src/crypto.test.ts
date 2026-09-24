@@ -113,6 +113,17 @@ describe('signing and verification', () => {
     expect(publicKeyFromPrivate(keys.privateKeyPem)).toBe(keys.publicKeyPem);
   });
 
+  it('a wildcard (pinned) key verifies any signer label, but only for the right key pair', () => {
+    const pinned: PublicKey[] = [{ keyId: '*', publicKeyPem: keys.publicKeyPem }];
+    const signed = wire(signManifest(manifestInput(), { ...signing, keyId: 'whatever-label' }));
+    expect(verifyManifest(signed, pinned).ok).toBe(true);
+    const other = generateKeyPair();
+    const forged = wire(
+      signManifest(manifestInput(), { privateKeyPem: other.privateKeyPem, keyId: 'whatever-label' }),
+    );
+    expect(verifyManifest(forged, pinned)).toEqual({ ok: false, reason: 'bad_signature' });
+  });
+
   it('accepts either of several trusted keys (rotation)', () => {
     const next = generateKeyPair();
     const both: PublicKey[] = [...trusted, { keyId: 'k2', publicKeyPem: next.publicKeyPem }];
