@@ -1,9 +1,13 @@
 import type { Device, PinnedDriver } from '@kestrel/model';
+import { LIBRARY } from '../library';
 import { DeclarativeDriver } from './declarative';
 import { GenericTcpDriver } from './generic-tcp';
+import { genericRestDriver } from './generic-rest';
 import { NvxDriver } from './nvx';
 import { PjlinkDriver } from './pjlink';
 import { QsysDriver } from './qsys';
+import { SerialDriver } from './serial';
+import { ViscaDriver } from './visca';
 import type { DeviceDriver, DriverContext } from './types';
 
 /**
@@ -21,7 +25,13 @@ export function createDriver(
   if (control.kind === 'generic') {
     if (control.protocol === 'pjlink') return new PjlinkDriver(device, ctx);
     if (control.protocol === 'tcp') return new GenericTcpDriver(device, ctx);
+    if (control.protocol === 'serial') return new SerialDriver(device, ctx);
+    if (control.protocol === 'rest') return genericRestDriver(device, ctx);
     return null;
+  }
+  if (control.driverId.startsWith('lib:')) {
+    const spec = LIBRARY[control.driverId];
+    return spec ? new DeclarativeDriver(device, ctx, spec) : null;
   }
   if (control.driverId.startsWith('custom:')) {
     const pinned = custom[control.driverId];
@@ -34,5 +44,6 @@ export function createDriver(
 const BUILT_IN: Record<string, (device: Device, ctx: DriverContext) => DeviceDriver> = {
   'crestron-dm-nvx': (d, c) => new NvxDriver(d, c),
   'qsys-core': (d, c) => new QsysDriver(d, c),
+  'visca-ip': (d, c) => new ViscaDriver(d, c),
 };
-export const BUILT_IN_DRIVER_IDS = Object.keys(BUILT_IN);
+export const BUILT_IN_DRIVER_IDS = [...Object.keys(BUILT_IN), ...Object.keys(LIBRARY)];

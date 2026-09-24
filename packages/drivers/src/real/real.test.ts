@@ -355,9 +355,6 @@ describe('createDriver', () => {
         ctx,
       ),
     ).toBeNull();
-    expect(
-      createDriver({ ...dsp({}), control: { kind: 'generic', protocol: 'serial' } }, ctx),
-    ).toBeNull();
   });
 });
 

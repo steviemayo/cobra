@@ -11,6 +11,38 @@ export interface DriverInfo {
 }
 
 export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
+  'visca-ip': {
+    name: 'PTZ camera (VISCA over IP)',
+    description:
+      'Recalls camera presets and switches power on cameras that speak VISCA over IP. Map preset names to the camera’s preset numbers.',
+    categories: ['ptz_camera', 'conf_camera', 'autoframing_camera', 'fixed_camera'],
+    example: { host: '<camera IP>', presets: { Wide: 0, Podium: 1 } },
+  },
+  'lib:extron-sis': {
+    name: 'Extron matrix switcher (SIS)',
+    description: 'Extron matrix switchers over Telnet. Routing ties an input to an output.',
+    categories: ['video_matrix', 'audio_matrix'],
+    example: { host: '<switcher IP>' },
+  },
+  'lib:cisco-roomos': {
+    name: 'Cisco RoomOS video conferencing',
+    description: 'Cisco Room and Board devices: standby, microphone mute, volume and hang up, over the HTTP API.',
+    categories: ['conference_system'],
+    example: { host: '<codec IP>', credentials: '<base64 of user:password>' },
+  },
+  'lib:shelly-relay': {
+    name: 'Shelly relay (screens and lifters)',
+    description:
+      'Motorised screens and lifters through a Shelly relay: command.down and command.up run for a set number of seconds.',
+    categories: ['screen', 'lifter'],
+    example: { host: '<relay IP>', seconds: 30 },
+  },
+  'lib:lutron-lip': {
+    name: 'Lutron lighting (Integration Protocol)',
+    description: 'Lutron processors: switch and dim a zone, press a keypad button for a scene.',
+    categories: ['lighting'],
+    example: { host: '<processor IP>', zone: 1, keypad: 1 },
+  },
   'crestron-dm-nvx': {
     name: 'Crestron DM NVX (virtual matrix)',
     description:

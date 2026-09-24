@@ -3,5 +3,6 @@ packages:
   - 'packages/*'
 allowBuilds:
   '@prisma/engines': true
+  '@serialport/bindings-cpp': true
   esbuild: true
   prisma: true

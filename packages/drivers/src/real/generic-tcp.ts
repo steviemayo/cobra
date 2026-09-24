@@ -1,6 +1,7 @@
 import { connect, type Socket } from 'node:net';
 import type { Device, DeviceCommand } from '@kestrel/model';
 import { BaseDriver } from './base';
+import { renderGenericCommand } from './generic-commands';
 import type { DriverContext } from './types';
 
 // Generic ASCII-over-TCP control. Everything device-specific lives in the device's settings:
@@ -57,30 +58,9 @@ export class GenericTcpDriver extends BaseDriver {
   }
 
   private template(command: DeviceCommand): string {
-    const commands = this.setting<Record<string, string>>('commands', {});
-    const key =
-      command.type === 'power'
-        ? `power.${command.on ? 'on' : 'off'}`
-        : command.type === 'mute'
-          ? `mute.${command.muted ? 'on' : 'off'}`
-          : command.type === 'record'
-            ? `record.${command.on ? 'on' : 'off'}`
-            : command.type === 'command'
-              ? `command.${command.name}`
-              : command.type;
-    const t = commands[key];
-    if (t === undefined) this.fail(`no "${key}" command configured`);
-    const vars: Record<string, string> = {};
-    if (command.type === 'volume') vars.level = String(command.level);
-    if (command.type === 'route') {
-      vars.input = command.inputPortId.replace(/\D+/g, '') || command.inputPortId;
-      vars.output = command.outputPortId.replace(/\D+/g, '') || command.outputPortId;
-    }
-    if (command.type === 'select_input')
-      vars.input = command.portId.replace(/\D+/g, '') || command.portId;
-    if (command.type === 'preset' || command.type === 'camera_preset' || command.type === 'scene')
-      vars.name = command.name;
-    return t.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? '');
+    const r = renderGenericCommand(this.setting<Record<string, string>>('commands', {}), command);
+    if (r.text === null) this.fail(`no "${r.key}" command configured`);
+    return r.text;
   }
 
   private transmit(text: string): Promise<void> {

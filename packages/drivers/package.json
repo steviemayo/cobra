@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@kestrel/engine": "workspace:*",
-    "@kestrel/model": "workspace:*"
+    "@kestrel/model": "workspace:*",
+    "serialport": "^13.0.0"
   }
 }
