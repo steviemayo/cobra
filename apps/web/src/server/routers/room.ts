@@ -1,12 +1,15 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { after } from 'next/server';
 import { db } from '@kestrel/db';
 import { RoomType } from '@kestrel/model';
 import { writeAudit } from '../audit';
+import { canAddRoom, getEntitlements } from '../billing';
 import { createDeployment } from '../deployment-service';
 import { effectiveStatus } from '../gateway-service';
 import { PanelInput, applyPanelInput, publicPanel, readPanel } from '../panel-settings';
 import { summariseDraft } from '../room-summary';
+import { syncQuantity } from '../stripe';
 import { orgProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
@@ -48,7 +51,9 @@ export const roomRouter = router({
     const { gateway, ...rest } = room;
     return {
       ...rest,
-      gateway: gateway ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) } : null,
+      gateway: gateway
+        ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) }
+        : null,
     };
   }),
 
@@ -60,14 +65,18 @@ export const roomRouter = router({
       omit,
       include: {
         site: { select: { id: true, name: true } },
-        gateway: { select: { id: true, name: true, status: true, lastSeenAt: true, enrolledAt: true } },
+        gateway: {
+          select: { id: true, name: true, status: true, lastSeenAt: true, enrolledAt: true },
+        },
         draft: { select: { revision: true, updatedAt: true, model: true } },
       },
     });
     return rooms.map(({ draft, gateway, ...room }) => ({
       ...room,
       draft: draft ? summariseDraft(draft) : null,
-      gateway: gateway ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) } : null,
+      gateway: gateway
+        ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) }
+        : null,
     }));
   }),
 
@@ -76,6 +85,12 @@ export const roomRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
       const site = await assertSite(ctx.orgId, input.siteId);
+      const entitlements = await getEntitlements(db, ctx.orgId);
+      if (!canAddRoom(entitlements, await db.room.count({ where: { orgId: ctx.orgId } })))
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `Your plan includes ${entitlements.maxRooms} rooms. Subscribe to add more.`,
+        });
       const room = await db.room.create({
         data: { orgId: ctx.orgId, siteId: site.id, name: input.name, type: input.type },
         omit,
@@ -87,6 +102,11 @@ export const roomRouter = router({
         target: room.id,
         meta: { name: room.name, site: site.name, type: room.type },
       });
+      after(() =>
+        syncQuantity(db, ctx.orgId).catch((e) =>
+          console.error('[billing] quantity sync failed', e),
+        ),
+      );
       return room;
     }),
 
@@ -126,6 +146,9 @@ export const roomRouter = router({
       target: room.id,
       meta: { name: room.name },
     });
+    after(() =>
+      syncQuantity(db, ctx.orgId).catch((e) => console.error('[billing] quantity sync failed', e)),
+    );
     return { ok: true };
   }),
 
@@ -194,7 +217,10 @@ export const roomRouter = router({
       try {
         next = applyPanelInput(readPanel(room.panel), input);
       } catch (e) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: e instanceof Error ? e.message : 'Invalid' });
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: e instanceof Error ? e.message : 'Invalid',
+        });
       }
       await db.room.update({ where: { id: room.id }, data: { panel: next } });
       await writeAudit({

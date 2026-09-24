@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
+import { TrialBanner } from '@/components/common/plan-gate';
 import { AppSidebar } from './app-sidebar';
 import { Breadcrumbs } from './breadcrumbs';
 import { CommandMenu, usePalette } from './command-menu';
@@ -66,6 +67,7 @@ export function OrgShell({
             <AppSidebar />
             <SidebarInset className="min-w-0">
               <TopBar />
+              <TrialBanner />
               <div className="flex-1">{children}</div>
             </SidebarInset>
           </CommandMenu>

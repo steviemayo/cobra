@@ -3,13 +3,14 @@ import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { COMMAND_TYPES } from '@kestrel/model';
 import { requestCommand } from '../commands';
-import { orgProcedure, requireRole, router } from '../trpc';
+import { featureProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
+const monitoringProcedure = featureProcedure('monitoring');
 
 export const commandRouter = router({
   // Support and developers only. The gateway runs allowlisted commands and nothing else.
-  request: orgProcedure
+  request: monitoringProcedure
     .input(
       z.object({
         orgId,
@@ -31,7 +32,7 @@ export const commandRouter = router({
       return { id: res.id };
     }),
 
-  list: orgProcedure
+  list: monitoringProcedure
     .input(
       z.object({
         orgId,

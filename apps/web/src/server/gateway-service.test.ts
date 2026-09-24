@@ -106,6 +106,10 @@ function world() {
   const remoteCommand = table([]);
   const alertChannel = table([]);
   const alertDelivery = table([]);
+  const orgBilling = table([
+    { id: 'b1', orgId: ORG, plan: 'pro', status: 'active', trialEndsAt: new Date() },
+  ]);
+  const org = table([{ id: ORG, createdAt: new Date() }]);
   const db = {
     gateway,
     room,
@@ -119,6 +123,8 @@ function world() {
     remoteCommand,
     alertChannel,
     alertDelivery,
+    orgBilling,
+    org,
   } as unknown as Db;
   return {
     db,
@@ -134,6 +140,8 @@ function world() {
     remoteCommand,
     alertChannel,
     alertDelivery,
+    orgBilling,
+    org,
   };
 }
 
@@ -606,5 +614,43 @@ describe('monitoring over the heartbeat', () => {
       keys,
     );
     expect(res.after).toBeUndefined();
+  });
+});
+
+describe('plan gating over the heartbeat', () => {
+  const offlineReport = {
+    roomId: ROOM,
+    releaseId: REL,
+    manifestHash: HASH,
+    status: 'fault',
+    devices: [{ deviceId: 'dsp', name: 'DSP', online: false }],
+  };
+
+  it('stops analysing reports when the plan has no monitoring, but keeps the gateway working', async () => {
+    const w = world();
+    Object.assign(w.orgBilling.rows[0]!, { plan: 'basic' });
+    const gw = w.gateway.rows[0]! as never;
+    const res = await heartbeat(w.db, gw, hb([offlineReport as never]), keys);
+    expect(res.status).toBe(200);
+    expect(w.incident.rows).toHaveLength(0);
+    expect(w.deviceStatus.rows).toHaveLength(0);
+    // Control carries on: the reported state is still stored and deployments still flow.
+    expect(w.room.rows[0]!.reportedStatus).toBe('fault');
+    expect(ConfigResponse.parse((await config(w.db, gw, keys)).body).rooms).toHaveLength(1);
+  });
+
+  it('cuts monitoring off when a trial runs out, and back on when they subscribe', async () => {
+    const w = world();
+    Object.assign(w.orgBilling.rows[0]!, {
+      plan: 'trial',
+      status: 'none',
+      trialEndsAt: new Date(Date.now() - 1000),
+    });
+    const gw = w.gateway.rows[0]! as never;
+    await heartbeat(w.db, gw, hb([offlineReport as never]), keys);
+    expect(w.incident.rows).toHaveLength(0);
+    Object.assign(w.orgBilling.rows[0]!, { plan: 'pro', status: 'active' });
+    await heartbeat(w.db, gw, hb([offlineReport as never]), keys);
+    expect(w.incident.rows.length).toBeGreaterThan(0);
   });
 });

@@ -56,6 +56,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `asked “${s(meta.room)}” to ${s(meta.type).replace('_', ' ')}`;
     case 'command.result':
       return `the gateway finished a ${s(meta.type).replace('_', ' ')} command (${meta.ok ? 'worked' : 'failed'})`;
+    case 'billing.subscribe':
+      return meta.changed
+        ? `changed the plan to ${s(meta.plan)}`
+        : `started checkout for the ${s(meta.plan)} plan`;
     case 'incident.acknowledge':
       return 'acknowledged an incident';
     case 'alert_channel.create':

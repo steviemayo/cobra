@@ -49,6 +49,10 @@ model Org {
   commands        RemoteCommand[]
   tickets         Ticket[]
   ticketComments  TicketComment[]
+  branding        Json?
+  billing         OrgBilling?
+  controlIntents  ControlIntent[]
+  controlSessions ControlSession[]
 }
 
 model Member {
@@ -457,4 +461,66 @@ model TicketComment {
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@index([ticketId, createdAt])
+}
+
+// ---- Billing ----------------------------------------------------------------------------------
+
+// One per organisation. `plan` is what they chose; entitlements are worked out from plan, Stripe
+// `status` and `trialEndsAt` (see @kestrel/model billing). Kestrel never stores card details.
+model OrgBilling {
+  id                   String    @id @default(uuid()) @db.Uuid
+  orgId                String    @unique @db.Uuid
+  plan                 String    @default("trial")
+  /// The Stripe subscription status, or "none" before there is one.
+  status               String    @default("none")
+  trialEndsAt          DateTime
+  stripeCustomerId     String?   @unique
+  stripeSubscriptionId String?   @unique
+  stripeItemId         String?
+  /// Rooms being billed for.
+  quantity             Int       @default(0)
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean   @default(false)
+  updatedAt            DateTime  @default(now()) @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// Stripe events already handled, so a redelivered webhook changes nothing.
+model StripeEvent {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now())
+}
+
+// ---- Control from the portal ------------------------------------------------------------------
+
+// While someone has a room's control page open, the gateway is asked for the room's panel state
+// and polled quickly. `snapshot` is the latest PanelViewModel the gateway sent.
+model ControlSession {
+  id           String    @id @default(uuid()) @db.Uuid
+  orgId        String    @db.Uuid
+  roomId       String    @unique @db.Uuid
+  lastActiveAt DateTime
+  snapshot     Json?
+  snapshotAt   DateTime?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// A panel intent (start an activity, change volume...) waiting for the gateway to pick it up.
+model ControlIntent {
+  id          String    @id @default(uuid()) @db.Uuid
+  orgId       String    @db.Uuid
+  roomId      String    @db.Uuid
+  gatewayId   String    @db.Uuid
+  intent      Json
+  createdBy   String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([gatewayId, deliveredAt])
+  @@index([roomId, createdAt])
 }

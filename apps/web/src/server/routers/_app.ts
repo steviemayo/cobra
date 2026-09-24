@@ -1,6 +1,7 @@
 import { router } from '../trpc';
 import { alertRouter } from './alert';
 import { auditRouter } from './audit';
+import { billingRouter } from './billing';
 import { commandRouter } from './command';
 import { deploymentRouter } from './deployment';
 import { draftRouter } from './draft';
@@ -31,5 +32,6 @@ export const appRouter = router({
   alert: alertRouter,
   command: commandRouter,
   ticket: ticketRouter,
+  billing: billingRouter,
 });
 export type AppRouter = typeof appRouter;

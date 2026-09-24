@@ -6,19 +6,20 @@ import { deliverAlerts } from '../alerts';
 import { writeAudit } from '../audit';
 import { maybeSweep } from '../monitoring';
 import { orgOverview } from '../monitoring-queries';
-import { orgProcedure, requireRole, router } from '../trpc';
+import { featureProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
+const monitoringProcedure = featureProcedure('monitoring');
 
 export const monitoringRouter = router({
   // Polled by the live status pages. Also sweeps for silent gateways, since nothing else runs then.
-  overview: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
+  overview: monitoringProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
     const jobs = await maybeSweep(db);
     if (jobs.length) after(() => deliverAlerts(db, jobs));
     return orgOverview(db, ctx.orgId);
   }),
 
-  room: orgProcedure
+  room: monitoringProcedure
     .input(z.object({ orgId, roomId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const room = await db.room.findFirst({ where: { id: input.roomId, orgId: ctx.orgId } });
@@ -52,7 +53,7 @@ export const monitoringRouter = router({
       };
     }),
 
-  incidents: orgProcedure
+  incidents: monitoringProcedure
     .input(
       z.object({
         orgId,
@@ -90,7 +91,7 @@ export const monitoringRouter = router({
       }));
     }),
 
-  acknowledge: orgProcedure
+  acknowledge: monitoringProcedure
     .input(z.object({ orgId, incidentId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev', 'support']);

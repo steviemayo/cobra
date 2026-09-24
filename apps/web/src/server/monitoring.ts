@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@kestrel/db';
 import type { RoomReport } from '@kestrel/model';
+import { getEntitlements } from './billing';
 import { effectiveStatus } from './gateway-status';
 
 // Turns what gateways report into device status and incidents. Functions take the database as a
@@ -7,7 +8,7 @@ import { effectiveStatus } from './gateway-status';
 // so a slow webhook can never hold up a heartbeat.
 export type MonitoringDb = Pick<
   PrismaClient,
-  'deviceStatus' | 'incident' | 'room' | 'gateway' | 'remoteCommand'
+  'deviceStatus' | 'incident' | 'room' | 'gateway' | 'remoteCommand' | 'orgBilling' | 'org'
 >;
 
 export type Severity = 'info' | 'warning' | 'critical';
@@ -243,7 +244,11 @@ export async function recordReports(
 export async function sweep(db: MonitoringDb, now = new Date()): Promise<AlertJob[]> {
   const jobs: AlertJob[] = [];
   const gateways = await db.gateway.findMany({ where: { enrolledAt: { not: null } } });
+  const monitored = new Map<string, boolean>();
   for (const gw of gateways) {
+    if (!monitored.has(gw.orgId))
+      monitored.set(gw.orgId, (await getEntitlements(db, gw.orgId, now)).monitoring);
+    if (!monitored.get(gw.orgId)) continue;
     const status = effectiveStatus(gw, now.getTime());
     const key = { orgId: gw.orgId, kind: 'gateway_offline' as const, subject: gw.id };
     const job =

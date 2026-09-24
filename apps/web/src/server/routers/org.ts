@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { db } from '@kestrel/db';
+import { TRIAL_DAYS } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { authedProcedure, orgProcedure, requireRole, router } from '../trpc';
 
@@ -25,6 +26,7 @@ export const orgRouter = router({
     const org = await db.org.create({
       data: {
         name: input.name,
+        billing: { create: { trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86_400_000) } },
         members: {
           create: { userId: ctx.user.id, email: ctx.user.email?.toLowerCase(), role: 'owner' },
         },

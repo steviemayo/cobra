@@ -11,6 +11,7 @@ import {
 import { applyCommandResults, takePendingCommands } from './commands';
 import { applyReport, promoteDue } from './deployment-service';
 import { deliverAlerts } from './alerts';
+import { getEntitlements } from './billing';
 import { maybeSweep, recordReports } from './monitoring';
 
 // The cloud's half of the gateway protocol. Route handlers are thin wrappers over these functions,
@@ -29,6 +30,8 @@ export type Db = Pick<
   | 'remoteCommand'
   | 'alertChannel'
   | 'alertDelivery'
+  | 'orgBilling'
+  | 'org'
 >;
 type GatewayRow = NonNullable<Awaited<ReturnType<Db['gateway']['findFirst']>>>;
 export interface Result {
@@ -180,7 +183,9 @@ export async function heartbeat(
   await promoteDue(db, gw.id, now);
   const list = await assignments(db, gw.id);
 
-  const jobs = await recordReports(db, gw, parsed.data.rooms, now);
+  // Monitoring is a plan feature: without it the gateway keeps running rooms, but nothing is analysed.
+  const monitored = (await getEntitlements(db, gw.orgId, now)).monitoring;
+  const jobs = monitored ? await recordReports(db, gw, parsed.data.rooms, now) : [];
   await applyCommandResults(db, gw.id, parsed.data.commandResults, now);
   jobs.push(...(await maybeSweep(db, now)));
   const commands = await takePendingCommands(db, gw.id, now);

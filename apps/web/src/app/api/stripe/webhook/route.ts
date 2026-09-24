@@ -1,0 +1,23 @@
+import { db } from '@kestrel/db';
+import { priceMapFromEnv, handleStripeEvent } from '@/server/billing';
+import { getStripe } from '@/server/stripe';
+
+export const dynamic = 'force-dynamic';
+
+// Stripe calls this when a subscription changes. The signature is checked against the raw body
+// before anything is read, so only Stripe can change an organisation's plan.
+export async function POST(req: Request) {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  const signature = req.headers.get('stripe-signature');
+  if (!secret || !signature) return Response.json({ error: 'Not configured' }, { status: 400 });
+
+  const body = await req.text();
+  let event;
+  try {
+    event = await getStripe().webhooks.constructEventAsync(body, signature, secret);
+  } catch {
+    return Response.json({ error: 'Bad signature' }, { status: 400 });
+  }
+  const result = await handleStripeEvent(db, event, priceMapFromEnv());
+  return Response.json({ received: true, result });
+}

@@ -9,9 +9,10 @@ import {
   type AlertMessage,
 } from '../alerts';
 import { writeAudit } from '../audit';
-import { orgProcedure, requireRole, router } from '../trpc';
+import { featureProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
+const monitoringProcedure = featureProcedure('monitoring');
 const channelId = z.string().uuid();
 const name = z.string().trim().min(1).max(80);
 const severity = z.enum(['info', 'warning', 'critical']);
@@ -70,7 +71,7 @@ async function find(ctxOrgId: string, id: string) {
 }
 
 export const alertRouter = router({
-  channels: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
+  channels: monitoringProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
     requireRole(ctx.role, ['owner', 'dev', 'support']);
     const rows = await db.alertChannel.findMany({
       where: { orgId: ctx.orgId },
@@ -97,7 +98,7 @@ export const alertRouter = router({
     });
   }),
 
-  create: orgProcedure
+  create: monitoringProcedure
     .input(
       z.object({ orgId, name, minSeverity: severity.default('warning'), config: ChannelConfig }),
     )
@@ -125,7 +126,7 @@ export const alertRouter = router({
       return { id: row.id };
     }),
 
-  update: orgProcedure
+  update: monitoringProcedure
     .input(
       z.object({
         orgId,
@@ -171,42 +172,46 @@ export const alertRouter = router({
       return { ok: true };
     }),
 
-  delete: orgProcedure.input(z.object({ orgId, channelId })).mutation(async ({ ctx, input }) => {
-    requireRole(ctx.role, ['owner', 'dev']);
-    const ch = await find(ctx.orgId, input.channelId);
-    await db.alertChannel.delete({ where: { id: ch.id } });
-    await writeAudit({
-      orgId: ctx.orgId,
-      actorId: ctx.user.id,
-      action: 'alert_channel.delete',
-      target: ch.id,
-      meta: { name: ch.name },
-    });
-    return { ok: true };
-  }),
+  delete: monitoringProcedure
+    .input(z.object({ orgId, channelId }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const ch = await find(ctx.orgId, input.channelId);
+      await db.alertChannel.delete({ where: { id: ch.id } });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'alert_channel.delete',
+        target: ch.id,
+        meta: { name: ch.name },
+      });
+      return { ok: true };
+    }),
 
   // Sends a made-up alert so people can see it arrive before a real one matters.
-  test: orgProcedure.input(z.object({ orgId, channelId })).mutation(async ({ ctx, input }) => {
-    requireRole(ctx.role, ['owner', 'dev']);
-    const ch = await find(ctx.orgId, input.channelId);
-    const msg: AlertMessage = {
-      event: 'test',
-      incident: {
-        id: crypto.randomUUID(),
-        kind: 'test',
-        severity: 'warning',
-        title: 'This is a test alert from Kestrel',
-        detail: 'If you can read this, alerts to this channel work.',
-        room: null,
-        openedAt: new Date().toISOString(),
-        resolvedAt: null,
-      },
-      portalUrl: portalLink(ctx.orgId, '/alerts'),
-    };
-    return deliverToChannel(db, ch, msg, null);
-  }),
+  test: monitoringProcedure
+    .input(z.object({ orgId, channelId }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const ch = await find(ctx.orgId, input.channelId);
+      const msg: AlertMessage = {
+        event: 'test',
+        incident: {
+          id: crypto.randomUUID(),
+          kind: 'test',
+          severity: 'warning',
+          title: 'This is a test alert from Kestrel',
+          detail: 'If you can read this, alerts to this channel work.',
+          room: null,
+          openedAt: new Date().toISOString(),
+          resolvedAt: null,
+        },
+        portalUrl: portalLink(ctx.orgId, '/alerts'),
+      };
+      return deliverToChannel(db, ch, msg, null);
+    }),
 
-  deliveries: orgProcedure
+  deliveries: monitoringProcedure
     .input(z.object({ orgId, limit: z.number().int().min(1).max(100).default(30) }))
     .query(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev', 'support']);

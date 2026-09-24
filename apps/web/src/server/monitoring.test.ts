@@ -31,8 +31,20 @@ function world() {
   const incident = table([]);
   const gateway = table([]);
   const remoteCommand = table([]);
-  const db = { room, deviceStatus, incident, gateway, remoteCommand } as unknown as MonitoringDb;
-  return { db, room, deviceStatus, incident, gateway, remoteCommand };
+  const orgBilling = table([
+    { id: 'b1', orgId: ORG, plan: 'pro', status: 'active', trialEndsAt: T0 },
+  ]);
+  const org = table([{ id: ORG, createdAt: T0 }]);
+  const db = {
+    room,
+    deviceStatus,
+    incident,
+    gateway,
+    remoteCommand,
+    orgBilling,
+    org,
+  } as unknown as MonitoringDb;
+  return { db, room, deviceStatus, incident, gateway, remoteCommand, orgBilling };
 }
 
 const report = (
@@ -212,6 +224,14 @@ describe('sweep', () => {
     w.gateway.rows[0]!.lastSeenAt = at(6 * 60_000);
     const back = await sweep(w.db, at(6 * 60_000 + 10_000));
     expect(back[0]!.event).toBe('resolved');
+  });
+
+  it('leaves organisations without monitoring alone', async () => {
+    const w = world();
+    w.gateway.rows.push(gwRow());
+    w.orgBilling.rows[0]!.plan = 'basic';
+    expect(await sweep(w.db, at(60 * 60_000))).toEqual([]);
+    expect(w.incident.rows).toHaveLength(0);
   });
 
   it('ignores gateways that never enrolled', async () => {

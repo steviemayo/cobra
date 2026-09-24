@@ -3,8 +3,9 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
 import { z } from 'zod';
 import { db } from '@kestrel/db';
-import type { OrgRole } from '@kestrel/model';
+import type { Feature, OrgRole } from '@kestrel/model';
 import { createSupabaseServer } from '@/lib/supabase/server';
+import { getEntitlements, planRequired } from './billing';
 
 export async function createContext() {
   const supabase = await createSupabaseServer();
@@ -42,3 +43,12 @@ export function requireRole(role: OrgRole, allowed: OrgRole[]) {
   if (!allowed.includes(role))
     throw new TRPCError({ code: 'FORBIDDEN', message: 'Insufficient role' });
 }
+
+/** An org procedure that also needs the organisation's plan to include a feature. */
+export const featureProcedure = (feature: Feature) =>
+  orgProcedure.use(async ({ ctx, next }) => {
+    const entitlements = await getEntitlements(db, ctx.orgId);
+    if (!entitlements[feature])
+      throw new TRPCError({ code: 'FORBIDDEN', message: planRequired(feature) });
+    return next();
+  });

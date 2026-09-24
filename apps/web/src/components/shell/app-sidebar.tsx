@@ -254,6 +254,16 @@ export function AppSidebar() {
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>
                       )}
+                      {isOwner && (
+                        <SidebarMenuSubItem>
+                          <SidebarMenuSubButton
+                            isActive={isActive(`${base}/settings/billing`)}
+                            render={<Link href={`${base}/settings/billing`} />}
+                          >
+                            <span>Plan and billing</span>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      )}
                       <SidebarMenuSubItem>
                         <SidebarMenuSubButton
                           isActive={isActive(`${base}/settings/activity`)}
