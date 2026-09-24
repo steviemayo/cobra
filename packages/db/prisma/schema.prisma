@@ -39,6 +39,8 @@ model Org {
   draftVersions RoomDraftVersion[]
   templates     Template[]
   invites       Invite[]
+  releases      Release[]
+  gatewayEvents GatewayEvent[]
 }
 
 model Member {
@@ -70,37 +72,51 @@ model Site {
 }
 
 model Gateway {
-  id              String        @id @default(uuid()) @db.Uuid
-  orgId           String        @db.Uuid
-  siteId          String        @db.Uuid
-  name            String
-  status          GatewayStatus @default(pending)
-  enrollTokenHash String?
-  lastSeenAt      DateTime?
-  createdAt       DateTime      @default(now())
+  id                   String        @id @default(uuid()) @db.Uuid
+  orgId                String        @db.Uuid
+  siteId               String        @db.Uuid
+  name                 String
+  status               GatewayStatus @default(pending)
+  enrollTokenHash      String?
+  enrollTokenExpiresAt DateTime?
+  credentialHash       String?       @unique
+  enrolledAt           DateTime?
+  version              String?
+  hostname             String?
+  os                   String?
+  lastSeenAt           DateTime?
+  createdAt            DateTime      @default(now())
 
-  org   Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site  Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  rooms Room[]
+  org    Org            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site   Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  rooms  Room[]
+  events GatewayEvent[]
 
   @@index([orgId])
   @@index([siteId])
 }
 
 model Room {
-  id        String   @id @default(uuid()) @db.Uuid
-  orgId     String   @db.Uuid
-  siteId    String   @db.Uuid
-  gatewayId String?  @db.Uuid
-  name      String
-  type      RoomType
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  id                String    @id @default(uuid()) @db.Uuid
+  orgId             String    @db.Uuid
+  siteId            String    @db.Uuid
+  gatewayId         String?   @db.Uuid
+  name              String
+  type              RoomType
+  createdAt         DateTime  @default(now())
+  panel             Json?
+  desiredReleaseId  String?   @db.Uuid
+  reportedReleaseId String?   @db.Uuid
+  reportedStatus    String?
+  reportedError     String?
+  reportedAt        DateTime?
+  updatedAt         DateTime  @default(now()) @updatedAt
 
-  org     Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site    Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  gateway Gateway?   @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
-  draft   RoomDraft?
+  org      Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site     Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  gateway  Gateway?   @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  draft    RoomDraft?
+  releases Release[]
 
   @@index([orgId])
   @@index([siteId])
@@ -190,4 +206,40 @@ model Invite {
 
   @@index([orgId])
   @@index([email])
+}
+
+// Immutable, signed snapshot of a room's design. `manifest` is the SignedManifest gateways run.
+model Release {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  roomId    String   @db.Uuid
+  number    Int
+  manifest  Json
+  hash      String
+  createdBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, number])
+  @@index([orgId])
+}
+
+// Telemetry reported by gateways. Retention and rollups arrive with monitoring.
+model GatewayEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String   @db.Uuid
+  gatewayId  String   @db.Uuid
+  roomId     String?  @db.Uuid
+  type       String
+  at         DateTime
+  data       Json
+  receivedAt DateTime @default(now())
+
+  org     Org     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  gateway Gateway @relation(fields: [gatewayId], references: [id], onDelete: Cascade)
+
+  @@index([gatewayId, at])
+  @@index([orgId, at])
 }

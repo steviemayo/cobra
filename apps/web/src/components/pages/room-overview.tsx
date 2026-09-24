@@ -3,15 +3,16 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { validateRoomModel } from '@kestrel/engine';
 import { useMemo } from 'react';
-import { ArrowRight, Rocket } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { PageContainer } from '@/components/common/page-header';
-import { GatewayStatus, HealthBadge } from '@/components/common/status';
+import { HealthBadge } from '@/components/common/status';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { buttonVariants } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
+import { ReleasePanel } from './room-releases';
 import { useRoom } from './room-shell';
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -131,23 +132,7 @@ export function RoomOverview({ roomId }: { roomId: string }) {
         </div>
 
         <div className="space-y-6">
-          <Panel title="Deployment">
-            <div className="space-y-3 px-4 py-4 text-sm">
-              <div className="flex items-center gap-2">
-                <Rocket className="size-4 text-muted-foreground" />
-                <span className="font-medium">Not deployed</span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Releases and deployments arrive in a later release. Designs are saved as drafts
-                until then.
-              </p>
-              <dl className="divide-y rounded-md border">
-                <Row label="Gateway">
-                  <GatewayStatus gateway={room.gateway} />
-                </Row>
-              </dl>
-            </div>
-          </Panel>
+          <ReleasePanel roomId={roomId} />
 
           <Panel title="Saved versions">
             {versions.isPending ? (

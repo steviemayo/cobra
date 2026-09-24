@@ -7,6 +7,7 @@ const config: NextConfig = {
     '@kestrel/engine',
     '@kestrel/drivers',
     '@kestrel/panel-ui',
+    '@kestrel/crypto',
   ],
   serverExternalPackages: ['pg'],
   async redirects() {

@@ -14,6 +14,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { ROOM_TYPE_LABEL } from '@/lib/format';
 import { useInvalidateEstate, useSites } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
+import { GatewaySetting, PanelSettings } from './room-deploy-settings';
 import { useRoom } from './room-shell';
 
 export function RoomSettings({ roomId }: { roomId: string }) {
@@ -107,6 +108,9 @@ export function RoomSettings({ roomId }: { roomId: string }) {
           Save changes
         </Button>
       </form>
+
+      <GatewaySetting roomId={roomId} />
+      <PanelSettings roomId={roomId} />
 
       <section className="space-y-3 rounded-lg border border-destructive/30 p-4">
         <div>
