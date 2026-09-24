@@ -32,6 +32,8 @@ export interface Graph {
   ports: Map<string, Port>;
   /** `deviceId:portId` -> connected `deviceId:portId` keys (out -> in only). */
   edges: Map<string, string[]>;
+  /** `outKeyinKey` -> connection id. */
+  connectionIds: Map<string, string>;
 }
 
 const key = (deviceId: string, portId: string) => `${deviceId}\u0000${portId}`;
@@ -42,14 +44,17 @@ export function buildGraph(model: RoomModel): Graph {
   const ports = new Map<string, Port>();
   for (const d of model.devices) for (const p of d.ports) ports.set(key(d.id, p.id), p);
   const edges = new Map<string, string[]>();
+  const connectionIds = new Map<string, string>();
   for (const c of model.connections) {
     const from = ports.get(key(c.from.deviceId, c.from.portId));
     const to = ports.get(key(c.to.deviceId, c.to.portId));
     if (from?.direction !== 'out' || to?.direction !== 'in') continue;
     const fk = key(c.from.deviceId, c.from.portId);
-    edges.set(fk, [...(edges.get(fk) ?? []), key(c.to.deviceId, c.to.portId)]);
+    const tk = key(c.to.deviceId, c.to.portId);
+    edges.set(fk, [...(edges.get(fk) ?? []), tk]);
+    connectionIds.set(`${fk}${tk}`, c.id);
   }
-  return { devices, ports, edges };
+  return { devices, ports, edges, connectionIds };
 }
 
 function passThroughMedia(device: Device): number {
@@ -57,28 +62,73 @@ function passThroughMedia(device: Device): number {
   return (caps.has('video_route') ? VIDEO : 0) | (caps.has('audio_route') ? AUDIO : 0);
 }
 
-/** Can a signal leave `src` and arrive at `dst`, passing only through routing devices (matrices/DSP)? */
-export function canRoute(
+export interface RouteHop {
+  /** The routing device (matrix/DSP) the signal passes through. */
+  deviceId: string;
+  inPortId: string;
+  outPortId: string;
+}
+
+export interface RoutePath {
+  sourcePortId: string;
+  destinationPortId: string;
+  hops: RouteHop[];
+  /** Ids of every connection the signal travels over, in order. */
+  connectionIds: string[];
+}
+
+/**
+ * Shortest way a signal can leave `src` and arrive at `dst`, passing only through routing
+ * devices (matrices/DSP). Null when the connections don't allow it.
+ */
+export function findRoute(
   g: Graph,
   src: { deviceId: string; portId?: string },
   dst: { deviceId: string; portId?: string },
-): boolean {
+): RoutePath | null {
   const srcDevice = g.devices.get(src.deviceId);
-  if (!srcDevice || !g.devices.has(dst.deviceId) || src.deviceId === dst.deviceId) return false;
-  const seen = new Set<string>();
+  if (!srcDevice || !g.devices.has(dst.deviceId) || src.deviceId === dst.deviceId) return null;
 
-  const walk = (outKey: string, m: number): boolean => {
-    const seenKey = `${outKey}|${m}`;
-    if (seen.has(seenKey)) return false;
+  interface Node {
+    outKey: string;
+    media: number;
+    sourcePortId: string;
+    hops: RouteHop[];
+    links: string[];
+  }
+  const queue: Node[] = [];
+  const seen = new Set<string>();
+  for (const p of srcDevice.ports) {
+    if (p.direction !== 'out' || (src.portId && src.portId !== p.id)) continue;
+    queue.push({
+      outKey: key(src.deviceId, p.id),
+      media: media(p.signal),
+      sourcePortId: p.id,
+      hops: [],
+      links: [],
+    });
+  }
+
+  for (let i = 0; i < queue.length; i++) {
+    const node = queue[i]!;
+    const seenKey = `${node.outKey}|${node.media}`;
+    if (seen.has(seenKey)) continue;
     seen.add(seenKey);
-    for (const inKey of g.edges.get(outKey) ?? []) {
+    for (const inKey of g.edges.get(node.outKey) ?? []) {
       const inPort = g.ports.get(inKey);
       if (!inPort) continue;
-      const m2 = m & media(inPort.signal);
+      const m2 = node.media & media(inPort.signal);
       if (m2 === 0) continue;
       const [devId, portId] = split(inKey);
+      const links = [...node.links, g.connectionIds.get(`${node.outKey}${inKey}`)!];
       if (devId === dst.deviceId) {
-        if (!dst.portId || dst.portId === portId) return true;
+        if (!dst.portId || dst.portId === portId)
+          return {
+            sourcePortId: node.sourcePortId,
+            destinationPortId: portId,
+            hops: node.hops,
+            connectionIds: links,
+          };
         continue;
       }
       const through = g.devices.get(devId);
@@ -88,18 +138,26 @@ export function canRoute(
       for (const outPort of through.ports) {
         if (outPort.direction !== 'out') continue;
         const m4 = m3 & media(outPort.signal);
-        if (m4 !== 0 && walk(key(devId, outPort.id), m4)) return true;
+        if (m4 === 0) continue;
+        queue.push({
+          outKey: key(devId, outPort.id),
+          media: m4,
+          sourcePortId: node.sourcePortId,
+          hops: [...node.hops, { deviceId: devId, inPortId: portId, outPortId: outPort.id }],
+          links,
+        });
       }
     }
-    return false;
-  };
+  }
+  return null;
+}
 
-  return srcDevice.ports.some(
-    (p) =>
-      p.direction === 'out' &&
-      (!src.portId || src.portId === p.id) &&
-      walk(key(src.deviceId, p.id), media(p.signal)),
-  );
+export function canRoute(
+  g: Graph,
+  src: { deviceId: string; portId?: string },
+  dst: { deviceId: string; portId?: string },
+): boolean {
+  return findRoute(g, src, dst) !== null;
 }
 
 /** Devices reachable downstream (following connections, any hops) from a device. */
@@ -122,4 +180,4 @@ export function downstreamDevices(g: Graph, deviceId: string): Set<string> {
   return found;
 }
 
-export { key as portKey };
+export { key as portKey, split as splitPortKey };

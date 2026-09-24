@@ -11,9 +11,12 @@ export const RoomSettings = z.object({
   autoOff: z
     .object({
       enabled: z.boolean().default(true),
+      /** Countdown shown before the room turns itself off. */
       warnSeconds: z.number().int().min(0).max(600).default(30),
+      /** How long with no signal before the countdown starts. */
+      idleSeconds: z.number().int().min(10).max(7200).default(600),
     })
-    .default({ enabled: true, warnSeconds: 30 }),
+    .default({ enabled: true, warnSeconds: 30, idleSeconds: 600 }),
   /** Seconds before auto-switching when a second source appears mid-activity. */
   sourceConflictSeconds: z.number().int().min(0).max(120).default(10),
   /** Extras exposed to users (lights/blinds/camera) only if enabled. */

@@ -33,7 +33,7 @@ describe('RoomModel', () => {
     const m = RoomModel.parse({ roomType: 'meeting' });
     expect(m.schemaVersion).toBe(1);
     expect(m.settings.defaultVolume).toBe(50);
-    expect(m.settings.autoOff).toEqual({ enabled: true, warnSeconds: 30 });
+    expect(m.settings.autoOff).toEqual({ enabled: true, warnSeconds: 30, idleSeconds: 600 });
     expect(m.settings.sourceConflictSeconds).toBe(10);
     expect(m.devices).toEqual([]);
   });
