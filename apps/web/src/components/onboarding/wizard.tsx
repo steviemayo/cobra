@@ -27,6 +27,8 @@ export function OnboardingWizard({ email, hasOrgs }: { email: string; hasOrgs: b
   const [orgId, setOrgId] = useState<string | null>(null);
   const [siteId, setSiteId] = useState<string | null>(null);
   const [orgName, setOrgName] = useState('');
+  // A managed service provider looks after other organisations; it has no rooms of its own.
+  const [isProvider, setIsProvider] = useState(false);
   const [siteName, setSiteName] = useState('');
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [roomName, setRoomName] = useState('');
@@ -43,6 +45,11 @@ export function OnboardingWizard({ email, hasOrgs }: { email: string; hasOrgs: b
       onSuccess: (org) => {
         setOrgId(org.id);
         rememberOrg(org.id);
+        if (org.kind === 'msp') {
+          router.replace(`/o/${org.id}/msp`);
+          router.refresh();
+          return;
+        }
         setStep(1);
       },
     }),
@@ -124,7 +131,7 @@ export function OnboardingWizard({ email, hasOrgs }: { email: string; hasOrgs: b
                 className="space-y-6"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  createOrg.mutate({ name: orgName });
+                  createOrg.mutate({ name: orgName, kind: isProvider ? 'msp' : 'customer' });
                 }}
               >
                 <div className="space-y-1.5">
@@ -144,6 +151,21 @@ export function OnboardingWizard({ email, hasOrgs }: { email: string; hasOrgs: b
                     onChange={(e) => setOrgName(e.target.value)}
                   />
                 </div>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={isProvider}
+                    onChange={(e) => setIsProvider(e.target.checked)}
+                  />
+                  <span>
+                    We are a managed service provider
+                    <span className="block text-xs text-muted-foreground">
+                      We look after other organisations’ systems. Customers connect to us and give
+                      us access; we don’t set up rooms of our own.
+                    </span>
+                  </span>
+                </label>
                 {createOrg.error && (
                   <p className="text-sm text-destructive">{createOrg.error.message}</p>
                 )}

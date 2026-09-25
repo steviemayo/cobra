@@ -42,6 +42,12 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
       onError: (e) => toast.error(e.message),
     }),
   );
+  const route = useMutation(
+    trpc.ticket.route.mutationOptions({
+      onSuccess: refresh,
+      onError: (e) => toast.error(e.message),
+    }),
+  );
   const escalate = useMutation(
     trpc.ticket.escalate.mutationOptions({
       onSuccess: async () => {
@@ -98,6 +104,14 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
             <span className="text-sm text-muted-foreground">
               {PRIORITY_LABEL[t.priority]} priority
             </span>
+            {t.providerName && (
+              <>
+                <span aria-hidden className="text-muted-foreground/50">
+                  ·
+                </span>
+                <span className="text-sm font-medium">With {t.providerName}</span>
+              </>
+            )}
             {t.routedTo === 'kestrel' && (
               <>
                 <span aria-hidden className="text-muted-foreground/50">
@@ -211,7 +225,21 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                   }))}
                 />
               </Field>
-              {t.routedTo === 'org' && !closed && (
+              {!closed && t.routedTo !== 'kestrel' && (t.providerName || t.providerAvailable) && (
+                <Field label="Service provider">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={route.isPending}
+                    onClick={() =>
+                      route.mutate({ orgId, ticketId, to: t.providerName ? 'org' : 'provider' })
+                    }
+                  >
+                    {t.providerName ? 'Take back for our team' : 'Send to our service provider'}
+                  </Button>
+                </Field>
+              )}
+              {t.routedTo !== 'kestrel' && !closed && (
                 <Field label="Kestrel support">
                   <Button
                     variant="outline"

@@ -20,29 +20,33 @@ export const orgRouter = router({
       id: m.org.id,
       name: m.org.name,
       createdAt: m.org.createdAt,
+      kind: m.org.kind,
       role: m.role,
     }));
   }),
 
-  create: authedProcedure.input(z.object({ name })).mutation(async ({ ctx, input }) => {
-    const org = await db.org.create({
-      data: {
-        name: input.name,
-        billing: { create: { trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86_400_000) } },
-        members: {
-          create: { userId: ctx.user.id, email: ctx.user.email?.toLowerCase(), role: 'owner' },
+  create: authedProcedure
+    .input(z.object({ name, kind: z.enum(['customer', 'msp']).default('customer') }))
+    .mutation(async ({ ctx, input }) => {
+      const org = await db.org.create({
+        data: {
+          name: input.name,
+          kind: input.kind,
+          billing: { create: { trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86_400_000) } },
+          members: {
+            create: { userId: ctx.user.id, email: ctx.user.email?.toLowerCase(), role: 'owner' },
+          },
         },
-      },
-    });
-    await writeAudit({
-      orgId: org.id,
-      actorId: ctx.user.id,
-      action: 'org.create',
-      target: org.id,
-      meta: { name: org.name },
-    });
-    return org;
-  }),
+      });
+      await writeAudit({
+        orgId: org.id,
+        actorId: ctx.user.id,
+        action: 'org.create',
+        target: org.id,
+        meta: { name: org.name },
+      });
+      return org;
+    }),
 
   // The default look of every room's panel. Rooms follow it unless they set their own.
   getBranding: orgProcedure.input(z.object({ orgId: z.string().uuid() })).query(async ({ ctx }) => {

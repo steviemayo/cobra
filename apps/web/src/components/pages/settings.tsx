@@ -11,6 +11,7 @@ import {
   type BrandingDraft,
 } from '@/components/common/branding-fields';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
+import { ServiceProvidersSetting } from '@/components/common/service-providers-setting';
 import { StaffAccessSetting } from '@/components/common/staff-access-setting';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
@@ -74,6 +75,7 @@ export function GeneralSettings() {
       </form>
       <OrgBrandingForm />
       <CalendarSettings />
+      {org.kind !== 'msp' && <ServiceProvidersSetting />}
       <StaffAccessSetting />
     </PageContainer>
   );

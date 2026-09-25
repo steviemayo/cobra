@@ -6,6 +6,24 @@ const role = (v: unknown) => ROLE_LABEL[s(v) as keyof typeof ROLE_LABEL] ?? s(v)
 // Human wording for audit log rows: "<actor> <this text>".
 export function describeAudit(action: string, meta: Record<string, unknown>): string {
   switch (action) {
+    case 'msp.invite':
+      return `invited ${s(meta.msp)} to look after this organisation (${s(meta.role)} access)`;
+    case 'msp.invited':
+      return `invited us to look after ${s(meta.customer)} (${s(meta.role)} access)`;
+    case 'msp.accepted':
+      return meta.msp
+        ? `${s(meta.msp)} accepted the invitation`
+        : `accepted the invitation from ${s(meta.customer)}`;
+    case 'msp.declined':
+      return meta.msp
+        ? `${s(meta.msp)} declined the invitation`
+        : `declined the invitation from ${s(meta.customer)}`;
+    case 'msp.ended':
+      return meta.msp
+        ? `ended the connection with ${s(meta.msp)}`
+        : `ended the connection with ${s(meta.customer)}`;
+    case 'ticket.route':
+      return `${meta.to === 'provider' ? 'sent' : 'took back'} support request “${s(meta.title)}”${meta.to === 'provider' ? ' to the service provider' : ' for your own team'}`;
     case 'staff.session.start':
       return `started a ${s(meta.mode) === 'act' ? 'support session where they can make changes' : 'view-only support session'} for ${s(meta.minutes)} minutes: “${s(meta.reason)}”${meta.ticketId ? ' (linked to a support ticket)' : ''}`;
     case 'staff.session.end':

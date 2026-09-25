@@ -6,6 +6,7 @@ import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { TrialBanner } from '@/components/common/plan-gate';
 import { ViewAsBanner, type ViewAs } from './view-as-banner';
+import { ViaProviderBanner } from './via-provider-banner';
 import { AppSidebar } from './app-sidebar';
 import { Breadcrumbs } from './breadcrumbs';
 import { CommandMenu, usePalette } from './command-menu';
@@ -71,6 +72,7 @@ export function OrgShell({
             <AppSidebar />
             <SidebarInset className="min-w-0">
               {viewAs && <ViewAsBanner session={viewAs} email={user.email} />}
+              <ViaProviderBanner />
               <TopBar />
               <TrialBanner />
               <div className="flex-1">{children}</div>

@@ -271,6 +271,11 @@ export function TicketsView() {
                     >
                       {t.title}
                     </Link>
+                    {t.routedTo.startsWith('msp:') && (
+                      <span className="ml-2 rounded-full border px-2 py-0.5 text-xs font-normal text-muted-foreground">
+                        With service provider
+                      </span>
+                    )}
                     {t.routedTo === 'kestrel' && (
                       <span className="ml-2 rounded-full border px-2 py-0.5 text-xs font-normal text-muted-foreground">
                         With Kestrel
