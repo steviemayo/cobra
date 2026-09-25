@@ -68,7 +68,7 @@
 ## Phase 7 — Expansion
 
 - Triggers: schedule, calendar (Graph/Google), occupancy, webhook/API
-- Combined rooms behaviour
+- Combined rooms behaviour (first version built; **redesign planned**: define combinations when a room group is created, see `docs/panel-ui-requirements.md`)
 - Marketplace (publish/buy templates), driver SDK + dev subscription
 - Gateway self-update channels, Windows installer, QR-to-phone control
 - Additional drivers (conference systems API control, cameras, env, mechanical)
