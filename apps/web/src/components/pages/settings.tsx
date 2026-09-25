@@ -11,6 +11,7 @@ import {
   type BrandingDraft,
 } from '@/components/common/branding-fields';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
+import { StaffAccessSetting } from '@/components/common/staff-access-setting';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -73,6 +74,7 @@ export function GeneralSettings() {
       </form>
       <OrgBrandingForm />
       <CalendarSettings />
+      <StaffAccessSetting />
     </PageContainer>
   );
 }

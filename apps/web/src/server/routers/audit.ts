@@ -21,6 +21,15 @@ export const auditRouter = router({
         },
         select: { userId: true, email: true },
       });
+      // A staff member acting in an act session is not a member: show them as Kestrel staff.
+      const strangers = [...new Set(rows.flatMap((r) => (r.actorId ? [r.actorId] : [])))].filter(
+        (id) => !actors.some((a) => a.userId === id),
+      );
+      const staffIds = new Set(
+        (await db.staffUser.findMany({ where: { userId: { in: strangers } } })).map(
+          (s) => s.userId,
+        ),
+      );
       const emailById = new Map(actors.map((a) => [a.userId, a.email]));
       return rows.map((r) => ({
         id: r.id,
@@ -29,7 +38,8 @@ export const auditRouter = router({
         meta: (r.meta ?? {}) as Record<string, unknown>,
         createdAt: r.createdAt,
         actor: r.actorId
-          ? (emailById.get(r.actorId) ?? 'Former member')
+          ? (emailById.get(r.actorId) ??
+            (staffIds.has(r.actorId) ? 'Kestrel staff' : 'Former member'))
           : (r.meta as { staff?: boolean } | null)?.staff
             ? 'Kestrel staff'
             : 'System',

@@ -5,6 +5,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { TrialBanner } from '@/components/common/plan-gate';
+import { ViewAsBanner, type ViewAs } from './view-as-banner';
 import { AppSidebar } from './app-sidebar';
 import { Breadcrumbs } from './breadcrumbs';
 import { CommandMenu, usePalette } from './command-menu';
@@ -51,12 +52,15 @@ export function OrgShell({
   orgs,
   user,
   defaultOpen,
+  viewAs,
   children,
 }: {
   orgId: string;
   orgs: OrgSummary[];
   user: { id: string; email: string };
   defaultOpen: boolean;
+  /** Set when Kestrel staff are looking in through a support session. */
+  viewAs?: ViewAs | null;
   children: React.ReactNode;
 }) {
   return (
@@ -66,6 +70,7 @@ export function OrgShell({
           <CommandMenu>
             <AppSidebar />
             <SidebarInset className="min-w-0">
+              {viewAs && <ViewAsBanner session={viewAs} email={user.email} />}
               <TopBar />
               <TrialBanner />
               <div className="flex-1">{children}</div>

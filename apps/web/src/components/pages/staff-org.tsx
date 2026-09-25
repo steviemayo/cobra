@@ -5,6 +5,7 @@ import { ArrowLeft } from 'lucide-react';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { LicencePanel } from '@/components/staff/licence-panel';
 import { NotesPanel } from '@/components/staff/notes-panel';
+import { SessionPanel } from '@/components/staff/session-panel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate, timeAgo } from '@/lib/format';
 import { useTRPC } from '@/trpc/client';
@@ -69,6 +70,8 @@ export function StaffOrg({ orgId }: { orgId: string }) {
         <Stat label="People" value={o.members} />
         <Stat label="Last activity" value={o.lastActivity ? timeAgo(o.lastActivity) : 'Never'} />
       </div>
+
+      <SessionPanel orgId={orgId} blocked={o.staffAccessBlocked} />
 
       <LicencePanel orgId={orgId} />
 

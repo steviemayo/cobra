@@ -6,6 +6,14 @@ const role = (v: unknown) => ROLE_LABEL[s(v) as keyof typeof ROLE_LABEL] ?? s(v)
 // Human wording for audit log rows: "<actor> <this text>".
 export function describeAudit(action: string, meta: Record<string, unknown>): string {
   switch (action) {
+    case 'staff.session.start':
+      return `started a ${s(meta.mode) === 'act' ? 'support session where they can make changes' : 'view-only support session'} for ${s(meta.minutes)} minutes: “${s(meta.reason)}”${meta.ticketId ? ' (linked to a support ticket)' : ''}`;
+    case 'staff.session.end':
+      return 'ended their support session';
+    case 'org.staff_access':
+      return meta.blocked
+        ? 'required a support ticket before Kestrel staff can open a session here'
+        : 'allowed Kestrel staff to open a support session without a ticket';
     case 'license.adjust':
       return `adjusted this organisation’s licence: ${s(meta.summary)}`;
     case 'license.revoke':

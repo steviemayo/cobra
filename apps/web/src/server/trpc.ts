@@ -7,6 +7,7 @@ import { hasStaffRole, type Feature, type OrgRole, type StaffRole } from '@kestr
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { getEntitlements, planRequired } from './billing';
 import { findStaff, mfaRequired } from './staff';
+import { activeSession, logSessionAction, sessionGate } from './support-sessions';
 
 export async function createContext() {
   const supabase = await createSupabaseServer();
@@ -30,15 +31,48 @@ const orgInput = z.object({ orgId: z.string().uuid() });
 
 // Every org-scoped procedure goes through here: verifies membership, exposes orgId + role.
 // Prisma bypasses Supabase RLS, so all queries MUST filter by ctx.orgId.
-export const orgProcedure = authedProcedure.use(async ({ ctx, next, getRawInput }) => {
+export const orgProcedure = authedProcedure.use(async ({ ctx, next, getRawInput, type, path }) => {
   const parsed = orgInput.safeParse(await getRawInput());
   if (!parsed.success) throw new TRPCError({ code: 'BAD_REQUEST', message: 'orgId required' });
   const member = await db.member.findUnique({
     where: { orgId_userId: { orgId: parsed.data.orgId, userId: ctx.user.id } },
   });
-  if (!member) throw new TRPCError({ code: 'FORBIDDEN' });
-  return next({ ctx: { orgId: member.orgId, role: member.role as OrgRole } });
+  if (member) {
+    const viewAs: ViewAs | null = null;
+    return next({ ctx: { orgId: member.orgId, role: member.role as OrgRole, viewAs } });
+  }
+
+  // Not a member. Kestrel staff with an open support session (and a second factor) may work here,
+  // at support level. A read session cannot change anything; an act session can, and every change
+  // is logged against the session.
+  const staff = await findStaff(db, ctx.user.id);
+  const session = staff ? await activeSession(db, ctx.user.id, parsed.data.orgId) : null;
+  if (!staff || !session) throw new TRPCError({ code: 'FORBIDDEN' });
+  if (mfaRequired()) {
+    const supabase = await createSupabaseServer();
+    const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (data?.currentLevel !== 'aal2')
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'MFA_REQUIRED' });
+  }
+  const gate = sessionGate(session.mode, type);
+  if (gate === 'deny') {
+    await logSessionAction(db, session, 'session.blocked', path);
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'This is a view-only support session. Start an "act" session to make changes.',
+    });
+  }
+  if (gate === 'log') await logSessionAction(db, session, 'session.act', path);
+  const viewAs: ViewAs = { sessionId: session.id, mode: session.mode, endsAt: session.endsAt };
+  return next({ ctx: { orgId: parsed.data.orgId, role: 'support' as OrgRole, viewAs } });
 });
+
+/** Set when the caller is Kestrel staff working inside the organisation through a support session. */
+export interface ViewAs {
+  sessionId: string;
+  mode: 'read' | 'act';
+  endsAt: Date;
+}
 
 export function requireRole(role: OrgRole, allowed: OrgRole[]) {
   if (!allowed.includes(role))
