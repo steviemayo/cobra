@@ -181,20 +181,6 @@ export const RoomReport = z.object({
 });
 export type RoomReport = z.infer<typeof RoomReport>;
 
-/** Rooms that can be joined into one. The primary's panel controls them all while combined. */
-export const CombinationConfig = z.object({
-  id: z.string().uuid(),
-  name: z.string(),
-  primaryRoomId: z.string().uuid(),
-  secondaryRoomIds: z.array(z.string().uuid()).min(1),
-  secondaryVideo: z.enum(['follow', 'blank']),
-  secondaryAudio: z.enum(['follow', 'blank']),
-});
-export type CombinationConfig = z.infer<typeof CombinationConfig>;
-
-export const CombinationReport = z.object({ id: z.string().uuid(), combined: z.boolean() });
-export type CombinationReport = z.infer<typeof CombinationReport>;
-
 /**
  * A room group as one gateway sees it: the rooms that can be joined, the movable walls between
  * them, and the combined rooms that exist for each joined set. Combined rooms are ordinary rooms
@@ -236,8 +222,6 @@ export const HeartbeatRequest = z.object({
   rooms: z.array(RoomReport),
   /** Outcomes of commands received in earlier heartbeat responses. */
   commandResults: z.array(CommandResult).max(50).default([]),
-  /** Which combinations are joined right now, as the gateway sees them. */
-  combinations: z.array(CombinationReport).max(100).default([]),
   /** Which movable walls are open, for the groups this gateway runs. The gateway owns this state. */
   dividers: z.array(DividerReport).max(500).default([]),
 });
@@ -278,8 +262,6 @@ export const ConfigResponse = z.object({
   configVersion: z.string(),
   rooms: z.array(AssignedRoom),
   publicKeys: z.array(PublicKey),
-  /** Combinations of this gateway's rooms. */
-  combinations: z.array(CombinationConfig).default([]),
   /** Room groups whose rooms run on this gateway. */
   groups: z.array(GroupConfig).default([]),
 });
@@ -297,16 +279,8 @@ export type HookIntent = z.infer<typeof HookIntent>;
 export const TriggerIntent = z.object({ type: z.literal('trigger'), triggerId: LocalId });
 export type TriggerIntent = z.infer<typeof TriggerIntent>;
 
-/** Join or split a combination of rooms from the portal. Sent to the primary room. */
-export const CombineIntent = z.object({
-  type: z.literal('combination.set'),
-  combinationId: z.string().uuid(),
-  combined: z.boolean(),
-});
-export type CombineIntent = z.infer<typeof CombineIntent>;
-
 /** Anything the cloud can ask a room to do on someone's behalf. */
-export const GatewayIntent = z.union([PanelIntent, HookIntent, TriggerIntent, CombineIntent]);
+export const GatewayIntent = z.union([PanelIntent, HookIntent, TriggerIntent]);
 export type GatewayIntent = z.infer<typeof GatewayIntent>;
 
 export const ControlIntentMessage = z.object({

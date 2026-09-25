@@ -30,11 +30,11 @@
 
 - Devs architect room logically; Kestrel derives routing/logic/UI from model
 - Flow: new room → template or Room Type (initial: Meeting, Training) → type supplies default behaviours
-- Model: devices (by category), ports, connections, groups, states, activities, triggers, rules, room combinations
+- Model: devices (by category), ports, connections, groups, states, activities, triggers, rules, room groups (combined rooms)
 - Device categories: video/audio sources, conf/fixed/PTZ/auto-framing cameras, reinforcement + voice-capture mics, conference systems (MTR/Codec), video matrix (virtual/physical — same model), audio matrix/DSP, video + audio destinations, conference outputs, environmental (lighting/HVAC/blinds), mechanical (lifters/screens)
 - Groups: Display Group = members + allowed sources + mode (follow | independent)
 - States: Off / On / custom = ordered actions (routes, DSP presets, device cmds, env scenes)
-- **Combined rooms:** a room can be Combined; behaviour is configurable: primary vs secondary role; secondary video follows|blanks; secondary audio follows|blanks; on uncombine revert to Off. **REDESIGN PLANNED (not built):** define combining when a room group is first created: create the large all-combined room plus each independent room, and every physically possible combination of rooms (defined by which movable walls join which rooms), so each room is state-aware. Design: `docs/room-groups.md` (room groups + dividers; combined rooms are ordinary rooms). Portal side and gateway runtime built (`GroupCoordinator`, per-wall open/close settings, see `docs/decisions.md`); the old `RoomCombination` panel bar, protocol fields and table remain until step D
+- **Combined rooms (BUILT):** combining is defined when a room group is created: the large all-combined room plus each independent room, and every physically possible combination (defined by which movable walls join which rooms), each an ordinary room with its own program. People combine rooms from the panel's **Link rooms** menu ("Combine with Room B"); when rooms are linked the combined room runs and the rooms it stands for are suspended. What the new space does is a per-wall setting in the portal (off, on, follow, restore). A group deploys as one action. Design: `docs/room-groups.md`; decisions: `docs/decisions.md`. The old primary/secondary "RoomCombination" feature is removed (its table is dropped in a follow-up migration)
 - Target: 90% rooms = 1–2 laptop inputs → 1–2 displays + speakers. Custom logic hooks (sandboxed scripts) DEFERRED; edge cases via rules
 - Runtime on gateway = generic interpreter of a signed manifest (same engine package also runs in-browser simulator)
 - Devices without driver: generic TCP/serial (and PJLink/REST templates) allowed in v1

@@ -718,7 +718,8 @@ model RoomDivider {
   @@index([groupId])
 }
 
-// Superseded by RoomGroup. Kept until the new version is deployed, then dropped.
+// Superseded by RoomGroup and no longer read or written by any code. Kept only until every
+// environment runs the version that stopped using it; a later migration drops the table.
 model RoomCombination {
   id               String   @id @default(uuid()) @db.Uuid
   orgId            String   @db.Uuid

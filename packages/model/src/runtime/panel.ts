@@ -26,8 +26,6 @@ export const PanelIntent = z.discriminatedUnion('type', [
   }),
   /** Run the room's On state ("Touch to begin" set to turn the room on). */
   z.object({ type: z.literal('room.on') }),
-  /** Join or split this room with the rooms it is set up to combine with. Only the primary room's panel offers it. */
-  z.object({ type: z.literal('combine.set'), combined: z.boolean() }),
   /** Open or close a movable wall from the Room linking menu. Ids come from `linking.dividers`. */
   z.object({
     type: z.literal('divider.set'),
@@ -51,7 +49,6 @@ export const MessageKey = z.enum([
   'fault_generic',
   'switch_source',
   'auto_off',
-  'combined_secondary',
 ]);
 export type MessageKey = z.infer<typeof MessageKey>;
 
@@ -100,15 +97,6 @@ export const PanelQuickAction = z.object({
 });
 export type PanelQuickAction = z.infer<typeof PanelQuickAction>;
 
-export const PanelCombination = z.object({
-  /** primary: this panel controls the combined rooms. secondary: another room is in charge. */
-  role: z.enum(['primary', 'secondary']),
-  combined: z.boolean(),
-  /** The other rooms, by name: the secondaries for a primary, the primary for a secondary. */
-  rooms: z.array(z.string()),
-});
-export type PanelCombination = z.infer<typeof PanelCombination>;
-
 /** One way to link rooms, as the "Link rooms" menu shows it: one per movable wall. */
 export const PanelDivider = z.object({
   id: z.string().min(1).max(64),
@@ -154,8 +142,6 @@ export const PanelViewModel = z.object({
     .nullable(),
   /** e.g. "Turning the room off in 30s". */
   warning: z.object({ text: PanelText, secondsLeft: z.number() }).nullable(),
-  /** Present only for rooms that can be combined. */
-  combination: PanelCombination.optional(),
   /** Present only for rooms in a room group: the walls and what is joined. */
   linking: PanelLinking.optional(),
 });

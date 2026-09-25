@@ -20,7 +20,7 @@
 
 ## Phase 1 — Room Modelling (portal)
 
-- `packages/model` schemas: Device, Port, Connection, Group, State, Action, Activity, Trigger, RoomCombination
+- `packages/model` schemas: Device, Port, Connection, Group, State, Action, Activity, Trigger
 - Catalog of device categories + Room Types (Meeting, Training) + starter templates
 - Authoring UI: add devices, define ports/connections, groups, states, activities (list + graph view)
 - Validator: unconnected ports, illegal routes, missing capabilities, missing drivers
@@ -68,7 +68,7 @@
 ## Phase 7 — Expansion
 
 - Triggers: schedule, calendar (Graph/Google), occupancy, webhook/API
-- Combined rooms behaviour (first version built; **redesign planned**: define combinations when a room group is created, see `docs/panel-ui-requirements.md`)
+- Combined rooms behaviour (room groups built: `docs/room-groups.md`; the first primary/secondary version is removed)
 - Marketplace (publish/buy templates), driver SDK + dev subscription
 - Gateway self-update channels, Windows installer, QR-to-phone control
 - Additional drivers (conference systems API control, cameras, env, mechanical)
@@ -398,7 +398,7 @@ Working rules that apply to all of them:
 | A | Browser pass of the new screens (below) | small | you, with an authenticator app and two accounts |
 | B | Quick actions from drivers (Blank Screen, Privacy Mute) | medium | a display or projector that supports blank, to try |
 | C | Room groups: gateway runtime (R1 to R4) | large | **built** (decisions in `docs/decisions.md`) |
-| D | Remove the old combinations code and table (R5) | medium | C deployed |
+| D | Remove the old combinations code and table (R5) | medium | code removal **built**; table drop waits for the release |
 | E | Audit retention and export | medium | retention default (12 months proposed) |
 | F | Panel function pages (cameras, microphones, recorder, room controls) | large | real devices to try |
 | G | Org accent colour in the portal | small | none |
@@ -478,6 +478,8 @@ Sub-slices:
 Depends on: nothing. Done when, in the simulator with fake devices: opening a wall makes the combined room run and suspends its members; closing reverses it; the state survives a gateway restart with no internet.
 
 ### D. Remove the old combinations code and table
+
+**Status: part 1 built** (every reader and writer, the panel intent and bar, the protocol fields, the model schema and the tests are gone; the `RoomCombination` model stays in `schema.prisma` with a comment). **Part 2 is yours, after the release to `main` is live:** add a migration dropping the table (`DROP TABLE "RoomCombination"`), remove the model from `schema.prisma`, and check `grep -ri roomcombination` finds only migration history. The protocol version stays 1 (decision D-1 in `docs/decisions.md`). The text below is the original brief.
 
 Why: the first combined-rooms design was wrong and is being replaced (C). Its code and table are still there.
 

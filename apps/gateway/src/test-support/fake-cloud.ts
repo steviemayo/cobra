@@ -36,8 +36,6 @@ export class FakeCloud {
   readonly queuedCommands: GatewayCommand[] = [];
   /** Rooms the fake portal is "controlling": the gateway is told to poll fast for them. */
   watching: string[] = [];
-  /** Combinations the fake cloud reports in the gateway's config. */
-  combinations: unknown[] = [];
   /** Room groups the fake cloud reports in the gateway's config. */
   groups: unknown[] = [];
   readonly queuedIntents: { id: string; roomId: string; intent: unknown }[] = [];
@@ -50,11 +48,6 @@ export class FakeCloud {
   /** When false the cloud answers 503 to everything. */
   up = true;
   url = '';
-
-  setCombinations(list: unknown[]) {
-    this.combinations = list;
-    this.version++;
-  }
 
   setGroups(list: unknown[]) {
     this.groups = list;
@@ -195,7 +188,6 @@ export class FakeCloud {
           manifestHash: (a.signed as { hash: string }).hash,
         })),
         publicKeys: this.extraKeys ?? this.publicKeys,
-        combinations: this.combinations,
         groups: this.groups,
       });
     }

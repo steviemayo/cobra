@@ -31,55 +31,6 @@ export function usePanel(client: PanelClient): PanelViewModel {
   );
 }
 
-const TONE_ICON = {
-  info: 'info',
-  progress: 'info',
-  success: 'check',
-  warn: 'warning',
-  error: 'warning',
-};
-
-function CombineBar({
-  vm,
-  t,
-  dispatch,
-}: {
-  vm: PanelViewModel;
-  t: Translate;
-  dispatch: PanelClient['dispatch'];
-}) {
-  const c = vm.combination;
-  if (c?.role !== 'primary') return null;
-  const rooms = c.rooms.join(', ');
-  return (
-    <div className="kp-banner kp-tone-info" role="group">
-      <span>{c.combined ? t('combine.status', { rooms }) : t('combine.join', { rooms })}</span>
-      <button
-        type="button"
-        className="kp-btn"
-        onClick={() => dispatch({ type: 'combine.set', combined: !c.combined })}
-      >
-        {c.combined ? t('combine.split') : t('combine.join', { rooms })}
-      </button>
-    </div>
-  );
-}
-
-function StatusBanner({ vm, t }: { vm: PanelViewModel; t: Translate }) {
-  if (!vm.message) return null;
-  const { text, tone } = vm.message;
-  return (
-    <div className={`kp-banner kp-tone-${tone}`} role="status" aria-live="polite">
-      {tone === 'progress' ? (
-        <span className="kp-spinner" aria-hidden />
-      ) : (
-        <Icon name={TONE_ICON[tone]} />
-      )}
-      <span>{messageText(t, text)}</span>
-    </div>
-  );
-}
-
 function PromptBar({
   vm,
   t,
@@ -295,7 +246,6 @@ export function PanelApp({
     vm.activities.find((a) => a.kind !== 'room_off' && !a.overlay) ??
     vm.activities[0];
   const off = vm.status === 'off';
-  const following = vm.combination?.role === 'secondary' && vm.combination.combined;
 
   const choose = (a: PanelActivity) => {
     setPicked(a.id);
@@ -342,18 +292,6 @@ export function PanelApp({
       </div>
     </div>
   );
-
-  if (following)
-    return (
-      <div className={`kp-app ${className ?? ''}`} data-mode={theme.mode} style={themeStyle(theme)}>
-        <div className="kp-frame">
-          <header className="kp-top">{brandFor(false)}</header>
-          <main className="kp-main">
-            <StatusBanner vm={vm} t={t} />
-          </main>
-        </div>
-      </div>
-    );
 
   // Room Off is not an activity to pick: it lives behind the Power button, with a confirmation.
   const tiles = vm.activities.filter((a) => a.kind !== 'room_off');
@@ -405,7 +343,6 @@ export function PanelApp({
         </header>
 
         <main className={`kp-main ${off ? 'kp-main-centre' : ''}`}>
-          <CombineBar vm={vm} t={t} dispatch={dispatch} />
           <PromptBar vm={vm} t={t} dispatch={dispatch} />
           <WarningBar vm={vm} t={t} dispatch={dispatch} />
 

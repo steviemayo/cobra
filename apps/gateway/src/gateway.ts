@@ -217,8 +217,6 @@ export class Gateway {
         configVersion: this.store.get(KEY_CONFIG_VERSION),
         rooms: this.roomReports(),
         commandResults: results,
-        // Old-style combinations are no longer run by the gateway (removed from the protocol in a later step).
-        combinations: [],
         dividers: this.groups.report(),
       })
       .catch((e: unknown) => {
@@ -275,9 +273,7 @@ export class Gateway {
       for (const { roomId, intent } of res.intents) {
         const runtime = this.host.active(roomId)?.runtime;
         if (!runtime) continue;
-        if (intent.type === 'combination.set')
-          this.log('warn', 'Ignored an old-style combination request', { roomId });
-        else if (intent.type === 'divider.set') void this.groups.set(intent.dividerId, intent.open);
+        if (intent.type === 'divider.set') void this.groups.set(intent.dividerId, intent.open);
         else if (intent.type === 'trigger') {
           const ran = runtime.fireTrigger(intent.triggerId);
           this.log('info', 'Trigger requested', { roomId, trigger: intent.triggerId, ran });
