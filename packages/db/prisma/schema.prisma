@@ -549,6 +549,33 @@ model ControlIntent {
 }
 
 // Rooms that can be joined into one. While combined, the primary's panel controls all of them.
+// Kestrel staff: people who may use the /staff portal across every organisation. Separate from
+// Member, which is about one organisation. `roles` are admin, support, billing, readonly; admin
+// includes all of them.
+model StaffUser {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @db.Uuid // Supabase auth.users.id
+  email     String?
+  roles     String[]
+  createdAt DateTime @default(now())
+  createdBy String?  @db.Uuid
+}
+
+// What staff did or looked at, across organisations. No foreign keys, so the record outlives
+// an organisation or a staff account.
+model StaffAudit {
+  id          String   @id @default(uuid()) @db.Uuid
+  staffUserId String   @db.Uuid
+  action      String
+  orgId       String?  @db.Uuid
+  target      String?
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([staffUserId, createdAt])
+}
+
 // Rooms that can be physically joined by movable walls. The combined rooms are ordinary Room rows
 // with kind "combined", created from the dividers.
 model RoomGroup {

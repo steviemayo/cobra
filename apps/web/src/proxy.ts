@@ -1,10 +1,20 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { staffHostVerdict } from '@/lib/staff-host';
 
 const PUBLIC_PREFIXES = ['/login', '/signup', '/forgot-password', '/auth/', '/invite/', '/c/'];
 const GUEST_ONLY = ['/login', '/signup', '/forgot-password'];
 
 export async function proxy(request: NextRequest) {
+  // The staff portal can be pinned to its own host (STAFF_HOST). See lib/staff-host.ts.
+  const verdict = staffHostVerdict(request.headers.get('host'), request.nextUrl.pathname);
+  if (verdict === 'not-found') return new NextResponse(null, { status: 404 });
+  if (verdict === 'to-staff') {
+    const url = request.nextUrl.clone();
+    url.pathname = '/staff';
+    url.search = '';
+    return NextResponse.redirect(url);
+  }
   let response = NextResponse.next({ request });
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

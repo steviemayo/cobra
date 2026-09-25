@@ -3,9 +3,10 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
 import { z } from 'zod';
 import { db } from '@kestrel/db';
-import type { Feature, OrgRole } from '@kestrel/model';
+import { hasStaffRole, type Feature, type OrgRole, type StaffRole } from '@kestrel/model';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { getEntitlements, planRequired } from './billing';
+import { findStaff, mfaRequired } from './staff';
 
 export async function createContext() {
   const supabase = await createSupabaseServer();
@@ -52,3 +53,31 @@ export const featureProcedure = (feature: Feature) =>
       throw new TRPCError({ code: 'FORBIDDEN', message: planRequired(feature) });
     return next();
   });
+
+/**
+ * Kestrel staff, signed in but with no second factor check yet. Used by the staff shell to decide
+ * where to send someone. Not scoped to an organisation. Anyone else gets FORBIDDEN.
+ */
+export const staffIdentityProcedure = authedProcedure.use(async ({ ctx, next }) => {
+  const staff = await findStaff(db, ctx.user.id);
+  if (!staff) throw new TRPCError({ code: 'FORBIDDEN' });
+  const supabase = await createSupabaseServer();
+  const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  return next({ ctx: { staff, mfaSatisfied: data?.currentLevel === 'aal2' } });
+});
+
+/**
+ * Kestrel staff with a second factor (unless switched off for local development). This is the one
+ * kind of procedure that is deliberately NOT limited to one organisation, so use it only under
+ * /staff and record what staff read or change with recordStaffAudit.
+ */
+export const staffProcedure = staffIdentityProcedure.use(({ ctx, next }) => {
+  if (mfaRequired() && !ctx.mfaSatisfied)
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'MFA_REQUIRED' });
+  return next();
+});
+
+export function requireStaffRole(staff: { roles: string[] }, needed: StaffRole) {
+  if (!hasStaffRole(staff.roles, needed))
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Insufficient staff role' });
+}
