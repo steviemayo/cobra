@@ -53,6 +53,8 @@ export const en = {
   'idle.support': 'Need support?',
   'volume.muted': 'Muted',
   'quick.more': 'Quick actions',
+  'quick.display.blank': 'Blank Screen',
+  'quick.mics.privacy_mute': 'Privacy Mute',
   'sheet.close': 'Close',
   'power.button': 'Power',
   'power.title': 'Power off system?',

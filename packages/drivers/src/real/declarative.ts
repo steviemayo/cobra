@@ -10,6 +10,7 @@ import {
   type DeviceCommand,
   type DriverAction,
   type DriverSpec,
+  type QuickActionId,
 } from '@kestrel/model';
 import { BaseDriver } from './base';
 import type { DriverContext } from './types';
@@ -65,6 +66,11 @@ export class DeclarativeDriver extends BaseDriver {
   private get port() {
     const fromSetting = typeof this.settings.port === 'number' ? this.settings.port : undefined;
     return fromSetting ?? this.spec.transport.port ?? (this.http?.https ? 443 : this.http ? 80 : 23);
+  }
+
+  /** The quick actions the driver declares. Others are refused by the room, not offered. */
+  override quickActions(): QuickActionId[] {
+    return [...new Set(this.spec.quickActions ?? [])];
   }
 
   // ---- Lifecycle ------------------------------------------------------------------------------
@@ -136,6 +142,9 @@ export class DeclarativeDriver extends BaseDriver {
             break;
           case 'preset':
             s.preset = raw;
+            break;
+          case 'blanked':
+            s.blanked = /^(on|1|true|blank|blanked)$/i.test(raw);
             break;
           case 'online':
             s.online = /^(on|1|true)$/i.test(raw);
@@ -345,6 +354,13 @@ export class DeclarativeDriver extends BaseDriver {
         return this.run(`power.${command.on ? 'on' : 'off'}`, v({}), () =>
           this.update((s) => {
             s.power = command.on ? 'on' : 'off';
+            if (!command.on) s.blanked = false;
+          }),
+        );
+      case 'blank':
+        return this.run(`blank.${command.on ? 'on' : 'off'}`, v({}), () =>
+          this.update((s) => {
+            s.blanked = command.on;
           }),
         );
       case 'mute':

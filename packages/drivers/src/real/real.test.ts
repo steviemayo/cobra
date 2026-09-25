@@ -42,9 +42,9 @@ async function until(check: () => boolean, ms = 3000) {
 // ---- Mock PJLink projector -----------------------------------------------------------------
 
 async function pjlink(
-  opts: { password?: string; warmMs?: number; power?: string; input?: string } = {},
+  opts: { password?: string; warmMs?: number; power?: string; input?: string; avmt?: boolean } = {},
 ) {
-  const state = { power: opts.power ?? '0', input: opts.input ?? '31' };
+  const state = { power: opts.power ?? '0', input: opts.input ?? '31', mute: '30' };
   const received: string[] = [];
   const salt = 'a1b2c3d4';
   const port = await listen(
@@ -72,7 +72,11 @@ async function pjlink(
           const [cmd, arg] = line.slice(2).split(' ');
           if (cmd === 'POWR' && arg === '?') socket.end(`%1POWR=${state.power}\r`);
           else if (cmd === 'INPT' && arg === '?') socket.end(`%1INPT=${state.input}\r`);
-          else if (cmd === 'POWR') {
+          else if (cmd === 'AVMT' && opts.avmt && arg === '?') socket.end(`%1AVMT=${state.mute}\r`);
+          else if (cmd === 'AVMT' && opts.avmt) {
+            state.mute = arg!;
+            socket.end('%1AVMT=OK\r');
+          } else if (cmd === 'POWR') {
             if (arg === '1') {
               state.power = '3';
               setTimeout(() => (state.power = '1'), opts.warmMs ?? 100);
@@ -90,6 +94,34 @@ async function pjlink(
 }
 
 describe('PJLink driver', () => {
+  it('blanks the picture and brings it back, and reads the state from the projector', async () => {
+    const p = await pjlink({ power: '1', avmt: true });
+    const d = new PjlinkDriver(display({ host: '127.0.0.1', port: p.port, pollMs: 40 }), ctx);
+    drivers.push(d);
+    expect(d.quickActions()).toEqual(['display.blank']);
+    await d.send({ type: 'blank', on: true });
+    expect(p.received).toContain('%1AVMT 11');
+    expect(d.getState().blanked).toBe(true);
+    await d.send({ type: 'blank', on: false });
+    expect(p.received).toContain('%1AVMT 10');
+    expect(d.getState().blanked).toBe(false);
+
+    // Someone blanks it with the remote: the next poll notices.
+    p.state.mute = '31';
+    d.start();
+    await until(() => d.getState().blanked === true);
+  });
+
+  it('a projector that does not know AVMT still shows as online, and refuses the blank in plain words', async () => {
+    const p = await pjlink({ power: '1' });
+    const d = new PjlinkDriver(display({ host: '127.0.0.1', port: p.port, pollMs: 40 }), ctx);
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().power === 'on');
+    expect(d.getState()).toMatchObject({ online: true });
+    await expect(d.send({ type: 'blank', on: true })).rejects.toThrow('command not supported');
+  });
+
   it('turns on, reports warming, and is only ready once the display is on', async () => {
     const p = await pjlink({ warmMs: 250 });
     const d = new PjlinkDriver(display({ host: '127.0.0.1', port: p.port }), ctx);

@@ -448,6 +448,8 @@ Do: add a `blank` capability and a `blanked` feedback field; add `quickActions` 
 
 Depends on: nothing. Done when: in the simulator a room with a PJLink display shows a working Blank Screen button, and a room without one shows none.
 
+**Status: built** (branch `feat/quick-actions`). Differences from the plan above: no model `blank` capability (support is declared by the driver, per the decision); driver format is `quickActions: [ids]` plus standard commands `blank.on`/`blank.off`, not the label/icon object first sketched. Not done: a failed action is silent; blank is not cleared when the source changes; the browser simulator does not see an org's custom drivers. Details: `docs/driver-sdk.md` (Quick actions), `docs/panel-ui-requirements.md` (Slice 2).
+
 ### C. Room groups: gateway runtime
 
 Why: the portal side is built (groups, walls, derived combined rooms). Nothing yet opens or closes a wall at runtime, so a combined room can be designed and deployed but never becomes live. This is the largest remaining piece.
