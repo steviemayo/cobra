@@ -5,6 +5,16 @@ import { db } from '@kestrel/db';
 import { exportAuditLog } from '../audit-export';
 import { RetentionError, auditRetentionFor, setAuditRetention } from '../audit-retention';
 import { writeAudit } from '../audit';
+import { supabaseAccounts } from '../staff-accounts';
+import {
+  TeamError,
+  describeStaffAudit,
+  listStaffAudit,
+  listTeam,
+  removeStaff,
+  setStaff,
+} from '../staff-team';
+import { StaffRole } from '@kestrel/model';
 import { orgDetail, orgDirectory, recordStaffAudit, mfaRequired } from '../staff';
 import { fleetHealth } from '../fleet-health';
 import { notifyOrg } from '../ticket-notify';
@@ -47,7 +57,8 @@ function asTrpc(e: unknown): never {
     e instanceof LicenceError ||
     e instanceof SessionError ||
     e instanceof TicketError ||
-    e instanceof RetentionError
+    e instanceof RetentionError ||
+    e instanceof TeamError
   )
     throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
   throw e;
@@ -250,6 +261,68 @@ export const staffRouter = router({
           return asTrpc(e);
         }
       }),
+  }),
+
+  // Who is Kestrel staff. Admin only: it decides who can see every customer.
+  team: router({
+    list: staffProcedure.query(async ({ ctx }) => {
+      requireStaffRole(ctx.staff, 'admin');
+      return listTeam(db);
+    }),
+
+    set: staffProcedure
+      .input(
+        z.object({ email: z.string().trim().email(), roles: z.array(StaffRole).min(1).max(4) }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'admin');
+        try {
+          return await setStaff(db, supabaseAccounts(), { ...input, by: ctx.staff.userId });
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    remove: staffProcedure
+      .input(z.object({ userId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'admin');
+        try {
+          await removeStaff(db, { userId: input.userId, by: ctx.staff.userId });
+          return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+  }),
+
+  // What staff have done or looked at, across organisations. Reading it is not itself recorded.
+  audit: router({
+    list: staffProcedure
+      .input(
+        z
+          .object({
+            staffUserId: z.string().uuid().optional(),
+            orgId: z.string().uuid().optional(),
+            action: z.string().trim().max(60).optional(),
+            before: z.date().optional(),
+          })
+          .default({}),
+      )
+      .query(async ({ ctx, input }) => {
+        requireAnyStaffRole(ctx.staff, ['admin', 'support']);
+        const { rows, more } = await listStaffAudit(db, input);
+        return {
+          more,
+          rows: rows.map((r) => ({ ...r, what: describeStaffAudit(r.action, r.meta) })),
+        };
+      }),
+
+    // The people to filter by, without needing to be an admin.
+    people: staffProcedure.query(async ({ ctx }) => {
+      requireAnyStaffRole(ctx.staff, ['admin', 'support']);
+      return (await listTeam(db)).map((t) => ({ userId: t.userId, email: t.email }));
+    }),
   }),
 
   // How long an organisation's activity log is kept, and downloading it. Extending retention is an

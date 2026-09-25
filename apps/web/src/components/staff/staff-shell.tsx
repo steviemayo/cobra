@@ -1,14 +1,17 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Activity, Building2, LifeBuoy, Store } from 'lucide-react';
+import { Activity, Building2, LifeBuoy, ScrollText, Store, Users } from 'lucide-react';
+import { hasStaffRole, type StaffRole } from '@kestrel/model';
 import { cn } from '@/lib/utils';
 
-const NAV = [
+const NAV: { href: string; label: string; icon: typeof Building2; needs?: StaffRole[] }[] = [
   { href: '/staff/orgs', label: 'Organisations', icon: Building2 },
   { href: '/staff/health', label: 'Fleet health', icon: Activity },
   { href: '/staff/tickets', label: 'Tickets', icon: LifeBuoy },
   { href: '/staff/marketplace', label: 'Marketplace review', icon: Store },
+  { href: '/staff/audit', label: 'Audit trail', icon: ScrollText, needs: ['admin', 'support'] },
+  { href: '/staff/team', label: 'Team', icon: Users, needs: ['admin'] },
 ];
 
 // The staff portal frame: deliberately plain and unlike the customer portal, so nobody mistakes
@@ -33,19 +36,21 @@ export function StaffShell({
           Kestrel
         </div>
         <nav aria-label="Staff" className="flex gap-1">
-          {NAV.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              aria-current={path.startsWith(href) ? 'page' : undefined}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground',
-                path.startsWith(href) && 'bg-muted font-medium text-foreground',
-              )}
-            >
-              <Icon className="size-4" /> {label}
-            </Link>
-          ))}
+          {NAV.filter(({ needs }) => !needs || needs.some((r) => hasStaffRole(roles, r))).map(
+            ({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                aria-current={path.startsWith(href) ? 'page' : undefined}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground',
+                  path.startsWith(href) && 'bg-muted font-medium text-foreground',
+                )}
+              >
+                <Icon className="size-4" /> {label}
+              </Link>
+            ),
+          )}
         </nav>
         <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
           <span>
