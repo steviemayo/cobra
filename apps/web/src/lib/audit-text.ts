@@ -121,7 +121,13 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
     case 'ticket.create':
       return `opened support request “${s(meta.title)}”`;
     case 'ticket.update':
-      return 'updated a support request';
+      return meta.status
+        ? `marked a support request ${s(meta.status).replace('_', ' ')}`
+        : 'updated a support request';
+    case 'ticket.escalate':
+      return `escalated support request “${s(meta.title)}” to Kestrel support`;
+    case 'ticket.handback':
+      return `handed support request “${s(meta.title)}” back to your team`;
     default:
       return action;
   }

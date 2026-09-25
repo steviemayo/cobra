@@ -2,8 +2,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, LifeBuoy } from 'lucide-react';
+import { ArrowLeft, LifeBuoy, Lock } from 'lucide-react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
@@ -26,6 +27,8 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   });
   const members = useQuery({ ...trpc.member.list.queryOptions({ orgId }), enabled: canSupport });
   const [reply, setReply] = useState('');
+  const [internal, setInternal] = useState(false);
+  const [confirmEscalate, setConfirmEscalate] = useState(false);
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: trpc.ticket.get.queryKey({ orgId, ticketId }) });
     await qc.invalidateQueries({ queryKey: trpc.ticket.list.queryKey() });
@@ -34,6 +37,15 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     trpc.ticket.comment.mutationOptions({
       onSuccess: async () => {
         setReply('');
+        await refresh();
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const escalate = useMutation(
+    trpc.ticket.escalate.mutationOptions({
+      onSuccess: async () => {
+        toast.success('Sent to Kestrel support');
         await refresh();
       },
       onError: (e) => toast.error(e.message),
@@ -86,6 +98,14 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
             <span className="text-sm text-muted-foreground">
               {PRIORITY_LABEL[t.priority]} priority
             </span>
+            {t.routedTo === 'kestrel' && (
+              <>
+                <span aria-hidden className="text-muted-foreground/50">
+                  ·
+                </span>
+                <span className="text-sm font-medium">With Kestrel support</span>
+              </>
+            )}
             {t.room && (
               <>
                 <span aria-hidden className="text-muted-foreground/50">
@@ -112,8 +132,16 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
             <p className="whitespace-pre-wrap text-sm">{t.body}</p>
           </div>
           {t.comments.map((c) => (
-            <div key={c.id} className="rounded-lg border p-4">
-              <div className="mb-2 text-xs text-muted-foreground">
+            <div
+              key={c.id}
+              className={`rounded-lg border p-4 ${c.visibility === 'internal' ? 'border-warning/50 bg-warning/5' : ''}`}
+            >
+              <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+                {c.visibility === 'internal' && (
+                  <span className="inline-flex items-center gap-1 font-medium text-warning">
+                    <Lock className="size-3" /> Internal note
+                  </span>
+                )}
                 {c.authorEmail} · {dateTime(c.createdAt)}
               </div>
               <p className="whitespace-pre-wrap text-sm">{c.body}</p>
@@ -128,7 +156,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
             className="space-y-2"
             onSubmit={(e) => {
               e.preventDefault();
-              comment.mutate({ orgId, ticketId, body: reply });
+              comment.mutate({ orgId, ticketId, body: reply, internal: canSupport && internal });
             }}
           >
             <Textarea
@@ -139,10 +167,20 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
               value={reply}
               onChange={(e) => setReply(e.target.value)}
             />
-            <div className="flex justify-end">
+            <div className="flex items-center justify-end gap-3">
+              {canSupport && (
+                <label className="mr-auto flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={internal}
+                    onChange={(e) => setInternal(e.target.checked)}
+                  />
+                  Internal note (your team and Kestrel only; customers cannot see it)
+                </label>
+              )}
               <Button type="submit" size="sm" disabled={comment.isPending || !reply.trim()}>
                 {comment.isPending && <Spinner />}
-                Reply
+                {internal && canSupport ? 'Add note' : 'Reply'}
               </Button>
             </div>
           </form>
@@ -173,6 +211,18 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                   }))}
                 />
               </Field>
+              {t.routedTo === 'org' && !closed && (
+                <Field label="Kestrel support">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={escalate.isPending}
+                    onClick={() => setConfirmEscalate(true)}
+                  >
+                    Escalate to Kestrel support
+                  </Button>
+                </Field>
+              )}
               <Field label="Assigned to">
                 <SimpleSelect
                   className="w-full"
@@ -209,6 +259,14 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
           )}
         </aside>
       </div>
+      <ConfirmDialog
+        open={confirmEscalate}
+        onOpenChange={setConfirmEscalate}
+        title="Send this to Kestrel support?"
+        description="Kestrel support will be able to read this ticket and reply to it. Use this when the problem is with Kestrel itself, not your own rooms."
+        confirmLabel="Escalate"
+        onConfirm={() => escalate.mutate({ orgId, ticketId })}
+      />
     </PageContainer>
   );
 }

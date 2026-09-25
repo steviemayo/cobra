@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { hasStaffRole } from '@kestrel/model';
@@ -32,7 +32,8 @@ export function SessionPanel({ orgId, blocked }: { orgId: string; blocked: boole
 
   const [reason, setReason] = useState('');
   const [minutes, setMinutes] = useState('30');
-  const [ticketId, setTicketId] = useState('');
+  // Coming from a ticket (?ticket=...) links it to the session.
+  const [ticketId, setTicketId] = useState(useSearchParams().get('ticket') ?? '');
   const [act, setAct] = useState(false);
   const [understood, setUnderstood] = useState(false);
 
