@@ -1,14 +1,12 @@
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { db, Prisma } from '@kestrel/db';
-import { signManifest } from '@kestrel/crypto';
-import { diffRoomModels, summariseChanges, validateRoomModel } from '@kestrel/engine';
+import { db } from '@kestrel/db';
+import { diffRoomModels, summariseChanges } from '@kestrel/engine';
 import { RoomModel, SignedManifest } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { createDeployment } from '../deployment-service';
-import { pinDrivers } from '../custom-drivers';
-import { effectivePanel, readOrgBranding, readPanel } from '../panel-settings';
+import { readOrgBranding } from '../panel-settings';
+import { checkPublishable, createRelease } from '../release-service';
 import { SigningNotConfigured, loadSigningKey } from '../signing';
 import { orgProcedure, requireRole, router } from '../trpc';
 import { assertRoom } from './room-model-helpers';
@@ -97,21 +95,8 @@ export const releaseRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
       const room = await assertRoom(ctx.orgId, input.roomId);
-      const draft = await db.roomDraft.findFirst({ where: { roomId: room.id, orgId: ctx.orgId } });
-      if (!draft)
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Design the room before publishing' });
-
-      const model = RoomModel.parse(draft.model);
-      const errors = validateRoomModel(model).issues.filter((i) => i.severity === 'error');
-      if (errors.length)
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Fix ${errors.length} design problem${errors.length === 1 ? '' : 's'} first: ${errors[0]!.message}`,
-        });
-
-      const pinned = await pinDrivers(db, ctx.orgId, model);
-      if (!pinned.ok)
-        throw new TRPCError({ code: 'BAD_REQUEST', message: pinned.problems[0]! });
+      const checked = await checkPublishable(db, ctx.orgId, room);
+      if (!checked.ok) throw new TRPCError({ code: checked.code, message: checked.message });
 
       let key;
       try {
@@ -126,52 +111,14 @@ export const releaseRouter = router({
         where: { id: ctx.orgId },
         select: { branding: true },
       });
-      const orgBranding = readOrgBranding(orgRow?.branding);
-
-      const create = async () => {
-        const last = await db.release.aggregate({
-          where: { roomId: room.id },
-          _max: { number: true },
-        });
-        const number = (last._max.number ?? 0) + 1;
-        const id = randomUUID();
-        const signed = signManifest(
-          {
-            manifestVersion: 1,
-            orgId: ctx.orgId,
-            roomId: room.id,
-            roomName: room.name,
-            releaseId: id,
-            releaseNumber: number,
-            createdAt: new Date().toISOString(),
-            model,
-            drivers: pinned.drivers,
-            panel: effectivePanel(readPanel(room.panel), orgBranding),
-          },
-          key,
-        );
-        return db.release.create({
-          data: {
-            id,
-            orgId: ctx.orgId,
-            roomId: room.id,
-            number,
-            manifest: signed as unknown as Prisma.InputJsonValue,
-            hash: signed.hash,
-            draftRevision: draft.revision,
-            createdBy: ctx.user.id,
-          },
-        });
-      };
-      let release;
-      try {
-        release = await create();
-      } catch (e) {
-        // Two people publishing at once: the loser retries with the next number.
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')
-          release = await create();
-        else throw e;
-      }
+      const release = await createRelease(db, {
+        orgId: ctx.orgId,
+        room,
+        checked,
+        key,
+        orgBranding: readOrgBranding(orgRow?.branding),
+        userId: ctx.user.id,
+      });
       await writeAudit({
         orgId: ctx.orgId,
         actorId: ctx.user.id,

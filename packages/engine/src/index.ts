@@ -26,3 +26,4 @@ export * from './schedule/cron';
 export * from './schedule/scheduler';
 export * from './groups/combinations';
 export * from './groups/derive';
+export * from './groups/controller';

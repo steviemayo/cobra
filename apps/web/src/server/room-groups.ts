@@ -3,6 +3,7 @@ import {
   DEFAULT_ON_CLOSE,
   DEFAULT_ON_OPEN,
   RoomModel,
+  type GroupConfig,
   TransitionAction,
   type RoomGroupSpec,
   type RoomType,
@@ -13,6 +14,7 @@ import {
   enumerateCombinedRooms,
   memberKey,
   validateGroupSpec,
+  validateRoomModel,
 } from '@kestrel/engine';
 
 // Room groups: rooms that can be physically joined by movable walls, and the combined rooms that
@@ -147,6 +149,65 @@ export async function saveGroup(db: GroupDb, orgId: string, input: GroupInput): 
       });
   }
   return groupId;
+}
+
+export interface SimulatedRoom {
+  id: string;
+  name: string;
+  kind: 'standard' | 'combined';
+  /** The design to run, or null with `problem` saying why it cannot be. */
+  model: RoomModel | null;
+  problem: string | null;
+}
+
+/**
+ * Everything the browser simulator needs to run a group: the group as a gateway would be given it,
+ * and each room's current design. A room with no design, or a design with errors, is listed with
+ * the reason and is not run.
+ */
+export async function loadGroupSimulation(
+  db: GroupDb,
+  orgId: string,
+  groupId: string,
+): Promise<{ name: string; config: GroupConfig; rooms: SimulatedRoom[] } | null> {
+  const view = await loadGroup(db, orgId, groupId);
+  if (!view) return null;
+  const combined = view.combined.filter((c) => c.roomId);
+  const config: GroupConfig = {
+    id: view.id,
+    name: view.name,
+    roomIds: view.rooms.map((r) => r.id),
+    dividers: view.dividers.map((d) => ({
+      id: d.id,
+      name: d.name,
+      roomIds: d.roomIds,
+      onOpen: d.onOpen,
+      onClose: d.onClose,
+    })),
+    combined: combined.map((c) => ({ roomId: c.roomId!, memberRoomIds: c.roomIds })),
+  };
+  const listed = [
+    ...view.rooms.map((r) => ({ id: r.id, name: r.name, kind: 'standard' as const })),
+    ...combined.map((c) => ({ id: c.roomId!, name: c.name, kind: 'combined' as const })),
+  ];
+  const rooms: SimulatedRoom[] = [];
+  for (const r of listed) {
+    const draft = await db.roomDraft.findFirst({ where: { roomId: r.id, orgId } });
+    const parsed = draft ? RoomModel.safeParse(draft.model) : null;
+    if (!parsed?.success) {
+      rooms.push({ ...r, model: null, problem: 'Has no design yet.' });
+      continue;
+    }
+    const errors = validateRoomModel(parsed.data).issues.filter((i) => i.severity === 'error');
+    rooms.push({
+      ...r,
+      model: errors.length ? null : parsed.data,
+      problem: errors.length
+        ? `${errors.length} design problem${errors.length === 1 ? '' : 's'}: ${errors[0]!.message}`
+        : null,
+    });
+  }
+  return { name: view.name, config, rooms };
 }
 
 export class GroupError extends Error {

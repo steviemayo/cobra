@@ -63,7 +63,10 @@ How it works (see `docs/decisions.md`, C-1 to C-14):
 
 ## Slices (status)
 
-Slices 1 and 2 are built (migration `room_groups` applied to `kestrel-dev`). Slice 3 (runtime, protocol and per-wall settings) is built; the migration `divider_actions` still has to be applied. The panel menu, portal walls, group deploy and simulator are the rest of slice 3 (steps C3, C4).
+Slices 1 and 2 are built (migration `room_groups` applied to `kestrel-dev`). Slice 3 is built: runtime, protocol and per-wall settings (the migration `divider_actions` still has to be applied), the Link rooms menu, group deploy, and the browser group simulator. Slice 4 (drop `RoomCombination`) is step D in `docs/plan.md`.
+
+- **Deploy group** (group editor): checks every room and combined room first (design valid, gateway assigned, combined rooms created), then publishes a release only where the design changed and deploys all of them, members first. Any problem stops the whole thing and is listed. Code: `apps/web/src/server/group-deploy.ts`
+- **Simulate** (group editor): runs every room of the group in the browser against simulated equipment with the same `GroupController` as the gateway (`packages/engine/src/groups/controller.ts`); a panel stands in a chosen room and follows the room that is running its space
 
 1. Pure logic with tests: divider validation, combined-room enumeration, program derivation (`packages/model`, `packages/engine`)
 2. Database (additive migration) and portal: create groups and dividers, list derived rooms, create combined rooms; remove the old combinations page, router and panel banner

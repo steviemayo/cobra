@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeft, Check, Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Play, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { enumerateCombinedRooms, validateGroupSpec } from '@kestrel/engine';
 import {
@@ -13,6 +13,7 @@ import {
   type TransitionAction,
 } from '@kestrel/model';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
+import { GroupDeployDialog } from '@/components/pages/group-deploy-dialog';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { useOrg } from '@/components/shell/org-context';
@@ -65,6 +66,7 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
   const [roomIds, setRoomIds] = useState<string[]>([]);
   const [dividers, setDividers] = useState<DividerDraft[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deployOpen, setDeployOpen] = useState(false);
   const [saved, setSaved] = useState<string>('');
 
   const serialise = (n: string, s: string, r: string[], d: DividerDraft[]) =>
@@ -209,9 +211,20 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
         title={groupId ? name || 'Room group' : 'New room group'}
         description="Say which rooms share movable walls, and which rooms each wall joins when it is open."
         actions={
-          <Button size="sm" variant="ghost" render={<Link href={base} />}>
-            <ArrowLeft data-icon="inline-start" /> All groups
-          </Button>
+          <>
+            {groupId && (
+              <Button
+                size="sm"
+                variant="outline"
+                render={<Link href={`${base}/${groupId}/simulate`} />}
+              >
+                <Play data-icon="inline-start" /> Simulate
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" render={<Link href={base} />}>
+              <ArrowLeft data-icon="inline-start" /> All groups
+            </Button>
+          </>
         }
       />
 
@@ -483,6 +496,16 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
           )}
           {groupId && (
             <Button
+              variant="outline"
+              disabled={dirty}
+              title={dirty ? 'Save your changes first' : undefined}
+              onClick={() => setDeployOpen(true)}
+            >
+              Deploy group
+            </Button>
+          )}
+          {groupId && (
+            <Button
               variant="ghost"
               className="ml-auto text-destructive"
               onClick={() => setConfirmDelete(true)}
@@ -491,6 +514,10 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
             </Button>
           )}
         </div>
+      )}
+
+      {groupId && (
+        <GroupDeployDialog groupId={groupId} open={deployOpen} onOpenChange={setDeployOpen} />
       )}
 
       <ConfirmDialog
