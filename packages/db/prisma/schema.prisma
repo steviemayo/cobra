@@ -35,35 +35,37 @@ model Org {
   name      String
   createdAt DateTime @default(now())
 
-  members         Member[]
-  sites           Site[]
-  gateways        Gateway[]
-  rooms           Room[]
-  audit           AuditLog[]
-  drafts          RoomDraft[]
-  draftVersions   RoomDraftVersion[]
-  templates       Template[]
-  invites         Invite[]
-  releases        Release[]
-  gatewayEvents   GatewayEvent[]
-  deployments     Deployment[]
-  deviceStatus    DeviceStatus[]
-  incidents       Incident[]
-  alertChannels   AlertChannel[]
-  alertDeliveries AlertDelivery[]
-  commands        RemoteCommand[]
-  tickets         Ticket[]
-  ticketComments  TicketComment[]
-  branding        Json?
-  billing         OrgBilling?
-  controlIntents  ControlIntent[]
-  controlSessions ControlSession[]
-  combinations    RoomCombination[]
-  roomGroups      RoomGroup[]
-  calendars       CalendarConnection[]
-  listings        MarketplaceListing[]
-  purchases       MarketplacePurchase[]
-  customDrivers   CustomDriver[]
+  members          Member[]
+  sites            Site[]
+  gateways         Gateway[]
+  rooms            Room[]
+  audit            AuditLog[]
+  drafts           RoomDraft[]
+  draftVersions    RoomDraftVersion[]
+  templates        Template[]
+  invites          Invite[]
+  releases         Release[]
+  gatewayEvents    GatewayEvent[]
+  deployments      Deployment[]
+  deviceStatus     DeviceStatus[]
+  incidents        Incident[]
+  alertChannels    AlertChannel[]
+  alertDeliveries  AlertDelivery[]
+  commands         RemoteCommand[]
+  tickets          Ticket[]
+  ticketComments   TicketComment[]
+  branding         Json?
+  billing          OrgBilling?
+  controlIntents   ControlIntent[]
+  controlSessions  ControlSession[]
+  combinations     RoomCombination[]
+  roomGroups       RoomGroup[]
+  licenseOverrides OrgLicenseOverride[]
+  notes            OrgNote[]
+  calendars        CalendarConnection[]
+  listings         MarketplaceListing[]
+  purchases        MarketplacePurchase[]
+  customDrivers    CustomDriver[]
 }
 
 model Member {
@@ -549,6 +551,45 @@ model ControlIntent {
 }
 
 // Rooms that can be joined into one. While combined, the primary's panel controls all of them.
+// Staff adjustments to what an organisation may do, on top of what it pays for: extend a trial,
+// comp a plan, lift the room limit. The newest one that is not revoked or expired applies. The
+// reason is required and stays internal; the organisation sees only that Kestrel adjusted it.
+model OrgLicenseOverride {
+  id             String    @id @default(uuid()) @db.Uuid
+  orgId          String    @db.Uuid
+  /// trial, basic or pro: behave as if the organisation were on that plan. Null: leave the plan alone.
+  plan           String?
+  /// A new trial end date (with plan trial, or to extend the organisation's own trial).
+  trialEndsAt    DateTime?
+  maxRooms       Int?
+  unlimitedRooms Boolean   @default(false)
+  /// Force monitoring on or off. Null: whatever the plan gives.
+  monitoring     Boolean?
+  expiresAt      DateTime?
+  reason         String
+  setBy          String    @db.Uuid
+  createdAt      DateTime  @default(now())
+  revokedAt      DateTime?
+  revokedBy      String?   @db.Uuid
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+}
+
+// Private notes about an organisation, for staff only.
+model OrgNote {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  body      String
+  authorId  String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+}
+
 // Kestrel staff: people who may use the /staff portal across every organisation. Separate from
 // Member, which is about one organisation. `roles` are admin, support, billing, readonly; admin
 // includes all of them.

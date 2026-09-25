@@ -28,7 +28,11 @@ export const auditRouter = router({
         target: r.target,
         meta: (r.meta ?? {}) as Record<string, unknown>,
         createdAt: r.createdAt,
-        actor: r.actorId ? (emailById.get(r.actorId) ?? 'Former member') : 'System',
+        actor: r.actorId
+          ? (emailById.get(r.actorId) ?? 'Former member')
+          : (r.meta as { staff?: boolean } | null)?.staff
+            ? 'Kestrel staff'
+            : 'System',
       }));
     }),
 });

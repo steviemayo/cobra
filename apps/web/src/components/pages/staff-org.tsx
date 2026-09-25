@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
+import { LicencePanel } from '@/components/staff/licence-panel';
+import { NotesPanel } from '@/components/staff/notes-panel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate, timeAgo } from '@/lib/format';
 import { useTRPC } from '@/trpc/client';
@@ -67,6 +69,10 @@ export function StaffOrg({ orgId }: { orgId: string }) {
         <Stat label="People" value={o.members} />
         <Stat label="Last activity" value={o.lastActivity ? timeAgo(o.lastActivity) : 'Never'} />
       </div>
+
+      <LicencePanel orgId={orgId} />
+
+      <NotesPanel orgId={orgId} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="space-y-2">
