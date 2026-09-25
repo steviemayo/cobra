@@ -4,6 +4,7 @@ import { auditRouter } from './audit';
 import { billingRouter } from './billing';
 import { calendarRouter } from './calendar';
 import { roomGroupRouter } from './room-group';
+import { staffRouter } from './staff';
 import { commandRouter } from './command';
 import { controlRouter } from './control';
 import { deploymentRouter } from './deployment';
@@ -42,6 +43,7 @@ export const appRouter = router({
   marketplace: marketplaceRouter,
   calendar: calendarRouter,
   roomGroup: roomGroupRouter,
+  staff: staffRouter,
   control: controlRouter,
 });
 export type AppRouter = typeof appRouter;

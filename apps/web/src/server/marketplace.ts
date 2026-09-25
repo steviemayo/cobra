@@ -10,19 +10,6 @@ export type MarketDb = Pick<
   'marketplaceListing' | 'marketplacePurchase' | 'template' | 'org'
 >;
 
-/** Kestrel staff who review listings: KESTREL_ADMIN_EMAILS, comma separated. */
-export function isPlatformAdmin(
-  email: string | null | undefined,
-  env = process.env.KESTREL_ADMIN_EMAILS,
-): boolean {
-  if (!email || !env) return false;
-  return env
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean)
-    .includes(email.toLowerCase());
-}
-
 /**
  * What goes public: the design, with everything that belongs to the publisher taken out. Device
  * settings hold addresses and passwords, calendar triggers name real mailboxes, and both must never

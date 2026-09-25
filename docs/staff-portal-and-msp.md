@@ -2,6 +2,11 @@
 
 Status: planning draft. Decisions so far come from the planning session on 2026-09-25 (see "Decided"). Nothing here is built.
 
+## Build status
+
+- **Slice 1 (staff foundation): built** on branch `feat/staff-portal`. `StaffUser` and `StaffAudit` tables (migration `staff_users`, applied to `kestrel-dev`), `staffProcedure` with a second-factor check, `/staff` with the organisation directory, an organisation page (every open is audited), marketplace review moved to `/staff/marketplace`, a `STAFF_HOST` switch, and `apps/web/scripts/add-staff.mts` to add staff. `KESTREL_ADMIN_EMAILS` is retired
+- Slices 2 to 6: not started
+
 ## Why
 
 Today Kestrel has no way for its own staff to see across customers. Extending a trial, comping a pilot, or investigating a customer's problem means editing the database by hand. Customers also have no way to bring in an MSP, and support tickets have no defined owner. This plan covers four things that share one foundation (who is allowed to see and do what, across organisations):

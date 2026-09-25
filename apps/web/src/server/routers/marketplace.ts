@@ -2,17 +2,27 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { writeAudit } from '../audit';
-import { grantListing, isPlatformAdmin, publishTemplate, review } from '../marketplace';
+import { grantListing, publishTemplate, review } from '../marketplace';
+import { recordStaffAudit } from '../staff';
 import { BillingNotConfigured, startMarketplaceCheckout } from '../stripe';
-import { authedProcedure, featureProcedure, requireRole, router } from '../trpc';
+import { hasStaffRole } from '@kestrel/model';
+import {
+  featureProcedure,
+  requireRole,
+  requireStaffRole,
+  router,
+  staffIdentityProcedure,
+  staffProcedure,
+} from '../trpc';
 
 const orgId = z.string().uuid();
 const listingId = z.string().uuid();
 const buyProcedure = featureProcedure('marketplaceBuy');
 const publishProcedure = featureProcedure('marketplacePublish');
 
-const admin = authedProcedure.use(({ ctx, next }) => {
-  if (!isPlatformAdmin(ctx.user.email)) throw new TRPCError({ code: 'FORBIDDEN' });
+// Listing review is Kestrel staff work (support or admin), with a second factor.
+const admin = staffProcedure.use(({ ctx, next }) => {
+  requireStaffRole(ctx.staff, 'support');
   return next();
 });
 
@@ -187,7 +197,7 @@ export const marketplaceRouter = router({
     }),
 
   // Kestrel staff only.
-  isAdmin: authedProcedure.query(({ ctx }) => isPlatformAdmin(ctx.user.email)),
+  isAdmin: staffIdentityProcedure.query(({ ctx }) => hasStaffRole(ctx.staff.roles, 'support')),
 
   pending: admin.query(async () => {
     const rows = await db.marketplaceListing.findMany({
@@ -220,7 +230,12 @@ export const marketplaceRouter = router({
       const res = await review(db, input);
       if (!res.ok)
         throw new TRPCError({ code: 'BAD_REQUEST', message: res.error ?? 'Could not review that' });
-      console.info('[marketplace] review', { by: ctx.user.email, ...input });
+      await recordStaffAudit(db, {
+        staffUserId: ctx.user.id,
+        action: input.approve ? 'marketplace.approve' : 'marketplace.reject',
+        target: input.listingId,
+        meta: input.note ? { note: input.note } : undefined,
+      });
       return { ok: true };
     }),
 });
