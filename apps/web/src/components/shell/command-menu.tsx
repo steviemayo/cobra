@@ -106,8 +106,8 @@ export function CommandMenu({ children }: { children: React.ReactNode }) {
                   <Store /> Marketplace
                 </CommandItem>
               )}
-              <CommandItem onSelect={() => go('/combinations')}>
-                <Link2 /> Combined rooms
+              <CommandItem onSelect={() => go('/groups')}>
+                <Link2 /> Room groups
               </CommandItem>
               <CommandItem onSelect={() => go('/monitoring')}>
                 <Activity /> Monitoring

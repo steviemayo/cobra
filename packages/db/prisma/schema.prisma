@@ -59,6 +59,7 @@ model Org {
   controlIntents  ControlIntent[]
   controlSessions ControlSession[]
   combinations    RoomCombination[]
+  roomGroups      RoomGroup[]
   calendars       CalendarConnection[]
   listings        MarketplaceListing[]
   purchases       MarketplacePurchase[]
@@ -86,9 +87,10 @@ model Site {
   timezone  String   @default("Australia/Sydney")
   createdAt DateTime @default(now())
 
-  org      Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  org      Org         @relation(fields: [orgId], references: [id], onDelete: Cascade)
   gateways Gateway[]
   rooms    Room[]
+  groups   RoomGroup[]
 
   @@index([orgId])
 }
@@ -128,6 +130,12 @@ model Room {
   type                RoomType
   createdAt           DateTime  @default(now())
   panel               Json?
+  /// The room group this room belongs to, if it can be physically joined to other rooms.
+  groupId             String?   @db.Uuid
+  /// standard: an ordinary room. combined: the room that exists while `memberRoomIds` are joined.
+  /// Only standard rooms are billed.
+  kind                String    @default("standard")
+  memberRoomIds       String[]  @default([]) @db.Uuid
   /// Hash of the secret webhook callers present. Null until someone generates one.
   hookSecretHash      String?
   desiredReleaseId    String?   @db.Uuid
@@ -142,6 +150,7 @@ model Room {
   org         Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
   site        Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
   gateway     Gateway?        @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  group       RoomGroup?      @relation(fields: [groupId], references: [id], onDelete: SetNull)
   draft       RoomDraft?
   releases    Release[]
   deployments Deployment[]
@@ -152,6 +161,7 @@ model Room {
 
   @@index([orgId])
   @@index([siteId])
+  @@index([groupId])
 }
 
 model AuditLog {
@@ -539,6 +549,38 @@ model ControlIntent {
 }
 
 // Rooms that can be joined into one. While combined, the primary's panel controls all of them.
+// Rooms that can be physically joined by movable walls. The combined rooms are ordinary Room rows
+// with kind "combined", created from the dividers.
+model RoomGroup {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  siteId    String   @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+
+  org      Org           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site     Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  dividers RoomDivider[]
+  rooms    Room[]
+
+  @@index([orgId])
+  @@index([siteId])
+}
+
+// A movable wall. When open it joins every room in `roomIds` into one space.
+model RoomDivider {
+  id        String   @id @default(uuid()) @db.Uuid
+  groupId   String   @db.Uuid
+  name      String
+  roomIds   String[] @db.Uuid
+  createdAt DateTime @default(now())
+
+  group RoomGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+}
+
+// Superseded by RoomGroup. Kept until the new version is deployed, then dropped.
 model RoomCombination {
   id               String   @id @default(uuid()) @db.Uuid
   orgId            String   @db.Uuid

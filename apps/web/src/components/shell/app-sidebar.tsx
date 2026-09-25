@@ -227,7 +227,7 @@ export function AppSidebar() {
                 <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />
               )}
               {canSupport && (
-                <NavItem href={`${base}/combinations`} icon={Link2} label="Combined rooms" />
+                <NavItem href={`${base}/groups`} icon={Link2} label="Room groups" />
               )}
               <NavItem href={`${base}/monitoring`} icon={Activity} label="Monitoring" />
               {canSupport && (

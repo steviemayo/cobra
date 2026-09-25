@@ -24,3 +24,5 @@ export {
 export * from './diff/diff';
 export * from './schedule/cron';
 export * from './schedule/scheduler';
+export * from './groups/combinations';
+export * from './groups/derive';

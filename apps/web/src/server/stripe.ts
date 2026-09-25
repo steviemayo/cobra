@@ -93,7 +93,7 @@ export async function syncQuantity(db: BillingDb, orgId: string): Promise<void> 
   if (!stripeConfigured()) return;
   const billing = await ensureBilling(db, orgId);
   if (!billing.stripeSubscriptionId || !billing.stripeItemId || !PAYING.has(billing.status)) return;
-  const rooms = Math.max(1, await db.room.count({ where: { orgId } }));
+  const rooms = Math.max(1, await db.room.count({ where: { orgId, kind: { not: 'combined' } } }));
   if (rooms === billing.quantity) return;
   await getStripe().subscriptionItems.update(billing.stripeItemId, {
     quantity: rooms,
