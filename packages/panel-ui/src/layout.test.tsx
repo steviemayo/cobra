@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import {
   PanelSettings,
   type PanelClient,
@@ -342,5 +342,107 @@ describe('touch to begin', () => {
     render(<PanelApp client={client} />);
     expect(screen.getByText('Dial 9925 8000')).toBeTruthy();
     expect(document.querySelector('.kp-idle .kp-qr')).toBeTruthy();
+  });
+});
+
+describe('linking rooms', () => {
+  const wall = (over: Record<string, unknown> = {}) => ({
+    id: 'w1',
+    name: 'Wall 1',
+    open: false,
+    rooms: ['Room A', 'Room B'],
+    adds: ['Room B'],
+    available: true,
+    ...over,
+  });
+  const linking = (dividers = [wall()], space = ['Room A']) => ({ dividers, space });
+
+  it('is not offered to a room that is not in a group', () => {
+    const { client } = fakeClient(running());
+    render(<PanelApp client={client} />);
+    expect(screen.queryByRole('button', { name: 'Link rooms' })).toBeNull();
+  });
+
+  it('is offered even while the room is off, so rooms can be linked before starting', () => {
+    const { client } = fakeClient({ ...base(), linking: linking() });
+    render(<PanelApp client={client} />);
+    expect(screen.getByRole('button', { name: 'Link rooms' })).toBeTruthy();
+  });
+
+  it('offers to combine with each neighbouring room, in words for the room, not the building', () => {
+    const { client } = fakeClient(running({ linking: linking() }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    const sheet = screen.getByRole('dialog', { name: 'Link rooms' });
+    expect(sheet.textContent).toContain('Combine with Room B');
+    expect(sheet.textContent).toContain('This room is on its own.');
+    expect(sheet.textContent).not.toMatch(/wall/i);
+  });
+
+  it('a wall that joins two other rooms is one choice naming both', () => {
+    const three = wall({ rooms: ['Large', 'Room B', 'Room C'], adds: ['Large', 'Room C'] });
+    const { client } = fakeClient(running({ linking: linking([three], ['Room B']) }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    expect(screen.getByText('Combine with Large + Room C')).toBeTruthy();
+  });
+
+  it('asks before combining, and only then sends it', () => {
+    const { client, dispatched } = fakeClient(running({ linking: linking() }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Combine' }));
+    expect(dispatched.some((i) => i.type === 'divider.set')).toBe(false);
+    const ask = screen.getByRole('alertdialog');
+    expect(ask.textContent).toContain('Combine with Room B?');
+    expect(ask.textContent).toContain('work together as one');
+    fireEvent.click(within(ask).getByRole('button', { name: 'Combine' }));
+    expect(dispatched.at(-1)).toEqual({ type: 'divider.set', dividerId: 'w1', open: true });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('cancelling the question changes nothing', () => {
+    const { client, dispatched } = fakeClient(running({ linking: linking() }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Combine' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(dispatched.some((i) => i.type === 'divider.set')).toBe(false);
+  });
+
+  it('linked rooms say so and offer to separate', () => {
+    const { client, dispatched } = fakeClient(
+      running({ linking: linking([wall({ open: true, adds: [] })], ['Room A', 'Room B']) }),
+    );
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    const sheet = screen.getByRole('dialog', { name: 'Link rooms' });
+    expect(sheet.textContent).toContain('Linked together: Room A + Room B');
+    expect(sheet.textContent).toContain('Linked with Room A + Room B');
+    fireEvent.click(screen.getByRole('button', { name: 'Separate' }));
+    const ask = screen.getByRole('alertdialog');
+    expect(ask.textContent).toContain('Each room will work on its own again.');
+    fireEvent.click(within(ask).getByRole('button', { name: 'Separate' }));
+    expect(dispatched.at(-1)).toEqual({ type: 'divider.set', dividerId: 'w1', open: false });
+  });
+
+  it('a choice that cannot be made yet is disabled and says why', () => {
+    const { client } = fakeClient(running({ linking: linking([wall({ available: false })]) }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    expect((screen.getByRole('button', { name: 'Combine' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(screen.getByText('Not set up yet')).toBeTruthy();
+  });
+
+  it('drops a question that went stale because the rooms were linked meanwhile', () => {
+    const { client, set } = fakeClient(running({ linking: linking() }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Combine' }));
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+    set(running({ linking: linking([wall({ open: true, adds: [] })], ['Room A', 'Room B']) }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 });

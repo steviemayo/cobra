@@ -126,6 +126,8 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
     [problems, roomIds, dividers],
   );
   const existing = new Map((loaded.data?.combined ?? []).map((c) => [c.key, c.roomId]));
+  // Walls the gateway last said are open, so a dev can see the rooms are joined right now.
+  const openNow = new Set((loaded.data?.dividers ?? []).filter((d) => d.open).map((d) => d.id));
 
   const refresh = async () => {
     await Promise.all([
@@ -328,6 +330,11 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
                   )
                 }
               />
+              {d.id && openNow.has(d.id) && (
+                <span className="inline-flex items-center gap-1 text-xs text-success">
+                  <Check className="size-3.5" /> Open now
+                </span>
+              )}
               {canEdit && (
                 <Button
                   size="icon"

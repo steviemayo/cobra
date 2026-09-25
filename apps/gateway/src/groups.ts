@@ -227,6 +227,7 @@ export class GroupCoordinator {
                 name: d.name,
                 open: isOpen,
                 rooms: d.roomIds.map((r) => this.roomName(r)),
+                adds: d.roomIds.filter((r) => !inSpace.has(r)).map((r) => this.roomName(r)),
                 available:
                   isOpen || this.plan(g, new Set(this.open).add(d.id)).missing.length === 0,
               };

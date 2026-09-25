@@ -40,7 +40,8 @@ Sources: reference screenshots from another vendor's panel (layout ideas only, n
 1. **Idle** ("Touch to begin"): logo, clock, room name, optional support text and QR. Touch runs the configured action (see Idle behaviour)
 2. **Start** (room off): the activities as big centred tiles. Picking one turns the room on and goes to it. Activities come from the room type (Present from laptop, Video call, Record; devs can add, rename, hide)
 3. **Activity** (room on): shown under the top nav; switching is one tap on the nav
-4. **Function pages** (behind the top nav): sources, microphones, cameras (presets, pan/tilt, zoom, tracking), recorder, room linking (combine/split), room controls (lights, blinds, screen)
+4. **Function pages** (behind the top nav): sources, microphones, cameras (presets, pan/tilt, zoom, tracking), recorder, room controls (lights, blinds, screen)
+4a. **Link rooms** (built): a "Link rooms" button in the top bar, on the off and on screens, only for rooms in a room group. Opens a sheet with one choice per neighbour: "Combine with Room B" (a wall that opens onto two rooms reads "Combine with Large + Room C") and a Combine button; rooms already linked read "Linked with ..." with a Separate button. Each asks first ("Combine with Room B? Their screens, sound and controls will work together as one."). A choice whose combined room is not set up is disabled ("Not set up yet"). The wording is about combining the rooms' AV systems, never about walls. While rooms are linked the panel shows the combined room's controls
 5. **Quick Actions sheet**: extra one-tap actions the room enables
 6. **Tech view**: device-level controls and tests; PIN on the panel
 7. **Notices**: second source plugged in (auto-switch after 10 s), auto-off warning 30 s before, room or gateway offline, plain-language errors
@@ -81,9 +82,9 @@ Also configurable: idle timeout back to the Idle screen, and whether the support
 - Order of the bottom bar: fixed order from the room type, devs can hide or reorder, max 3 in the bar and the rest in the Quick Actions sheet
 - Driver format: see `docs/driver-sdk.md` (Quick actions). Built: Blank Screen and Privacy Mute. Order is fixed (Blank, then Privacy Mute); hide/reorder by devs is not built
 
-## Room Linking (parked, to redesign)
+## Room Linking (built: menu and gateway runtime; see `docs/room-groups.md`)
 
-The current "Combining Rooms" implementation is not what is wanted. Do not build panel UI for it yet. Intent captured for the redesign:
+The old "Combining Rooms" bar is replaced by the Link rooms menu (screen 4a) and stays in the code only until step D removes it. Original intent:
 
 - Combining is defined when a room group is first created, not afterwards
 - Create the large "all combined" room, then each independent room in the group, so every room is state-aware and knows the intended behaviour when combined

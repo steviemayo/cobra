@@ -95,6 +95,17 @@ export async function portalIntent(
         meta: { room: room.name, intent: intent.data.type, activityId: intent.data.activityId },
       },
     });
+  // Moving a wall changes what several rooms do, so it is always recorded.
+  if (intent.data.type === 'divider.set')
+    await db.auditLog.create({
+      data: {
+        orgId: input.orgId,
+        actorId: input.by,
+        action: 'wall.set',
+        target: intent.data.dividerId,
+        meta: { room: room.name, open: intent.data.open },
+      },
+    });
   return { ok: true };
 }
 
