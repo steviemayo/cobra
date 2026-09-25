@@ -403,7 +403,7 @@ Working rules that apply to all of them:
 | F | Panel function pages (cameras, microphones, recorder, room controls) | large | real devices to try |
 | G | Org accent colour in the portal | small | **built** (`docs/decisions.md`, G-1 to G-4) |
 | H | Email notifications (tickets and alerts) | small | a domain, Resend verified (step 6 above) |
-| I | Staff user management and a staff audit viewer | small | none |
+| I | Staff user management and a staff audit viewer | small | **built** (`docs/decisions.md`, I-1 to I-6) |
 | J | Assign tickets to provider people | medium | none |
 | K | SLAs and priority timers | medium | after first customers |
 | L | Provider billing and white label | large | a business decision on who pays |
@@ -528,6 +528,8 @@ Pre-read: `apps/web/src/server/ticket-notify.ts` (Teams and webhook today), `ale
 Do: send ticket events (escalation, staff reply, status change, hand back) by email to the right people, with the same rules as Teams and webhook, and let staff and providers opt in. Done when: an escalation emails the configured staff address.
 
 ### I. Staff user management and a staff audit viewer
+
+**Status: built.** The text below is the original brief.
 
 Why: staff are added only by `apps/web/scripts/add-staff.mts`, and `StaffAudit` has no viewer.
 
