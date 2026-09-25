@@ -483,6 +483,8 @@ stateDiagram-v2
 
 ## 23. Combined Rooms
 
+> **Redesign planned, not built.** Combining will be defined when a room group is created: the large all-combined room plus each independent room, with every combination of 2-5 rooms, so each room is state-aware. The diagram below is the current implementation. See `docs/panel-ui-requirements.md` (Room Linking).
+
 ```mermaid
 stateDiagram-v2
   [*] --> Separate

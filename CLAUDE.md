@@ -34,7 +34,7 @@
 - Device categories: video/audio sources, conf/fixed/PTZ/auto-framing cameras, reinforcement + voice-capture mics, conference systems (MTR/Codec), video matrix (virtual/physical — same model), audio matrix/DSP, video + audio destinations, conference outputs, environmental (lighting/HVAC/blinds), mechanical (lifters/screens)
 - Groups: Display Group = members + allowed sources + mode (follow | independent)
 - States: Off / On / custom = ordered actions (routes, DSP presets, device cmds, env scenes)
-- **Combined rooms:** a room can be Combined; behaviour is configurable: primary vs secondary role; secondary video follows|blanks; secondary audio follows|blanks; on uncombine revert to Off
+- **Combined rooms:** a room can be Combined; behaviour is configurable: primary vs secondary role; secondary video follows|blanks; secondary audio follows|blanks; on uncombine revert to Off. **REDESIGN PLANNED (not built):** define combining when a room group is first created: create the large all-combined room plus each independent room, and every combination of 2-5 rooms, so each room is state-aware. Current `RoomCombination` implementation to be replaced. See `docs/panel-ui-requirements.md` (Room Linking)
 - Target: 90% rooms = 1–2 laptop inputs → 1–2 displays + speakers. Custom logic hooks (sandboxed scripts) DEFERRED; edge cases via rules
 - Runtime on gateway = generic interpreter of a signed manifest (same engine package also runs in-browser simulator)
 - Devices without driver: generic TCP/serial (and PJLink/REST templates) allowed in v1
@@ -61,6 +61,8 @@
 - Responsive UI (fixed panels, tablets); QR-to-phone later. Generated from model with editable elements + per-org themes (logo/colours) + multilingual
 - Panel auth: open on LAN v1, optional PIN, trusted-device bypass by verified IP (MAC only if same L2 subnet — see Risks)
 - Activities derived from Room Type + model; only offered if required capabilities exist in room
+- **Quick actions come from drivers** (PLANNED): a driver declares the quick actions its device supports (e.g. Blank Screen); the room shows one only if the room has the device and the driver supports it. Privacy Mute only if the room has conferencing mics and a conference system. Max 3 in the panel bottom bar, rest in a Quick Actions sheet
+- **Panel UI requirements draft:** `docs/panel-ui-requirements.md` (no slider for volume, per-room "touch to begin" action, top-nav activities, power button with confirmation, per-org accent colour for portal and panel)
 
 ## Triggers (all in v1)
 

@@ -1,10 +1,26 @@
-import { useState, useSyncExternalStore } from 'react';
-import type { PanelActivity, PanelClient, PanelViewModel } from '@kestrel/model';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
+import {
+  PanelSettings,
+  type PanelActivity,
+  type PanelClient,
+  type PanelViewModel,
+} from '@kestrel/model';
+import { BottomBar } from './BottomBar';
+import { IdleScreen } from './IdleScreen';
+import { PowerDialog } from './PowerDialog';
 import { Icon } from './icons';
 import { messageText, type Translate } from './i18n';
 import { translatorFor } from './languages';
 import { darkTheme, themeStyle, type PanelTheme } from './theme';
-import { VolumeControl } from './VolumeControl';
+import { VolumeHud } from './VolumeControl';
 
 export function usePanel(client: PanelClient): PanelViewModel {
   return useSyncExternalStore(
@@ -141,6 +157,72 @@ function defaultSource(a: PanelActivity): string | undefined {
   );
 }
 
+const DEFAULT_UI = PanelSettings.parse({});
+
+/**
+ * The activities as one glass pill, with a highlight that slides to the one being shown. The
+ * highlight is placed by measuring the selected button, so it follows any label length or width.
+ */
+function ActivityNav({
+  label,
+  activities,
+  currentId,
+  onChoose,
+}: {
+  label: string;
+  activities: PanelActivity[];
+  currentId: string | undefined;
+  onChoose: (a: PanelActivity) => void;
+}) {
+  const nav = useRef<HTMLElement>(null);
+  const [anchor, setAnchor] = useState<{ left: number; width: number } | null>(null);
+  const [settled, setSettled] = useState(false);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = nav.current?.querySelector<HTMLElement>('[aria-pressed="true"]');
+      setAnchor(el ? { left: el.offsetLeft, width: el.offsetWidth } : null);
+    };
+    measure();
+    // Slide only after the first placement, so it does not fly in from the corner on load.
+    const frame = requestAnimationFrame(() => setSettled(true));
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    if (nav.current) observer?.observe(nav.current);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [currentId, activities.length]);
+
+  return (
+    <nav className="kp-nav" aria-label={label} ref={nav}>
+      {anchor && (
+        <span
+          className="kp-nav-anchor"
+          aria-hidden
+          data-settled={settled || undefined}
+          style={{ width: anchor.width, transform: `translateX(${anchor.left}px)` }}
+        />
+      )}
+      {activities.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          className="kp-nav-item"
+          aria-pressed={currentId === a.id}
+          data-active={a.active || undefined}
+          data-kind={a.kind}
+          onClick={() => onChoose(a)}
+        >
+          <Icon name={a.icon ?? a.kind} />
+          <span>{a.name}</span>
+          {a.busy && <span className="kp-spinner kp-spinner-sm" aria-hidden />}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 export interface PanelAppProps {
   client: PanelClient;
   theme?: PanelTheme;
@@ -148,11 +230,17 @@ export interface PanelAppProps {
   /** A language code such as "es". Ignored if `translate` is given. */
   language?: string;
   className?: string;
+  /** An extra control for the top bar, e.g. the phone-control button. */
+  headerAction?: ReactNode;
 }
 
 /**
  * The generated room panel: activities, never devices. Everything it shows comes from the client's
  * view model, so the same component serves the browser simulator and a real gateway.
+ *
+ * Layout: top bar (room, navigation), content, and an always-visible bottom bar (time, volume,
+ * quick actions). Home is a grid of activities or, per room setting, the running activity with a
+ * top nav. An optional "Touch to begin" screen covers everything after a period without touches.
  */
 export function PanelApp({
   client,
@@ -160,11 +248,44 @@ export function PanelApp({
   translate,
   language,
   className,
+  headerAction,
 }: PanelAppProps) {
   const vm = usePanel(client);
   const t = translate ?? translatorFor(language);
   const dispatch: PanelClient['dispatch'] = (intent) => client.dispatch(intent);
+  const ui = vm.ui ?? DEFAULT_UI;
   const [picked, setPicked] = useState<string | null>(null);
+  const [confirmOff, setConfirmOff] = useState(false);
+
+  // "Touch to begin": shown on load and again after `timeoutMinutes` without a touch (0 = never).
+  const idleMs = ui.idle.timeoutMinutes * 60_000;
+  const [idle, setIdle] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const configured = useRef(false);
+  const arm = useCallback(() => {
+    clearTimeout(timer.current);
+    if (idleMs > 0) timer.current = setTimeout(() => setIdle(true), idleMs);
+  }, [idleMs]);
+  useEffect(() => {
+    if (idleMs === 0) {
+      clearTimeout(timer.current);
+      configured.current = false;
+      setIdle(false);
+      return;
+    }
+    if (!configured.current) {
+      configured.current = true;
+      setIdle(true);
+    } else arm();
+    return () => clearTimeout(timer.current);
+  }, [idleMs, arm]);
+  // A question or the auto-off countdown must never sit behind the idle screen.
+  const attention = Boolean(vm.prompt || vm.warning);
+  useEffect(() => {
+    if (!attention) return;
+    setIdle(false);
+    arm();
+  }, [attention, arm]);
 
   const current =
     vm.activities.find((a) => a.id === picked) ??
@@ -189,52 +310,89 @@ export function PanelApp({
     }
   };
 
+  const wake = () => {
+    setIdle(false);
+    arm();
+    if (!off) return;
+    if (ui.idle.action === 'on') dispatch({ type: 'room.on' });
+    else if (ui.idle.action === 'activity') {
+      const a =
+        vm.activities.find((x) => x.id === ui.idle.activityId) ??
+        vm.activities.find((x) => x.kind !== 'room_off' && !x.overlay);
+      if (a) choose(a);
+    }
+  };
+
+  // What the room is doing, in small print under its name. "Room is off" adds nothing to the
+  // start screen, so it is left out there.
+  const note = vm.message && !(off && vm.message.text.key === 'room_off') ? vm.message : null;
+  const brandFor = (withNote: boolean) => (
+    <div className="kp-brand">
+      {theme.logoUrl && <img className="kp-logo" src={theme.logoUrl} alt="" />}
+      <div className="kp-brand-text">
+        <h1>{vm.roomName}</h1>
+        {withNote && note && (
+          <p className={`kp-note kp-note-${note.tone}`} role="status" aria-live="polite">
+            {note.tone === 'progress' && <span className="kp-spinner" aria-hidden />}
+            {messageText(t, note.text)}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+
   if (following)
     return (
       <div className={`kp-app ${className ?? ''}`} data-mode={theme.mode} style={themeStyle(theme)}>
-        <header className="kp-header">
-          <div className="kp-brand">
-            {theme.logoUrl && <img className="kp-logo" src={theme.logoUrl} alt="" />}
-            <h1>{vm.roomName}</h1>
-          </div>
-        </header>
-        <main className="kp-main">
-          <StatusBanner vm={vm} t={t} />
-        </main>
+        <div className="kp-frame">
+          <header className="kp-top">{brandFor(false)}</header>
+          <main className="kp-main">
+            <StatusBanner vm={vm} t={t} />
+          </main>
+        </div>
       </div>
     );
 
+  // Room Off is not an activity to pick: it lives behind the Power button, with a confirmation.
+  const tiles = vm.activities.filter((a) => a.kind !== 'room_off');
+  const roomOff = vm.activities.find((a) => a.kind === 'room_off');
+  const canPowerOff = !off && vm.status !== 'stopping' && Boolean(roomOff);
+
   return (
-    <div className={`kp-app ${className ?? ''}`} data-mode={theme.mode} style={themeStyle(theme)}>
-      <header className="kp-header">
-        <div className="kp-brand">
-          {theme.logoUrl && <img className="kp-logo" src={theme.logoUrl} alt="" />}
-          <h1>{vm.roomName}</h1>
-        </div>
-        <span className={`kp-pill kp-pill-${vm.status}`}>{t(`status.${vm.status}` as const)}</span>
-      </header>
+    <div
+      className={`kp-app ${className ?? ''}`}
+      data-mode={theme.mode}
+      style={themeStyle(theme)}
+      onPointerDownCapture={idleMs > 0 && !idle ? arm : undefined}
+      onKeyDownCapture={idleMs > 0 && !idle ? arm : undefined}
+    >
+      <div className="kp-frame" inert={idle}>
+        <header className={`kp-top ${off ? 'kp-top-quiet' : ''}`}>
+          {brandFor(true)}
 
-      <div className="kp-body">
-        <nav className="kp-nav" aria-label={t('nav.label')}>
-          {vm.activities.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              className="kp-nav-item"
-              aria-pressed={current?.id === a.id}
-              data-active={a.active || undefined}
-              data-kind={a.kind}
-              onClick={() => choose(a)}
-            >
-              <Icon name={a.icon ?? a.kind} />
-              <span>{a.name}</span>
-              {a.busy && <span className="kp-spinner kp-spinner-sm" aria-hidden />}
-            </button>
-          ))}
-        </nav>
+          {off ? (
+            <span />
+          ) : (
+            <ActivityNav
+              label={t('nav.label')}
+              activities={tiles}
+              currentId={current?.id}
+              onChoose={choose}
+            />
+          )}
 
-        <main className="kp-main">
-          <StatusBanner vm={vm} t={t} />
+          <div className="kp-top-end">
+            {headerAction}
+            {canPowerOff && (
+              <button type="button" className="kp-power" onClick={() => setConfirmOff(true)}>
+                <Icon name="power" />
+                {t('power.button')}
+              </button>
+            )}
+          </div>
+        </header>
+
+        <main className={`kp-main ${off ? 'kp-main-centre' : ''}`}>
           <CombineBar vm={vm} t={t} dispatch={dispatch} />
           <PromptBar vm={vm} t={t} dispatch={dispatch} />
           <WarningBar vm={vm} t={t} dispatch={dispatch} />
@@ -243,19 +401,17 @@ export function PanelApp({
             <section className="kp-start">
               <h2>{t('start.title')}</h2>
               <div className="kp-tiles">
-                {vm.activities
-                  .filter((a) => a.kind !== 'room_off')
-                  .map((a) => (
-                    <button
-                      key={a.id}
-                      type="button"
-                      className="kp-tile kp-tile-big"
-                      onClick={() => choose(a)}
-                    >
-                      <Icon name={a.icon ?? a.kind} />
-                      <span>{a.name}</span>
-                    </button>
-                  ))}
+                {tiles.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className="kp-tile kp-tile-big"
+                    onClick={() => choose(a)}
+                  >
+                    <Icon name={a.icon ?? a.kind} />
+                    <span>{a.name}</span>
+                  </button>
+                ))}
               </div>
             </section>
           ) : (
@@ -307,18 +463,45 @@ export function PanelApp({
               </section>
             )
           )}
-
-          {vm.volume.available && !off && (
-            <VolumeControl
-              level={vm.volume.level}
-              muted={vm.volume.muted}
-              t={t}
-              onBump={(delta) => dispatch({ type: 'volume.bump', delta })}
-              onMute={(muted) => dispatch({ type: 'mute.set', muted })}
-            />
-          )}
         </main>
+
+        {/* Nothing to control while the room is off, so no bar. */}
+        {!off && (
+          <>
+            <BottomBar vm={vm} t={t} dispatch={dispatch} showVolume={vm.volume.available} />
+            {vm.volume.available && (
+              <VolumeHud
+                level={vm.volume.level}
+                muted={vm.volume.muted}
+                feedback={vm.volume.feedback !== false}
+                t={t}
+              />
+            )}
+          </>
+        )}
       </div>
+
+      {confirmOff && canPowerOff && roomOff && !idle && (
+        <PowerDialog
+          t={t}
+          onCancel={() => setConfirmOff(false)}
+          onConfirm={() => {
+            setConfirmOff(false);
+            choose(roomOff);
+          }}
+        />
+      )}
+
+      {idle && (
+        <IdleScreen
+          roomName={vm.roomName}
+          logoUrl={theme.logoUrl}
+          supportText={ui.idle.supportText}
+          supportUrl={ui.idle.supportUrl}
+          t={t}
+          onWake={wake}
+        />
+      )}
     </div>
   );
 }

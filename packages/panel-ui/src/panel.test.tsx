@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { PanelClient, PanelIntent, PanelViewModel } from '@kestrel/model';
+import { type PanelClient, type PanelIntent, type PanelViewModel } from '@kestrel/model';
 import { PanelApp } from './PanelApp';
 import { createTranslator, messageText } from './i18n';
 import { lightTheme, themeStyle } from './theme';
@@ -85,12 +85,15 @@ afterEach(() => {
 });
 
 describe('when the room is off', () => {
-  it('shows the room name, status and one big button per activity', () => {
+  it('shows the room name and one big button per activity, with a quiet top bar', () => {
     const { client } = fakeClient(base());
-    render(<PanelApp client={client} />);
+    const view = render(<PanelApp client={client} />);
     expect(screen.getByRole('heading', { name: 'Boardroom' })).toBeTruthy();
-    expect(screen.getByText('Off')).toBeTruthy();
-    expect(screen.getByText('The room is off. Choose what you would like to do.')).toBeTruthy();
+    // Nothing in the top bar but the room name: no status badge, no Home, no Power.
+    const top = view.container.querySelector('.kp-top')!;
+    expect(top.classList.contains('kp-top-quiet')).toBe(true);
+    expect(top.querySelectorAll('button')).toHaveLength(0);
+    expect(top.querySelector('.kp-pill')).toBeNull();
     expect(screen.getByText('What would you like to do?')).toBeTruthy();
     // No device jargon, and no volume until the room is on.
     expect(screen.queryByRole('group', { name: 'Volume' })).toBeNull();
@@ -135,13 +138,11 @@ describe('when the room is on', () => {
     ]);
   });
 
-  it('tapping Room Off in the nav sends it', () => {
-    const { client, dispatched } = fakeClient(on());
+  it('Room Off is not a nav item: it is the Power button', () => {
+    const { client } = fakeClient(on());
     render(<PanelApp client={client} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Room Off' }));
-    expect(dispatched).toEqual([
-      { type: 'activity.start', activityId: 'room_off', sourceId: undefined },
-    ]);
+    expect(screen.queryByRole('button', { name: 'Room Off' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Power' })).toBeTruthy();
   });
 
   it('Record toggles: start, then stop', () => {
@@ -182,7 +183,6 @@ describe('when the room is on', () => {
     const { client } = fakeClient(vm);
     render(<PanelApp client={client} />);
     expect(screen.getByText('Getting the room ready…')).toBeTruthy();
-    expect(screen.getByText('Starting')).toBeTruthy();
   });
 
   it('names a failing device in plain language', () => {
@@ -197,13 +197,39 @@ describe('when the room is on', () => {
 });
 
 describe('volume', () => {
-  it('a tap bumps by 5, and shows the number', () => {
+  const vol = (level: number, feedback: boolean, muted = false) =>
+    on({ volume: { available: true, level, muted, feedback } });
+
+  it('a tap bumps by 5', () => {
     const { client, dispatched } = fakeClient(on());
     render(<PanelApp client={client} />);
-    expect(screen.getByText('50')).toBeTruthy();
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Volume up' }));
     fireEvent.pointerUp(screen.getByRole('button', { name: 'Volume up' }));
     expect(dispatched).toEqual([{ type: 'volume.bump', delta: 5 }]);
+  });
+
+  it('has no slider, and shows no level until it changes', () => {
+    const { client } = fakeClient(vol(50, true));
+    render(<PanelApp client={client} />);
+    expect(screen.queryByRole('slider')).toBeNull();
+    expect(document.querySelector('.kp-hud')).toBeNull();
+  });
+
+  it('shows the level briefly when it changes, then hides it', () => {
+    const { client, set } = fakeClient(vol(50, true));
+    render(<PanelApp client={client} />);
+    set(vol(55, true));
+    expect(document.querySelector('.kp-hud-number')?.textContent).toBe('55');
+    act(() => void vi.advanceTimersByTime(1600));
+    expect(document.querySelector('.kp-hud')).toBeNull();
+  });
+
+  it('hides the number when no device reports its level', () => {
+    const { client, set } = fakeClient(vol(50, false));
+    render(<PanelApp client={client} />);
+    set(vol(55, false));
+    expect(document.querySelector('.kp-hud')).toBeTruthy();
+    expect(document.querySelector('.kp-hud-number')).toBeNull();
   });
 
   it('press-and-hold ramps until released', () => {
@@ -232,7 +258,7 @@ describe('volume', () => {
     expect(screen.getByRole('button', { name: 'Unmute' }).getAttribute('aria-pressed')).toBe(
       'true',
     );
-    expect(screen.getByText('—')).toBeTruthy();
+    expect(document.querySelector('.kp-hud-text')?.textContent).toBe('Muted');
   });
 
   it('is hidden when the room has nothing to control volume', () => {

@@ -44,16 +44,34 @@ const vm = (over: Partial<PanelViewModel> = {}): PanelViewModel => ({
   roomName: 'Boardroom',
   status: 'on',
   activities: [
-    { id: 'present', name: 'Present', kind: 'present', active: true, busy: false, overlay: false, sources: [] },
+    {
+      id: 'present',
+      name: 'Present',
+      kind: 'present',
+      active: true,
+      busy: false,
+      overlay: false,
+      sources: [],
+    },
   ],
   message: { text: { key: 'ready', params: {} }, tone: 'success' },
   ...over,
 });
 const branding = { mode: 'dark' as const, language: 'en' };
-const hello = (pinRequired = false): PanelServerMessage => ({ t: 'hello', roomId: ROOM, pinRequired, branding });
+const hello = (pinRequired = false): PanelServerMessage => ({
+  t: 'hello',
+  roomId: ROOM,
+  pinRequired,
+  branding,
+});
 const socket = () => FakeSocket.instances.at(-1)!;
 const client = (opts = {}) =>
-  new WsPanelClient('ws://gw/ws/room', { createSocket: (u) => new FakeSocket(u), minRetryMs: 100, maxRetryMs: 400, ...opts });
+  new WsPanelClient('ws://gw/ws/room', {
+    createSocket: (u) => new FakeSocket(u),
+    minRetryMs: 100,
+    maxRetryMs: 400,
+    ...opts,
+  });
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -233,7 +251,12 @@ describe('PanelSession', () => {
     const { container } = render(<PanelSession client={c} />);
     act(() => {
       socket().open();
-      socket().receive({ t: 'hello', roomId: ROOM, pinRequired: false, branding: { mode: 'light', accent: '#ff0066', language: 'en' } });
+      socket().receive({
+        t: 'hello',
+        roomId: ROOM,
+        pinRequired: false,
+        branding: { mode: 'light', accent: '#ff0066', language: 'en' },
+      });
       socket().receive({ t: 'snapshot', vm: vm() });
     });
     const app = container.querySelector('.kp-app') as HTMLElement;
@@ -249,7 +272,11 @@ describe('PanelSession', () => {
       socket().receive({ t: 'snapshot', vm: vm() });
     });
     expect(screen.queryByLabelText('Control from your phone')).toBeNull();
-    const link = (n: number): PanelServerMessage => ({ t: 'qr', url: `https://k.example/c/token${n}`, expiresAt: '2030-01-01T00:00:00.000Z' });
+    const link = (n: number): PanelServerMessage => ({
+      t: 'qr',
+      url: `https://k.example/c/token${n}`,
+      expiresAt: '2030-01-01T00:00:00.000Z',
+    });
     act(() => {
       socket().receive(link(1));
       socket().receive(link(2));

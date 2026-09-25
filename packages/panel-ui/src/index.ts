@@ -16,4 +16,12 @@ export {
   type Translate,
 } from './i18n';
 export { LANGUAGES, languageOptions, translatorFor } from './languages';
-export { darkTheme, lightTheme, themeFromBranding, themeStyle, type PanelTheme } from './theme';
+export {
+  contrastRatio,
+  darkTheme,
+  legibleAccent,
+  lightTheme,
+  themeFromBranding,
+  themeStyle,
+  type PanelTheme,
+} from './theme';

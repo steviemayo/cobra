@@ -72,6 +72,8 @@ export class RoomRuntime implements PanelClient {
   private faultDevice: string | null = null;
   private faultText: string | null = null;
   private volume: number;
+  /** Set once any device has reported its own level. Until then the number is only our guess. */
+  private volumeFeedback = false;
   private muted = false;
   private prompt: Prompt | null = null;
   private warningDeadline: number | null = null;
@@ -148,6 +150,11 @@ export class RoomRuntime implements PanelClient {
         return this.respondToPrompt(intent.promptId, intent.accept);
       case 'warning.dismiss':
         return this.dismissWarning();
+      case 'room.on': {
+        const on = this.model.states.find((s) => s.kind === 'on');
+        if (on && this.status === 'off') void this.runState(on.id);
+        return;
+      }
       case 'combine.set':
         if (this.combination?.role === 'primary') this.opts.onCombine?.(intent.combined);
         return;
@@ -475,7 +482,10 @@ export class RoomRuntime implements PanelClient {
   private adoptDeviceState() {
     for (const id of this.volumeDevices) {
       const s = this.bus.getState(id);
-      if (s?.volume !== undefined) this.volume = s.volume;
+      if (s?.volume !== undefined) {
+        this.volume = s.volume;
+        this.volumeFeedback = true;
+      }
       if (s?.muted !== undefined) this.muted = s.muted;
     }
     if (this.status === 'off' && !this.primary) {
@@ -490,7 +500,10 @@ export class RoomRuntime implements PanelClient {
   private onDeviceEvent(event: DeviceEvent) {
     if (this.disposed) return;
     if (this.volumeDevices.includes(event.deviceId) && !this.volumeInFlight) {
-      if (event.state.volume !== undefined) this.volume = event.state.volume;
+      if (event.state.volume !== undefined) {
+        this.volume = event.state.volume;
+        this.volumeFeedback = true;
+      }
       if (event.state.muted !== undefined) this.muted = event.state.muted;
     }
     this.occupancyChanged(event);
@@ -728,7 +741,9 @@ export class RoomRuntime implements PanelClient {
         available: this.volumeDevices.length > 0,
         level: this.volume,
         muted: this.muted,
+        feedback: this.volumeFeedback,
       },
+      ui: this.model.settings.panel,
       message,
       prompt: this.prompt
         ? {
