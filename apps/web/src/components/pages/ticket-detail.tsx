@@ -25,7 +25,11 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     ...trpc.ticket.get.queryOptions({ orgId, ticketId }),
     refetchInterval: 10_000,
   });
-  const members = useQuery({ ...trpc.member.list.queryOptions({ orgId }), enabled: canSupport });
+  // The team, and people from a connected service provider.
+  const assignees = useQuery({
+    ...trpc.ticket.assignees.queryOptions({ orgId, ticketId }),
+    enabled: canSupport,
+  });
   const [reply, setReply] = useState('');
   const [internal, setInternal] = useState(false);
   const [confirmEscalate, setConfirmEscalate] = useState(false);
@@ -87,7 +91,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
       </PageContainer>
     );
   const t = ticket.data;
-  const staff = (members.data ?? []).filter((m) => m.role !== 'customer_viewer');
+  const staff = assignees.data ?? [];
   const closed = t.status === 'closed';
 
   return (
@@ -262,7 +266,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                     { value: 'none', label: 'Unassigned' },
                     ...staff.map((m) => ({
                       value: m.userId,
-                      label: m.userId === user.id ? 'Me' : (m.email ?? 'Member'),
+                      label: m.userId === user.id ? 'Me' : m.label,
                     })),
                   ]}
                 />

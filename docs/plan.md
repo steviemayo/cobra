@@ -404,7 +404,7 @@ Working rules that apply to all of them:
 | G | Org accent colour in the portal | small | **built** (`docs/decisions.md`, G-1 to G-4) |
 | H | Email notifications (tickets and alerts) | small | a domain, Resend verified (step 6 above) |
 | I | Staff user management and a staff audit viewer | small | **built** (`docs/decisions.md`, I-1 to I-6) |
-| J | Assign tickets to provider people | medium | none |
+| J | Assign tickets to provider people | medium | **built** (`docs/decisions.md`, J-1 to J-6) |
 | K | SLAs and priority timers | medium | after first customers |
 | L | Provider billing and white label | large | a business decision on who pays |
 | M | Earlier candidates: WSS push, Stripe Connect payouts, third-party drivers, sandboxed logic hooks | large each | see `docs/phase-4-preread.md` |
@@ -538,6 +538,8 @@ Pre-read: `apps/web/src/server/staff.ts`, `scripts/add-staff.mts`, the `StaffUse
 Do: a `/staff/team` page (admin only) to add, change and remove staff by email, and a `/staff/audit` page to browse the trail with filters by staff member, organisation and action. Done when: an admin can add a support person without the script.
 
 ### J. Assign tickets to provider people
+
+**Status: built.** The text below is the original brief.
 
 Pre-read: `apps/web/src/server/routers/ticket.ts` (the `update` procedure requires the assignee to be an organisation member), `apps/web/src/server/msp.ts` (`mspAccess`), the `Ticket.assignedTo` column.
 
