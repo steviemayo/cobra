@@ -20,11 +20,6 @@ export const en = {
 
   // Panel chrome
   'nav.label': 'Activities',
-  'status.off': 'Off',
-  'status.starting': 'Starting',
-  'status.on': 'On',
-  'status.stopping': 'Turning off',
-  'status.fault': 'Needs attention',
   'sources.title': 'Show from',
   'source.connected': 'Cable connected',
   'source.disconnected': 'No cable',

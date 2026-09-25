@@ -93,11 +93,15 @@ afterEach(() => {
 });
 
 describe('when the room is off', () => {
-  it('shows the room name, status and one big button per activity', () => {
+  it('shows the room name and one big button per activity, with a quiet top bar', () => {
     const { client } = fakeClient(base());
-    render(<PanelApp client={client} />);
+    const view = render(<PanelApp client={client} />);
     expect(screen.getByRole('heading', { name: 'Boardroom' })).toBeTruthy();
-    expect(screen.getByText('Off')).toBeTruthy();
+    // Nothing in the top bar but the room name: no status badge, no Home, no Power.
+    const top = view.container.querySelector('.kp-top')!;
+    expect(top.classList.contains('kp-top-quiet')).toBe(true);
+    expect(top.querySelectorAll('button')).toHaveLength(0);
+    expect(top.querySelector('.kp-pill')).toBeNull();
     expect(screen.getByText('The room is off. Choose what you would like to do.')).toBeTruthy();
     expect(screen.getByText('What would you like to do?')).toBeTruthy();
     // No device jargon, and no volume until the room is on.
@@ -188,7 +192,6 @@ describe('when the room is on', () => {
     const { client } = fakeClient(vm);
     render(<PanelApp client={client} />);
     expect(screen.getByText('Getting the room ready…')).toBeTruthy();
-    expect(screen.getByText('Starting')).toBeTruthy();
   });
 
   it('names a failing device in plain language', () => {

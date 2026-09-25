@@ -101,39 +101,28 @@
   height: 2em;
   width: auto;
 }
+/* Off: nothing but the room name (and the phone button, if any) */
+.kp-top-quiet {
+  border-bottom-color: transparent;
+  min-height: 4.8em;
+}
+.kp-top-quiet .kp-brand h1 {
+  font-size: 1.15em;
+  font-weight: 500;
+  color: var(--kp-muted);
+}
 .kp-top-end {
   display: flex;
   align-items: center;
   gap: 0.8em;
   padding-bottom: 0.7em;
 }
-.kp-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5em;
-  padding: 0.4em 0.9em;
-  border-radius: 999px;
-  background: var(--kp-glass);
-  font-size: 0.9em;
-  font-weight: 500;
-  white-space: nowrap;
+.kp-home svg {
+  font-size: 1.6em;
 }
-.kp-pill::before {
-  content: '';
-  width: 0.55em;
-  height: 0.55em;
-  border-radius: 50%;
-  background: var(--kp-muted);
-}
-.kp-pill-on::before {
-  background: var(--kp-ok);
-}
-.kp-pill-starting::before,
-.kp-pill-stopping::before {
-  background: var(--kp-warn);
-}
-.kp-pill-fault::before {
-  background: var(--kp-error);
+.kp-top-end .kp-btn,
+.kp-top-end .kp-power {
+  min-height: 3.8em;
 }
 .kp-home {
   display: inline-flex;
@@ -704,7 +693,6 @@
     .kp-quick,
     .kp-round,
     .kp-bar,
-    .kp-pill,
     .kp-sheet,
     .kp-hud,
     .kp-dialog,

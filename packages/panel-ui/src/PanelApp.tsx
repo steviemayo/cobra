@@ -296,7 +296,7 @@ export function PanelApp({
       onKeyDownCapture={idleMs > 0 && !idle ? arm : undefined}
     >
       <div className="kp-frame" inert={idle}>
-        <header className="kp-top">
+        <header className={`kp-top ${off ? 'kp-top-quiet' : ''}`}>
           {brand}
 
           {navMode && !off ? (
@@ -333,9 +333,6 @@ export function PanelApp({
                 {t('nav.home')}
               </button>
             )}
-            <span className={`kp-pill kp-pill-${vm.status}`}>
-              {t(`status.${vm.status}` as const)}
-            </span>
             {headerAction}
             {canPowerOff && (
               <button type="button" className="kp-power" onClick={() => setConfirmOff(true)}>
