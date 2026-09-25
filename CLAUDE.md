@@ -133,6 +133,7 @@
 - API responses via tRPC types; gateway↔cloud protocol versioned and defined in `packages/model`
 - Never omit `orgId` scoping; never hardcode secrets
 - Status: Phases 0-7 built and merged to `dev`/`main`. Remaining work is setup and real-world verification (see "Next steps by dev" in `docs/plan.md`). **Read `docs/phase-4-preread.md` first** (status table, verified-vs-untested list, ops setup, rules learned, next steps). Progress lives there, not in plan.md
+- Since phase 7 (all merged): panel UI redesign, room groups (portal side), staff portal, service providers. **What to build next: "Next build steps" at the end of `docs/plan.md`** (each step lists its pre-read). Staff/MSP design and status: `docs/staff-portal-and-msp.md`
 - Pins: TypeScript ^6 (typescript-eslint lacks TS7 support), Prisma 7.x (CLI must match client), pnpm 12, Next 16 (`proxy.ts` replaces middleware)
 - Env: see `.env.example`; Prisma CLI reads `DIRECT_URL`, runtime uses `DATABASE_URL`
 - Every org-scoped tRPC procedure uses `orgProcedure` (membership check) and filters by `ctx.orgId`
