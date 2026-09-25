@@ -157,9 +157,14 @@ export const featureProcedure = (feature: Feature) =>
 export const staffIdentityProcedure = authedProcedure.use(async ({ ctx, next }) => {
   const staff = await findStaff(db, ctx.user.id);
   if (!staff) throw new TRPCError({ code: 'FORBIDDEN' });
-  const supabase = await createSupabaseServer();
-  const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-  return next({ ctx: { staff, mfaSatisfied: data?.currentLevel === 'aal2' } });
+  // With a second factor switched off (local development) there is nothing to check.
+  let mfaSatisfied = true;
+  if (mfaRequired()) {
+    const supabase = await createSupabaseServer();
+    const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    mfaSatisfied = data?.currentLevel === 'aal2';
+  }
+  return next({ ctx: { staff, mfaSatisfied } });
 });
 
 /**
