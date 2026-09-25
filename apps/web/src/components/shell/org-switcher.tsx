@@ -52,6 +52,9 @@ export function OrgSwitcher() {
                 <DropdownMenuItem key={o.id} onClick={() => router.push(orgPath(o.id))}>
                   <OrgAvatar name={o.name} />
                   <span className="flex-1 truncate">{o.name}</span>
+                  {o.via && (
+                    <span className="truncate text-xs text-muted-foreground">via {o.via}</span>
+                  )}
                   {o.id === org.id && <Check className="size-4" />}
                 </DropdownMenuItem>
               ))}

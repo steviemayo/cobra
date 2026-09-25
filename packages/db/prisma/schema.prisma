@@ -36,38 +36,42 @@ model Org {
   createdAt          DateTime @default(now())
   /// When true, staff can only open a support session if they link one of this organisation's open tickets.
   staffAccessBlocked Boolean  @default(false)
+  /// customer: an organisation with rooms. msp: a managed service provider that looks after customers.
+  kind               String   @default("customer")
 
-  members          Member[]
-  sites            Site[]
-  gateways         Gateway[]
-  rooms            Room[]
-  audit            AuditLog[]
-  drafts           RoomDraft[]
-  draftVersions    RoomDraftVersion[]
-  templates        Template[]
-  invites          Invite[]
-  releases         Release[]
-  gatewayEvents    GatewayEvent[]
-  deployments      Deployment[]
-  deviceStatus     DeviceStatus[]
-  incidents        Incident[]
-  alertChannels    AlertChannel[]
-  alertDeliveries  AlertDelivery[]
-  commands         RemoteCommand[]
-  tickets          Ticket[]
-  ticketComments   TicketComment[]
-  branding         Json?
-  billing          OrgBilling?
-  controlIntents   ControlIntent[]
-  controlSessions  ControlSession[]
-  combinations     RoomCombination[]
-  roomGroups       RoomGroup[]
-  licenseOverrides OrgLicenseOverride[]
-  notes            OrgNote[]
-  calendars        CalendarConnection[]
-  listings         MarketplaceListing[]
-  purchases        MarketplacePurchase[]
-  customDrivers    CustomDriver[]
+  members             Member[]
+  sites               Site[]
+  gateways            Gateway[]
+  rooms               Room[]
+  audit               AuditLog[]
+  drafts              RoomDraft[]
+  draftVersions       RoomDraftVersion[]
+  templates           Template[]
+  invites             Invite[]
+  releases            Release[]
+  gatewayEvents       GatewayEvent[]
+  deployments         Deployment[]
+  deviceStatus        DeviceStatus[]
+  incidents           Incident[]
+  alertChannels       AlertChannel[]
+  alertDeliveries     AlertDelivery[]
+  commands            RemoteCommand[]
+  tickets             Ticket[]
+  ticketComments      TicketComment[]
+  branding            Json?
+  billing             OrgBilling?
+  controlIntents      ControlIntent[]
+  controlSessions     ControlSession[]
+  combinations        RoomCombination[]
+  roomGroups          RoomGroup[]
+  licenseOverrides    OrgLicenseOverride[]
+  notes               OrgNote[]
+  grantsToProviders   MspGrant[]            @relation("CustomerSide")
+  grantsFromCustomers MspGrant[]            @relation("MspSide")
+  calendars           CalendarConnection[]
+  listings            MarketplaceListing[]
+  purchases           MarketplacePurchase[]
+  customDrivers       CustomDriver[]
 }
 
 model Member {
@@ -621,6 +625,34 @@ model SupportSession {
 
   @@index([orgId, startedAt])
   @@index([staffUserId, endsAt])
+}
+
+// A managed service provider (an Org of kind "msp") looking after a customer organisation.
+// Two-sided: the customer's owner invites, the provider's owner accepts, and either side can end
+// it. `siteIds` empty means the whole organisation (site-limited grants come later). `role` is the
+// most the provider's people can do: manage (up to dev), support, or view. Never owner: the
+// customer keeps billing, team and settings.
+model MspGrant {
+  id             String    @id @default(uuid()) @db.Uuid
+  mspOrgId       String    @db.Uuid
+  customerOrgId  String    @db.Uuid
+  siteIds        String[]  @default([]) @db.Uuid
+  role           String
+  /// pending, active, declined or ended
+  status         String    @default("pending")
+  invitedBy      String    @db.Uuid
+  invitedByEmail String?
+  respondedBy    String?   @db.Uuid
+  createdAt      DateTime  @default(now())
+  respondedAt    DateTime?
+  endedAt        DateTime?
+  endedBy        String?   @db.Uuid
+
+  msp      Org @relation("MspSide", fields: [mspOrgId], references: [id], onDelete: Cascade)
+  customer Org @relation("CustomerSide", fields: [customerOrgId], references: [id], onDelete: Cascade)
+
+  @@index([customerOrgId, status])
+  @@index([mspOrgId, status])
 }
 
 // Kestrel staff: people who may use the /staff portal across every organisation. Separate from

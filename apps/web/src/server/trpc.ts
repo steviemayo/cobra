@@ -7,6 +7,7 @@ import { hasStaffRole, type Feature, type OrgRole, type StaffRole } from '@kestr
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { getEntitlements, planRequired } from './billing';
 import { findStaff, mfaRequired } from './staff';
+import { mspAccess } from './msp';
 import { activeSession, logSessionAction, sessionGate } from './support-sessions';
 
 export async function createContext() {
@@ -39,7 +40,18 @@ export const orgProcedure = authedProcedure.use(async ({ ctx, next, getRawInput,
   });
   if (member) {
     const viewAs: ViewAs | null = null;
-    return next({ ctx: { orgId: member.orgId, role: member.role as OrgRole, viewAs } });
+    const viaMsp: ViaMsp | null = null;
+    return next({ ctx: { orgId: member.orgId, role: member.role as OrgRole, viewAs, viaMsp } });
+  }
+
+  // Not a member. A service provider the organisation has connected to (and the person belongs
+  // to) gives them a role here: the lower of their own role and what the connection allows,
+  // never owner.
+  const msp = await mspAccess(db, ctx.user.id, parsed.data.orgId);
+  if (msp) {
+    const viewAs: ViewAs | null = null;
+    const viaMsp: ViaMsp = { mspOrgId: msp.mspOrgId, mspName: msp.mspName };
+    return next({ ctx: { orgId: parsed.data.orgId, role: msp.role, viewAs, viaMsp } });
   }
 
   // Not a member. Kestrel staff with an open support session (and a second factor) may work here,
@@ -64,8 +76,15 @@ export const orgProcedure = authedProcedure.use(async ({ ctx, next, getRawInput,
   }
   if (gate === 'log') await logSessionAction(db, session, 'session.act', path);
   const viewAs: ViewAs = { sessionId: session.id, mode: session.mode, endsAt: session.endsAt };
-  return next({ ctx: { orgId: parsed.data.orgId, role: 'support' as OrgRole, viewAs } });
+  const viaMsp: ViaMsp | null = null;
+  return next({ ctx: { orgId: parsed.data.orgId, role: 'support' as OrgRole, viewAs, viaMsp } });
 });
+
+/** Set when the caller reaches the organisation through a service provider they belong to. */
+export interface ViaMsp {
+  mspOrgId: string;
+  mspName: string;
+}
 
 /** Set when the caller is Kestrel staff working inside the organisation through a support session. */
 export interface ViewAs {

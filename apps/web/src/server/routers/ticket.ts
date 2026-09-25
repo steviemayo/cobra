@@ -3,6 +3,8 @@ import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { after } from 'next/server';
 import { writeAudit } from '../audit';
+import { mspFromRoute } from '@kestrel/model';
+import { routeForNewTicket } from '../msp';
 import { notifyStaff } from '../ticket-notify';
 import { STAFF_LABEL, TicketError, escalateTicket, visibleComments } from '../tickets';
 import { orgProcedure, requireRole, router } from '../trpc';
@@ -98,10 +100,17 @@ export const ticketRouter = router({
           select: { email: true },
         })
       : null;
+    const providerId = mspFromRoute(t.routedTo);
+    const provider = providerId
+      ? await db.org.findFirst({ where: { id: providerId }, select: { name: true } })
+      : null;
     return {
       id: t.id,
       title: t.title,
       body: t.body,
+      providerName: provider?.name ?? null,
+      // Whether a service provider that takes tickets is connected, so the team can send it there.
+      providerAvailable: (await routeForNewTicket(db, ctx.orgId)) !== 'org',
       status: t.status,
       priority: t.priority,
       room,
@@ -166,7 +175,7 @@ export const ticketRouter = router({
           createdByEmail: ctx.user.email?.toLowerCase() ?? null,
           ...(input.toKestrel
             ? { routedTo: 'kestrel', escalatedAt: new Date(), escalatedBy: ctx.user.id }
-            : {}),
+            : { routedTo: await routeForNewTicket(db, ctx.orgId) }),
         },
       });
       await writeAudit({
@@ -209,6 +218,37 @@ export const ticketRouter = router({
       await db.ticket.update({
         where: { id: t.id },
         data: { updatedAt: new Date(), ...(reopen ? { status: 'open', closedAt: null } : {}) },
+      });
+      return { ok: true };
+    }),
+
+  // Move a ticket between the organisation's own team and its service provider.
+  route: orgProcedure
+    .input(z.object({ orgId, ticketId, to: z.enum(['org', 'provider']) }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, [...TEAM]);
+      const t = await find(ctx.orgId, input.ticketId);
+      if (t.routedTo === 'kestrel')
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This ticket is with Kestrel support.',
+        });
+      let routedTo = 'org';
+      if (input.to === 'provider') {
+        routedTo = await routeForNewTicket(db, ctx.orgId);
+        if (routedTo === 'org')
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'This organisation has no service provider that takes tickets.',
+          });
+      }
+      await db.ticket.update({ where: { id: t.id }, data: { routedTo, updatedAt: new Date() } });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'ticket.route',
+        target: t.id,
+        meta: { title: t.title, to: input.to },
       });
       return { ok: true };
     }),

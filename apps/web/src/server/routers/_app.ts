@@ -3,6 +3,7 @@ import { alertRouter } from './alert';
 import { auditRouter } from './audit';
 import { billingRouter } from './billing';
 import { calendarRouter } from './calendar';
+import { mspRouter } from './msp';
 import { roomGroupRouter } from './room-group';
 import { staffRouter } from './staff';
 import { commandRouter } from './command';
@@ -42,6 +43,7 @@ export const appRouter = router({
   driver: driverRouter,
   marketplace: marketplaceRouter,
   calendar: calendarRouter,
+  msp: mspRouter,
   roomGroup: roomGroupRouter,
   staff: staffRouter,
   control: controlRouter,
