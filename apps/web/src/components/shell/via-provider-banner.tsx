@@ -18,7 +18,8 @@ export function ViaProviderBanner() {
     >
       <Handshake className="size-4 text-muted-foreground" />
       <span>
-        You are working in <span className="font-medium">{org.name}</span> as {org.via}.
+        You are working in <span className="font-medium">{org.name}</span> as {org.via}
+        {org.scoped ? ', limited to the sites they gave you' : ''}.
       </span>
       {home && (
         <Link

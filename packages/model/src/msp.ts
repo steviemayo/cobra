@@ -45,6 +45,21 @@ export function bestMspRole(
   return best;
 }
 
+/**
+ * The lowest role across several grants. Used when a provider holds only site-limited grants: their
+ * sites are combined, so the role is the most cautious one rather than the most generous.
+ */
+export function lowestMspRole(
+  candidates: { memberRole: OrgRole; grant: GrantRole }[],
+): OrgRole | null {
+  let lowest: OrgRole | null = null;
+  for (const c of candidates) {
+    const role = effectiveMspRole(c.memberRole, c.grant);
+    if (lowest === null || RANK[role] < RANK[lowest]) lowest = role;
+  }
+  return lowest;
+}
+
 /** Whether a grant lets the provider take tickets for the customer (view-only providers do not). */
 export const grantTakesTickets = (grant: GrantRole): boolean => grant !== 'view';
 

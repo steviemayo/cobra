@@ -11,6 +11,7 @@ import { effectiveStatus } from '../gateway-service';
 import { PanelInput, applyPanelInput, publicPanel, readPanel } from '../panel-settings';
 import { summariseDraft } from '../room-summary';
 import { syncQuantity } from '../stripe';
+import { SITE_SCOPED, siteFilter } from '../site-scope';
 import { orgProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
@@ -73,52 +74,63 @@ async function applyGateway(
 
 export const roomRouter = router({
   list: orgProcedure
+    .meta(SITE_SCOPED)
     .input(z.object({ orgId }))
     .query(({ ctx }) =>
-      db.room.findMany({ where: { orgId: ctx.orgId }, orderBy: { createdAt: 'asc' }, omit }),
+      db.room.findMany({
+        where: { orgId: ctx.orgId, ...siteFilter(ctx.siteScope) },
+        orderBy: { createdAt: 'asc' },
+        omit,
+      }),
     ),
 
-  get: orgProcedure.input(z.object({ orgId, roomId })).query(async ({ ctx, input }) => {
-    const room = await db.room.findFirst({
-      where: { id: input.roomId, orgId: ctx.orgId },
-      omit,
-      include: {
-        site: { select: { id: true, name: true } },
-        gateway: { select: { id: true, name: true, lastSeenAt: true, enrolledAt: true } },
-      },
-    });
-    if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
-    const { gateway, ...rest } = room;
-    return {
-      ...rest,
-      gateway: gateway
-        ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) }
-        : null,
-    };
-  }),
+  get: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, roomId }))
+    .query(async ({ ctx, input }) => {
+      const room = await db.room.findFirst({
+        where: { id: input.roomId, orgId: ctx.orgId, ...siteFilter(ctx.siteScope) },
+        omit,
+        include: {
+          site: { select: { id: true, name: true } },
+          gateway: { select: { id: true, name: true, lastSeenAt: true, enrolledAt: true } },
+        },
+      });
+      if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
+      const { gateway, ...rest } = room;
+      return {
+        ...rest,
+        gateway: gateway
+          ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) }
+          : null,
+      };
+    }),
 
   // Rooms with their site, gateway and a summary of the design draft, for lists and dashboards.
-  overview: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
-    const rooms = await db.room.findMany({
-      where: { orgId: ctx.orgId },
-      orderBy: [{ createdAt: 'asc' }],
-      omit,
-      include: {
-        site: { select: { id: true, name: true } },
-        gateway: {
-          select: { id: true, name: true, status: true, lastSeenAt: true, enrolledAt: true },
+  overview: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId }))
+    .query(async ({ ctx }) => {
+      const rooms = await db.room.findMany({
+        where: { orgId: ctx.orgId, ...siteFilter(ctx.siteScope) },
+        orderBy: [{ createdAt: 'asc' }],
+        omit,
+        include: {
+          site: { select: { id: true, name: true } },
+          gateway: {
+            select: { id: true, name: true, status: true, lastSeenAt: true, enrolledAt: true },
+          },
+          draft: { select: { revision: true, updatedAt: true, model: true } },
         },
-        draft: { select: { revision: true, updatedAt: true, model: true } },
-      },
-    });
-    return rooms.map(({ draft, gateway, ...room }) => ({
-      ...room,
-      draft: draft ? summariseDraft(draft) : null,
-      gateway: gateway
-        ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) }
-        : null,
-    }));
-  }),
+      });
+      return rooms.map(({ draft, gateway, ...room }) => ({
+        ...room,
+        draft: draft ? summariseDraft(draft) : null,
+        gateway: gateway
+          ? { id: gateway.id, name: gateway.name, status: effectiveStatus(gateway) }
+          : null,
+      }));
+    }),
 
   create: orgProcedure
     .input(z.object({ orgId, siteId: z.string().uuid(), name, type: RoomType }))

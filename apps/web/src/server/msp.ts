@@ -3,6 +3,7 @@ import {
   bestMspRole,
   effectiveMspRole,
   grantTakesTickets,
+  lowestMspRole,
   mspRoute,
   type GrantRole,
   type OrgRole,
@@ -15,7 +16,7 @@ import { effectiveStatus } from './gateway-status';
 // Functions take the database as a parameter so they can be tested without one.
 export type MspDb = Pick<
   PrismaClient,
-  'org' | 'member' | 'mspGrant' | 'auditLog' | 'ticket' | 'room' | 'gateway' | 'incident'
+  'org' | 'member' | 'mspGrant' | 'auditLog' | 'ticket' | 'room' | 'gateway' | 'incident' | 'site'
 >;
 
 export class MspError extends Error {}
@@ -44,6 +45,8 @@ export async function inviteMsp(
     customerOrgId: string;
     mspOrgId: string;
     role: GrantRole;
+    /** Only these sites. Empty or missing: the whole organisation. */
+    siteIds?: string[];
     by: { userId: string; email: string | null };
   },
 ): Promise<{ id: string }> {
@@ -54,6 +57,12 @@ export async function inviteMsp(
   if (!customer || customer.kind === 'msp')
     throw new MspError('Only a customer organisation can invite a service provider.');
   if (msp.id === customer.id) throw new MspError('An organisation cannot manage itself.');
+  const siteIds = [...new Set(args.siteIds ?? [])];
+  if (siteIds.length > 0) {
+    const found = await db.site.findMany({ where: { orgId: customer.id, id: { in: siteIds } } });
+    if (found.length !== siteIds.length)
+      throw new MspError('One of those sites is not part of this organisation.');
+  }
   const existing = await db.mspGrant.findFirst({
     where: { mspOrgId: msp.id, customerOrgId: customer.id, status: { in: LIVE } },
   });
@@ -68,6 +77,7 @@ export async function inviteMsp(
       mspOrgId: msp.id,
       customerOrgId: customer.id,
       role: args.role,
+      siteIds,
       status: 'pending',
       invitedBy: args.by.userId,
       invitedByEmail: args.by.email,
@@ -147,6 +157,8 @@ export interface CustomerGrantView {
   mspName: string;
   role: string;
   status: string;
+  /** Names of the sites it is limited to. Empty: the whole organisation. */
+  siteNames: string[];
   createdAt: Date;
 }
 
@@ -161,12 +173,15 @@ export async function grantsForCustomer(
   });
   const orgs = await db.org.findMany({ where: { id: { in: grants.map((g) => g.mspOrgId) } } });
   const name = new Map(orgs.map((o) => [o.id, o.name]));
+  const sites = await db.site.findMany({ where: { orgId: customerOrgId } });
+  const siteName = new Map(sites.map((s) => [s.id, s.name]));
   return grants.map((g) => ({
     id: g.id,
     mspOrgId: g.mspOrgId,
     mspName: name.get(g.mspOrgId) ?? 'Unknown provider',
     role: g.role,
     status: g.status,
+    siteNames: g.siteIds.map((id) => siteName.get(id) ?? 'Unknown site'),
     createdAt: g.createdAt,
   }));
 }
@@ -175,6 +190,8 @@ export interface MspInviteView {
   id: string;
   customerName: string;
   role: string;
+  /** Number of sites it is limited to. 0: the whole organisation. */
+  siteCount: number;
   invitedByEmail: string | null;
   createdAt: Date;
 }
@@ -191,6 +208,7 @@ export async function pendingInvites(db: MspDb, mspOrgId: string): Promise<MspIn
     id: g.id,
     customerName: name.get(g.customerOrgId) ?? 'Unknown organisation',
     role: g.role,
+    siteCount: g.siteIds.length,
     invitedByEmail: g.invitedByEmail,
     createdAt: g.createdAt,
   }));
@@ -202,11 +220,39 @@ export interface MspAccess {
   role: OrgRole;
   mspOrgId: string;
   mspName: string;
+  /** null: the whole organisation. A list: only these sites. */
+  sites: string[] | null;
+}
+
+type Candidate = { memberRole: OrgRole; grant: GrantRole; mspOrgId: string; siteIds: string[] };
+
+/**
+ * The role and scope a person gets in a customer from the provider grants they can use.
+ *
+ * A whole-organisation grant wins: the best role among those, no site limit. With only
+ * site-limited grants, the sites are combined and the role is the LOWEST of them (the cautious
+ * choice, since one role cannot be given per site).
+ */
+function resolve(
+  candidates: Candidate[],
+): { role: OrgRole; from: Candidate; sites: string[] | null } | null {
+  if (candidates.length === 0) return null;
+  const whole = candidates.filter((c) => c.siteIds.length === 0);
+  if (whole.length > 0) {
+    const role = bestMspRole(whole);
+    const from = role && whole.find((c) => effectiveMspRole(c.memberRole, c.grant) === role);
+    return role && from ? { role, from, sites: null } : null;
+  }
+  const role = lowestMspRole(candidates);
+  const from = role && candidates.find((c) => effectiveMspRole(c.memberRole, c.grant) === role);
+  return role && from
+    ? { role, from, sites: [...new Set(candidates.flatMap((c) => c.siteIds))] }
+    : null;
 }
 
 /**
  * What this person may do inside `customerOrgId` because of a service provider they belong to, or
- * null. Only active, whole-organisation grants count (site-limited grants come later).
+ * null. Only active grants count.
  */
 export async function mspAccess(
   db: MspDb,
@@ -222,20 +268,24 @@ export async function mspAccess(
       mspOrgId: { in: memberships.map((m) => m.orgId) },
     },
   });
-  const usable = grants.filter((g) => g.siteIds.length === 0);
-  if (usable.length === 0) return null;
   const roleIn = new Map(memberships.map((m) => [m.orgId, m.role as OrgRole]));
-  const candidates = usable.map((g) => ({
-    memberRole: roleIn.get(g.mspOrgId)!,
-    grant: g.role as GrantRole,
-    mspOrgId: g.mspOrgId,
-  }));
-  const role = bestMspRole(candidates);
-  if (!role) return null;
-  // Name the provider that gave the best role, for the banner and the activity log.
-  const from = candidates.find((c) => effectiveMspRole(c.memberRole, c.grant) === role)!;
-  const msp = await db.org.findFirst({ where: { id: from.mspOrgId } });
-  return { role, mspOrgId: from.mspOrgId, mspName: msp?.name ?? 'Service provider' };
+  const found = resolve(
+    grants.map((g) => ({
+      memberRole: roleIn.get(g.mspOrgId)!,
+      grant: g.role as GrantRole,
+      mspOrgId: g.mspOrgId,
+      siteIds: g.siteIds,
+    })),
+  );
+  if (!found) return null;
+  // Name the provider that gave the role, for the banner and the activity log.
+  const msp = await db.org.findFirst({ where: { id: found.from.mspOrgId } });
+  return {
+    role: found.role,
+    mspOrgId: found.from.mspOrgId,
+    mspName: msp?.name ?? 'Service provider',
+    sites: found.sites,
+  };
 }
 
 export interface ManagedCustomer {
@@ -244,6 +294,8 @@ export interface ManagedCustomer {
   role: OrgRole;
   mspOrgId: string;
   mspName: string;
+  /** null: the whole organisation. A list: only these sites. */
+  sites: string[] | null;
 }
 
 /** Every customer this person can work in through a provider, for the organisation switcher. */
@@ -253,32 +305,33 @@ export async function managedCustomers(db: MspDb, userId: string): Promise<Manag
   const grants = await db.mspGrant.findMany({
     where: { status: 'active', mspOrgId: { in: memberships.map((m) => m.orgId) } },
   });
-  const whole = grants.filter((g) => g.siteIds.length === 0);
-  const customerIds = [...new Set(whole.map((g) => g.customerOrgId))];
+  const customerIds = [...new Set(grants.map((g) => g.customerOrgId))];
   const [customers, providers] = await Promise.all([
     db.org.findMany({ where: { id: { in: customerIds } } }),
-    db.org.findMany({ where: { id: { in: [...new Set(whole.map((g) => g.mspOrgId))] } } }),
+    db.org.findMany({ where: { id: { in: [...new Set(grants.map((g) => g.mspOrgId))] } } }),
   ]);
   const roleIn = new Map(memberships.map((m) => [m.orgId, m.role as OrgRole]));
   const mspName = new Map(providers.map((o) => [o.id, o.name]));
   return customers
     .map((c) => {
-      const mine = whole
-        .filter((g) => g.customerOrgId === c.id)
-        .map((g) => ({
-          memberRole: roleIn.get(g.mspOrgId)!,
-          grant: g.role as GrantRole,
-          mspOrgId: g.mspOrgId,
-        }));
-      const role = bestMspRole(mine);
-      const from = mine.find((m) => effectiveMspRole(m.memberRole, m.grant) === role);
-      return role && from
+      const found = resolve(
+        grants
+          .filter((g) => g.customerOrgId === c.id)
+          .map((g) => ({
+            memberRole: roleIn.get(g.mspOrgId)!,
+            grant: g.role as GrantRole,
+            mspOrgId: g.mspOrgId,
+            siteIds: g.siteIds,
+          })),
+      );
+      return found
         ? {
             orgId: c.id,
             name: c.name,
-            role,
-            mspOrgId: from.mspOrgId,
-            mspName: mspName.get(from.mspOrgId) ?? 'Service provider',
+            role: found.role,
+            mspOrgId: found.from.mspOrgId,
+            mspName: mspName.get(found.from.mspOrgId) ?? 'Service provider',
+            sites: found.sites,
           }
         : null;
     })
@@ -287,16 +340,28 @@ export async function managedCustomers(db: MspDb, userId: string): Promise<Manag
 }
 
 /**
- * Where a new ticket goes: to the customer's service provider if it has an active one that takes
- * tickets (the oldest such connection), otherwise to the customer's own team.
+ * Where a new ticket goes: to a service provider that takes tickets and covers it, otherwise to the
+ * customer's own team. For a ticket about a room, a provider limited to that room's site is the
+ * most specific match and wins; otherwise the oldest whole-organisation connection.
  */
-export async function routeForNewTicket(db: MspDb, customerOrgId: string): Promise<string> {
-  const grants = await db.mspGrant.findMany({
-    where: { customerOrgId, status: 'active' },
-    orderBy: { createdAt: 'asc' },
-  });
-  const g = grants.find((x) => x.siteIds.length === 0 && grantTakesTickets(x.role as GrantRole));
-  return g ? mspRoute(g.mspOrgId) : 'org';
+export async function routeForNewTicket(
+  db: MspDb,
+  customerOrgId: string,
+  roomId?: string | null,
+): Promise<string> {
+  const grants = (
+    await db.mspGrant.findMany({
+      where: { customerOrgId, status: 'active' },
+      orderBy: { createdAt: 'asc' },
+    })
+  ).filter((g) => grantTakesTickets(g.role as GrantRole));
+  const room = roomId
+    ? await db.room.findFirst({ where: { id: roomId, orgId: customerOrgId } })
+    : null;
+  const specific = room ? grants.find((g) => g.siteIds.includes(room.siteId)) : undefined;
+  const whole = grants.find((g) => g.siteIds.length === 0);
+  const chosen = specific ?? whole;
+  return chosen ? mspRoute(chosen.mspOrgId) : 'org';
 }
 
 // ---- The provider's own view -----------------------------------------------------------------
@@ -306,6 +371,8 @@ export interface ManagedRow {
   orgId: string;
   name: string;
   role: string;
+  /** Number of sites the connection is limited to. 0: the whole organisation. */
+  limitedToSites: number;
   rooms: number;
   gateways: number;
   gatewaysOnline: number;
@@ -342,16 +409,25 @@ export async function managedOverview(
   const name = new Map(orgs.map((o) => [o.id, o.name]));
   return grants
     .map((g): ManagedRow => {
-      const gw = gateways.filter((x) => x.orgId === g.customerOrgId);
+      const covers = (siteId: string) => g.siteIds.length === 0 || g.siteIds.includes(siteId);
+      const ownRooms = rooms.filter((r) => r.orgId === g.customerOrgId && covers(r.siteId));
+      const gw = gateways.filter((x) => x.orgId === g.customerOrgId && covers(x.siteId));
+      const roomIds = new Set(ownRooms.map((r) => r.id));
+      const gwIds = new Set(gw.map((x) => x.id));
       return {
         grantId: g.id,
         orgId: g.customerOrgId,
         name: name.get(g.customerOrgId) ?? 'Unknown organisation',
         role: g.role,
-        rooms: rooms.filter((r) => r.orgId === g.customerOrgId && r.kind !== 'combined').length,
+        limitedToSites: g.siteIds.length,
+        rooms: ownRooms.filter((r) => r.kind !== 'combined').length,
         gateways: gw.length,
         gatewaysOnline: gw.filter((x) => effectiveStatus(x, now.getTime()) === 'online').length,
-        openIncidents: incidents.filter((i) => i.orgId === g.customerOrgId).length,
+        openIncidents: incidents.filter(
+          (i) =>
+            i.orgId === g.customerOrgId &&
+            (i.roomId ? roomIds.has(i.roomId) : i.gatewayId !== null && gwIds.has(i.gatewayId)),
+        ).length,
         ticketsWithUs: tickets.filter((t) => t.orgId === g.customerOrgId).length,
       };
     })

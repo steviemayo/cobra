@@ -6,23 +6,46 @@ import { deliverAlerts } from '../alerts';
 import { writeAudit } from '../audit';
 import { maybeSweep } from '../monitoring';
 import { orgOverview } from '../monitoring-queries';
+import { SITE_SCOPED, siteFilter, type SiteScope } from '../site-scope';
 import { featureProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
 const monitoringProcedure = featureProcedure('monitoring');
 
+/**
+ * For a site-limited provider: which incidents it may see, as a Prisma OR list (an incident is
+ * about a room at its sites, or about a gateway at its sites). null: no limit.
+ */
+async function incidentScope(orgId: string, scope: SiteScope) {
+  if (scope === null) return null;
+  const [rooms, gateways] = await Promise.all([
+    db.room.findMany({ where: { orgId, ...siteFilter(scope) }, select: { id: true } }),
+    db.gateway.findMany({ where: { orgId, ...siteFilter(scope) }, select: { id: true } }),
+  ]);
+  return [
+    { roomId: { in: rooms.map((r) => r.id) } },
+    { roomId: null, gatewayId: { in: gateways.map((g) => g.id) } },
+  ];
+}
+
 export const monitoringRouter = router({
   // Polled by the live status pages. Also sweeps for silent gateways, since nothing else runs then.
-  overview: monitoringProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
-    const jobs = await maybeSweep(db);
-    if (jobs.length) after(() => deliverAlerts(db, jobs));
-    return orgOverview(db, ctx.orgId);
-  }),
+  overview: monitoringProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId }))
+    .query(async ({ ctx }) => {
+      const jobs = await maybeSweep(db);
+      if (jobs.length) after(() => deliverAlerts(db, jobs));
+      return orgOverview(db, ctx.orgId, new Date(), ctx.siteScope);
+    }),
 
   room: monitoringProcedure
+    .meta(SITE_SCOPED)
     .input(z.object({ orgId, roomId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      const room = await db.room.findFirst({ where: { id: input.roomId, orgId: ctx.orgId } });
+      const room = await db.room.findFirst({
+        where: { id: input.roomId, orgId: ctx.orgId, ...siteFilter(ctx.siteScope) },
+      });
       if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
       const [devices, incidents, events] = await Promise.all([
         db.deviceStatus.findMany({
@@ -54,6 +77,7 @@ export const monitoringRouter = router({
     }),
 
   incidents: monitoringProcedure
+    .meta(SITE_SCOPED)
     .input(
       z.object({
         orgId,
@@ -62,8 +86,13 @@ export const monitoringRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
+      const scoped = await incidentScope(ctx.orgId, ctx.siteScope);
       const rows = await db.incident.findMany({
-        where: { orgId: ctx.orgId, ...(input.status === 'all' ? {} : { status: input.status }) },
+        where: {
+          orgId: ctx.orgId,
+          ...(input.status === 'all' ? {} : { status: input.status }),
+          ...(scoped ? { OR: scoped } : {}),
+        },
         orderBy: { openedAt: 'desc' },
         take: input.limit,
       });
@@ -92,11 +121,18 @@ export const monitoringRouter = router({
     }),
 
   acknowledge: monitoringProcedure
+    .meta(SITE_SCOPED)
     .input(z.object({ orgId, incidentId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev', 'support']);
+      const scoped = await incidentScope(ctx.orgId, ctx.siteScope);
       const { count } = await db.incident.updateMany({
-        where: { id: input.incidentId, orgId: ctx.orgId, acknowledgedAt: null },
+        where: {
+          id: input.incidentId,
+          orgId: ctx.orgId,
+          acknowledgedAt: null,
+          ...(scoped ? { OR: scoped } : {}),
+        },
         data: { acknowledgedBy: ctx.user.id, acknowledgedAt: new Date() },
       });
       if (count > 0)

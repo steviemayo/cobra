@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@kestrel/db';
 import { effectiveStatus } from './gateway-status';
 import { roomHealth, type Health } from './monitoring';
+import { incidentVisible, inScope, type SiteScope } from './site-scope';
 
 export type OverviewDb = Pick<
   PrismaClient,
@@ -37,14 +38,27 @@ export interface GatewayLive {
 }
 
 /** Everything the live status pages show, in five queries. Every query is scoped to the org. */
-export async function orgOverview(db: OverviewDb, orgId: string, now = new Date()) {
-  const [rooms, gateways, sites, devices, incidents] = await Promise.all([
+export async function orgOverview(
+  db: OverviewDb,
+  orgId: string,
+  now = new Date(),
+  /** null: the whole organisation. A list: only rooms, gateways and sites at these sites. */
+  scope: SiteScope = null,
+) {
+  const [allRooms, allGateways, allSites, allDevices, allIncidents] = await Promise.all([
     db.room.findMany({ where: { orgId }, orderBy: { name: 'asc' } }),
     db.gateway.findMany({ where: { orgId }, orderBy: { name: 'asc' } }),
     db.site.findMany({ where: { orgId } }),
     db.deviceStatus.findMany({ where: { orgId } }),
     db.incident.findMany({ where: { orgId, status: 'open' } }),
   ]);
+  const rooms = allRooms.filter((r) => inScope(scope, r.siteId));
+  const gateways = allGateways.filter((g) => inScope(scope, g.siteId));
+  const sites = allSites.filter((s) => inScope(scope, s.id));
+  const roomIds = new Set(rooms.map((r) => r.id));
+  const gatewayIds = new Set(gateways.map((g) => g.id));
+  const devices = allDevices.filter((d) => roomIds.has(d.roomId));
+  const incidents = allIncidents.filter((i) => incidentVisible(i, scope, roomIds, gatewayIds));
   const siteName = new Map(sites.map((s) => [s.id, s.name]));
   const gatewayById = new Map(
     gateways.map((g) => [g.id, { name: g.name, status: effectiveStatus(g, now.getTime()) }]),
