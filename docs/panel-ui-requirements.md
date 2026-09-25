@@ -20,20 +20,26 @@ Sources: reference screenshots from another vendor's panel (layout ideas only, n
 
 ## Layout
 
-Three fixed zones on every screen except Idle:
+**Room off:** minimal. Room name at top left, the start options (Present, Video call, Record...) centred in the middle of the screen, and nothing else: no nav, no bottom bar, no quick actions, no status.
 
-- **Top nav:** icon + label per function group, active item marked with the accent colour and an underline. Only groups the room supports appear. Typical: Sources (video), Audio, Cameras, Recorder, Room Linking, Room Controls
-- **Content area:** one function group at a time, big tiles, plain language
-- **Bottom bar (always visible):**
+**Room on:** three zones:
+
+- **Top bar:** room name at top left with what the room is doing in small print underneath (e.g. "Showing Laptop 1."; progress and problems show in their own colour). In the middle, the activities as one glass pill with a highlight that slides to the one being shown. At the right, the Power button. No Home button and no full-width status banner
+- **Content area:** the current activity: big tiles, plain language
+- **Bottom bar:**
   - left: clock and room name
-  - centre-left: volume (see below) and mute
+  - centre: volume (see below) and mute
   - right: up to 3 quick actions, supplied by drivers (see Quick actions), plus a Quick Actions sheet for the rest. Each shows an on/off state
+
+**Power:** a Power button in the top bar once the room is on. It opens "Power off system?" with Cancel and Power off. Cancel, Escape, or a touch outside go back. Room Off is not a nav item or tile.
+
+**Look:** gradient background tinted by the accent colour; translucent, blurred "glass" surfaces with a light edge and soft shadow. Blur is the main cost on weak panel hardware: check on real panels and add a lite mode if needed.
 
 ## Screens
 
 1. **Idle** ("Touch to begin"): logo, clock, room name, optional support text and QR. Touch runs the configured action (see Idle behaviour)
-2. **Home**: either Activity tiles or the last-used activity with the top nav, chosen per room (see Home screen mode)
-3. **Activity picker**: "What's happening today?" list, each with a short plain description. Set from the room type (Present from laptop, Video call, Record, Room off; devs can add, rename, hide)
+2. **Start** (room off): the activities as big centred tiles. Picking one turns the room on and goes to it. Activities come from the room type (Present from laptop, Video call, Record; devs can add, rename, hide)
+3. **Activity** (room on): shown under the top nav; switching is one tap on the nav
 4. **Function pages** (behind the top nav): sources, microphones, cameras (presets, pan/tilt, zoom, tracking), recorder, room linking (combine/split), room controls (lights, blinds, screen)
 5. **Quick Actions sheet**: extra one-tap actions the room enables
 6. **Tech view**: device-level controls and tests; PIN on the panel
@@ -48,16 +54,11 @@ Three fixed zones on every screen except Idle:
 - Level is shown as 0 to 100 (scaled from the device range, e.g. -40 dB to 0 dB). If the device gives no feedback, hide the number and show only a brief icon pulse
 - Mute button beside it with a clear on/off state. Default level 50 unless the room config overrides it
 
-## Home screen mode (new room setting)
-
-- `Activity tiles` (default): Home is the tile grid. Picking one runs it and moves to that activity's view
-- `Top nav`: Home is the last-used activity (or the room's default) with the top nav visible; the picker is one tap from a header button
-
 ## Idle behaviour (new room setting)
 
 "Touch to begin" runs one configurable action:
 
-- Wake the panel only (unlock, go to Home; room stays as it was) (proposed default)
+- Wake the panel only (room stays as it was) (default)
 - Run an activity (choose which, e.g. Present)
 - Run the room's On state
 
@@ -98,9 +99,9 @@ The current "Combining Rooms" implementation is not what is wanted. Do not build
 
 ## Changes this needs
 
-- **Model (`packages/model`):** room settings for home screen mode, idle action, idle timeout; org theme accent colour; new capabilities (e.g. `blank`) and driver-declared quick actions
+- **Model (`packages/model`):** room settings for idle action, idle timeout and support text; org theme accent colour; new capabilities (e.g. `blank`) and driver-declared quick actions
 - **Drivers (`packages/drivers`):** `quickActions` in the driver format, and blank/mute support in the built-in drivers that can do it (PJLink has AVMT for blank)
-- **Panel UI (`packages/panel-ui`):** new bottom bar, volume HUD, activity picker, idle screen, tokenised theme
+- **Panel UI (`packages/panel-ui`):** bottom bar, volume HUD, sliding-highlight nav, power dialog, idle screen, tokenised theme
 - **Portal:** room settings form for the above, org accent colour picker with contrast check (applies to portal and panel)
 - **Simulator:** shows the same panel, at 7" and 10" preview sizes
 
@@ -128,7 +129,10 @@ Slice 1 (built, on branch `feat/panel-ui-redesign`):
 - Theme: default blue accent, contrast checked; org accents are lightened/darkened until legible (`legibleAccent`)
 - Layout: top bar, content, always-visible bottom bar; sizes scale from panel width (em units)
 - Volume: no slider; - / mute / + buttons; HUD overlay on change; number hidden when no device gives feedback
-- Home screen mode (`tiles` or `nav`) and "Touch to begin" (wake / activity / room on, timeout, support text and QR) as room settings, editable in the room editor
+- "Touch to begin" (wake / activity / room on, timeout, support text and QR) as room settings, editable in the room editor
+- Minimal off state (start options centred, no bars); on state has a top nav pill with a sliding highlight, status in small print under the room name, and a Power button with a confirmation
+- Glass styling on a gradient background
+- The earlier "home screen mode" setting was removed: activities are always in the top nav while the room is on
 - Quick actions: bottom bar and sheet are built and tested; nothing supplies them yet
 
 Next slices:

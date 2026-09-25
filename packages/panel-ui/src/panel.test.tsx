@@ -1,11 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import {
-  PanelSettings,
-  type PanelClient,
-  type PanelIntent,
-  type PanelViewModel,
-} from '@kestrel/model';
+import { type PanelClient, type PanelIntent, type PanelViewModel } from '@kestrel/model';
 import { PanelApp } from './PanelApp';
 import { createTranslator, messageText } from './i18n';
 import { lightTheme, themeStyle } from './theme';
@@ -83,9 +78,6 @@ const on = (over: Partial<PanelViewModel> = {}): PanelViewModel => {
   return { ...vm, ...over };
 };
 
-const settings = (over: Record<string, unknown>) => PanelSettings.parse(over);
-const navMode = () => settings({ homeMode: 'nav' });
-
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
   cleanup();
@@ -102,7 +94,6 @@ describe('when the room is off', () => {
     expect(top.classList.contains('kp-top-quiet')).toBe(true);
     expect(top.querySelectorAll('button')).toHaveLength(0);
     expect(top.querySelector('.kp-pill')).toBeNull();
-    expect(screen.getByText('The room is off. Choose what you would like to do.')).toBeTruthy();
     expect(screen.getByText('What would you like to do?')).toBeTruthy();
     // No device jargon, and no volume until the room is on.
     expect(screen.queryByRole('group', { name: 'Volume' })).toBeNull();
@@ -148,18 +139,18 @@ describe('when the room is on', () => {
   });
 
   it('Room Off is not a nav item: it is the Power button', () => {
-    const { client } = fakeClient(on({ ui: navMode() }));
+    const { client } = fakeClient(on());
     render(<PanelApp client={client} />);
     expect(screen.queryByRole('button', { name: 'Room Off' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Power' })).toBeTruthy();
   });
 
   it('Record toggles: start, then stop', () => {
-    const { client, dispatched, set } = fakeClient(on({ ui: navMode() }));
+    const { client, dispatched, set } = fakeClient(on());
     render(<PanelApp client={client} />);
     fireEvent.click(screen.getByRole('button', { name: 'Record' }));
     expect(dispatched.at(-1)).toMatchObject({ type: 'activity.start', activityId: 'record' });
-    const recording = on({ ui: navMode() });
+    const recording = on();
     recording.activities[1]!.active = true;
     set(recording);
     expect(screen.getByRole('button', { name: /Stop recording/ })).toBeTruthy();

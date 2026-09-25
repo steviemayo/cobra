@@ -88,6 +88,32 @@
   min-width: 0;
   padding-bottom: 0.7em;
 }
+.kp-brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.kp-note {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  margin: 0.1em 0 0;
+  color: var(--kp-muted);
+  font-size: 0.72em;
+  line-height: 1.25;
+}
+.kp-note .kp-spinner {
+  width: 0.9em;
+  height: 0.9em;
+  border-width: 2px;
+}
+.kp-note-warn {
+  color: var(--kp-warn);
+}
+.kp-note-error {
+  color: var(--kp-error);
+  font-weight: 500;
+}
 .kp-brand h1 {
   margin: 0;
   font-size: 1.3em;
@@ -117,21 +143,9 @@
   gap: 0.8em;
   padding-bottom: 0.7em;
 }
-.kp-home svg {
-  font-size: 1.6em;
-}
 .kp-top-end .kp-btn,
 .kp-top-end .kp-power {
   min-height: 3.8em;
-}
-.kp-home {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5em;
-}
-.kp-home[aria-pressed='true'] {
-  border-color: var(--kp-accent);
-  color: var(--kp-accent);
 }
 .kp-phone-btn {
   display: grid;
@@ -148,55 +162,79 @@
   color: var(--kp-text);
 }
 
-/* Top navigation (room setting "nav"): icon over label, underline on the current one */
+/* Top navigation: one glass pill, with a highlight that slides to the item being shown */
 .kp-nav {
+  position: relative;
   display: flex;
   align-items: stretch;
-  justify-content: center;
-  gap: 0.3em;
+  justify-self: center;
+  gap: 0.2em;
+  max-width: 100%;
+  margin-bottom: 0.7em;
+  padding: 0.35em;
+  border: 1px solid var(--kp-glass-line);
+  border-radius: 1.3em;
+  background: var(--kp-glass);
   overflow-x: auto;
+  scrollbar-width: none;
+}
+.kp-nav-anchor {
+  position: absolute;
+  top: 0.35em;
+  bottom: 0.35em;
+  left: 0;
+  border: 1px solid color-mix(in srgb, var(--kp-accent) 55%, transparent);
+  border-radius: 1em;
+  background: color-mix(in srgb, var(--kp-accent) 24%, var(--kp-glass-strong));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    0 0 1.4em color-mix(in srgb, var(--kp-accent) 30%, transparent);
+  pointer-events: none;
+}
+.kp-nav-anchor[data-settled] {
+  transition:
+    transform 280ms cubic-bezier(0.3, 0.9, 0.3, 1),
+    width 280ms cubic-bezier(0.3, 0.9, 0.3, 1);
 }
 .kp-nav-item {
   position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 0.25em;
-  min-height: 4.4em;
+  min-height: 4em;
   min-width: 5.5em;
   padding: 0.4em 1.1em;
   border: 0;
-  border-bottom: 0.2em solid transparent;
-  border-radius: 0.6em 0.6em 0 0;
+  border-radius: 1em;
   background: transparent;
+  color: var(--kp-muted);
   font-size: 0.95em;
   white-space: nowrap;
-  transition:
-    background 160ms ease,
-    color 160ms ease;
+  transition: color 200ms ease;
 }
 .kp-nav-item svg {
-  font-size: 2.2em;
+  font-size: 2.1em;
   flex-shrink: 0;
 }
-.kp-nav-item:hover {
-  background: var(--kp-glass-strong);
-}
 .kp-nav-item:active {
-  background: var(--kp-line);
+  transform: scale(0.97);
 }
 .kp-nav-item[aria-pressed='true'] {
+  color: var(--kp-text);
+}
+.kp-nav-item[aria-pressed='true'] svg {
   color: var(--kp-accent);
-  border-bottom-color: var(--kp-accent);
 }
 .kp-nav-item[data-active]::after {
   content: '';
   position: absolute;
-  top: 0.5em;
-  right: 0.7em;
-  width: 0.6em;
-  height: 0.6em;
+  top: 0.45em;
+  right: 0.6em;
+  width: 0.5em;
+  height: 0.5em;
   border-radius: 50%;
   background: var(--kp-ok);
 }
@@ -220,6 +258,24 @@
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* Off: the options sit in the middle of the screen */
+.kp-main-centre {
+  align-items: center;
+  justify-content: center;
+}
+.kp-main-centre .kp-start {
+  width: 100%;
+  max-width: 62em;
+  text-align: center;
+}
+.kp-main-centre .kp-start h2 {
+  margin-bottom: 1.1em;
+}
+.kp-main-centre .kp-tiles {
+  grid-template-columns: repeat(auto-fit, minmax(13em, 17em));
+  justify-content: center;
 }
 
 /* Messages */
@@ -696,7 +752,7 @@
     .kp-sheet,
     .kp-hud,
     .kp-dialog,
-    .kp-nav-item
+    .kp-nav
   ) {
   -webkit-backdrop-filter: blur(var(--kp-blur)) saturate(150%);
   backdrop-filter: blur(var(--kp-blur)) saturate(150%);

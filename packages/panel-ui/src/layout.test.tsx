@@ -80,34 +80,79 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('home screen', () => {
-  it('tiles mode: no top nav, and Home opens the activity tiles', () => {
-    const { client, dispatched } = fakeClient(running());
+describe('navigation and the start screen', () => {
+  it('while the room is on, the activities are one row of top navigation with no Home button', () => {
+    const { client } = fakeClient(running());
     render(<PanelApp client={client} />);
-    expect(screen.queryByRole('navigation', { name: 'Activities' })).toBeNull();
-    expect(screen.queryByText('What’s happening today?')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Home' }));
-    expect(screen.getByText('What’s happening today?')).toBeTruthy();
-    // Room Off is not a tile: it is behind the Power button.
-    expect(screen.queryByRole('button', { name: 'Room Off' })).toBeNull();
-    // Picking the running activity just goes back to it, without restarting anything.
-    fireEvent.click(screen.getByRole('button', { name: /Present/ }));
-    expect(screen.queryByText('What’s happening today?')).toBeNull();
-    expect(dispatched).toEqual([]);
-  });
-
-  it('nav mode: top navigation, no Home button', () => {
-    const { client } = fakeClient(running({ ui: settings({ homeMode: 'nav' }) }));
-    render(<PanelApp client={client} />);
-    expect(screen.getByRole('navigation', { name: 'Activities' })).toBeTruthy();
+    const nav = screen.getByRole('navigation', { name: 'Activities' });
+    expect(nav.querySelectorAll('button')).toHaveLength(1); // Present (Room Off is the Power button)
     expect(screen.queryByRole('button', { name: 'Home' })).toBeNull();
   });
 
-  it('always shows the time and room name in the bottom bar', () => {
+  it('marks the current activity, and the highlight follows a change', () => {
+    const vm = running();
+    vm.activities.splice(1, 0, {
+      id: 'call',
+      name: 'Video call',
+      kind: 'video_call',
+      active: false,
+      busy: false,
+      overlay: false,
+      sources: [],
+    });
+    const { client, dispatched } = fakeClient(vm);
+    render(<PanelApp client={client} />);
+    const present = screen.getByRole('button', { name: 'Present' });
+    const call = screen.getByRole('button', { name: 'Video call' });
+    expect(present.getAttribute('aria-pressed')).toBe('true');
+    expect(call.getAttribute('aria-pressed')).toBe('false');
+    expect(document.querySelector('.kp-nav-anchor')).toBeTruthy();
+    fireEvent.click(call);
+    expect(dispatched.at(-1)).toMatchObject({ type: 'activity.start', activityId: 'call' });
+    expect(call.getAttribute('aria-pressed')).toBe('true');
+    expect(present.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('while the room is off: no nav, no bottom bar, options in the middle', () => {
     const { client } = fakeClient(base());
+    const view = render(<PanelApp client={client} />);
+    expect(screen.queryByRole('navigation')).toBeNull();
+    expect(view.container.querySelector('.kp-bar')).toBeNull();
+    expect(view.container.querySelector('.kp-quick')).toBeNull();
+    expect(view.container.querySelector('.kp-main')!.classList.contains('kp-main-centre')).toBe(
+      true,
+    );
+  });
+
+  it('shows the time and room name in the bottom bar while on', () => {
+    const { client } = fakeClient(running());
     render(<PanelApp client={client} />);
     expect(document.querySelector('.kp-bar .kp-clock-time')).toBeTruthy();
     expect(document.querySelector('.kp-bar .kp-clock-label')?.textContent).toBe('Boardroom');
+  });
+});
+
+describe('what the room is doing', () => {
+  it('is small print under the room name, not a banner', () => {
+    const { client } = fakeClient(running());
+    const view = render(<PanelApp client={client} />);
+    const note = view.container.querySelector('.kp-brand .kp-note')!;
+    expect(note.textContent).toBe('Showing Laptop 1.');
+    expect(view.container.querySelector('.kp-banner')).toBeNull();
+  });
+
+  it('is left out on the start screen, where it would only repeat the heading', () => {
+    const { client } = fakeClient(base());
+    const view = render(<PanelApp client={client} />);
+    expect(view.container.querySelector('.kp-note')).toBeNull();
+  });
+
+  it('still shows progress and problems, in their own colour', () => {
+    const vm = running({ status: 'fault' });
+    vm.message = { text: { key: 'fault_generic', params: {} }, tone: 'error' };
+    const { client } = fakeClient(vm);
+    const view = render(<PanelApp client={client} />);
+    expect(view.container.querySelector('.kp-note-error')).toBeTruthy();
   });
 });
 

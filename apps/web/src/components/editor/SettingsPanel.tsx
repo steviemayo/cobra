@@ -52,18 +52,6 @@ function PanelSection({ model, update }: PanelProps) {
           How the panel looks and behaves in this room.
         </p>
       </div>
-      <Label text="Home screen">
-        <select
-          className={inputCls}
-          value={panel.homeMode}
-          onChange={(e) =>
-            change((p) => void (p.homeMode = e.target.value as PanelSettings['homeMode']))
-          }
-        >
-          <option value="tiles">Activity tiles</option>
-          <option value="nav">Running activity with a top menu</option>
-        </select>
-      </Label>
       <Label text={'When someone touches "Touch to begin"'}>
         <select
           className={inputCls}

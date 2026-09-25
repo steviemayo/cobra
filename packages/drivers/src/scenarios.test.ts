@@ -605,10 +605,9 @@ describe('triggers', () => {
 describe('panel settings and volume feedback', () => {
   it('passes the room settings for the panel to show', () => {
     const m = meeting();
-    m.settings.panel.homeMode = 'nav';
     m.settings.panel.idle.timeoutMinutes = 5;
     setup(m);
-    expect(snap().ui).toMatchObject({ homeMode: 'nav', idle: { timeoutMinutes: 5 } });
+    expect(snap().ui).toMatchObject({ idle: { timeoutMinutes: 5 } });
   });
 
   it('room.on runs the On state when the room is off, and does nothing when it is on', async () => {

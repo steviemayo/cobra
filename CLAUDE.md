@@ -62,7 +62,7 @@
 - Panel auth: open on LAN v1, optional PIN, trusted-device bypass by verified IP (MAC only if same L2 subnet — see Risks)
 - Activities derived from Room Type + model; only offered if required capabilities exist in room
 - **Quick actions come from drivers** (PLANNED): a driver declares the quick actions its device supports (e.g. Blank Screen); the room shows one only if the room has the device and the driver supports it. Privacy Mute only if the room has conferencing mics and a conference system. Max 3 in the panel bottom bar, rest in a Quick Actions sheet
-- **Panel UI requirements draft:** `docs/panel-ui-requirements.md` (no slider for volume, per-room home screen mode and "touch to begin" action, per-org accent colour for portal and panel)
+- **Panel UI requirements draft:** `docs/panel-ui-requirements.md` (no slider for volume, per-room "touch to begin" action, top-nav activities, power button with confirmation, per-org accent colour for portal and panel)
 
 ## Triggers (all in v1)
 

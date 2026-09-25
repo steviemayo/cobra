@@ -49,8 +49,6 @@ export const en = {
   'combine.join': 'Combine with {rooms}',
   'combine.split': 'Split rooms',
   'combine.status': 'Combined with {rooms}',
-  'nav.home': 'Home',
-  'home.title': 'What’s happening today?',
   'idle.begin': 'Touch to begin',
   'idle.support': 'Need support?',
   'volume.muted': 'Muted',

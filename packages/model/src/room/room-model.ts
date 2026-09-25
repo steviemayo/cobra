@@ -23,12 +23,7 @@ export const IdleSettings = z.object({
 });
 export type IdleSettings = z.infer<typeof IdleSettings>;
 
-export const PanelHomeMode = z.enum(['tiles', 'nav']);
-export type PanelHomeMode = z.infer<typeof PanelHomeMode>;
-
 export const PanelSettings = z.object({
-  /** tiles: Home is a grid of activities. nav: Home is the running activity with a top nav. */
-  homeMode: PanelHomeMode.default('tiles'),
   idle: IdleSettings.default(() => IdleSettings.parse({})),
 });
 export type PanelSettings = z.infer<typeof PanelSettings>;

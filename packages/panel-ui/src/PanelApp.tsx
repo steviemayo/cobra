@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -158,6 +159,70 @@ function defaultSource(a: PanelActivity): string | undefined {
 
 const DEFAULT_UI = PanelSettings.parse({});
 
+/**
+ * The activities as one glass pill, with a highlight that slides to the one being shown. The
+ * highlight is placed by measuring the selected button, so it follows any label length or width.
+ */
+function ActivityNav({
+  label,
+  activities,
+  currentId,
+  onChoose,
+}: {
+  label: string;
+  activities: PanelActivity[];
+  currentId: string | undefined;
+  onChoose: (a: PanelActivity) => void;
+}) {
+  const nav = useRef<HTMLElement>(null);
+  const [anchor, setAnchor] = useState<{ left: number; width: number } | null>(null);
+  const [settled, setSettled] = useState(false);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = nav.current?.querySelector<HTMLElement>('[aria-pressed="true"]');
+      setAnchor(el ? { left: el.offsetLeft, width: el.offsetWidth } : null);
+    };
+    measure();
+    // Slide only after the first placement, so it does not fly in from the corner on load.
+    const frame = requestAnimationFrame(() => setSettled(true));
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    if (nav.current) observer?.observe(nav.current);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [currentId, activities.length]);
+
+  return (
+    <nav className="kp-nav" aria-label={label} ref={nav}>
+      {anchor && (
+        <span
+          className="kp-nav-anchor"
+          aria-hidden
+          data-settled={settled || undefined}
+          style={{ width: anchor.width, transform: `translateX(${anchor.left}px)` }}
+        />
+      )}
+      {activities.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          className="kp-nav-item"
+          aria-pressed={currentId === a.id}
+          data-active={a.active || undefined}
+          data-kind={a.kind}
+          onClick={() => onChoose(a)}
+        >
+          <Icon name={a.icon ?? a.kind} />
+          <span>{a.name}</span>
+          {a.busy && <span className="kp-spinner kp-spinner-sm" aria-hidden />}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 export interface PanelAppProps {
   client: PanelClient;
   theme?: PanelTheme;
@@ -190,7 +255,6 @@ export function PanelApp({
   const dispatch: PanelClient['dispatch'] = (intent) => client.dispatch(intent);
   const ui = vm.ui ?? DEFAULT_UI;
   const [picked, setPicked] = useState<string | null>(null);
-  const [home, setHome] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
 
   // "Touch to begin": shown on load and again after `timeoutMinutes` without a touch (0 = never).
@@ -230,11 +294,9 @@ export function PanelApp({
     vm.activities[0];
   const off = vm.status === 'off';
   const following = vm.combination?.role === 'secondary' && vm.combination.combined;
-  const navMode = ui.homeMode === 'nav';
 
   const choose = (a: PanelActivity) => {
     setPicked(a.id);
-    setHome(false);
     if (a.overlay) {
       dispatch(
         a.active
@@ -261,10 +323,21 @@ export function PanelApp({
     }
   };
 
-  const brand = (
+  // What the room is doing, in small print under its name. "Room is off" adds nothing to the
+  // start screen, so it is left out there.
+  const note = vm.message && !(off && vm.message.text.key === 'room_off') ? vm.message : null;
+  const brandFor = (withNote: boolean) => (
     <div className="kp-brand">
       {theme.logoUrl && <img className="kp-logo" src={theme.logoUrl} alt="" />}
-      <h1>{vm.roomName}</h1>
+      <div className="kp-brand-text">
+        <h1>{vm.roomName}</h1>
+        {withNote && note && (
+          <p className={`kp-note kp-note-${note.tone}`} role="status" aria-live="polite">
+            {note.tone === 'progress' && <span className="kp-spinner" aria-hidden />}
+            {messageText(t, note.text)}
+          </p>
+        )}
+      </div>
     </div>
   );
 
@@ -272,7 +345,7 @@ export function PanelApp({
     return (
       <div className={`kp-app ${className ?? ''}`} data-mode={theme.mode} style={themeStyle(theme)}>
         <div className="kp-frame">
-          <header className="kp-top">{brand}</header>
+          <header className="kp-top">{brandFor(false)}</header>
           <main className="kp-main">
             <StatusBanner vm={vm} t={t} />
           </main>
@@ -280,11 +353,9 @@ export function PanelApp({
       </div>
     );
 
-  const showTiles = off || (!navMode && home);
   // Room Off is not an activity to pick: it lives behind the Power button, with a confirmation.
   const tiles = vm.activities.filter((a) => a.kind !== 'room_off');
   const roomOff = vm.activities.find((a) => a.kind === 'room_off');
-  const showVolume = vm.volume.available && !off;
   const canPowerOff = !off && vm.status !== 'stopping' && Boolean(roomOff);
 
   return (
@@ -297,42 +368,20 @@ export function PanelApp({
     >
       <div className="kp-frame" inert={idle}>
         <header className={`kp-top ${off ? 'kp-top-quiet' : ''}`}>
-          {brand}
+          {brandFor(true)}
 
-          {navMode && !off ? (
-            <nav className="kp-nav" aria-label={t('nav.label')}>
-              {tiles.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  className="kp-nav-item"
-                  aria-pressed={current?.id === a.id}
-                  data-active={a.active || undefined}
-                  data-kind={a.kind}
-                  onClick={() => choose(a)}
-                >
-                  <Icon name={a.icon ?? a.kind} />
-                  <span>{a.name}</span>
-                  {a.busy && <span className="kp-spinner kp-spinner-sm" aria-hidden />}
-                </button>
-              ))}
-            </nav>
-          ) : (
+          {off ? (
             <span />
+          ) : (
+            <ActivityNav
+              label={t('nav.label')}
+              activities={tiles}
+              currentId={current?.id}
+              onChoose={choose}
+            />
           )}
 
           <div className="kp-top-end">
-            {!navMode && !off && (
-              <button
-                type="button"
-                className="kp-btn kp-home"
-                aria-pressed={home}
-                onClick={() => setHome((h) => !h)}
-              >
-                <Icon name="home" />
-                {t('nav.home')}
-              </button>
-            )}
             {headerAction}
             {canPowerOff && (
               <button type="button" className="kp-power" onClick={() => setConfirmOff(true)}>
@@ -343,22 +392,20 @@ export function PanelApp({
           </div>
         </header>
 
-        <main className="kp-main">
-          <StatusBanner vm={vm} t={t} />
+        <main className={`kp-main ${off ? 'kp-main-centre' : ''}`}>
           <CombineBar vm={vm} t={t} dispatch={dispatch} />
           <PromptBar vm={vm} t={t} dispatch={dispatch} />
           <WarningBar vm={vm} t={t} dispatch={dispatch} />
 
-          {showTiles ? (
+          {off ? (
             <section className="kp-start">
-              <h2>{off ? t('start.title') : t('home.title')}</h2>
+              <h2>{t('start.title')}</h2>
               <div className="kp-tiles">
                 {tiles.map((a) => (
                   <button
                     key={a.id}
                     type="button"
                     className="kp-tile kp-tile-big"
-                    aria-pressed={!off && a.active}
                     onClick={() => choose(a)}
                   >
                     <Icon name={a.icon ?? a.kind} />
@@ -418,14 +465,19 @@ export function PanelApp({
           )}
         </main>
 
-        <BottomBar vm={vm} t={t} dispatch={dispatch} showVolume={showVolume} />
-        {showVolume && (
-          <VolumeHud
-            level={vm.volume.level}
-            muted={vm.volume.muted}
-            feedback={vm.volume.feedback !== false}
-            t={t}
-          />
+        {/* Nothing to control while the room is off, so no bar. */}
+        {!off && (
+          <>
+            <BottomBar vm={vm} t={t} dispatch={dispatch} showVolume={vm.volume.available} />
+            {vm.volume.available && (
+              <VolumeHud
+                level={vm.volume.level}
+                muted={vm.volume.muted}
+                feedback={vm.volume.feedback !== false}
+                t={t}
+              />
+            )}
+          </>
         )}
       </div>
 
