@@ -3,6 +3,7 @@ import { after } from 'next/server';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { orgDetail, orgDirectory, recordStaffAudit, mfaRequired } from '../staff';
+import { fleetHealth } from '../fleet-health';
 import { notifyOrg } from '../ticket-notify';
 import {
   PRIORITIES,
@@ -78,6 +79,10 @@ export const staffRouter = router({
     mfaRequired: mfaRequired(),
     mfaSatisfied: ctx.mfaSatisfied,
   })),
+
+  // What is wrong across every customer right now. Read only, and operational metadata only
+  // (gateway and room names, counts), so it is not written to the audit trail on every refresh.
+  health: staffProcedure.query(() => fleetHealth(db)),
 
   // Tickets escalated to Kestrel, across every organisation.
   tickets: router({
