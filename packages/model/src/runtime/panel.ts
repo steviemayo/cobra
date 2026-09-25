@@ -109,13 +109,16 @@ export const PanelCombination = z.object({
 });
 export type PanelCombination = z.infer<typeof PanelCombination>;
 
-/** A movable wall as the Room linking menu shows it. */
+/** One way to link rooms, as the "Link rooms" menu shows it: one per movable wall. */
 export const PanelDivider = z.object({
   id: z.string().min(1).max(64),
   name: z.string(),
+  /** true: the rooms it joins are linked now. */
   open: z.boolean(),
-  /** The rooms this wall joins, by name. */
+  /** All the rooms this wall joins, by name. */
   rooms: z.array(z.string()),
+  /** The rooms linking would add to this panel's space ("Combine with ..."). Empty if all are in it already. */
+  adds: z.array(z.string()),
   /** false: opening it now would join rooms that are not all running here yet. Closing is always possible. */
   available: z.boolean(),
 });

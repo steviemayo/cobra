@@ -143,7 +143,14 @@ describe('room groups: the walls', () => {
     expect(r.vm(A).linking).toEqual({
       space: ['Room A'],
       dividers: [
-        { id: W1, name: 'Wall 1', open: false, rooms: ['Room A', 'Room B'], available: true },
+        {
+          id: W1,
+          name: 'Wall 1',
+          open: false,
+          rooms: ['Room A', 'Room B'],
+          adds: ['Room B'],
+          available: true,
+        },
       ],
     });
     // B touches both walls.

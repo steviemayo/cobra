@@ -15,6 +15,7 @@ import {
 } from '@kestrel/model';
 import { BottomBar } from './BottomBar';
 import { IdleScreen } from './IdleScreen';
+import { LinkingSheet } from './LinkingSheet';
 import { PowerDialog } from './PowerDialog';
 import { Icon } from './icons';
 import { messageText, type Translate } from './i18n';
@@ -256,6 +257,7 @@ export function PanelApp({
   const ui = vm.ui ?? DEFAULT_UI;
   const [picked, setPicked] = useState<string | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
+  const [linkingOpen, setLinkingOpen] = useState(false);
 
   // "Touch to begin": shown on load and again after `timeoutMinutes` without a touch (0 = never).
   const idleMs = ui.idle.timeoutMinutes * 60_000;
@@ -383,6 +385,16 @@ export function PanelApp({
 
           <div className="kp-top-end">
             {headerAction}
+            {vm.linking && (
+              <button
+                type="button"
+                className="kp-power kp-link"
+                onClick={() => setLinkingOpen(true)}
+              >
+                <Icon name="link" />
+                {t('linking.button')}
+              </button>
+            )}
             {canPowerOff && (
               <button type="button" className="kp-power" onClick={() => setConfirmOff(true)}>
                 <Icon name="power" />
@@ -480,6 +492,15 @@ export function PanelApp({
           </>
         )}
       </div>
+
+      {linkingOpen && vm.linking && !idle && (
+        <LinkingSheet
+          linking={vm.linking}
+          t={t}
+          dispatch={dispatch}
+          onClose={() => setLinkingOpen(false)}
+        />
+      )}
 
       {confirmOff && canPowerOff && roomOff && !idle && (
         <PowerDialog

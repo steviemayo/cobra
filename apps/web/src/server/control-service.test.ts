@@ -119,6 +119,21 @@ describe('portal side', () => {
     });
   });
 
+  it('queues a wall being opened or closed, and always audits it', async () => {
+    const w = world();
+    const wall = { type: 'divider.set', dividerId: 'w1', open: true };
+    expect((await send(w, wall, T0)).ok).toBe(true);
+    expect(w.controlIntent.rows[0]).toMatchObject({ gatewayId: GW, intent: wall });
+    expect(w.auditLog.rows).toHaveLength(1);
+    expect(w.auditLog.rows[0]).toMatchObject({
+      action: 'wall.set',
+      actorId: 'u1',
+      target: 'w1',
+      meta: { open: true },
+    });
+    expect((await send(w, { type: 'divider.set', dividerId: '', open: true }, T0)).ok).toBe(false);
+  });
+
   it('limits how fast intents can be queued', async () => {
     const w = world();
     for (let i = 0; i < MAX_INTENTS_PER_10S; i++) expect((await send(w, bump, T0)).ok).toBe(true);
