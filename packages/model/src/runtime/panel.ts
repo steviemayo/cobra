@@ -28,6 +28,12 @@ export const PanelIntent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('room.on') }),
   /** Join or split this room with the rooms it is set up to combine with. Only the primary room's panel offers it. */
   z.object({ type: z.literal('combine.set'), combined: z.boolean() }),
+  /** Open or close a movable wall from the Room linking menu. Ids come from `linking.dividers`. */
+  z.object({
+    type: z.literal('divider.set'),
+    dividerId: z.string().min(1).max(64),
+    open: z.boolean(),
+  }),
 ]);
 export type PanelIntent = z.infer<typeof PanelIntent>;
 
@@ -103,6 +109,27 @@ export const PanelCombination = z.object({
 });
 export type PanelCombination = z.infer<typeof PanelCombination>;
 
+/** A movable wall as the Room linking menu shows it. */
+export const PanelDivider = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string(),
+  open: z.boolean(),
+  /** The rooms this wall joins, by name. */
+  rooms: z.array(z.string()),
+  /** false: opening it now would join rooms that are not all running here yet. Closing is always possible. */
+  available: z.boolean(),
+});
+export type PanelDivider = z.infer<typeof PanelDivider>;
+
+/** Present only for rooms in a room group. */
+export const PanelLinking = z.object({
+  /** The walls that touch the space this panel controls, whether open or closed. */
+  dividers: z.array(PanelDivider),
+  /** The rooms joined into this space right now, by name. Just this room when nothing is open. */
+  space: z.array(z.string()),
+});
+export type PanelLinking = z.infer<typeof PanelLinking>;
+
 export const PanelViewModel = z.object({
   roomName: z.string(),
   status: RoomStatus,
@@ -126,6 +153,8 @@ export const PanelViewModel = z.object({
   warning: z.object({ text: PanelText, secondsLeft: z.number() }).nullable(),
   /** Present only for rooms that can be combined. */
   combination: PanelCombination.optional(),
+  /** Present only for rooms in a room group: the walls and what is joined. */
+  linking: PanelLinking.optional(),
 });
 export type PanelViewModel = z.infer<typeof PanelViewModel>;
 

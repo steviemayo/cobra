@@ -67,6 +67,9 @@ export class RoomHost {
   private readonly rooms = new Map<string, LoadedRoom>();
   private readonly reloadListeners = new Set<(roomId: string) => void>();
   private combineListener: ((roomId: string, combined: boolean) => void) | null = null;
+  private dividerListener: ((dividerId: string, open: boolean) => void) | null = null;
+  private resolveActive: (roomId: string) => string = (roomId) => roomId;
+  private readonly activeListeners = new Set<() => void>();
 
   constructor(
     private readonly mode: SimulateMode,
@@ -97,6 +100,33 @@ export class RoomHost {
     this.combineListener = listener;
   }
 
+  /** Set by the group coordinator: a panel asked to open or close a movable wall. */
+  onDividerRequest(listener: (dividerId: string, open: boolean) => void) {
+    this.dividerListener = listener;
+  }
+
+  /**
+   * The room that is really running a panel's room right now. Usually the room itself; while a wall
+   * is open it is the combined room that includes it. Set by the group coordinator.
+   */
+  setActiveResolver(resolve: (roomId: string) => string) {
+    this.resolveActive = resolve;
+  }
+
+  active(roomId: string): LoadedRoom | undefined {
+    return this.rooms.get(this.resolveActive(roomId)) ?? this.rooms.get(roomId);
+  }
+
+  /** Called when which room runs a panel's room may have changed, so panels can follow it. */
+  onActiveChange(listener: () => void): () => void {
+    this.activeListeners.add(listener);
+    return () => this.activeListeners.delete(listener);
+  }
+
+  notifyActiveChange() {
+    for (const l of this.activeListeners) l();
+  }
+
   /** Build a room and start connecting to its devices without replacing the one that is running. */
   stage(signed: SignedManifest): LoadedRoom {
     const { manifest } = signed;
@@ -106,6 +136,7 @@ export class RoomHost {
       roomName: manifest.roomName,
       bus: built.bus,
       onCombine: (combined) => this.combineListener?.(manifest.roomId, combined),
+      onDivider: (dividerId, open) => this.dividerListener?.(dividerId, open),
     });
     const scheduler = new TriggerScheduler(manifest.model, { fire: (t) => runtime.fire(t.run) });
     const room: LoadedRoom = {
