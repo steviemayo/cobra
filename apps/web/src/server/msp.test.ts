@@ -54,23 +54,42 @@ function world() {
   const mspGrant = withIds(table([]), 'g');
   const auditLog = withIds(table([]), 'a');
   const ticket = table([]);
+  const site = table([
+    { id: 'site-a', orgId: CUSTOMER, name: 'Head office' },
+    { id: 'site-b', orgId: CUSTOMER, name: 'Warehouse' },
+    { id: 'site-c', orgId: CUSTOMER2, name: 'Beta HQ' },
+  ]);
   const room = table([
-    { id: 'r1', orgId: CUSTOMER, kind: 'standard' },
-    { id: 'r2', orgId: CUSTOMER, kind: 'combined' },
-    { id: 'r3', orgId: CUSTOMER2, kind: 'standard' },
+    { id: 'r1', orgId: CUSTOMER, kind: 'standard', siteId: 'site-a' },
+    { id: 'r2', orgId: CUSTOMER, kind: 'combined', siteId: 'site-a' },
+    { id: 'r3', orgId: CUSTOMER2, kind: 'standard', siteId: 'site-c' },
+    { id: 'r4', orgId: CUSTOMER, kind: 'standard', siteId: 'site-b' },
   ]);
   const gateway = table([
-    { id: 'gw1', orgId: CUSTOMER, enrolledAt: NOW, lastSeenAt: NOW },
+    { id: 'gw1', orgId: CUSTOMER, siteId: 'site-a', enrolledAt: NOW, lastSeenAt: NOW },
     {
       id: 'gw2',
       orgId: CUSTOMER,
+      siteId: 'site-b',
       enrolledAt: NOW,
       lastSeenAt: new Date(NOW.getTime() - 3_600_000),
     },
   ]);
-  const incident = table([{ id: 'i1', orgId: CUSTOMER, status: 'open' }]);
+  const incident = table([
+    { id: 'i1', orgId: CUSTOMER, status: 'open', roomId: 'r1', gatewayId: null },
+  ]);
   return {
-    db: { org, member, mspGrant, auditLog, ticket, room, gateway, incident } as unknown as MspDb,
+    db: {
+      org,
+      member,
+      mspGrant,
+      auditLog,
+      ticket,
+      room,
+      gateway,
+      incident,
+      site,
+    } as unknown as MspDb,
     mspGrant,
     auditLog,
     ticket,
@@ -82,8 +101,15 @@ const connect = async (
   w: ReturnType<typeof world>,
   role: 'manage' | 'support' | 'view' = 'manage',
   customer = CUSTOMER,
+  siteIds: string[] = [],
 ) => {
-  const { id } = await inviteMsp(w.db, { customerOrgId: customer, mspOrgId: MSP, role, by: carol });
+  const { id } = await inviteMsp(w.db, {
+    customerOrgId: customer,
+    mspOrgId: MSP,
+    role,
+    siteIds,
+    by: carol,
+  });
   await respondToInvite(w.db, { grantId: id, mspOrgId: MSP, accept: true, by: ALICE, now: NOW });
   return id;
 };
@@ -217,12 +243,69 @@ describe('what a provider’s people can do in a customer', () => {
     expect((await mspAccess(w.db, ALICE, CUSTOMER))!.mspOrgId).toBe(MSP);
   });
 
-  it('site-limited grants give no access yet', async () => {
+  it('a whole-organisation grant has no site limit', async () => {
     const w = world();
     await connect(w);
-    w.mspGrant.rows[0]!.siteIds = ['site-1'];
-    expect(await mspAccess(w.db, ALICE, CUSTOMER)).toBeNull();
-    expect(await managedCustomers(w.db, ALICE)).toEqual([]);
+    expect((await mspAccess(w.db, ALICE, CUSTOMER))!.sites).toBeNull();
+  });
+
+  it('a site-limited grant gives access to those sites only', async () => {
+    const w = world();
+    await connect(w, 'support', CUSTOMER, ['site-a']);
+    expect(await mspAccess(w.db, ALICE, CUSTOMER)).toMatchObject({
+      role: 'support',
+      sites: ['site-a'],
+    });
+    expect((await managedCustomers(w.db, ALICE))[0]).toMatchObject({
+      name: 'Acme',
+      sites: ['site-a'],
+    });
+  });
+
+  it('several site-limited grants combine their sites, at the most cautious role', async () => {
+    const w = world();
+    await connect(w, 'manage', CUSTOMER, ['site-a']);
+    w.mspGrant.rows.push({
+      id: 'g-extra',
+      mspOrgId: MSP,
+      customerOrgId: CUSTOMER,
+      siteIds: ['site-b'],
+      role: 'view',
+      status: 'active',
+      createdAt: NOW,
+    });
+    const a = (await mspAccess(w.db, ALICE, CUSTOMER))!;
+    expect([...a.sites!].sort()).toEqual(['site-a', 'site-b']);
+    expect(a.role).toBe('customer_viewer'); // the lower of manage (dev) and view
+  });
+
+  it('a whole-organisation grant beats a site-limited one', async () => {
+    const w = world();
+    await connect(w, 'view', CUSTOMER, ['site-a']);
+    w.mspGrant.rows.push({
+      id: 'g-whole',
+      mspOrgId: MSP,
+      customerOrgId: CUSTOMER,
+      siteIds: [],
+      role: 'support',
+      status: 'active',
+      createdAt: NOW,
+    });
+    expect(await mspAccess(w.db, ALICE, CUSTOMER)).toMatchObject({ role: 'support', sites: null });
+  });
+
+  it('a site that is not the customer’s cannot be granted', async () => {
+    const w = world();
+    await expect(
+      inviteMsp(w.db, {
+        customerOrgId: CUSTOMER,
+        mspOrgId: MSP,
+        role: 'view',
+        siteIds: ['site-c'],
+        by: carol,
+      }),
+    ).rejects.toThrow(/not part of this organisation/);
+    expect(w.mspGrant.rows).toHaveLength(0);
   });
 
   it('lists the customers someone can work in, for the organisation switcher', async () => {
@@ -326,7 +409,7 @@ describe('the provider’s view', () => {
     const rows = await managedOverview(w.db, MSP, NOW);
     expect(rows.map((r) => r.name)).toEqual(['Acme', 'Beta']);
     expect(rows[0]).toMatchObject({
-      rooms: 1,
+      rooms: 2,
       gateways: 2,
       gatewaysOnline: 1,
       openIncidents: 1,
@@ -356,5 +439,53 @@ describe('the provider’s view', () => {
       t('not-mine', 'urgent', `msp:${MSP}`, CUSTOMER2),
     );
     expect((await mspTickets(w.db, MSP)).map((r) => r.id)).toEqual(['urgent', 'normal']);
+  });
+});
+
+describe('site-limited grants in tickets and overviews', () => {
+  it('a ticket about a room at its site goes to the site-limited provider; others do not', async () => {
+    const w = world();
+    await connect(w, 'support', CUSTOMER, ['site-a']);
+    expect(await routeForNewTicket(w.db, CUSTOMER, 'r1')).toBe(`msp:${MSP}`); // a site-a room
+    expect(await routeForNewTicket(w.db, CUSTOMER, 'r4')).toBe('org'); // a site-b room
+    expect(await routeForNewTicket(w.db, CUSTOMER)).toBe('org'); // no room: only a whole-org provider
+  });
+
+  it('a provider limited to a site beats a whole-organisation one for that site’s rooms', async () => {
+    const w = world();
+    await connect(w, 'support', CUSTOMER, []);
+    w.mspGrant.rows.push({
+      id: 'g-site',
+      mspOrgId: MSP2,
+      customerOrgId: CUSTOMER,
+      siteIds: ['site-a'],
+      role: 'support',
+      status: 'active',
+      createdAt: new Date(NOW.getTime() + 60_000),
+    });
+    expect(await routeForNewTicket(w.db, CUSTOMER, 'r1')).toBe(`msp:${MSP2}`);
+    expect(await routeForNewTicket(w.db, CUSTOMER, 'r4')).toBe(`msp:${MSP}`);
+  });
+
+  it('the overview counts only the sites the provider covers', async () => {
+    const w = world();
+    await connect(w, 'manage', CUSTOMER, ['site-b']);
+    const [row] = await managedOverview(w.db, MSP, NOW);
+    expect(row).toMatchObject({
+      limitedToSites: 1,
+      rooms: 1,
+      gateways: 1,
+      gatewaysOnline: 0,
+      openIncidents: 0,
+    });
+  });
+
+  it('a customer sees which sites a provider is limited to', async () => {
+    const w = world();
+    await connect(w, 'view', CUSTOMER, ['site-a', 'site-b']);
+    expect((await grantsForCustomer(w.db, CUSTOMER))[0]!.siteNames).toEqual([
+      'Head office',
+      'Warehouse',
+    ]);
   });
 });

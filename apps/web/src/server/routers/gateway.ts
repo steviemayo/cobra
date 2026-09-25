@@ -4,6 +4,7 @@ import { db } from '@kestrel/db';
 import { writeAudit } from '../audit';
 import { effectiveStatus, newEnrollToken } from '../gateway-service';
 import { latestVersions, updateStatus } from '../gateway-updates';
+import { SITE_SCOPED, siteFilter } from '../site-scope';
 import { orgProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
@@ -33,15 +34,22 @@ async function findGateway(ctxOrgId: string, id: string) {
 }
 
 export const gatewayRouter = router({
-  list: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
-    const gateways = await db.gateway.findMany({
-      where: { orgId: ctx.orgId },
-      orderBy: { createdAt: 'asc' },
-      select: safe,
-    });
-    const latest = latestVersions();
-    return gateways.map((g) => ({ ...g, status: effectiveStatus(g), update: updateStatus(g, latest) }));
-  }),
+  list: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId }))
+    .query(async ({ ctx }) => {
+      const gateways = await db.gateway.findMany({
+        where: { orgId: ctx.orgId, ...siteFilter(ctx.siteScope) },
+        orderBy: { createdAt: 'asc' },
+        select: safe,
+      });
+      const latest = latestVersions();
+      return gateways.map((g) => ({
+        ...g,
+        status: effectiveStatus(g),
+        update: updateStatus(g, latest),
+      }));
+    }),
 
   // The enrolment token is returned once, here. Only its hash is stored.
   create: orgProcedure

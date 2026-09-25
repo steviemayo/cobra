@@ -3,8 +3,9 @@ import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { after } from 'next/server';
 import { writeAudit } from '../audit';
-import { mspFromRoute } from '@kestrel/model';
+import { mspFromRoute, mspRoute } from '@kestrel/model';
 import { routeForNewTicket } from '../msp';
+import { SITE_SCOPED, roomIdsInScope, ticketVisible } from '../site-scope';
 import { notifyStaff } from '../ticket-notify';
 import { STAFF_LABEL, TicketError, escalateTicket, visibleComments } from '../tickets';
 import { orgProcedure, requireRole, router } from '../trpc';
@@ -31,15 +32,36 @@ const ticketId = z.string().uuid();
 const STATUSES = ['open', 'in_progress', 'resolved', 'closed'] as const;
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
 
-async function find(ctxOrgId: string, id: string) {
-  const t = await db.ticket.findFirst({ where: { id, orgId: ctxOrgId } });
+interface TicketCtx {
+  orgId: string;
+  siteScope: string[] | null;
+  viaMsp: { mspOrgId: string } | null;
+}
+
+/** The rooms a site-limited caller may see, or null for no limit. */
+async function scopedRooms(ctx: TicketCtx): Promise<Set<string> | null> {
+  if (ctx.siteScope === null) return null;
+  const rooms = await db.room.findMany({
+    where: { orgId: ctx.orgId },
+    select: { id: true, siteId: true },
+  });
+  return roomIdsInScope(rooms, ctx.siteScope);
+}
+
+/** A ticket by id, or not found. A site-limited provider only finds tickets it may see. */
+async function find(ctx: TicketCtx, id: string) {
+  const t = await db.ticket.findFirst({ where: { id, orgId: ctx.orgId } });
   if (!t) throw new TRPCError({ code: 'NOT_FOUND', message: 'Ticket not found' });
+  const roomIds = await scopedRooms(ctx);
+  if (roomIds && !ticketVisible(t, ctx.siteScope, roomIds, ctx.viaMsp?.mspOrgId ?? null))
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Ticket not found' });
   return t;
 }
 
 // Anyone in the org, customers included, can raise and follow a ticket. Only support staff work them.
 export const ticketRouter = router({
   list: orgProcedure
+    .meta(SITE_SCOPED)
     .input(
       z.object({
         orgId,
@@ -54,8 +76,18 @@ export const ticketRouter = router({
           : input.status === 'active'
             ? { status: { in: ['open', 'in_progress'] } }
             : { status: input.status };
+      const roomIds = await scopedRooms(ctx);
       const rows = await db.ticket.findMany({
-        where: { orgId: ctx.orgId, ...status },
+        where: {
+          orgId: ctx.orgId,
+          ...status,
+          // A site-limited provider sees tickets about rooms at its sites, and tickets sent to it.
+          ...(roomIds && ctx.viaMsp
+            ? {
+                OR: [{ routedTo: mspRoute(ctx.viaMsp.mspOrgId) }, { roomId: { in: [...roomIds] } }],
+              }
+            : {}),
+        },
         orderBy: { createdAt: 'desc' },
         take: input.limit,
       });
@@ -82,60 +114,64 @@ export const ticketRouter = router({
       }));
     }),
 
-  get: orgProcedure.input(z.object({ orgId, ticketId })).query(async ({ ctx, input }) => {
-    const t = await find(ctx.orgId, input.ticketId);
-    const comments = await db.ticketComment.findMany({
-      where: { orgId: ctx.orgId, ticketId: t.id },
-      orderBy: { createdAt: 'asc' },
-    });
-    const room = t.roomId
-      ? await db.room.findFirst({
-          where: { id: t.roomId, orgId: ctx.orgId },
-          select: { id: true, name: true },
-        })
-      : null;
-    const assignee = t.assignedTo
-      ? await db.member.findFirst({
-          where: { orgId: ctx.orgId, userId: t.assignedTo },
-          select: { email: true },
-        })
-      : null;
-    const providerId = mspFromRoute(t.routedTo);
-    const provider = providerId
-      ? await db.org.findFirst({ where: { id: providerId }, select: { name: true } })
-      : null;
-    return {
-      id: t.id,
-      title: t.title,
-      body: t.body,
-      providerName: provider?.name ?? null,
-      // Whether a service provider that takes tickets is connected, so the team can send it there.
-      providerAvailable: (await routeForNewTicket(db, ctx.orgId)) !== 'org',
-      status: t.status,
-      priority: t.priority,
-      room,
-      incidentId: t.incidentId,
-      routedTo: t.routedTo,
-      escalatedAt: t.escalatedAt,
-      createdByEmail: t.createdByEmail,
-      createdAt: t.createdAt,
-      closedAt: t.closedAt,
-      assignedTo: t.assignedTo,
-      assigneeEmail: assignee?.email ?? null,
-      // Internal notes are for the organisation's team and Kestrel staff, not its customer viewers.
-      // Kestrel staff are shown by role, never by name.
-      comments: visibleComments(comments, ctx.role).map((c) => ({
-        id: c.id,
-        body: c.body,
-        visibility: c.visibility,
-        fromStaff: c.fromStaff,
-        authorEmail: c.fromStaff ? STAFF_LABEL : (c.authorEmail ?? 'Former member'),
-        createdAt: c.createdAt,
-      })),
-    };
-  }),
+  get: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, ticketId }))
+    .query(async ({ ctx, input }) => {
+      const t = await find(ctx, input.ticketId);
+      const comments = await db.ticketComment.findMany({
+        where: { orgId: ctx.orgId, ticketId: t.id },
+        orderBy: { createdAt: 'asc' },
+      });
+      const room = t.roomId
+        ? await db.room.findFirst({
+            where: { id: t.roomId, orgId: ctx.orgId },
+            select: { id: true, name: true },
+          })
+        : null;
+      const assignee = t.assignedTo
+        ? await db.member.findFirst({
+            where: { orgId: ctx.orgId, userId: t.assignedTo },
+            select: { email: true },
+          })
+        : null;
+      const providerId = mspFromRoute(t.routedTo);
+      const provider = providerId
+        ? await db.org.findFirst({ where: { id: providerId }, select: { name: true } })
+        : null;
+      return {
+        id: t.id,
+        title: t.title,
+        body: t.body,
+        providerName: provider?.name ?? null,
+        // Whether a service provider that takes tickets is connected, so the team can send it there.
+        providerAvailable: (await routeForNewTicket(db, ctx.orgId, t.roomId)) !== 'org',
+        status: t.status,
+        priority: t.priority,
+        room,
+        incidentId: t.incidentId,
+        routedTo: t.routedTo,
+        escalatedAt: t.escalatedAt,
+        createdByEmail: t.createdByEmail,
+        createdAt: t.createdAt,
+        closedAt: t.closedAt,
+        assignedTo: t.assignedTo,
+        assigneeEmail: assignee?.email ?? null,
+        // Internal notes are for the organisation's team and Kestrel staff, not its customer viewers.
+        // Kestrel staff are shown by role, never by name.
+        comments: visibleComments(comments, ctx.role).map((c) => ({
+          id: c.id,
+          body: c.body,
+          visibility: c.visibility,
+          fromStaff: c.fromStaff,
+          authorEmail: c.fromStaff ? STAFF_LABEL : (c.authorEmail ?? 'Former member'),
+          createdAt: c.createdAt,
+        })),
+      };
+    }),
 
   create: orgProcedure
+    .meta(SITE_SCOPED)
     .input(
       z.object({
         orgId,
@@ -149,17 +185,30 @@ export const ticketRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Related ids must belong to this org: a ticket can't point at someone else's room.
+      // Related ids must belong to this org: a ticket can't point at someone else's room. A
+      // site-limited provider can only raise tickets about rooms at its sites.
+      const scopedRoomIds = await scopedRooms(ctx);
+      if (scopedRoomIds && (!input.roomId || !scopedRoomIds.has(input.roomId)))
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Choose a room at one of the sites you look after.',
+        });
       if (
         input.roomId &&
         !(await db.room.findFirst({ where: { id: input.roomId, orgId: ctx.orgId } }))
       )
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
-      if (
-        input.incidentId &&
-        !(await db.incident.findFirst({ where: { id: input.incidentId, orgId: ctx.orgId } }))
-      )
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Incident not found' });
+      if (input.incidentId) {
+        const incident = await db.incident.findFirst({
+          where: { id: input.incidentId, orgId: ctx.orgId },
+        });
+        // A site-limited provider may only link incidents at its sites.
+        if (
+          !incident ||
+          (scopedRoomIds && !(incident.roomId && scopedRoomIds.has(incident.roomId)))
+        )
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Incident not found' });
+      }
       // Customers can't set urgency above normal, so the urgent queue stays meaningful.
       const priority =
         ctx.role === 'customer_viewer' && input.priority !== 'low' ? 'normal' : input.priority;
@@ -175,7 +224,7 @@ export const ticketRouter = router({
           createdByEmail: ctx.user.email?.toLowerCase() ?? null,
           ...(input.toKestrel
             ? { routedTo: 'kestrel', escalatedAt: new Date(), escalatedBy: ctx.user.id }
-            : { routedTo: await routeForNewTicket(db, ctx.orgId) }),
+            : { routedTo: await routeForNewTicket(db, ctx.orgId, input.roomId) }),
         },
       });
       await writeAudit({
@@ -190,6 +239,7 @@ export const ticketRouter = router({
     }),
 
   comment: orgProcedure
+    .meta(SITE_SCOPED)
     .input(
       z.object({
         orgId,
@@ -200,7 +250,7 @@ export const ticketRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const t = await find(ctx.orgId, input.ticketId);
+      const t = await find(ctx, input.ticketId);
       if (input.internal) requireRole(ctx.role, [...TEAM]);
       await db.ticketComment.create({
         data: {
@@ -224,10 +274,11 @@ export const ticketRouter = router({
 
   // Move a ticket between the organisation's own team and its service provider.
   route: orgProcedure
+    .meta(SITE_SCOPED)
     .input(z.object({ orgId, ticketId, to: z.enum(['org', 'provider']) }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, [...TEAM]);
-      const t = await find(ctx.orgId, input.ticketId);
+      const t = await find(ctx, input.ticketId);
       if (t.routedTo === 'kestrel')
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -235,7 +286,7 @@ export const ticketRouter = router({
         });
       let routedTo = 'org';
       if (input.to === 'provider') {
-        routedTo = await routeForNewTicket(db, ctx.orgId);
+        routedTo = await routeForNewTicket(db, ctx.orgId, t.roomId);
         if (routedTo === 'org')
           throw new TRPCError({
             code: 'BAD_REQUEST',
@@ -255,9 +306,11 @@ export const ticketRouter = router({
 
   // The organisation's team sends a ticket to Kestrel support.
   escalate: orgProcedure
+    .meta(SITE_SCOPED)
     .input(z.object({ orgId, ticketId, note: z.string().trim().max(1000).optional() }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, [...TEAM]);
+      await find(ctx, input.ticketId);
       try {
         await escalateTicket(db, {
           orgId: ctx.orgId,
@@ -275,6 +328,7 @@ export const ticketRouter = router({
     }),
 
   update: orgProcedure
+    .meta(SITE_SCOPED)
     .input(
       z.object({
         orgId,
@@ -285,7 +339,7 @@ export const ticketRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const t = await find(ctx.orgId, input.ticketId);
+      const t = await find(ctx, input.ticketId);
       // A customer may close their own ticket; everything else is for staff.
       const ownClose =
         ctx.role === 'customer_viewer' &&

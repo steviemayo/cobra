@@ -34,6 +34,8 @@ export default async function OrgLayout({
     role: (typeof memberships)[number]['role'];
     kind: string;
     via?: string;
+    /** Limited to specific sites (a site-limited service provider). */
+    scoped?: boolean;
   }[] = memberships.map((m) => ({
     id: m.org.id,
     name: m.org.name,
@@ -43,7 +45,14 @@ export default async function OrgLayout({
   // Customers this person looks after through a service provider they belong to.
   for (const c of await managedCustomers(db, user.id))
     if (!orgs.some((o) => o.id === c.orgId))
-      orgs.push({ id: c.orgId, name: c.name, role: c.role, kind: 'customer', via: c.mspName });
+      orgs.push({
+        id: c.orgId,
+        name: c.name,
+        role: c.role,
+        kind: 'customer',
+        via: c.mspName,
+        scoped: c.sites !== null,
+      });
   let viewAs: { sessionId: string; mode: 'read' | 'act'; endsAt: string } | null = null;
 
   if (!orgs.some((o) => o.id === orgId)) {

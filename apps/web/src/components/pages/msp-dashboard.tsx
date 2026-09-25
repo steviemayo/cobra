@@ -103,7 +103,10 @@ export function MspDashboard() {
                 <div>
                   <div className="font-medium">{i.customerName}</div>
                   <div className="text-xs text-muted-foreground">
-                    Wants you to have {ROLE_WORDS[i.role]?.toLowerCase()} access
+                    Wants you to have {ROLE_WORDS[i.role]?.toLowerCase()} access to{' '}
+                    {i.siteCount === 0
+                      ? 'the whole organisation'
+                      : `${i.siteCount} ${i.siteCount === 1 ? 'site' : 'sites'}`}
                     {i.invitedByEmail ? ` · invited by ${i.invitedByEmail}` : ''} ·{' '}
                     {timeAgo(i.createdAt)}
                   </div>
@@ -163,7 +166,11 @@ export function MspDashboard() {
                       {c.name}
                     </Link>
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground">{ROLE_WORDS[c.role]}</td>
+                  <td className="px-3 py-2 text-muted-foreground">
+                    {ROLE_WORDS[c.role]}
+                    {c.limitedToSites > 0 &&
+                      ` · ${c.limitedToSites} ${c.limitedToSites === 1 ? 'site' : 'sites'}`}
+                  </td>
                   <td className="px-3 py-2 text-right tabular-nums">{c.rooms}</td>
                   <td
                     className={cn(

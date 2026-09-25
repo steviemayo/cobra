@@ -11,6 +11,8 @@ export interface OrgSummary {
   kind?: string;
   /** Set when you reach this organisation through a service provider: its name. */
   via?: string;
+  /** You reach this organisation through a provider connection limited to specific sites. */
+  scoped?: boolean;
 }
 
 interface OrgContextValue {

@@ -43,6 +43,8 @@ export const mspRouter = router({
         // The provider's code: its organisation id.
         code: z.string().trim().min(10).max(60),
         role: GrantRole,
+        // Only these sites. Empty: the whole organisation.
+        siteIds: z.array(z.string().uuid()).max(100).default([]),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -52,6 +54,7 @@ export const mspRouter = router({
           customerOrgId: ctx.orgId,
           mspOrgId: input.code,
           role: input.role,
+          siteIds: input.siteIds,
           by: { userId: ctx.user.id, email: ctx.user.email?.toLowerCase() ?? null },
         });
       } catch (e) {

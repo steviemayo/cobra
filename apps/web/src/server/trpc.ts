@@ -16,9 +16,14 @@ export async function createContext() {
   return { user: data.user };
 }
 
-const t = initTRPC.context<Awaited<ReturnType<typeof createContext>>>().create({
-  transformer: superjson,
-});
+// `siteScoped` marks a procedure that filters by the caller's site scope (see site-scope.ts).
+// Site-limited service providers are refused everywhere else.
+const t = initTRPC
+  .context<Awaited<ReturnType<typeof createContext>>>()
+  .meta<{ siteScoped?: boolean }>()
+  .create({
+    transformer: superjson,
+  });
 
 export const router = t.router;
 export const publicProcedure = t.procedure;
@@ -32,53 +37,91 @@ const orgInput = z.object({ orgId: z.string().uuid() });
 
 // Every org-scoped procedure goes through here: verifies membership, exposes orgId + role.
 // Prisma bypasses Supabase RLS, so all queries MUST filter by ctx.orgId.
-export const orgProcedure = authedProcedure.use(async ({ ctx, next, getRawInput, type, path }) => {
-  const parsed = orgInput.safeParse(await getRawInput());
-  if (!parsed.success) throw new TRPCError({ code: 'BAD_REQUEST', message: 'orgId required' });
-  const member = await db.member.findUnique({
-    where: { orgId_userId: { orgId: parsed.data.orgId, userId: ctx.user.id } },
-  });
-  if (member) {
-    const viewAs: ViewAs | null = null;
-    const viaMsp: ViaMsp | null = null;
-    return next({ ctx: { orgId: member.orgId, role: member.role as OrgRole, viewAs, viaMsp } });
-  }
-
-  // Not a member. A service provider the organisation has connected to (and the person belongs
-  // to) gives them a role here: the lower of their own role and what the connection allows,
-  // never owner.
-  const msp = await mspAccess(db, ctx.user.id, parsed.data.orgId);
-  if (msp) {
-    const viewAs: ViewAs | null = null;
-    const viaMsp: ViaMsp = { mspOrgId: msp.mspOrgId, mspName: msp.mspName };
-    return next({ ctx: { orgId: parsed.data.orgId, role: msp.role, viewAs, viaMsp } });
-  }
-
-  // Not a member. Kestrel staff with an open support session (and a second factor) may work here,
-  // at support level. A read session cannot change anything; an act session can, and every change
-  // is logged against the session.
-  const staff = await findStaff(db, ctx.user.id);
-  const session = staff ? await activeSession(db, ctx.user.id, parsed.data.orgId) : null;
-  if (!staff || !session) throw new TRPCError({ code: 'FORBIDDEN' });
-  if (mfaRequired()) {
-    const supabase = await createSupabaseServer();
-    const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-    if (data?.currentLevel !== 'aal2')
-      throw new TRPCError({ code: 'FORBIDDEN', message: 'MFA_REQUIRED' });
-  }
-  const gate = sessionGate(session.mode, type);
-  if (gate === 'deny') {
-    await logSessionAction(db, session, 'session.blocked', path);
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: 'This is a view-only support session. Start an "act" session to make changes.',
+export const orgProcedure = authedProcedure.use(
+  async ({ ctx, next, getRawInput, type, path, meta }) => {
+    const parsed = orgInput.safeParse(await getRawInput());
+    if (!parsed.success) throw new TRPCError({ code: 'BAD_REQUEST', message: 'orgId required' });
+    const member = await db.member.findUnique({
+      where: { orgId_userId: { orgId: parsed.data.orgId, userId: ctx.user.id } },
     });
-  }
-  if (gate === 'log') await logSessionAction(db, session, 'session.act', path);
-  const viewAs: ViewAs = { sessionId: session.id, mode: session.mode, endsAt: session.endsAt };
-  const viaMsp: ViaMsp | null = null;
-  return next({ ctx: { orgId: parsed.data.orgId, role: 'support' as OrgRole, viewAs, viaMsp } });
-});
+    if (member) {
+      return next({
+        ctx: orgCtx({
+          orgId: member.orgId,
+          role: member.role as OrgRole,
+          viewAs: null,
+          viaMsp: null,
+          siteScope: null,
+        }),
+      });
+    }
+
+    // Not a member. A service provider the organisation has connected to (and the person belongs
+    // to) gives them a role here: the lower of their own role and what the connection allows,
+    // never owner.
+    const msp = await mspAccess(db, ctx.user.id, parsed.data.orgId);
+    if (msp) {
+      // Limited to some sites: only procedures that filter by the scope may run (default deny).
+      if (msp.sites !== null && !meta?.siteScoped)
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            'Your access is limited to specific sites, and this area is not available with it.',
+        });
+      return next({
+        ctx: orgCtx({
+          orgId: parsed.data.orgId,
+          role: msp.role,
+          viewAs: null,
+          viaMsp: { mspOrgId: msp.mspOrgId, mspName: msp.mspName },
+          siteScope: msp.sites,
+        }),
+      });
+    }
+
+    // Not a member. Kestrel staff with an open support session (and a second factor) may work here,
+    // at support level. A read session cannot change anything; an act session can, and every change
+    // is logged against the session.
+    const staff = await findStaff(db, ctx.user.id);
+    const session = staff ? await activeSession(db, ctx.user.id, parsed.data.orgId) : null;
+    if (!staff || !session) throw new TRPCError({ code: 'FORBIDDEN' });
+    if (mfaRequired()) {
+      const supabase = await createSupabaseServer();
+      const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (data?.currentLevel !== 'aal2')
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'MFA_REQUIRED' });
+    }
+    const gate = sessionGate(session.mode, type);
+    if (gate === 'deny') {
+      await logSessionAction(db, session, 'session.blocked', path);
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'This is a view-only support session. Start an "act" session to make changes.',
+      });
+    }
+    if (gate === 'log') await logSessionAction(db, session, 'session.act', path);
+    return next({
+      ctx: orgCtx({
+        orgId: parsed.data.orgId,
+        role: 'support',
+        viewAs: { sessionId: session.id, mode: session.mode, endsAt: session.endsAt },
+        viaMsp: null,
+        siteScope: null,
+      }),
+    });
+  },
+);
+
+/** What every org procedure knows about who is calling and how they got in. */
+interface OrgCtx {
+  orgId: string;
+  role: OrgRole;
+  viewAs: ViewAs | null;
+  viaMsp: ViaMsp | null;
+  /** null: the whole organisation. A list: only these sites (a site-limited service provider). */
+  siteScope: string[] | null;
+}
+const orgCtx = (c: OrgCtx): OrgCtx => c;
 
 /** Set when the caller reaches the organisation through a service provider they belong to. */
 export interface ViaMsp {

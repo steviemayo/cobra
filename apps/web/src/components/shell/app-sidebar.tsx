@@ -181,6 +181,8 @@ export function AppSidebar() {
   const { orgId, org, canEdit, canSeeTeam, canSupport, isOwner } = useOrg();
   // A service provider has customers rather than an estate of its own.
   const isMsp = org.kind === 'msp';
+  // A provider limited to some sites only gets the site-aware areas.
+  const scoped = !!org.scoped;
   const { openNewSite } = useDialogs();
   const base = orgPath(orgId);
   const isActive = useActive();
@@ -207,7 +209,11 @@ export function AppSidebar() {
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
-                <NavItem href={base} icon={LayoutDashboard} label="Overview" exact />
+                {scoped ? (
+                  <NavItem href={`${base}/rooms`} icon={DoorOpen} label="Rooms" exact />
+                ) : (
+                  <NavItem href={base} icon={LayoutDashboard} label="Overview" exact />
+                )}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -234,22 +240,22 @@ export function AppSidebar() {
                 <SidebarMenu>
                   {canSupport && <NavItem href={`${base}/sites`} icon={Building2} label="Sites" />}
                   <NavItem href={`${base}/rooms`} icon={DoorOpen} label="Rooms" />
-                  {canEdit && (
+                  {canEdit && !scoped && (
                     <NavItem href={`${base}/templates`} icon={LayoutTemplate} label="Templates" />
                   )}
-                  {canEdit && (
+                  {canEdit && !scoped && (
                     <NavItem href={`${base}/marketplace`} icon={Store} label="Marketplace" />
                   )}
-                  {canEdit && (
+                  {canEdit && !scoped && (
                     <NavItem href={`${base}/drivers`} icon={Cpu} label="Custom drivers" />
                   )}
                   {canSupport && (
                     <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />
                   )}
-                  {canSupport && (
+                  {canSupport && !scoped && (
                     <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />
                   )}
-                  {canSupport && (
+                  {canSupport && !scoped && (
                     <NavItem href={`${base}/groups`} icon={Link2} label="Room groups" />
                   )}
                   <NavItem href={`${base}/monitoring`} icon={Activity} label="Monitoring" />
@@ -263,7 +269,7 @@ export function AppSidebar() {
           </>
         )}
 
-        {canSeeTeam && (
+        {canSeeTeam && !scoped && (
           <SidebarGroup>
             <SidebarGroupLabel>Organisation</SidebarGroupLabel>
             <SidebarGroupContent>
