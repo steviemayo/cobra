@@ -115,7 +115,7 @@ Slices 1 and 2 give the most value fastest and touch the least. Slice 5 changes 
 
 1. **Customers can block staff view-as** for their org. Staff can still start a session when the customer raises a ticket and links it (the ticket is the customer's consent). The block is a setting on the org, owner only. (Proposed default accepted; unanswered in review, confirm when building.)
 2. **White label for MSPs**: later, not in the first versions
-3. **Audit retention and export**: yes. Needs a retention policy per org (default 12 months, staff can extend) and a CSV/JSON export of the activity log for owners and staff
+3. **Audit retention and export**: yes. Needs a retention policy per org (default 12 months, staff can extend) and a CSV/JSON export of the activity log for owners and staff. **Built** (step E; see `docs/decisions.md`, E-1 to E-9)
 4. **Notifications**: email alongside Teams and webhook channels, so MSPs and staff are notified before the Resend domain exists. The existing alert channels are reused for ticket events
 5. **SLAs and priorities**: after the first customers. The `priority` field stays; no timers yet
 6. **Marketplace review moves into the staff portal in slice 1**, and `KESTREL_ADMIN_EMAILS` is retired after the first staff user is seeded
@@ -125,5 +125,5 @@ Slices 1 and 2 give the most value fastest and touch the least. Slice 5 changes 
 ## Still open
 
 - Where the customer's "block staff access" setting lives in the org settings page, and its wording
-- Retention default (12 months is a proposal) and whether some events (billing, access changes) are kept longer
+- ~~Retention default and whether some events are kept longer~~ decided while building: 12 months; billing and access-change events, and the staff trail, are kept 7 years (`docs/decisions.md`, E-1 to E-4)
 - Whether an MSP can invite its own staff into a customer org directly, or only through the grant (proposed: only through the grant)
