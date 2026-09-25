@@ -37,28 +37,33 @@ Custom drivers need the **Pro** plan. Kestrel ships built-in drivers for PJLink,
 - **`id`**: lowercase letters, numbers and dashes. Devices refer to it as `custom:<id>`.
 - **`transport`**: `tcp` (text lines; set `keepOpen` to hold one connection and hear the device's unsolicited messages) or `http` (`https`, `headers`, `port`).
 - **`settings`**: what someone fills in per device (`host` and `port` always exist). Types: `string`, `number`, `boolean`, `secret`. Use them in templates as `{setting.password}`.
-- **`commands`**: any of `power.on`, `power.off`, `mute.on`, `mute.off`, `volume`, `select_input`, `route`, `preset`, `camera_preset`, `scene`, `record.on`, `record.off`, or `command.<name>` for anything device specific.
+- **`commands`**: any of `power.on`, `power.off`, `mute.on`, `mute.off`, `volume`, `select_input`, `route`, `preset`, `camera_preset`, `scene`, `record.on`, `record.off`, `blank.on`, `blank.off`, or `command.<name>` for anything device specific.
   - TCP action: `send` (and optionally `expect`, a regular expression the reply must match).
   - HTTP action: `method`, `path` (starts with `/`), `body`, `expect`.
 - **Placeholders**: `volume` gets `{level}`; `select_input` gets `{input}` `{inputNumber}`; `route` gets `{input}` `{output}` `{inputNumber}` `{outputNumber}`; `preset`, `camera_preset` and `scene` get `{name}`. A port id such as `in2` gives `inputNumber` 2.
 - **`volumeScale`**: maps the room's 0-100 to the device's range, and back when reading feedback.
-- **`feedback`**: `poll` actions run on a timer; `patterns` are regular expressions tried on every line (TCP) or reply body (HTTP). `set` is one of `power`, `muted`, `volume`, `input`, `preset`, `online`; `value` is a literal (`on`, `off`, `true`, `false`) or `$1` for the first group.
+- **`feedback`**: `poll` actions run on a timer; `patterns` are regular expressions tried on every line (TCP) or reply body (HTTP). `set` is one of `power`, `muted`, `volume`, `input`, `preset`, `blanked`, `online`; `value` is a literal (`on`, `off`, `true`, `false`) or `$1` for the first group.
 
-## Planned: quick actions (not built yet)
+## Quick actions
 
-Drivers will declare which panel quick actions their device supports, so the panel only offers what the room can actually do (for example Blank Screen only when a display's driver supports blank).
+A driver declares which panel quick actions its device supports, so the panel only offers what the room can actually do.
 
 ```json
-"quickActions": [
-  { "id": "display.blank", "label": "Blank Screen", "icon": "blank", "kind": "toggle",
-    "on": "command.blank.on", "off": "command.blank.off", "stateFrom": "blanked" }
-]
+"quickActions": ["display.blank"],
+"commands": {
+  "blank.on":  { "send": "BLANK 1" },
+  "blank.off": { "send": "BLANK 0" }
+},
+"feedback": { "patterns": [{ "match": "^BLANK=(1|0)$", "set": "blanked", "value": "$1" }] }
 ```
 
-- `id` is a standard id (`display.blank`, `mics.privacy_mute`, ...) so the same action on several devices becomes one button acting on all of them
-- `kind` is `toggle` (state from feedback) or `button` (one shot)
-- `stateFrom` is a new feedback field (`blanked`), added alongside `power`, `muted`, `volume`, `input`, `preset`, `online`
-- Whether an action shows also depends on the room: Privacy Mute needs conferencing microphones and a conference system in the model
+- `quickActions` is a list of standard ids. Labels and icons are fixed by Kestrel (and translated by the panel), so the same action on several devices becomes one button acting on all of them
+- Standard ids and the commands each needs (checked when the driver is saved):
+  - `display.blank` (Blank Screen): `blank.on`, `blank.off`. Feedback field `blanked` shows the button's state
+  - `mics.privacy_mute` (Privacy Mute): `mute.on`, `mute.off`. Uses `muted` feedback. For a conference system driver
+- A driver with no `quickActions` (all existing ones) offers none. The field is left out of the driver rather than defaulted, so existing signed releases keep their hash
+- Whether an action shows also depends on the room: Blank Screen needs a display device whose driver declares it; Privacy Mute needs conferencing microphones and a conference system whose driver declares it
+- Built in: PJLink declares `display.blank` (AVMT picture mute; a projector that does not know AVMT stays usable and refuses the blank in plain words); the Cisco RoomOS library driver declares `mics.privacy_mute`
 - Requirements: `docs/panel-ui-requirements.md`
 
 ## Safety

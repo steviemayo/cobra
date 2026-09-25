@@ -3,6 +3,7 @@ import {
   type Device,
   type DeviceCommand,
   type DeviceState,
+  type QuickActionId,
 } from '@kestrel/model';
 import type { DeviceDriver, DriverContext } from './types';
 
@@ -20,6 +21,9 @@ export abstract class BaseDriver implements DeviceDriver {
   }
 
   abstract send(command: DeviceCommand): Promise<void>;
+  quickActions(): QuickActionId[] {
+    return [];
+  }
   start(): void {}
   close(): void {}
 

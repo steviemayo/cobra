@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { LocalId } from '../room/common';
+import type { QuickActionId } from './quick-actions';
 
 // The vocabulary the engine speaks to drivers (real or simulated). Drivers translate to protocol.
 export const DeviceCommand = z.discriminatedUnion('type', [
@@ -14,6 +15,8 @@ export const DeviceCommand = z.discriminatedUnion('type', [
   z.object({ type: z.literal('camera_preset'), name: z.string().min(1) }),
   z.object({ type: z.literal('scene'), name: z.string().min(1) }),
   z.object({ type: z.literal('record'), on: z.boolean() }),
+  /** Displays: blank the picture (or bring it back) without powering off. */
+  z.object({ type: z.literal('blank'), on: z.boolean() }),
   z.object({
     type: z.literal('command'),
     name: z.string().min(1),
@@ -37,6 +40,8 @@ export const DeviceState = z.object({
   /** 0-100, scaled by the driver from the device's native range. */
   volume: z.number().min(0).max(100).optional(),
   preset: z.string().optional(),
+  /** Displays: is the picture blanked (shutter, AV mute). */
+  blanked: z.boolean().optional(),
   recording: z.boolean().optional(),
   /** Occupancy sensors: is anyone in the room. */
   occupied: z.boolean().optional(),
@@ -56,6 +61,8 @@ export interface DeviceBus {
   send(deviceId: string, command: DeviceCommand): Promise<void>;
   getState(deviceId: string): DeviceState | undefined;
   subscribe(listener: (event: DeviceEvent) => void): () => void;
+  /** The quick actions this device's driver supports. Absent means none. */
+  quickActions?(deviceId: string): QuickActionId[];
 }
 
 export const defaultDeviceState = (): DeviceState => ({ online: true, routes: {}, signal: {} });

@@ -39,7 +39,7 @@ interface BuiltBus {
 export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger): BuiltBus {
   const model = signed.manifest.model;
   if (mode === 'all') {
-    const sim = createSimulation(model);
+    const sim = createSimulation(model, { customDrivers: signed.manifest.drivers });
     return { bus: sim, offline: () => [], close: () => sim.dispose() };
   }
   const real = new Map<string, DeviceDriver>();
@@ -51,7 +51,10 @@ export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger
     );
     if (driver) real.set(device.id, driver);
   }
-  const bus = new HybridBus(real, mode === 'missing' ? createSimulation(model) : null);
+  const bus = new HybridBus(
+    real,
+    mode === 'missing' ? createSimulation(model, { customDrivers: signed.manifest.drivers }) : null,
+  );
   bus.start();
   return { bus, offline: () => bus.offline(), close: () => bus.close() };
 }

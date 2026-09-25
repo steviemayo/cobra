@@ -1,5 +1,6 @@
 import {
   PanelIntent,
+  QUICK_ACTIONS,
   type Activity,
   type DeviceBus,
   type DeviceEvent,
@@ -14,6 +15,12 @@ import { executePlan } from '../plan/execute';
 import { activitySources, planActivity, planState, planStopOverlay, type Plan } from '../plan/plan';
 import { buildGraph, deviceCapabilities, type Graph } from '../validate/graph';
 import { availableActivities, detectorsFor, type SignalDetector } from './activities';
+import {
+  quickActionActive,
+  quickActionCommand,
+  roomQuickActions,
+  type RoomQuickAction,
+} from './quick-actions';
 
 export interface RuntimeOptions {
   model: RoomModel;
@@ -61,6 +68,7 @@ export class RoomRuntime implements PanelClient {
   private readonly detectors: Map<string, SignalDetector | null>;
   private readonly activities: Activity[];
   private readonly volumeDevices: string[];
+  private readonly quickActions: RoomQuickAction[];
   private readonly listeners = new Set<() => void>();
   private readonly unsubscribe: () => void;
   private readonly stepTimeoutMs?: number;
@@ -105,6 +113,7 @@ export class RoomRuntime implements PanelClient {
     this.volumeDevices = this.model.devices
       .filter((d) => deviceCapabilities(d).has('volume'))
       .map((d) => d.id);
+    this.quickActions = roomQuickActions(this.model, this.bus);
     this.volume = this.model.settings.defaultVolume;
     this.adoptDeviceState();
     for (const [source] of this.detectors) this.lastPresence.set(source, this.presence(source));
@@ -150,6 +159,8 @@ export class RoomRuntime implements PanelClient {
         return this.respondToPrompt(intent.promptId, intent.accept);
       case 'warning.dismiss':
         return this.dismissWarning();
+      case 'quickaction.run':
+        return void this.runQuickAction(intent.id, intent.active);
       case 'room.on': {
         const on = this.model.states.find((s) => s.kind === 'on');
         if (on && this.status === 'off') void this.runState(on.id);
@@ -469,6 +480,19 @@ export class RoomRuntime implements PanelClient {
     );
   }
 
+  // ---- Quick actions --------------------------------------------------------------------------
+
+  /** One button acts on every device that supports it. State comes back through device feedback. */
+  private async runQuickAction(id: string, active?: boolean) {
+    const action = this.quickActions.find((a) => a.id === id);
+    if (!action) return;
+    const on = active ?? !quickActionActive(action, (d) => this.bus.getState(d));
+    await Promise.allSettled(
+      action.devices.map((d) => this.bus.send(d, quickActionCommand(action.id, on))),
+    );
+    this.notify();
+  }
+
   // ---- Feedback, walk-in behaviour ------------------------------------------------------------
 
   private presence(sourceDeviceId: string): boolean | null {
@@ -743,6 +767,17 @@ export class RoomRuntime implements PanelClient {
         muted: this.muted,
         feedback: this.volumeFeedback,
       },
+      ...(this.quickActions.length > 0
+        ? {
+            quickActions: this.quickActions.map((a) => ({
+              id: a.id,
+              label: QUICK_ACTIONS[a.id].label,
+              icon: QUICK_ACTIONS[a.id].icon,
+              kind: QUICK_ACTIONS[a.id].kind,
+              active: quickActionActive(a, (d) => this.bus.getState(d)),
+            })),
+          }
+        : {}),
       ui: this.model.settings.panel,
       message,
       prompt: this.prompt

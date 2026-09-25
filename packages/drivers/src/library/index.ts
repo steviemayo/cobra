@@ -26,6 +26,7 @@ const raw: unknown[] = [
       'Cisco Room and Board devices over their HTTP API (/putxml). Set "credentials" to the base64 of "username:password".',
     transport: { type: 'http', https: true, headers: { authorization: 'Basic {setting.credentials}', 'content-type': 'text/xml' } },
     settings: [{ key: 'credentials', label: 'Credentials (base64 of user:password)', type: 'secret', required: true }],
+    quickActions: ['mics.privacy_mute'],
     commands: {
       'power.on': { method: 'POST', path: '/putxml', body: '<Command><Standby><Deactivate/></Standby></Command>' },
       'power.off': { method: 'POST', path: '/putxml', body: '<Command><Standby><Activate/></Standby></Command>' },
@@ -36,10 +37,15 @@ const raw: unknown[] = [
     },
     volumeScale: { min: 0, max: 100 },
     feedback: {
-      poll: [{ action: { method: 'GET', path: '/getxml?location=/Status/Standby/State' }, everyMs: 15000 }],
+      poll: [
+        { action: { method: 'GET', path: '/getxml?location=/Status/Standby/State' }, everyMs: 15000 },
+        { action: { method: 'GET', path: '/getxml?location=/Status/Audio/Microphones/Mute' }, everyMs: 15000 },
+      ],
       patterns: [
         { match: '<State[^>]*>Standby</State>', set: 'power', value: 'off' },
         { match: '<State[^>]*>Off</State>', set: 'power', value: 'on' },
+        { match: '<Mute[^>]*>On</Mute>', set: 'muted', value: 'on' },
+        { match: '<Mute[^>]*>Off</Mute>', set: 'muted', value: 'off' },
       ],
     },
   },

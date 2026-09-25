@@ -243,6 +243,15 @@ describe('quick actions', () => {
     });
   });
 
+  it('translates the standard actions by id, and shows any other label as given', () => {
+    const { client } = fakeClient(
+      running({ quickActions: [action('display.blank'), action('custom.thing')] }),
+    );
+    render(<PanelApp client={client} language="es" />);
+    expect(screen.getByRole('button', { name: 'Pantalla en negro' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'custom.thing' })).toBeTruthy();
+  });
+
   it('keeps two in the bar and the rest in a sheet when there are more than three', () => {
     const { client, dispatched } = fakeClient(
       running({ quickActions: ['a', 'b', 'c', 'd'].map((id) => action(id)) }),

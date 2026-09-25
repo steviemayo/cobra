@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { PanelClient, PanelQuickAction, PanelViewModel } from '@kestrel/model';
 import { Clock } from './Clock';
 import { Icon } from './icons';
-import type { Translate } from './i18n';
+import { en, type TextKey, type Translate } from './i18n';
 import { VolumeControl } from './VolumeControl';
 
 /** Quick actions that sit in the bar. Beyond this the rest go in the Quick Actions sheet. */
@@ -10,14 +10,19 @@ const IN_BAR = 3;
 
 function QuickButton({
   action,
+  t,
   dispatch,
   onDone,
 }: {
   action: PanelQuickAction;
+  t: Translate;
   dispatch: PanelClient['dispatch'];
   onDone?: () => void;
 }) {
   const toggle = action.kind === 'toggle';
+  // Standard actions are translated by id; anything else shows the label it came with.
+  const key = `quick.${action.id}`;
+  const label = key in en ? t(key as TextKey) : action.label;
   return (
     <button
       type="button"
@@ -33,7 +38,7 @@ function QuickButton({
       }}
     >
       <Icon name={action.icon ?? 'custom'} />
-      <span>{action.label}</span>
+      <span>{label}</span>
     </button>
   );
 }
@@ -76,7 +81,7 @@ export function BottomBar({
 
       <div className="kp-bar-end">
         {inBar.map((a) => (
-          <QuickButton key={a.id} action={a} dispatch={dispatch} />
+          <QuickButton key={a.id} action={a} t={t} dispatch={dispatch} />
         ))}
         {rest.length > 0 && (
           <button type="button" className="kp-quick" onClick={() => setSheet(true)}>
@@ -100,6 +105,7 @@ export function BottomBar({
                 <QuickButton
                   key={a.id}
                   action={a}
+                  t={t}
                   dispatch={dispatch}
                   onDone={() => setSheet(false)}
                 />

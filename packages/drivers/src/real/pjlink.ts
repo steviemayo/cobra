@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { connect } from 'node:net';
-import type { Device, DeviceCommand, PowerState } from '@kestrel/model';
+import type { Device, DeviceCommand, PowerState, QuickActionId } from '@kestrel/model';
 import { BaseDriver } from './base';
 import type { DriverContext } from './types';
 
@@ -27,6 +27,10 @@ export class PjlinkDriver extends BaseDriver {
     this.state.power = 'off';
     this.state.selectedInput = null;
     this.state.online = false;
+  }
+
+  override quickActions(): QuickActionId[] {
+    return ['display.blank'];
   }
 
   private get host() {
@@ -102,9 +106,14 @@ export class PjlinkDriver extends BaseDriver {
     try {
       const power = await this.command('POWR ?');
       const input = POWER[power] === 'on' ? await this.command('INPT ?') : null;
+      // Not every projector answers AVMT; that must not make the projector look offline.
+      const mute = POWER[power] === 'on' ? await this.command('AVMT ?').catch(() => null) : null;
       this.update((s) => {
         s.online = true;
         s.power = POWER[power] ?? s.power;
+        // 11 = picture muted, 31 = picture and sound muted
+        if (mute !== null) s.blanked = mute === '11' || mute === '31';
+        else if (POWER[power] !== 'on') s.blanked = false;
         if (input !== null) {
           const map = this.setting<Record<string, string>>('inputs', {});
           s.selectedInput =
@@ -156,6 +165,7 @@ export class PjlinkDriver extends BaseDriver {
             s.online = true;
             s.power = 'cooling';
             s.selectedInput = null;
+            s.blanked = false;
           });
           // Room Off shouldn't wait for the lamp to cool; keep tracking in the background.
           void this.waitForPower('off', 120_000).catch(() => undefined);
@@ -177,6 +187,15 @@ export class PjlinkDriver extends BaseDriver {
         await this.command(`INPT ${code}`);
         this.update((s) => {
           s.selectedInput = command.portId;
+        });
+        return;
+      }
+      case 'blank': {
+        // AVMT 11 mutes the picture only; 10 brings it back.
+        await this.command(`AVMT ${command.on ? '11' : '10'}`);
+        this.update((s) => {
+          s.online = true;
+          s.blanked = command.on;
         });
         return;
       }

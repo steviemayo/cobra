@@ -79,7 +79,7 @@ Also configurable: idle timeout back to the Idle screen, and whether the support
 - Same action on several devices (e.g. two displays) is one button acting on all of them
 - Driver-declared quick actions can be toggles (with on/off state from feedback) or one-shot buttons
 - Order of the bottom bar: fixed order from the room type, devs can hide or reorder, max 3 in the bar and the rest in the Quick Actions sheet
-- Planned driver format change: see `docs/driver-sdk.md` (planned section)
+- Driver format: see `docs/driver-sdk.md` (Quick actions). Built: Blank Screen and Privacy Mute. Order is fixed (Blank, then Privacy Mute); hide/reorder by devs is not built
 
 ## Room Linking (parked, to redesign)
 
@@ -133,11 +133,18 @@ Slice 1 (built, on branch `feat/panel-ui-redesign`):
 - Minimal off state (start options centred, no bars); on state has a top nav pill with a sliding highlight, status in small print under the room name, and a Power button with a confirmation
 - Glass styling on a gradient background
 - The earlier "home screen mode" setting was removed: activities are always in the top nav while the room is on
-- Quick actions: bottom bar and sheet are built and tested; nothing supplies them yet
+- Quick actions: bottom bar and sheet are built and tested. Supplied by drivers (see Slice 2)
+
+Slice 2 (built, branch `feat/quick-actions`): quick actions from drivers
+
+- Driver format: `quickActions` (standard ids `display.blank`, `mics.privacy_mute`), commands `blank.on`/`blank.off`, feedback field `blanked`; validated on save
+- Bus: `DeviceBus.quickActions(deviceId)`; real drivers report what they declare, the simulator derives it from the device's driver setting (`driverQuickActions`)
+- Engine: offers Blank only with a display whose driver supports it, Privacy Mute only with a voice-capture mic plus a supporting conference system; `quickaction.run` acts on every supporting device, state comes from device feedback; powering a display off clears the blank
+- PJLink blanks with AVMT; Cisco RoomOS library driver privacy-mutes and polls mic mute state
+- Panel: labels translated by action id (en/es/fr/de)
+- Not done: a failed action is silent (the button just does not turn on); blank is not cleared by changing source; a model `blank` capability was not added (support lives in the driver, as decided); the browser simulator does not see an org's custom drivers, so their quick actions only show on the gateway
 
 Next slices:
-
-- Quick actions from drivers (`quickActions` in the driver format, `blank` capability, engine handling of `quickaction.run`)
 - Function pages: cameras, microphones/audio, recorder, room controls
 - Org accent colour setting applied to the portal (same contrast check)
 - Room linking redesign
