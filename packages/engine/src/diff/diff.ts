@@ -2,13 +2,7 @@ import type { Device, RoomModel } from '@kestrel/model';
 
 export type ChangeKind = 'added' | 'removed' | 'changed';
 export type ChangeArea =
-  | 'device'
-  | 'connection'
-  | 'group'
-  | 'state'
-  | 'activity'
-  | 'trigger'
-  | 'setting';
+  'device' | 'connection' | 'group' | 'state' | 'activity' | 'trigger' | 'setting';
 
 export interface Change {
   kind: ChangeKind;
@@ -19,7 +13,15 @@ export interface Change {
   details: string[];
 }
 
-const AREA_ORDER: ChangeArea[] = ['device', 'connection', 'group', 'state', 'activity', 'trigger', 'setting'];
+const AREA_ORDER: ChangeArea[] = [
+  'device',
+  'connection',
+  'group',
+  'state',
+  'activity',
+  'trigger',
+  'setting',
+];
 
 /** JSON with sorted keys, so structural equality ignores key order. */
 function stable(v: unknown): string {
@@ -46,7 +48,9 @@ function list(items: string[]): string {
 }
 
 function keysChanged(a: Record<string, unknown>, b: Record<string, unknown>): string[] {
-  return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => !same(a[k], b[k])).sort();
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])]
+    .filter((k) => !same(a[k], b[k]))
+    .sort();
 }
 
 function compare<T extends { id: string }>(
@@ -67,7 +71,8 @@ function compare<T extends { id: string }>(
       if (details.length) out.push({ kind: 'changed', area, label: label(x), details });
     }
   }
-  for (const [id, x] of a) if (!b.has(id)) out.push({ kind: 'removed', area, label: label(x), details: [] });
+  for (const [id, x] of a)
+    if (!b.has(id)) out.push({ kind: 'removed', area, label: label(x), details: [] });
 }
 
 function deviceDetails(a: Device, b: Device): string[] {
@@ -106,6 +111,12 @@ const SETTING_LABEL: Record<string, string> = {
   'userControls.lights': 'Lights control on panel',
   'userControls.blinds': 'Blinds control on panel',
   'userControls.camera': 'Camera control on panel',
+  'panel.homeMode': 'Panel home screen',
+  'panel.idle.action': 'Touch to begin action',
+  'panel.idle.activityId': 'Touch to begin activity',
+  'panel.idle.timeoutMinutes': 'Panel idle timeout (minutes)',
+  'panel.idle.supportText': 'Idle screen support text',
+  'panel.idle.supportUrl': 'Idle screen support link',
 };
 
 /**
@@ -113,7 +124,15 @@ const SETTING_LABEL: Record<string, string> = {
  * everything is reported as added.
  */
 export function diffRoomModels(before: RoomModel | null, after: RoomModel): Change[] {
-  const empty: RoomModel = { ...after, devices: [], connections: [], groups: [], states: [], activities: [], triggers: [] };
+  const empty: RoomModel = {
+    ...after,
+    devices: [],
+    connections: [],
+    groups: [],
+    states: [],
+    activities: [],
+    triggers: [],
+  };
   const a = before ?? empty;
   const out: Change[] = [];
   const nameOf = (id: string, ...models: RoomModel[]) => {
@@ -155,7 +174,8 @@ export function diffRoomModels(before: RoomModel | null, after: RoomModel): Chan
       if (x.name !== y.name) d.push(`renamed from “${x.name}”`);
       if (x.mode !== y.mode) d.push(`mode changed to ${y.mode}`);
       if (!same(x.members, y.members)) d.push(`members now ${list(names(y.members))}`);
-      if (!same(x.allowedSources, y.allowedSources)) d.push(`allowed sources now ${list(names(y.allowedSources))}`);
+      if (!same(x.allowedSources, y.allowedSources))
+        d.push(`allowed sources now ${list(names(y.allowedSources))}`);
       return d;
     },
     out,
@@ -170,7 +190,8 @@ export function diffRoomModels(before: RoomModel | null, after: RoomModel): Chan
       const d: string[] = [];
       if (x.name !== y.name) d.push(`renamed from “${x.name}”`);
       if (x.kind !== y.kind) d.push(`kind changed to ${y.kind}`);
-      if (!same(x.actions, y.actions)) d.push(`actions changed (${x.actions.length} to ${y.actions.length})`);
+      if (!same(x.actions, y.actions))
+        d.push(`actions changed (${x.actions.length} to ${y.actions.length})`);
       return d;
     },
     out,
@@ -188,7 +209,8 @@ export function diffRoomModels(before: RoomModel | null, after: RoomModel): Chan
       if (!same(x.sources, y.sources)) d.push(`sources now ${list(y.sources.map((s) => s.label))}`);
       if (x.targetGroupId !== y.targetGroupId) d.push('target group changed');
       if (!same(x.requires, y.requires)) d.push('required equipment changed');
-      if (!same(x.actions, y.actions)) d.push(`actions changed (${x.actions.length} to ${y.actions.length})`);
+      if (!same(x.actions, y.actions))
+        d.push(`actions changed (${x.actions.length} to ${y.actions.length})`);
       return d;
     },
     out,
@@ -203,7 +225,8 @@ export function diffRoomModels(before: RoomModel | null, after: RoomModel): Chan
       const d: string[] = [];
       if (x.name !== y.name) d.push(`renamed from “${x.name}”`);
       if (x.enabled !== y.enabled) d.push(y.enabled ? 'enabled' : 'disabled');
-      if (!same({ ...x, name: 0, enabled: 0 }, { ...y, name: 0, enabled: 0 })) d.push('what it does or when changed');
+      if (!same({ ...x, name: 0, enabled: 0 }, { ...y, name: 0, enabled: 0 }))
+        d.push('what it does or when changed');
       return d;
     },
     out,

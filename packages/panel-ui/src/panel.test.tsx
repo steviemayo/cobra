@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { PanelClient, PanelIntent, PanelViewModel } from '@kestrel/model';
+import {
+  PanelSettings,
+  type PanelClient,
+  type PanelIntent,
+  type PanelViewModel,
+} from '@kestrel/model';
 import { PanelApp } from './PanelApp';
 import { createTranslator, messageText } from './i18n';
 import { lightTheme, themeStyle } from './theme';
@@ -78,6 +83,9 @@ const on = (over: Partial<PanelViewModel> = {}): PanelViewModel => {
   return { ...vm, ...over };
 };
 
+const settings = (over: Record<string, unknown>) => PanelSettings.parse(over);
+const navMode = () => settings({ homeMode: 'nav' });
+
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
   cleanup();
@@ -136,7 +144,7 @@ describe('when the room is on', () => {
   });
 
   it('tapping Room Off in the nav sends it', () => {
-    const { client, dispatched } = fakeClient(on());
+    const { client, dispatched } = fakeClient(on({ ui: navMode() }));
     render(<PanelApp client={client} />);
     fireEvent.click(screen.getByRole('button', { name: 'Room Off' }));
     expect(dispatched).toEqual([
@@ -145,11 +153,11 @@ describe('when the room is on', () => {
   });
 
   it('Record toggles: start, then stop', () => {
-    const { client, dispatched, set } = fakeClient(on());
+    const { client, dispatched, set } = fakeClient(on({ ui: navMode() }));
     render(<PanelApp client={client} />);
     fireEvent.click(screen.getByRole('button', { name: 'Record' }));
     expect(dispatched.at(-1)).toMatchObject({ type: 'activity.start', activityId: 'record' });
-    const recording = on();
+    const recording = on({ ui: navMode() });
     recording.activities[1]!.active = true;
     set(recording);
     expect(screen.getByRole('button', { name: /Stop recording/ })).toBeTruthy();
@@ -197,13 +205,39 @@ describe('when the room is on', () => {
 });
 
 describe('volume', () => {
-  it('a tap bumps by 5, and shows the number', () => {
+  const vol = (level: number, feedback: boolean, muted = false) =>
+    on({ volume: { available: true, level, muted, feedback } });
+
+  it('a tap bumps by 5', () => {
     const { client, dispatched } = fakeClient(on());
     render(<PanelApp client={client} />);
-    expect(screen.getByText('50')).toBeTruthy();
     fireEvent.pointerDown(screen.getByRole('button', { name: 'Volume up' }));
     fireEvent.pointerUp(screen.getByRole('button', { name: 'Volume up' }));
     expect(dispatched).toEqual([{ type: 'volume.bump', delta: 5 }]);
+  });
+
+  it('has no slider, and shows no level until it changes', () => {
+    const { client } = fakeClient(vol(50, true));
+    render(<PanelApp client={client} />);
+    expect(screen.queryByRole('slider')).toBeNull();
+    expect(document.querySelector('.kp-hud')).toBeNull();
+  });
+
+  it('shows the level briefly when it changes, then hides it', () => {
+    const { client, set } = fakeClient(vol(50, true));
+    render(<PanelApp client={client} />);
+    set(vol(55, true));
+    expect(document.querySelector('.kp-hud-number')?.textContent).toBe('55');
+    act(() => void vi.advanceTimersByTime(1600));
+    expect(document.querySelector('.kp-hud')).toBeNull();
+  });
+
+  it('hides the number when no device reports its level', () => {
+    const { client, set } = fakeClient(vol(50, false));
+    render(<PanelApp client={client} />);
+    set(vol(55, false));
+    expect(document.querySelector('.kp-hud')).toBeTruthy();
+    expect(document.querySelector('.kp-hud-number')).toBeNull();
   });
 
   it('press-and-hold ramps until released', () => {
@@ -232,7 +266,7 @@ describe('volume', () => {
     expect(screen.getByRole('button', { name: 'Unmute' }).getAttribute('aria-pressed')).toBe(
       'true',
     );
-    expect(screen.getByText('—')).toBeTruthy();
+    expect(document.querySelector('.kp-hud-text')?.textContent).toBe('Muted');
   });
 
   it('is hidden when the room has nothing to control volume', () => {

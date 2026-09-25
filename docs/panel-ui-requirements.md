@@ -1,6 +1,6 @@
 # Panel UI requirements (draft for review)
 
-Status: draft. No code until confirmed. Applies to the generated panel served by the gateway on the LAN (`apps/panel`, `packages/panel-ui`), also shown in the portal simulator.
+Status: slice 1 built (see Build status). Rest is draft. Applies to the generated panel served by the gateway on the LAN (`apps/panel`, `packages/panel-ui`), also shown in the portal simulator.
 
 Sources: reference screenshots from another vendor's panel (layout ideas only, no branding or assets copied) plus the rules already decided in `CLAUDE.md` (intent-based UI, Activities, volume, auto-off).
 
@@ -60,7 +60,6 @@ Three fixed zones on every screen except Idle:
 - Wake the panel only (unlock, go to Home; room stays as it was) (proposed default)
 - Run an activity (choose which, e.g. Present)
 - Run the room's On state
-- Do nothing beyond dismissing Idle
 
 Also configurable: idle timeout back to the Idle screen, and whether the support text and QR show.
 
@@ -121,3 +120,21 @@ The current "Combining Rooms" implementation is not what is wanted. Do not build
    - is each combined room authored separately, or derived from its member rooms with overrides? (proposed: derived, so nobody hand-builds 26 rooms)
    - must all member rooms run on the same gateway? YES all must be on same gateway (note in portal)
    - what happens to the existing `RoomCombination` data and UI (primary/secondary, follow/blank)? Remove this as it was incorrect
+
+## Build status
+
+Slice 1 (built, on branch `feat/panel-ui-redesign`):
+
+- Theme: default blue accent, contrast checked; org accents are lightened/darkened until legible (`legibleAccent`)
+- Layout: top bar, content, always-visible bottom bar; sizes scale from panel width (em units)
+- Volume: no slider; - / mute / + buttons; HUD overlay on change; number hidden when no device gives feedback
+- Home screen mode (`tiles` or `nav`) and "Touch to begin" (wake / activity / room on, timeout, support text and QR) as room settings, editable in the room editor
+- Quick actions: bottom bar and sheet are built and tested; nothing supplies them yet
+
+Next slices:
+
+- Quick actions from drivers (`quickActions` in the driver format, `blank` capability, engine handling of `quickaction.run`)
+- Function pages: cameras, microphones/audio, recorder, room controls
+- Org accent colour setting applied to the portal (same contrast check)
+- Room linking redesign
+- Check on real 7" and 10" panels

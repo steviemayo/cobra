@@ -1,10 +1,24 @@
-import { useState, useSyncExternalStore } from 'react';
-import type { PanelActivity, PanelClient, PanelViewModel } from '@kestrel/model';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
+import {
+  PanelSettings,
+  type PanelActivity,
+  type PanelClient,
+  type PanelViewModel,
+} from '@kestrel/model';
+import { BottomBar } from './BottomBar';
+import { IdleScreen } from './IdleScreen';
 import { Icon } from './icons';
 import { messageText, type Translate } from './i18n';
 import { translatorFor } from './languages';
 import { darkTheme, themeStyle, type PanelTheme } from './theme';
-import { VolumeControl } from './VolumeControl';
+import { VolumeHud } from './VolumeControl';
 
 export function usePanel(client: PanelClient): PanelViewModel {
   return useSyncExternalStore(
@@ -141,6 +155,8 @@ function defaultSource(a: PanelActivity): string | undefined {
   );
 }
 
+const DEFAULT_UI = PanelSettings.parse({});
+
 export interface PanelAppProps {
   client: PanelClient;
   theme?: PanelTheme;
@@ -148,11 +164,17 @@ export interface PanelAppProps {
   /** A language code such as "es". Ignored if `translate` is given. */
   language?: string;
   className?: string;
+  /** An extra control for the top bar, e.g. the phone-control button. */
+  headerAction?: ReactNode;
 }
 
 /**
  * The generated room panel: activities, never devices. Everything it shows comes from the client's
  * view model, so the same component serves the browser simulator and a real gateway.
+ *
+ * Layout: top bar (room, navigation), content, and an always-visible bottom bar (time, volume,
+ * quick actions). Home is a grid of activities or, per room setting, the running activity with a
+ * top nav. An optional "Touch to begin" screen covers everything after a period without touches.
  */
 export function PanelApp({
   client,
@@ -160,11 +182,44 @@ export function PanelApp({
   translate,
   language,
   className,
+  headerAction,
 }: PanelAppProps) {
   const vm = usePanel(client);
   const t = translate ?? translatorFor(language);
   const dispatch: PanelClient['dispatch'] = (intent) => client.dispatch(intent);
+  const ui = vm.ui ?? DEFAULT_UI;
   const [picked, setPicked] = useState<string | null>(null);
+  const [home, setHome] = useState(false);
+
+  // "Touch to begin": shown on load and again after `timeoutMinutes` without a touch (0 = never).
+  const idleMs = ui.idle.timeoutMinutes * 60_000;
+  const [idle, setIdle] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const configured = useRef(false);
+  const arm = useCallback(() => {
+    clearTimeout(timer.current);
+    if (idleMs > 0) timer.current = setTimeout(() => setIdle(true), idleMs);
+  }, [idleMs]);
+  useEffect(() => {
+    if (idleMs === 0) {
+      clearTimeout(timer.current);
+      configured.current = false;
+      setIdle(false);
+      return;
+    }
+    if (!configured.current) {
+      configured.current = true;
+      setIdle(true);
+    } else arm();
+    return () => clearTimeout(timer.current);
+  }, [idleMs, arm]);
+  // A question or the auto-off countdown must never sit behind the idle screen.
+  const attention = Boolean(vm.prompt || vm.warning);
+  useEffect(() => {
+    if (!attention) return;
+    setIdle(false);
+    arm();
+  }, [attention, arm]);
 
   const current =
     vm.activities.find((a) => a.id === picked) ??
@@ -173,9 +228,11 @@ export function PanelApp({
     vm.activities[0];
   const off = vm.status === 'off';
   const following = vm.combination?.role === 'secondary' && vm.combination.combined;
+  const navMode = ui.homeMode === 'nav';
 
   const choose = (a: PanelActivity) => {
     setPicked(a.id);
+    setHome(false);
     if (a.overlay) {
       dispatch(
         a.active
@@ -189,49 +246,95 @@ export function PanelApp({
     }
   };
 
+  const wake = () => {
+    setIdle(false);
+    arm();
+    if (!off) return;
+    if (ui.idle.action === 'on') dispatch({ type: 'room.on' });
+    else if (ui.idle.action === 'activity') {
+      const a =
+        vm.activities.find((x) => x.id === ui.idle.activityId) ??
+        vm.activities.find((x) => x.kind !== 'room_off' && !x.overlay);
+      if (a) choose(a);
+    }
+  };
+
+  const brand = (
+    <div className="kp-brand">
+      {theme.logoUrl && <img className="kp-logo" src={theme.logoUrl} alt="" />}
+      <h1>{vm.roomName}</h1>
+    </div>
+  );
+
   if (following)
     return (
       <div className={`kp-app ${className ?? ''}`} data-mode={theme.mode} style={themeStyle(theme)}>
-        <header className="kp-header">
-          <div className="kp-brand">
-            {theme.logoUrl && <img className="kp-logo" src={theme.logoUrl} alt="" />}
-            <h1>{vm.roomName}</h1>
-          </div>
-        </header>
-        <main className="kp-main">
-          <StatusBanner vm={vm} t={t} />
-        </main>
+        <div className="kp-frame">
+          <header className="kp-top">{brand}</header>
+          <main className="kp-main">
+            <StatusBanner vm={vm} t={t} />
+          </main>
+        </div>
       </div>
     );
 
-  return (
-    <div className={`kp-app ${className ?? ''}`} data-mode={theme.mode} style={themeStyle(theme)}>
-      <header className="kp-header">
-        <div className="kp-brand">
-          {theme.logoUrl && <img className="kp-logo" src={theme.logoUrl} alt="" />}
-          <h1>{vm.roomName}</h1>
-        </div>
-        <span className={`kp-pill kp-pill-${vm.status}`}>{t(`status.${vm.status}` as const)}</span>
-      </header>
+  const showTiles = off || (!navMode && home);
+  const tiles = vm.activities.filter((a) => a.kind !== 'room_off');
+  const roomOff = vm.activities.find((a) => a.kind === 'room_off');
+  const showVolume = vm.volume.available && !off;
 
-      <div className="kp-body">
-        <nav className="kp-nav" aria-label={t('nav.label')}>
-          {vm.activities.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              className="kp-nav-item"
-              aria-pressed={current?.id === a.id}
-              data-active={a.active || undefined}
-              data-kind={a.kind}
-              onClick={() => choose(a)}
-            >
-              <Icon name={a.icon ?? a.kind} />
-              <span>{a.name}</span>
-              {a.busy && <span className="kp-spinner kp-spinner-sm" aria-hidden />}
-            </button>
-          ))}
-        </nav>
+  return (
+    <div
+      className={`kp-app ${className ?? ''}`}
+      data-mode={theme.mode}
+      style={themeStyle(theme)}
+      onPointerDownCapture={idleMs > 0 && !idle ? arm : undefined}
+      onKeyDownCapture={idleMs > 0 && !idle ? arm : undefined}
+    >
+      <div className="kp-frame" inert={idle}>
+        <header className="kp-top">
+          {brand}
+
+          {navMode && !off ? (
+            <nav className="kp-nav" aria-label={t('nav.label')}>
+              {vm.activities.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  className="kp-nav-item"
+                  aria-pressed={current?.id === a.id}
+                  data-active={a.active || undefined}
+                  data-kind={a.kind}
+                  onClick={() => choose(a)}
+                >
+                  <Icon name={a.icon ?? a.kind} />
+                  <span>{a.name}</span>
+                  {a.busy && <span className="kp-spinner kp-spinner-sm" aria-hidden />}
+                </button>
+              ))}
+            </nav>
+          ) : (
+            <span />
+          )}
+
+          <div className="kp-top-end">
+            {!navMode && !off && (
+              <button
+                type="button"
+                className="kp-btn kp-home"
+                aria-pressed={home}
+                onClick={() => setHome((h) => !h)}
+              >
+                <Icon name="home" />
+                {t('nav.home')}
+              </button>
+            )}
+            <span className={`kp-pill kp-pill-${vm.status}`}>
+              {t(`status.${vm.status}` as const)}
+            </span>
+            {headerAction}
+          </div>
+        </header>
 
         <main className="kp-main">
           <StatusBanner vm={vm} t={t} />
@@ -239,23 +342,32 @@ export function PanelApp({
           <PromptBar vm={vm} t={t} dispatch={dispatch} />
           <WarningBar vm={vm} t={t} dispatch={dispatch} />
 
-          {off ? (
+          {showTiles ? (
             <section className="kp-start">
-              <h2>{t('start.title')}</h2>
+              <h2>{off ? t('start.title') : t('home.title')}</h2>
               <div className="kp-tiles">
-                {vm.activities
-                  .filter((a) => a.kind !== 'room_off')
-                  .map((a) => (
-                    <button
-                      key={a.id}
-                      type="button"
-                      className="kp-tile kp-tile-big"
-                      onClick={() => choose(a)}
-                    >
-                      <Icon name={a.icon ?? a.kind} />
-                      <span>{a.name}</span>
-                    </button>
-                  ))}
+                {tiles.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className="kp-tile kp-tile-big"
+                    aria-pressed={!off && a.active}
+                    onClick={() => choose(a)}
+                  >
+                    <Icon name={a.icon ?? a.kind} />
+                    <span>{a.name}</span>
+                  </button>
+                ))}
+                {!off && roomOff && (
+                  <button
+                    type="button"
+                    className="kp-tile kp-tile-big kp-tile-quiet"
+                    onClick={() => choose(roomOff)}
+                  >
+                    <Icon name={roomOff.icon ?? roomOff.kind} />
+                    <span>{roomOff.name}</span>
+                  </button>
+                )}
               </div>
             </section>
           ) : (
@@ -307,18 +419,29 @@ export function PanelApp({
               </section>
             )
           )}
-
-          {vm.volume.available && !off && (
-            <VolumeControl
-              level={vm.volume.level}
-              muted={vm.volume.muted}
-              t={t}
-              onBump={(delta) => dispatch({ type: 'volume.bump', delta })}
-              onMute={(muted) => dispatch({ type: 'mute.set', muted })}
-            />
-          )}
         </main>
+
+        <BottomBar vm={vm} t={t} dispatch={dispatch} showVolume={showVolume} />
+        {showVolume && (
+          <VolumeHud
+            level={vm.volume.level}
+            muted={vm.volume.muted}
+            feedback={vm.volume.feedback !== false}
+            t={t}
+          />
+        )}
       </div>
+
+      {idle && (
+        <IdleScreen
+          roomName={vm.roomName}
+          logoUrl={theme.logoUrl}
+          supportText={ui.idle.supportText}
+          supportUrl={ui.idle.supportUrl}
+          t={t}
+          onWake={wake}
+        />
+      )}
     </div>
   );
 }

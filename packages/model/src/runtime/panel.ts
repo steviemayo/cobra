@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { LocalId } from '../room/common';
 import { ActivityKind } from '../room/behaviour';
+import { PanelSettings } from '../room/room-model';
 
 // Panels send intents, never device commands. Validated at the gateway boundary.
 export const PanelIntent = z.discriminatedUnion('type', [
@@ -17,6 +18,14 @@ export const PanelIntent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('prompt.respond'), promptId: z.string().min(1), accept: z.boolean() }),
   /** "Stay on" during the auto-off warning. */
   z.object({ type: z.literal('warning.dismiss') }),
+  /** A quick action from the bottom bar (Blank Screen, Privacy Mute). `active` is the wanted state for toggles. */
+  z.object({
+    type: z.literal('quickaction.run'),
+    id: z.string().min(1),
+    active: z.boolean().optional(),
+  }),
+  /** Run the room's On state ("Touch to begin" set to turn the room on). */
+  z.object({ type: z.literal('room.on') }),
   /** Join or split this room with the rooms it is set up to combine with. Only the primary room's panel offers it. */
   z.object({ type: z.literal('combine.set'), combined: z.boolean() }),
 ]);
@@ -74,6 +83,17 @@ export const PanelActivity = z.object({
 });
 export type PanelActivity = z.infer<typeof PanelActivity>;
 
+/** A one-tap action from a driver, such as Blank Screen. Shown in the panel's bottom bar. */
+export const PanelQuickAction = z.object({
+  id: z.string().min(1),
+  label: z.string(),
+  icon: z.string().optional(),
+  /** toggle: has an on/off state. button: one shot. */
+  kind: z.enum(['toggle', 'button']),
+  active: z.boolean(),
+});
+export type PanelQuickAction = z.infer<typeof PanelQuickAction>;
+
 export const PanelCombination = z.object({
   /** primary: this panel controls the combined rooms. secondary: another room is in charge. */
   role: z.enum(['primary', 'secondary']),
@@ -87,7 +107,16 @@ export const PanelViewModel = z.object({
   roomName: z.string(),
   status: RoomStatus,
   activities: z.array(PanelActivity),
-  volume: z.object({ available: z.boolean(), level: z.number(), muted: z.boolean() }),
+  volume: z.object({
+    available: z.boolean(),
+    level: z.number(),
+    muted: z.boolean(),
+    /** false: no device reports its level, so panels should not show a number. Absent means true. */
+    feedback: z.boolean().optional(),
+  }),
+  quickActions: z.array(PanelQuickAction).optional(),
+  /** Panel look and behaviour from the room's settings. Absent means defaults. */
+  ui: PanelSettings.optional(),
   message: z.object({ text: PanelText, tone: MessageTone }).nullable(),
   /** e.g. "Switch to Laptop 2?", auto-accepts when secondsLeft reaches 0. */
   prompt: z

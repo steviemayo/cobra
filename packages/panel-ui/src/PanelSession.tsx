@@ -117,32 +117,48 @@ export function PanelSession({
       </div>
     );
 
+  const phoneButton = conn.qr ? (
+    <button
+      type="button"
+      className="kp-phone-btn"
+      aria-label={t('phone.button')}
+      title={t('phone.button')}
+      onClick={() => setShowQr(true)}
+    >
+      <Icon name="phone" />
+    </button>
+  ) : undefined;
+
   return (
     <>
-      <PanelApp client={client} theme={theme} translate={t} className={className} />
-      {conn.qr && (
+      <PanelApp
+        client={client}
+        theme={theme}
+        translate={t}
+        className={className}
+        headerAction={phoneButton}
+      />
+      {conn.qr && showQr && (
         <div data-mode={theme.mode} style={themeStyle(theme)}>
-          <button
-            type="button"
-            className="kp-phone-btn"
+          <div
+            className="kp-modal"
+            role="dialog"
             aria-label={t('phone.button')}
-            title={t('phone.button')}
-            onClick={() => setShowQr(true)}
+            onClick={() => setShowQr(false)}
           >
-            <Icon name="phone" />
-          </button>
-          {showQr && (
-            <div className="kp-modal" role="dialog" aria-label={t('phone.button')} onClick={() => setShowQr(false)}>
-              <div className="kp-modal-card" onClick={(e) => e.stopPropagation()}>
-                <h2>{t('phone.button')}</h2>
-                <QrCode value={conn.qr.url} label={t('phone.title')} />
-                <p className="kp-muted">{t('phone.title')}</p>
-                <button type="button" className="kp-btn kp-btn-primary" onClick={() => setShowQr(false)}>
-                  {t('phone.close')}
-                </button>
-              </div>
+            <div className="kp-modal-card" onClick={(e) => e.stopPropagation()}>
+              <h2>{t('phone.button')}</h2>
+              <QrCode value={conn.qr.url} label={t('phone.title')} />
+              <p className="kp-muted">{t('phone.title')}</p>
+              <button
+                type="button"
+                className="kp-btn kp-btn-primary"
+                onClick={() => setShowQr(false)}
+              >
+                {t('phone.close')}
+              </button>
             </div>
-          )}
+          </div>
         </div>
       )}
       {conn.state === 'reconnecting' && (

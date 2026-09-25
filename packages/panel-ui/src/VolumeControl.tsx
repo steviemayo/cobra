@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from './icons';
 import type { Translate } from './i18n';
 
@@ -6,6 +6,7 @@ const TAP_STEP = 5;
 const RAMP_STEP = 3;
 const HOLD_DELAY_MS = 420;
 const RAMP_INTERVAL_MS = 90;
+const HUD_MS = 1500;
 
 // A button that bumps once on press, then keeps going while held.
 function RampButton({
@@ -66,6 +67,7 @@ function RampButton({
   );
 }
 
+/** Volume down, mute, volume up. No slider: the level shows briefly in the VolumeHud when it changes. */
 export function VolumeControl({
   level,
   muted,
@@ -88,20 +90,6 @@ export function VolumeControl({
         onBump={onBump}
         disabled={level <= 0 && !muted}
       />
-      <div className="kp-volume-readout" aria-live="off">
-        <span className="kp-volume-number">{muted ? '—' : Math.round(level)}</span>
-        <span className="kp-volume-caption">{t('volume.label')}</span>
-        <div className="kp-meter" aria-hidden>
-          <div className="kp-meter-fill" style={{ width: `${muted ? 0 : Math.round(level)}%` }} />
-        </div>
-      </div>
-      <RampButton
-        label={t('volume.up')}
-        delta={1}
-        icon="plus"
-        onBump={onBump}
-        disabled={level >= 100}
-      />
       <button
         type="button"
         className="kp-round kp-mute"
@@ -111,6 +99,62 @@ export function VolumeControl({
       >
         <Icon name={muted ? 'mute' : 'volume'} />
       </button>
+      <RampButton
+        label={t('volume.up')}
+        delta={1}
+        icon="plus"
+        onBump={onBump}
+        disabled={level >= 100}
+      />
+    </div>
+  );
+}
+
+/**
+ * A short overlay when the level or mute changes, like a phone. With feedback it shows the 0-100
+ * number; without (no device reports its level) it shows only the icon.
+ */
+export function VolumeHud({
+  level,
+  muted,
+  feedback,
+  t,
+}: {
+  level: number;
+  muted: boolean;
+  feedback: boolean;
+  t: Translate;
+}) {
+  const [shown, setShown] = useState(false);
+  const last = useRef<{ level: number; muted: boolean } | null>(null);
+
+  useEffect(() => {
+    const before = last.current;
+    last.current = { level, muted };
+    // The first value is the starting point, not a change.
+    if (!before || (before.level === level && before.muted === muted)) return;
+    setShown(true);
+    const id = setTimeout(() => setShown(false), HUD_MS);
+    return () => clearTimeout(id);
+  }, [level, muted]);
+
+  if (!shown) return null;
+  const value = Math.round(level);
+  return (
+    <div className="kp-hud" role="status" aria-live="polite">
+      <Icon name={muted ? 'mute' : 'volume'} />
+      {muted ? (
+        <span className="kp-hud-text">{t('volume.muted')}</span>
+      ) : (
+        feedback && (
+          <>
+            <span className="kp-hud-number">{value}</span>
+            <div className="kp-hud-bar" aria-hidden>
+              <div className="kp-hud-fill" style={{ width: `${value}%` }} />
+            </div>
+          </>
+        )
+      )}
     </div>
   );
 }

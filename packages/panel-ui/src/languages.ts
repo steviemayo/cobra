@@ -52,6 +52,13 @@ const es: Dictionary = {
   'combine.join': 'Combinar con {rooms}',
   'combine.split': 'Separar salas',
   'combine.status': 'Combinada con {rooms}',
+  'nav.home': 'Inicio',
+  'home.title': '¿Qué ocurre hoy?',
+  'idle.begin': 'Toque para comenzar',
+  'idle.support': '¿Necesita ayuda?',
+  'volume.muted': 'Silenciado',
+  'quick.more': 'Acciones rápidas',
+  'sheet.close': 'Cerrar',
 };
 
 const fr: Dictionary = {
@@ -103,6 +110,13 @@ const fr: Dictionary = {
   'combine.join': 'Associer avec {rooms}',
   'combine.split': 'Séparer les salles',
   'combine.status': 'Associée avec {rooms}',
+  'nav.home': 'Accueil',
+  'home.title': 'Que se passe-t-il aujourd’hui ?',
+  'idle.begin': 'Touchez pour commencer',
+  'idle.support': 'Besoin d’aide ?',
+  'volume.muted': 'Son coupé',
+  'quick.more': 'Actions rapides',
+  'sheet.close': 'Fermer',
 };
 
 const de: Dictionary = {
@@ -157,6 +171,13 @@ const de: Dictionary = {
   'combine.join': 'Mit {rooms} verbinden',
   'combine.split': 'Räume trennen',
   'combine.status': 'Verbunden mit {rooms}',
+  'nav.home': 'Start',
+  'home.title': 'Was steht heute an?',
+  'idle.begin': 'Zum Starten berühren',
+  'idle.support': 'Brauchen Sie Hilfe?',
+  'volume.muted': 'Stumm',
+  'quick.more': 'Schnellaktionen',
+  'sheet.close': 'Schließen',
 };
 
 export const LANGUAGES: Record<string, { label: string; dictionary: Dictionary }> = {

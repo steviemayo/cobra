@@ -601,3 +601,33 @@ describe('triggers', () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('panel settings and volume feedback', () => {
+  it('passes the room settings for the panel to show', () => {
+    const m = meeting();
+    m.settings.panel.homeMode = 'nav';
+    m.settings.panel.idle.timeoutMinutes = 5;
+    setup(m);
+    expect(snap().ui).toMatchObject({ homeMode: 'nav', idle: { timeoutMinutes: 5 } });
+  });
+
+  it('room.on runs the On state when the room is off, and does nothing when it is on', async () => {
+    setup(meeting());
+    rt.dispatch({ type: 'room.on' });
+    await advance(50);
+    expect(snap().status).toBe('starting');
+    await advance(3000);
+    expect(snap().status).toBe('on');
+    expect(sim.getState('display1')!.power).toBe('on');
+    rt.dispatch({ type: 'room.on' });
+    await advance(50);
+    expect(snap().status).toBe('on');
+  });
+
+  it('says the volume has feedback once a device reports it', async () => {
+    setup(meeting());
+    rt.dispatch({ type: 'activity.start', activityId: 'present' });
+    await advance(3000);
+    expect(snap().volume.feedback).toBe(true);
+  });
+});
