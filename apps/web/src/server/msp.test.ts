@@ -352,6 +352,17 @@ describe('ending the relationship', () => {
     expect(w.ticket.rows.map((t) => t.routedTo)).toEqual(['org', 'kestrel']);
   });
 
+  it('provider staff can no longer be assigned tickets, but the team still can', async () => {
+    const w = world();
+    const id = await connect(w);
+    w.ticket.rows.push(
+      { id: 't1', orgId: CUSTOMER, routedTo: 'org', assignedTo: BOB, status: 'open' },
+      { id: 't2', orgId: CUSTOMER, routedTo: 'org', assignedTo: CAROL, status: 'open' },
+    );
+    await endGrant(w.db, { grantId: id, orgId: MSP, by: ALICE });
+    expect(w.ticket.rows.map((t) => t.assignedTo)).toEqual([null, CAROL]);
+  });
+
   it('a customer sees only live connections', async () => {
     const w = world();
     const id = await connect(w);

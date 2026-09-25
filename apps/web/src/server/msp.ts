@@ -9,6 +9,7 @@ import {
   type OrgRole,
 } from '@kestrel/model';
 import { effectiveStatus } from './gateway-status';
+import { clearStaleAssignees } from './ticket-assignees';
 
 // Managed service providers. An MSP is an organisation of kind "msp"; a customer's owner invites
 // it, the MSP's owner accepts, and either side can end it. While it is active, the MSP's people
@@ -136,6 +137,8 @@ export async function endGrant(
     where: { orgId: g.customerOrgId, routedTo: mspRoute(g.mspOrgId) },
     data: { routedTo: 'org' },
   });
+  // Provider staff can no longer be assigned tickets here.
+  await clearStaleAssignees(db, g.customerOrgId);
   const [msp, customer] = await Promise.all([
     db.org.findFirst({ where: { id: g.mspOrgId } }),
     db.org.findFirst({ where: { id: g.customerOrgId } }),
