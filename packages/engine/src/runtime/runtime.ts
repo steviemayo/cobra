@@ -6,6 +6,7 @@ import {
   type DeviceEvent,
   type PanelClient,
   type PanelCombination,
+  type PanelLinking,
   type PanelViewModel,
   type RoomModel,
   type RoomStatus,
@@ -30,6 +31,17 @@ export interface RuntimeOptions {
   stepTimeoutMs?: number;
   /** The panel asked to join or split the room with its combined partners. */
   onCombine?: (combined: boolean) => void;
+  /** The panel asked to open or close a movable wall (Room linking menu). */
+  onDivider?: (dividerId: string, open: boolean) => void;
+}
+
+/** What a room was doing when it was suspended, so it can be brought back. */
+export interface ParkedState {
+  /** The room was on (or starting). */
+  on: boolean;
+  primary: { activityId: string; sourceId?: string } | null;
+  /** Overlay activities that were running, such as Record. */
+  overlays: string[];
 }
 
 interface Primary {
@@ -102,6 +114,9 @@ export class RoomRuntime implements PanelClient {
   private volumeQueued: number | null = null;
   private snapshot: PanelViewModel;
   private disposed = false;
+  /** While a combined room that includes this one is live, this room must not touch the devices. */
+  private suspended = false;
+  private linking: PanelLinking | null = null;
 
   constructor(private readonly opts: RuntimeOptions) {
     this.model = opts.model;
@@ -138,7 +153,7 @@ export class RoomRuntime implements PanelClient {
 
   dispatch(raw: PanelIntent): void {
     const parsed = PanelIntent.safeParse(raw);
-    if (!parsed.success || this.disposed) return;
+    if (!parsed.success || this.disposed || this.suspended) return;
     const intent = parsed.data;
     // Any touch counts as someone being here: cancel a pending auto-off.
     if (intent.type !== 'warning.dismiss') this.userPresent();
@@ -169,6 +184,9 @@ export class RoomRuntime implements PanelClient {
       case 'combine.set':
         if (this.combination?.role === 'primary') this.opts.onCombine?.(intent.combined);
         return;
+      case 'divider.set':
+        this.opts.onDivider?.(intent.dividerId, intent.open);
+        return;
     }
   }
 
@@ -181,6 +199,87 @@ export class RoomRuntime implements PanelClient {
     this.clearWarning();
     this.stopTicker();
     this.listeners.clear();
+  }
+
+  // ---- Room groups ----------------------------------------------------------------------------
+
+  get isSuspended(): boolean {
+    return this.suspended;
+  }
+
+  /** The walls and joined rooms the Room linking menu shows. null: not in a room group. */
+  setLinking(info: PanelLinking | null) {
+    if (JSON.stringify(info) === JSON.stringify(this.linking)) return;
+    this.linking = info;
+    this.notify();
+  }
+
+  /**
+   * Stop acting on the devices, because another room's program is running them (a combined room
+   * that includes this one). Anything in flight is abandoned and timers are cleared. Returns what
+   * the room was doing, to restore later.
+   */
+  suspend(): ParkedState {
+    const parked: ParkedState = {
+      on: this.status === 'on' || this.status === 'starting',
+      primary: this.primary
+        ? { activityId: this.primary.activityId, sourceId: this.primary.sourceId }
+        : null,
+      overlays: [...this.overlays],
+    };
+    if (this.suspended || this.disposed) return parked;
+    this.suspended = true;
+    this.abort?.abort();
+    this.runId++;
+    this.clearIdle();
+    this.clearPrompt();
+    this.clearWarning();
+    this.stopTicker();
+    this.notify();
+    return parked;
+  }
+
+  /**
+   * Take the devices back. What the room believed about itself is dropped, because someone else has
+   * been driving the devices: it starts from off, and the caller says what to do next
+   * (turnOff, turnOn or restore).
+   */
+  resume() {
+    if (!this.suspended || this.disposed) return;
+    this.suspended = false;
+    this.primary = null;
+    this.overlays.clear();
+    this.starting = null;
+    this.faultDevice = null;
+    this.faultText = null;
+    this.status = 'off';
+    this.adoptDeviceState();
+    this.notify();
+  }
+
+  /** Run the On state (devices on, nothing chosen yet). */
+  turnOn(): Promise<void> {
+    const on = this.model.states.find((s) => s.kind === 'on');
+    if (!on || this.suspended || this.disposed) return Promise.resolve();
+    return this.runState(on.id);
+  }
+
+  /** Run Room Off even if the room thinks it is already off: the devices may not agree. */
+  turnOff(): Promise<void> {
+    if (this.suspended || this.disposed) return Promise.resolve();
+    return this.roomOff();
+  }
+
+  /** Bring back what a room was doing. A room that was off (or never ran) is turned off. */
+  async restore(state: ParkedState | undefined): Promise<void> {
+    if (!state || !state.on) return this.turnOff();
+    if (state.primary) {
+      await this.startActivity(state.primary.activityId, state.primary.sourceId);
+      for (const id of state.overlays) await this.startActivity(id);
+      return;
+    }
+    await this.turnOn();
+    for (const id of state.overlays) await this.startActivity(id);
   }
 
   // ---- Combined rooms -------------------------------------------------------------------------
@@ -243,7 +342,7 @@ export class RoomRuntime implements PanelClient {
 
   /** Run what a trigger points at: an activity (with a source) or a state. Used by schedules, hooks and sensors. */
   fire(target: TriggerTarget): void {
-    if (this.disposed) return;
+    if (this.disposed || this.suspended) return;
     if (target.type === 'activity')
       return void this.startActivity(target.activityId, target.sourceId);
     void this.runState(target.stateId);
@@ -251,6 +350,7 @@ export class RoomRuntime implements PanelClient {
 
   /** Run one enabled trigger by id, whatever its kind (a calendar meeting starting, say). Returns whether it ran. */
   fireTrigger(triggerId: string): boolean {
+    if (this.suspended) return false;
     const t = this.model.triggers.find((x) => x.id === triggerId && x.enabled);
     if (!t) return false;
     this.fire(t.run);
@@ -259,6 +359,7 @@ export class RoomRuntime implements PanelClient {
 
   /** An external call (webhook) by name. Returns how many triggers ran. */
   fireHook(hookName: string): number {
+    if (this.suspended) return 0;
     const hooks = this.model.triggers.filter(
       (t) => t.type === 'webhook' && t.enabled && t.hookName === hookName,
     );
@@ -522,7 +623,7 @@ export class RoomRuntime implements PanelClient {
   }
 
   private onDeviceEvent(event: DeviceEvent) {
-    if (this.disposed) return;
+    if (this.disposed || this.suspended) return;
     if (this.volumeDevices.includes(event.deviceId) && !this.volumeInFlight) {
       if (event.state.volume !== undefined) {
         this.volume = event.state.volume;
@@ -798,6 +899,7 @@ export class RoomRuntime implements PanelClient {
             }
           : null,
       ...(this.combination ? { combination: this.combination } : {}),
+      ...(this.linking ? { linking: this.linking } : {}),
     };
   }
 }

@@ -79,9 +79,11 @@ function execute(host: RoomHost, cmd: GatewayCommand, facts: GatewayFacts): Comm
       return { id: '', ok: true, output: { restarted: room.signed.manifest.roomName } };
     }
     case 'room_off': {
-      const off = room.runtime.getSnapshot().activities.find((a) => a.kind === 'room_off');
+      // While walls are open the combined room is the one in charge of this room's devices.
+      const running = host.active(cmd.roomId) ?? room;
+      const off = running.runtime.getSnapshot().activities.find((a) => a.kind === 'room_off');
       if (!off) return fail('This room has no Room Off activity');
-      room.runtime.dispatch({ type: 'activity.start', activityId: off.id });
+      running.runtime.dispatch({ type: 'activity.start', activityId: off.id });
       return { id: '', ok: true, output: {} };
     }
     default:
