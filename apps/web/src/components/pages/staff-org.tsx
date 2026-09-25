@@ -5,6 +5,7 @@ import { ArrowLeft } from 'lucide-react';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { LicencePanel } from '@/components/staff/licence-panel';
 import { NotesPanel } from '@/components/staff/notes-panel';
+import { RetentionPanel } from '@/components/staff/retention-panel';
 import { SessionPanel } from '@/components/staff/session-panel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate, timeAgo } from '@/lib/format';
@@ -76,6 +77,8 @@ export function StaffOrg({ orgId }: { orgId: string }) {
       <LicencePanel orgId={orgId} />
 
       <NotesPanel orgId={orgId} />
+
+      <RetentionPanel orgId={orgId} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="space-y-2">

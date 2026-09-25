@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ActivityFeed } from '@/components/common/activity-feed';
+import { AuditExportButtons } from '@/components/common/audit-export-buttons';
 import {
   BrandingFields,
   brandingToDraft,
@@ -133,13 +134,29 @@ function OrgBrandingForm() {
 export function ActivityLog() {
   const trpc = useTRPC();
   const { orgId } = useOrg();
+  const { isOwner } = useOrg();
   const log = useQuery(trpc.audit.list.queryOptions({ orgId, limit: 100 }));
+  const retention = useQuery(trpc.audit.retention.queryOptions({ orgId }));
+  const exportLog = useMutation(trpc.audit.export.mutationOptions());
+  const months = (days: number) => Math.round(days / 30.4);
   return (
     <PageContainer className="max-w-3xl">
       <PageHeader
         title="Activity log"
         description="Changes to sites, rooms, members and invitations."
+        actions={
+          isOwner ? (
+            <AuditExportButtons run={(format) => exportLog.mutateAsync({ orgId, format })} />
+          ) : undefined
+        }
       />
+      {retention.data && (
+        <p className="text-sm text-muted-foreground">
+          Kept for {months(retention.data.days)} months. Billing and access changes are kept for{' '}
+          {months(retention.data.longKeptDays)} months.
+          {isOwner ? ' Download the whole log with the buttons above.' : ''}
+        </p>
+      )}
       {log.isPending ? (
         <Skeleton className="h-48 w-full" />
       ) : log.error ? (

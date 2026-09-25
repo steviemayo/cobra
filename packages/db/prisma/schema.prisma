@@ -44,6 +44,7 @@ model Org {
   gateways            Gateway[]
   rooms               Room[]
   audit               AuditLog[]
+  retention           OrgRetention?
   drafts              RoomDraft[]
   draftVersions       RoomDraftVersion[]
   templates           Template[]
@@ -170,6 +171,17 @@ model Room {
   @@index([orgId])
   @@index([siteId])
   @@index([groupId])
+}
+
+// How long an organisation's activity log is kept. No row means the default (12 months). Only staff
+// change it; the daily retention job reads it. Billing and access-change events are kept longer.
+model OrgRetention {
+  orgId     String   @id @db.Uuid
+  auditDays Int      @default(365)
+  updatedBy String?  @db.Uuid
+  updatedAt DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
 
 model AuditLog {

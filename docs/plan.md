@@ -399,7 +399,7 @@ Working rules that apply to all of them:
 | B | Quick actions from drivers (Blank Screen, Privacy Mute) | medium | a display or projector that supports blank, to try |
 | C | Room groups: gateway runtime (R1 to R4) | large | **built** (decisions in `docs/decisions.md`) |
 | D | Remove the old combinations code and table (R5) | medium | code removal **built**; table drop waits for the release |
-| E | Audit retention and export | medium | retention default (12 months proposed) |
+| E | Audit retention and export | medium | **built** (default 12 months, see `docs/decisions.md`); apply migration `org_retention` |
 | F | Panel function pages (cameras, microphones, recorder, room controls) | large | real devices to try |
 | G | Org accent colour in the portal | small | none |
 | H | Email notifications (tickets and alerts) | small | a domain, Resend verified (step 6 above) |
@@ -490,6 +490,8 @@ Do, in two releases: (1) remove every reader and writer, the panel `combine.set`
 Depends on: C deployed everywhere. Done when: `grep -ri roomcombination` finds only the migration history.
 
 ### E. Audit retention and export
+
+**Status: built.** Nothing left to decide; the migration `org_retention` (one new table) still has to be applied. Until it is, only the daily audit clean-up reports an error (the rest of the retention job still runs) and the staff retention panel shows an error. The text below is the original brief.
 
 Decided in the staff plan review; not built.
 
