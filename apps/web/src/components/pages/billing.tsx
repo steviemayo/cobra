@@ -100,6 +100,13 @@ export function BillingView() {
                 : ''
             }${b.subscription.status === 'past_due' ? ' A payment failed. Update your card to avoid interruption.' : ''}`}
         </p>
+        {e.adjusted && (
+          <p className="text-sm">
+            Kestrel has adjusted your licence
+            {e.adjusted.until ? ` until ${formatDate(e.adjusted.until)}` : ''}. Contact support if
+            you have questions.
+          </p>
+        )}
         <p className="text-sm text-muted-foreground">
           {plural(b.rooms, 'room')} in use
           {e.maxRooms !== null ? ` of ${e.maxRooms} on this plan` : ''}.

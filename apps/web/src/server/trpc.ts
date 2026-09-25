@@ -81,3 +81,9 @@ export function requireStaffRole(staff: { roles: string[] }, needed: StaffRole) 
   if (!hasStaffRole(staff.roles, needed))
     throw new TRPCError({ code: 'FORBIDDEN', message: 'Insufficient staff role' });
 }
+
+/** For work that more than one staff role may do (for example notes: support or billing). */
+export function requireAnyStaffRole(staff: { roles: string[] }, needed: StaffRole[]) {
+  if (!needed.some((r) => hasStaffRole(staff.roles, r)))
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Insufficient staff role' });
+}

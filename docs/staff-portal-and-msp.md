@@ -5,7 +5,8 @@ Status: planning draft. Decisions so far come from the planning session on 2026-
 ## Build status
 
 - **Slice 1 (staff foundation): built** on branch `feat/staff-portal`. `StaffUser` and `StaffAudit` tables (migration `staff_users`, applied to `kestrel-dev`), `staffProcedure` with a second-factor check, `/staff` with the organisation directory, an organisation page (every open is audited), marketplace review moved to `/staff/marketplace`, a `STAFF_HOST` switch, and `apps/web/scripts/add-staff.mts` to add staff. `KESTREL_ADMIN_EMAILS` is retired
-- Slices 2 to 6: not started
+- **Slice 2 (licences): built** on branch `feat/staff-licences`. `OrgLicenseOverride` and `OrgNote` tables (migration `license_overrides`, applied to `kestrel-dev`). An override can change the plan, trial end, room limit or monitoring, ends on its date or when removed, needs a reason, and replaces the previous one. Staff need the billing role (or admin) to change it; support or billing can add notes. The customer sees "Kestrel staff adjusted this organisation's licence: ..." in their activity log and a line on the billing page, never the reason. Entitlements everywhere (room limits, monitoring, marketplace) go through the override
+- Slices 3 to 6: not started
 
 ## Why
 

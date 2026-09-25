@@ -6,6 +6,10 @@ const role = (v: unknown) => ROLE_LABEL[s(v) as keyof typeof ROLE_LABEL] ?? s(v)
 // Human wording for audit log rows: "<actor> <this text>".
 export function describeAudit(action: string, meta: Record<string, unknown>): string {
   switch (action) {
+    case 'license.adjust':
+      return `adjusted this organisation’s licence: ${s(meta.summary)}`;
+    case 'license.revoke':
+      return 'removed an adjustment to this organisation’s licence';
     case 'org.create':
       return `created the organisation “${s(meta.name)}”`;
     case 'org.rename':
@@ -57,7 +61,9 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
     case 'command.result':
       return `the gateway finished a ${s(meta.type).replace('_', ' ')} command (${meta.ok ? 'worked' : 'failed'})`;
     case 'driver.save':
-      return meta.created ? 'created a custom driver' : `saved version ${s(meta.version)} of a custom driver`;
+      return meta.created
+        ? 'created a custom driver'
+        : `saved version ${s(meta.version)} of a custom driver`;
     case 'driver.delete':
       return `deleted the custom driver “${s(meta.name)}”`;
     case 'marketplace.publish':
