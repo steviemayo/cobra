@@ -32,7 +32,7 @@ export const billingRouter = router({
     const [billing, entitlements, rooms] = await Promise.all([
       ensureBilling(db, ctx.orgId),
       getEntitlements(db, ctx.orgId),
-      db.room.count({ where: { orgId: ctx.orgId } }),
+      db.room.count({ where: { orgId: ctx.orgId, kind: { not: 'combined' } } }),
     ]);
     const prices = priceMapFromEnv();
     return {
@@ -56,7 +56,7 @@ export const billingRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner']);
       try {
-        const rooms = await db.room.count({ where: { orgId: ctx.orgId } });
+        const rooms = await db.room.count({ where: { orgId: ctx.orgId, kind: { not: 'combined' } } });
         const res = await startSubscription(db, {
           orgId: ctx.orgId,
           plan: input.plan,

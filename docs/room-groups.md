@@ -53,7 +53,9 @@ For a combined room over member rooms R1..Rn:
 - Billing and trial limits count `kind = standard` rooms only: combined rooms are derived and are not billed
 - The old `RoomCombination` table stays until the new version is deployed everywhere, then a follow-up migration drops it. Dropping it in the same release would break the running production code, which shares the database with previews
 
-## Slices
+## Slices (status)
+
+Slice 1 and 2 are built. The migration `room_groups` is additive and has been applied to `kestrel-dev`.
 
 1. Pure logic with tests: divider validation, combined-room enumeration, program derivation (`packages/model`, `packages/engine`)
 2. Database (additive migration) and portal: create groups and dividers, list derived rooms, create combined rooms; remove the old combinations page, router and panel banner

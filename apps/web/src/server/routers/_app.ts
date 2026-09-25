@@ -3,7 +3,7 @@ import { alertRouter } from './alert';
 import { auditRouter } from './audit';
 import { billingRouter } from './billing';
 import { calendarRouter } from './calendar';
-import { combinationRouter } from './combination';
+import { roomGroupRouter } from './room-group';
 import { commandRouter } from './command';
 import { controlRouter } from './control';
 import { deploymentRouter } from './deployment';
@@ -41,7 +41,7 @@ export const appRouter = router({
   driver: driverRouter,
   marketplace: marketplaceRouter,
   calendar: calendarRouter,
-  combination: combinationRouter,
+  roomGroup: roomGroupRouter,
   control: controlRouter,
 });
 export type AppRouter = typeof appRouter;

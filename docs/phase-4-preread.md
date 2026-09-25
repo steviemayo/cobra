@@ -44,7 +44,7 @@
 - `apps/gateway` — Node gateway service, `Dockerfile`, README (GHCR image, stable/beta channels)
 - `apps/panel` — Vite panel SPA served by gateways (PIN gate, reconnecting WebSocket)
 - `packages/model` (room schemas, device catalog, templates, protocol schemas) · `engine` (validator, RoomRuntime, activity planner, executor, design diff) · `drivers` (`sim/` simulated devices, `real/` PJLink, NVX, Q-SYS, generic TCP/serial/REST, VISCA, declarative + bundled `library/`, hybrid real/simulated bus, registry) · `crypto` (Ed25519 signed manifests, tokens, PIN hashing) · `panel-ui` (generated panel) · `db` · `config`
-- Migrations: init, room_drafts_templates, members_email_invites, gateway_releases_events, deployments, monitoring, billing_and_control, room_hook_secret, room_combinations, calendars, marketplace, custom_drivers, gateway_channel
+- Migrations: init, room_drafts_templates, members_email_invites, gateway_releases_events, deployments, monitoring, billing_and_control, room_hook_secret, room_combinations, calendars, marketplace, custom_drivers, gateway_channel, room_groups
 
 ## Rules learned (don't relearn)
 

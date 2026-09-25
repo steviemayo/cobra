@@ -32,6 +32,45 @@ async function findRoom(ctxOrgId: string, id: string) {
   return room;
 }
 
+async function applyGateway(
+  orgId: string,
+  userId: string,
+  room: { id: string; name: string; desiredReleaseId: string | null },
+  gatewayId: string | null,
+  gatewayName: string | null,
+) {
+  await db.room.update({
+    where: { id: room.id },
+    data: {
+      gatewayId,
+      // The new gateway has not reported on this room yet.
+      reportedReleaseId: null,
+      reportedHash: null,
+      reportedStatus: null,
+      reportedError: null,
+      reportedAt: null,
+    },
+  });
+  // A room that already has a release follows it to its new gateway.
+  if (gatewayId && room.desiredReleaseId)
+    await createDeployment(db, {
+      orgId,
+      roomId: room.id,
+      gatewayId,
+      releaseId: room.desiredReleaseId,
+      kind: 'deploy',
+      createdBy: userId,
+      scheduledFor: null,
+    });
+  await writeAudit({
+    orgId,
+    actorId: userId,
+    action: 'room.gateway',
+    target: room.id,
+    meta: { room: room.name, gateway: gatewayName },
+  });
+}
+
 export const roomRouter = router({
   list: orgProcedure
     .input(z.object({ orgId }))
@@ -87,7 +126,12 @@ export const roomRouter = router({
       requireRole(ctx.role, ['owner', 'dev']);
       const site = await assertSite(ctx.orgId, input.siteId);
       const entitlements = await getEntitlements(db, ctx.orgId);
-      if (!canAddRoom(entitlements, await db.room.count({ where: { orgId: ctx.orgId } })))
+      if (
+        !canAddRoom(
+          entitlements,
+          await db.room.count({ where: { orgId: ctx.orgId, kind: { not: 'combined' } } }),
+        )
+      )
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: `Your plan includes ${entitlements.maxRooms} rooms. Subscribe to add more.`,
@@ -117,6 +161,11 @@ export const roomRouter = router({
       requireRole(ctx.role, ['owner', 'dev']);
       const room = await findRoom(ctx.orgId, input.roomId);
       const site = input.siteId ? await assertSite(ctx.orgId, input.siteId) : null;
+      if (site && site.id !== room.siteId && room.groupId)
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This room is in a room group. Take it out of the group before moving it.',
+        });
       const updated = await db.room.update({
         where: { id: room.id },
         data: {
@@ -139,6 +188,11 @@ export const roomRouter = router({
   delete: orgProcedure.input(z.object({ orgId, roomId })).mutation(async ({ ctx, input }) => {
     requireRole(ctx.role, ['owner', 'dev']);
     const room = await findRoom(ctx.orgId, input.roomId);
+    if (room.groupId && room.kind !== 'combined')
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'This room is in a room group. Take it out of the group first.',
+      });
     await db.room.delete({ where: { id: room.id } });
     await writeAudit({
       orgId: ctx.orgId,
@@ -170,36 +224,12 @@ export const roomRouter = router({
           });
         gatewayName = gw.name;
       }
-      await db.room.update({
-        where: { id: room.id },
-        data: {
-          gatewayId: input.gatewayId,
-          // The new gateway has not reported on this room yet.
-          reportedReleaseId: null,
-          reportedHash: null,
-          reportedStatus: null,
-          reportedError: null,
-          reportedAt: null,
-        },
-      });
-      // A room that already has a release follows it to its new gateway.
-      if (input.gatewayId && room.desiredReleaseId)
-        await createDeployment(db, {
-          orgId: ctx.orgId,
-          roomId: room.id,
-          gatewayId: input.gatewayId,
-          releaseId: room.desiredReleaseId,
-          kind: 'deploy',
-          createdBy: ctx.user.id,
-          scheduledFor: null,
-        });
-      await writeAudit({
-        orgId: ctx.orgId,
-        actorId: ctx.user.id,
-        action: 'room.gateway',
-        target: room.id,
-        meta: { room: room.name, gateway: gatewayName },
-      });
+      // Rooms in a group are controlled together, so they always run on one gateway: move them all.
+      const targets = room.groupId
+        ? await db.room.findMany({ where: { orgId: ctx.orgId, groupId: room.groupId } })
+        : [room];
+      for (const target of targets)
+        await applyGateway(ctx.orgId, ctx.user.id, target, input.gatewayId, gatewayName);
       return { ok: true };
     }),
 
