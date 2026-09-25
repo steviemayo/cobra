@@ -88,9 +88,12 @@ describe('home screen', () => {
     expect(screen.queryByText('What’s happening today?')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Home' }));
     expect(screen.getByText('What’s happening today?')).toBeTruthy();
-    // Room Off is offered, as a quiet tile.
-    fireEvent.click(screen.getByRole('button', { name: 'Room Off' }));
-    expect(dispatched.at(-1)).toMatchObject({ type: 'activity.start', activityId: 'room_off' });
+    // Room Off is not a tile: it is behind the Power button.
+    expect(screen.queryByRole('button', { name: 'Room Off' })).toBeNull();
+    // Picking the running activity just goes back to it, without restarting anything.
+    fireEvent.click(screen.getByRole('button', { name: /Present/ }));
+    expect(screen.queryByText('What’s happening today?')).toBeNull();
+    expect(dispatched).toEqual([]);
   });
 
   it('nav mode: top navigation, no Home button', () => {
@@ -105,6 +108,65 @@ describe('home screen', () => {
     render(<PanelApp client={client} />);
     expect(document.querySelector('.kp-bar .kp-clock-time')).toBeTruthy();
     expect(document.querySelector('.kp-bar .kp-clock-label')?.textContent).toBe('Boardroom');
+  });
+});
+
+describe('power', () => {
+  it('has no Power button while the room is off', () => {
+    const { client } = fakeClient(base());
+    render(<PanelApp client={client} />);
+    expect(screen.queryByRole('button', { name: 'Power' })).toBeNull();
+  });
+
+  it('asks "Power off system?" and only turns the room off on confirm', () => {
+    const { client, dispatched } = fakeClient(running());
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Power' }));
+    expect(screen.getByRole('alertdialog', { name: 'Power off system?' })).toBeTruthy();
+    expect(dispatched).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Power off' }));
+    expect(dispatched).toEqual([
+      { type: 'activity.start', activityId: 'room_off', sourceId: undefined },
+    ]);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('Cancel goes back without doing anything', () => {
+    const { client, dispatched } = fakeClient(running());
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Power' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(dispatched).toEqual([]);
+  });
+
+  it('a touch outside the dialog, or Escape, goes back too', () => {
+    const { client, dispatched } = fakeClient(running());
+    const { container } = render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Power' }));
+    fireEvent.click(container.querySelector('.kp-dialog-backdrop')!);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Power' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Cancel' }), { key: 'Escape' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(dispatched).toEqual([]);
+  });
+
+  it('a touch inside the dialog does not dismiss it', () => {
+    const { client } = fakeClient(running());
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Power' }));
+    fireEvent.click(screen.getByRole('heading', { name: 'Power off system?' }));
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+  });
+
+  it('closes by itself if the room turns off meanwhile', () => {
+    const { client, set } = fakeClient(running());
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Power' }));
+    set(base());
+    expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 });
 

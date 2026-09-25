@@ -61,6 +61,11 @@ export const en = {
   'volume.muted': 'Muted',
   'quick.more': 'Quick actions',
   'sheet.close': 'Close',
+  'power.button': 'Power',
+  'power.title': 'Power off system?',
+  'power.body': 'The displays and audio will turn off.',
+  'power.confirm': 'Power off',
+  'power.cancel': 'Cancel',
 } as const;
 
 export type TextKey = keyof typeof en;

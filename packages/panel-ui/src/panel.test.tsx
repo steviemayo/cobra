@@ -143,13 +143,11 @@ describe('when the room is on', () => {
     ]);
   });
 
-  it('tapping Room Off in the nav sends it', () => {
-    const { client, dispatched } = fakeClient(on({ ui: navMode() }));
+  it('Room Off is not a nav item: it is the Power button', () => {
+    const { client } = fakeClient(on({ ui: navMode() }));
     render(<PanelApp client={client} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Room Off' }));
-    expect(dispatched).toEqual([
-      { type: 'activity.start', activityId: 'room_off', sourceId: undefined },
-    ]);
+    expect(screen.queryByRole('button', { name: 'Room Off' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Power' })).toBeTruthy();
   });
 
   it('Record toggles: start, then stop', () => {

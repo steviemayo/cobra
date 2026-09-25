@@ -14,6 +14,7 @@ import {
 } from '@kestrel/model';
 import { BottomBar } from './BottomBar';
 import { IdleScreen } from './IdleScreen';
+import { PowerDialog } from './PowerDialog';
 import { Icon } from './icons';
 import { messageText, type Translate } from './i18n';
 import { translatorFor } from './languages';
@@ -190,6 +191,7 @@ export function PanelApp({
   const ui = vm.ui ?? DEFAULT_UI;
   const [picked, setPicked] = useState<string | null>(null);
   const [home, setHome] = useState(false);
+  const [confirmOff, setConfirmOff] = useState(false);
 
   // "Touch to begin": shown on load and again after `timeoutMinutes` without a touch (0 = never).
   const idleMs = ui.idle.timeoutMinutes * 60_000;
@@ -279,9 +281,11 @@ export function PanelApp({
     );
 
   const showTiles = off || (!navMode && home);
+  // Room Off is not an activity to pick: it lives behind the Power button, with a confirmation.
   const tiles = vm.activities.filter((a) => a.kind !== 'room_off');
   const roomOff = vm.activities.find((a) => a.kind === 'room_off');
   const showVolume = vm.volume.available && !off;
+  const canPowerOff = !off && vm.status !== 'stopping' && Boolean(roomOff);
 
   return (
     <div
@@ -297,7 +301,7 @@ export function PanelApp({
 
           {navMode && !off ? (
             <nav className="kp-nav" aria-label={t('nav.label')}>
-              {vm.activities.map((a) => (
+              {tiles.map((a) => (
                 <button
                   key={a.id}
                   type="button"
@@ -333,6 +337,12 @@ export function PanelApp({
               {t(`status.${vm.status}` as const)}
             </span>
             {headerAction}
+            {canPowerOff && (
+              <button type="button" className="kp-power" onClick={() => setConfirmOff(true)}>
+                <Icon name="power" />
+                {t('power.button')}
+              </button>
+            )}
           </div>
         </header>
 
@@ -358,16 +368,6 @@ export function PanelApp({
                     <span>{a.name}</span>
                   </button>
                 ))}
-                {!off && roomOff && (
-                  <button
-                    type="button"
-                    className="kp-tile kp-tile-big kp-tile-quiet"
-                    onClick={() => choose(roomOff)}
-                  >
-                    <Icon name={roomOff.icon ?? roomOff.kind} />
-                    <span>{roomOff.name}</span>
-                  </button>
-                )}
               </div>
             </section>
           ) : (
@@ -431,6 +431,17 @@ export function PanelApp({
           />
         )}
       </div>
+
+      {confirmOff && canPowerOff && roomOff && !idle && (
+        <PowerDialog
+          t={t}
+          onCancel={() => setConfirmOff(false)}
+          onConfirm={() => {
+            setConfirmOff(false);
+            choose(roomOff);
+          }}
+        />
+      )}
 
       {idle && (
         <IdleScreen

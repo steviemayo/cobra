@@ -13,7 +13,22 @@
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  background: var(--kp-bg);
+  background:
+    radial-gradient(
+      70% 60% at 8% 0%,
+      color-mix(in srgb, var(--kp-accent) 34%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      60% 55% at 100% 100%,
+      color-mix(in srgb, var(--kp-accent) 20%, transparent),
+      transparent 72%
+    ),
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--kp-bg) 86%, var(--kp-accent)),
+      var(--kp-bg) 65%
+    );
   color: var(--kp-text);
   font-family: var(--kp-font, 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif);
   font-size: 17px;
@@ -30,7 +45,7 @@
 .kp-app *::after {
   box-sizing: border-box;
 }
-.kp-app button {
+:where(.kp-app button) {
   font: inherit;
   color: inherit;
   cursor: pointer;
@@ -63,7 +78,7 @@
   align-items: center;
   gap: 1.2em;
   padding: 0.7em 1.6em 0;
-  border-bottom: 1px solid var(--kp-line);
+  border-bottom: 1px solid var(--kp-glass-line);
   min-height: 5.6em;
 }
 .kp-brand {
@@ -98,7 +113,7 @@
   gap: 0.5em;
   padding: 0.4em 0.9em;
   border-radius: 999px;
-  background: var(--kp-raised);
+  background: var(--kp-glass);
   font-size: 0.9em;
   font-weight: 500;
   white-space: nowrap;
@@ -136,7 +151,7 @@
   height: 3em;
   border-radius: 50%;
   border: 1px solid var(--kp-line);
-  background: var(--kp-raised);
+  background: var(--kp-glass);
   color: var(--kp-muted);
   font-size: 1.3em;
 }
@@ -173,11 +188,11 @@
     color 160ms ease;
 }
 .kp-nav-item svg {
-  font-size: 1.8em;
+  font-size: 2.2em;
   flex-shrink: 0;
 }
 .kp-nav-item:hover {
-  background: var(--kp-raised);
+  background: var(--kp-glass-strong);
 }
 .kp-nav-item:active {
   background: var(--kp-line);
@@ -225,7 +240,7 @@
   gap: 0.8em;
   padding: 0.9em 1.2em;
   border-radius: var(--kp-radius);
-  background: var(--kp-surface);
+  background: var(--kp-glass);
   border: 1px solid var(--kp-line);
   font-size: 1.05em;
   animation: kp-in 200ms ease-out;
@@ -273,7 +288,7 @@
   gap: 1em;
   padding: 0.9em 1.2em;
   border-radius: var(--kp-radius);
-  background: var(--kp-surface);
+  background: var(--kp-glass);
   border: 2px solid var(--kp-accent);
   animation: kp-in 200ms ease-out;
 }
@@ -296,7 +311,7 @@
   padding: 0 1.3em;
   border: 1px solid var(--kp-line);
   border-radius: 0.9em;
-  background: var(--kp-raised);
+  background: var(--kp-glass);
   font-weight: 500;
   transition:
     background 160ms ease,
@@ -355,7 +370,7 @@
   padding: 1em 1.2em;
   border: 2px solid var(--kp-line);
   border-radius: var(--kp-radius);
-  background: var(--kp-surface);
+  background: var(--kp-glass);
   text-align: left;
   transition:
     border-color 160ms ease,
@@ -363,14 +378,14 @@
     transform 120ms ease;
 }
 .kp-tile:hover {
-  background: var(--kp-raised);
+  background: var(--kp-glass-strong);
 }
 .kp-tile:active {
   transform: scale(0.98);
 }
 .kp-tile[aria-pressed='true'] {
   border-color: var(--kp-accent);
-  background: color-mix(in srgb, var(--kp-accent) 14%, var(--kp-surface));
+  background: color-mix(in srgb, var(--kp-accent) 22%, var(--kp-glass-strong));
 }
 .kp-tile-big {
   flex-direction: row;
@@ -384,13 +399,6 @@
   font-size: 1.6em;
   color: var(--kp-accent);
   flex-shrink: 0;
-}
-.kp-tile-quiet {
-  background: transparent;
-  color: var(--kp-muted);
-}
-.kp-tile-quiet svg {
-  color: var(--kp-muted);
 }
 .kp-tile-title {
   font-size: 1.2em;
@@ -415,7 +423,7 @@
   gap: 1.2em;
   padding: 0.8em 1.6em;
   border-top: 1px solid var(--kp-line);
-  background: var(--kp-surface);
+  background: var(--kp-glass);
 }
 .kp-clock {
   display: flex;
@@ -466,12 +474,15 @@
   height: 4.4em;
   border: 1px solid var(--kp-line);
   border-radius: 50%;
-  background: var(--kp-raised);
-  font-size: 1.5em;
+  background: var(--kp-glass);
+  font-size: 1em;
   transition:
     background 160ms ease,
     transform 100ms ease;
   touch-action: none;
+}
+.kp-round svg {
+  font-size: 2.1em;
 }
 .kp-round:active {
   transform: scale(0.94);
@@ -494,21 +505,21 @@
   padding: 0.4em 0.9em;
   border: 1px solid var(--kp-line);
   border-radius: 0.9em;
-  background: var(--kp-raised);
+  background: var(--kp-glass);
   font-size: 0.9em;
   transition:
     background 160ms ease,
     transform 120ms ease;
 }
 .kp-quick svg {
-  font-size: 1.7em;
+  font-size: 2.2em;
 }
 .kp-quick:active {
   transform: scale(0.97);
 }
 .kp-quick[aria-pressed='true'] {
   border-color: var(--kp-accent);
-  background: color-mix(in srgb, var(--kp-accent) 18%, var(--kp-raised));
+  background: color-mix(in srgb, var(--kp-accent) 24%, var(--kp-glass-strong));
   color: var(--kp-accent);
 }
 
@@ -525,7 +536,7 @@
   min-width: 11em;
   padding: 1em 1.6em;
   border-radius: var(--kp-radius);
-  background: var(--kp-raised);
+  background: var(--kp-glass);
   border: 1px solid var(--kp-line);
   box-shadow: 0 0.5em 2em rgb(0 0 0 / 0.35);
   font-size: clamp(13px, 1.35cqw, 24px);
@@ -576,7 +587,7 @@
   max-height: 80%;
   padding: 1.4em 2em 1.6em;
   border-radius: 1.4em 1.4em 0 0;
-  background: var(--kp-surface);
+  background: var(--kp-glass);
   overflow-y: auto;
   animation: kp-in 160ms ease-out;
 }
@@ -668,6 +679,141 @@
 .kp-idle-support .kp-qr {
   width: 6.4em;
   flex-shrink: 0;
+}
+
+/* Glass: translucent, blurred surfaces over the gradient, with a light edge and soft shadow */
+.kp-app {
+  --kp-glass: rgb(255 255 255 / 0.07);
+  --kp-glass-strong: rgb(255 255 255 / 0.13);
+  --kp-glass-line: rgb(255 255 255 / 0.16);
+  --kp-shadow: rgb(0 0 0 / 0.32);
+  --kp-blur: 16px;
+}
+.kp-app[data-mode='light'] {
+  --kp-glass: rgb(255 255 255 / 0.62);
+  --kp-glass-strong: rgb(255 255 255 / 0.85);
+  --kp-glass-line: rgb(255 255 255 / 0.9);
+  --kp-shadow: rgb(30 50 80 / 0.16);
+}
+.kp-app
+  :where(
+    .kp-banner,
+    .kp-alert,
+    .kp-tile,
+    .kp-btn,
+    .kp-quick,
+    .kp-round,
+    .kp-bar,
+    .kp-pill,
+    .kp-sheet,
+    .kp-hud,
+    .kp-dialog,
+    .kp-nav-item
+  ) {
+  -webkit-backdrop-filter: blur(var(--kp-blur)) saturate(150%);
+  backdrop-filter: blur(var(--kp-blur)) saturate(150%);
+}
+.kp-app :where(.kp-tile, .kp-quick, .kp-round, .kp-hud, .kp-dialog),
+.kp-app .kp-btn:not(.kp-btn-primary, .kp-btn-danger) {
+  border-color: var(--kp-glass-line);
+}
+.kp-app
+  :where(.kp-banner, .kp-alert, .kp-tile, .kp-btn, .kp-quick, .kp-round, .kp-hud, .kp-dialog) {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.14),
+    0 0.4em 1.3em var(--kp-shadow);
+}
+.kp-app .kp-bar {
+  border-top-color: var(--kp-glass-line);
+  box-shadow: 0 -0.4em 1.6em var(--kp-shadow);
+}
+.kp-app .kp-sheet,
+.kp-app .kp-dialog,
+.kp-app .kp-hud {
+  background: var(--kp-glass-strong);
+}
+.kp-app .kp-tile[aria-pressed='true'],
+.kp-app .kp-quick[aria-pressed='true'] {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    0 0 1.6em color-mix(in srgb, var(--kp-accent) 35%, transparent);
+}
+.kp-app .kp-btn-primary {
+  background: var(--kp-accent);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.3),
+    0 0.4em 1.4em color-mix(in srgb, var(--kp-accent) 45%, transparent);
+}
+/* Text on the error colour needs to stay readable in dark mode */
+.kp-app[data-mode='dark'] .kp-btn-danger,
+.kp-app[data-mode='dark'] .kp-mute[aria-pressed='true'] {
+  color: #2a0805;
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .kp-app {
+    --kp-glass: var(--kp-surface);
+    --kp-glass-strong: var(--kp-raised);
+  }
+}
+
+/* Power: always visible once the room is on; asks before turning everything off */
+.kp-power {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  min-height: 3.4em;
+  padding: 0 1.1em;
+  border: 1px solid var(--kp-glass-line);
+  border-radius: 0.9em;
+  background: var(--kp-glass);
+  color: var(--kp-error);
+  font-weight: 500;
+}
+.kp-power svg {
+  font-size: 1.6em;
+}
+.kp-power:active {
+  transform: scale(0.97);
+}
+.kp-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgb(4 8 12 / 0.6);
+  font-size: clamp(13px, 1.35cqw, 24px);
+  animation: kp-hud-in 140ms ease-out;
+}
+.kp-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1em;
+  width: min(30em, 90%);
+  padding: 2em;
+  border: 1px solid var(--kp-glass-line);
+  border-radius: 1.4em;
+  text-align: center;
+}
+.kp-dialog h2 {
+  margin: 0;
+  font-size: 1.7em;
+  font-weight: 600;
+}
+.kp-dialog p {
+  margin: 0;
+  color: var(--kp-muted);
+  font-size: 1.1em;
+}
+.kp-dialog-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9em;
+  margin-top: 0.4em;
+}
+.kp-dialog-actions .kp-btn {
+  min-height: 4em;
+  font-size: 1.1em;
 }
 
 /* Narrow panels (phones, small tablets in portrait, embedded previews) */

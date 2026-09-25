@@ -59,6 +59,11 @@ const es: Dictionary = {
   'volume.muted': 'Silenciado',
   'quick.more': 'Acciones rápidas',
   'sheet.close': 'Cerrar',
+  'power.button': 'Apagar',
+  'power.title': '¿Apagar el sistema?',
+  'power.body': 'Las pantallas y el audio se apagarán.',
+  'power.confirm': 'Apagar',
+  'power.cancel': 'Cancelar',
 };
 
 const fr: Dictionary = {
@@ -117,6 +122,11 @@ const fr: Dictionary = {
   'volume.muted': 'Son coupé',
   'quick.more': 'Actions rapides',
   'sheet.close': 'Fermer',
+  'power.button': 'Éteindre',
+  'power.title': 'Éteindre le système ?',
+  'power.body': 'Les écrans et le son seront éteints.',
+  'power.confirm': 'Éteindre',
+  'power.cancel': 'Annuler',
 };
 
 const de: Dictionary = {
@@ -178,6 +188,11 @@ const de: Dictionary = {
   'volume.muted': 'Stumm',
   'quick.more': 'Schnellaktionen',
   'sheet.close': 'Schließen',
+  'power.button': 'Ausschalten',
+  'power.title': 'System ausschalten?',
+  'power.body': 'Bildschirme und Audio werden ausgeschaltet.',
+  'power.confirm': 'Ausschalten',
+  'power.cancel': 'Abbrechen',
 };
 
 export const LANGUAGES: Record<string, { label: string; dictionary: Dictionary }> = {
