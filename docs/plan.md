@@ -401,7 +401,7 @@ Working rules that apply to all of them:
 | D | Remove the old combinations code and table (R5) | medium | code removal **built**; table drop waits for the release |
 | E | Audit retention and export | medium | **built** (default 12 months, see `docs/decisions.md`); apply migration `org_retention` |
 | F | Panel function pages (cameras, microphones, recorder, room controls) | large | real devices to try |
-| G | Org accent colour in the portal | small | none |
+| G | Org accent colour in the portal | small | **built** (`docs/decisions.md`, G-1 to G-4) |
 | H | Email notifications (tickets and alerts) | small | a domain, Resend verified (step 6 above) |
 | I | Staff user management and a staff audit viewer | small | none |
 | J | Assign tickets to provider people | medium | none |
@@ -510,6 +510,8 @@ Pre-read: `docs/panel-ui-requirements.md` ("Screens", "Build status"), `packages
 Do: extend the panel view model with per-function data, engine intents for camera preset, pan/tilt/zoom and tracking, mic mute, lighting scenes; render the pages under the top nav only when the room has the capability. Done when: a training room with a PTZ camera and lights shows Cameras and Room Controls pages in the simulator.
 
 ### G. Org accent colour in the portal
+
+**Status: built.** The text below is the original brief.
 
 Why: decided that one accent colour themes the portal and the panel, with the same contrast check. Today only the panel uses it.
 

@@ -11,6 +11,7 @@ import { AppSidebar } from './app-sidebar';
 import { Breadcrumbs } from './breadcrumbs';
 import { CommandMenu, usePalette } from './command-menu';
 import { DialogsProvider } from './dialogs';
+import { PortalAccent } from './portal-accent';
 import { OrgProvider, type OrgSummary } from './org-context';
 import { ThemeToggle } from './theme-toggle';
 
@@ -54,6 +55,7 @@ export function OrgShell({
   user,
   defaultOpen,
   viewAs,
+  accent,
   children,
 }: {
   orgId: string;
@@ -62,10 +64,13 @@ export function OrgShell({
   defaultOpen: boolean;
   /** Set when Kestrel staff are looking in through a support session. */
   viewAs?: ViewAs | null;
+  /** The organisation's accent colour, if it set one. */
+  accent?: string | null;
   children: React.ReactNode;
 }) {
   return (
     <OrgProvider orgId={orgId} orgs={orgs} user={user}>
+      <PortalAccent accent={accent} />
       <SidebarProvider defaultOpen={defaultOpen}>
         <DialogsProvider>
           <CommandMenu>

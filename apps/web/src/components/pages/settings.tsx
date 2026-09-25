@@ -86,6 +86,7 @@ export function GeneralSettings() {
 function OrgBrandingForm() {
   const trpc = useTRPC();
   const qc = useQueryClient();
+  const router = useRouter();
   const { orgId } = useOrg();
   const current = useQuery(trpc.org.getBranding.queryOptions({ orgId }));
   const [look, setLook] = useState<BrandingDraft>({
@@ -101,7 +102,11 @@ function OrgBrandingForm() {
     trpc.org.setBranding.mutationOptions({
       onSuccess: async () => {
         await qc.invalidateQueries({ queryKey: trpc.org.getBranding.queryKey() });
-        toast.success('Panel theme saved. Rooms pick it up on their next release.');
+        toast.success(
+          'Theme saved. The portal updates now; rooms pick it up on their next release.',
+        );
+        // The portal's own accent colour comes from the page, so reload it.
+        router.refresh();
       },
     }),
   );
