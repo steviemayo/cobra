@@ -109,6 +109,26 @@ Words used below:
 
 - All phases are built and merged to `dev` and `main` (PRs #9, #10 and the phases 5 to 7 PR). CI on them is green. What follows is setup and real-world checks that need you.
 - Use `docs/phase-4-preread.md` as the status source, and `.env.example` as the list of every env var.
+- **Status check on 2026-09-25** (checked with the Vercel, Supabase, GitHub and Prisma CLIs; secret values were not read). Production URL until a domain exists: `https://kestrel-lovat.vercel.app`. There is one database, `kestrel-dev`, used by Production and Preview alike.
+
+| Step | Status | Notes |
+|---|---|---|
+| 1. Secrets | Done | `KESTREL_SIGNING_KEY`, `_ID`, `CRON_SECRET`, `KESTREL_SECRETS_KEY` are on Vercel (Production + Preview) and in `.env` |
+| 2. Vercel env vars | Done (except Stripe) | See "Added to Vercel" below; redeploy needed |
+| 3. Migrations | Done | `prisma migrate status`: 13 migrations, "Database schema is up to date". Supabase CLI linked to `ntamimcbktoyvgvwesii` |
+| 4. Supabase housekeeping | **Unverified** | Password rotation and auth redirect URLs cannot be checked from the CLI. Confirm in the Supabase dashboard |
+| 5. Scheduled jobs | **Unverified** | Not tested. Run the `curl.exe` check in step 5 against `https://kestrel-lovat.vercel.app` and confirm the job exists in cron-job.org |
+| 6. Resend | Deferred | No domain yet. `RESEND_API_KEY` and `ALERT_FROM_EMAIL` are in local `.env` only, not on Vercel |
+| 7. Stripe | Deferred | Set up later |
+| 8. Marketplace review | Ready to try after redeploy | `KESTREL_ADMIN_EMAILS` is set |
+| 9. Gateway release | **Partly** | CI green on `main`, `:stable` and `:beta` images publicly pullable, `gateway-stable` release exists, workflow permissions are read/write. `GATEWAY_LATEST_*` now set on Vercel. No `gateway-beta` release was listed, check it |
+| 10 to 14 | Not started | Not a priority for now |
+
+**Added to Vercel on 2026-09-25** (Production and Preview): `NEXT_PUBLIC_APP_URL` (`https://kestrel-lovat.vercel.app`), `KESTREL_ADMIN_EMAILS`, `GATEWAY_LATEST_STABLE` and `GATEWAY_LATEST_BETA` (`0.1.0`), `NEXT_PUBLIC_GATEWAY_IMAGE`, and `RESEND_API_KEY` and `ALERT_FROM_EMAIL` (copied from local `.env`; email will not send from a real domain until step 6 is done).
+
+Still to add later: the four `STRIPE_*` vars (step 7). When a domain exists, update `NEXT_PUBLIC_APP_URL`.
+
+Env vars only apply to new deployments, so redeploy Production after adding any.
 
 ### 1. Generate the secrets
 
@@ -188,6 +208,8 @@ The dev database (`kestrel-dev`) already has all 13 migrations because I ran the
    `migrate deploy` only applies committed migrations and never resets data. The docs: https://www.prisma.io/docs/orm/prisma-migrate/workflows/production-and-testing-environments
 3. Working when: `migrate status` says "Database schema is up to date".
 
+Current setup: only `kestrel-dev` exists and both Production and Preview use it, so nothing more is needed here yet.
+
 Better long term: make a separate `kestrel-prod` Supabase project (Sydney) before real customers, keep `kestrel-dev` for development, and point Vercel Production at prod and Preview at dev.
 
 ### 4. Supabase housekeeping
@@ -234,12 +256,16 @@ curl.exe -H "Authorization: Bearer <CRON_SECRET>" https://<app>/api/cron/sweep
 
 Alerts by email need a sender. Teams and webhook alerts do not.
 
+**Deferred (no domain yet).** Resend account and API key exist locally. Until a domain is verified, email alerts can only be tested to your own address via `onboarding@resend.dev`; leave the two vars off Vercel so email channels are skipped. Resume at item 1 once the domain is bought.
+
 1. Sign up at https://resend.com, then **Domains** > add your domain and add the DNS records it shows (https://resend.com/docs/dashboard/domains/introduction). Wait until it says Verified. (You cannot send from a domain you have not verified; testing with Resend's `onboarding@resend.dev` sender only delivers to your own email.)
 2. **API Keys** (https://resend.com/api-keys) > create one with "Sending access".
 3. Set `RESEND_API_KEY` to it and `ALERT_FROM_EMAIL` to an address on your verified domain, e.g. `alerts@<your domain>` (step 2).
 4. Working when: in the portal, **Alerts** > add an email channel > send a test, and it arrives.
 
 ### 7. Billing (Stripe)
+
+**Deferred, set up later.** Until then billing pages will not work; nothing else depends on it.
 
 Do this in Stripe **test mode** first (toggle at the top right of the dashboard). Real cards are not charged in test mode. Docs: https://docs.stripe.com/billing/subscriptions/build-subscriptions
 
