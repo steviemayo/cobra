@@ -706,6 +706,11 @@ model RoomDivider {
   groupId   String   @db.Uuid
   name      String
   roomIds   String[] @db.Uuid
+  /// What happens to the spaces this wall creates when it opens / closes: off, on, follow or restore.
+  onOpen    String   @default("follow")
+  onClose   String   @default("off")
+  /// Whether the gateway last reported this wall open. The gateway owns the live state.
+  open      Boolean  @default(false)
   createdAt DateTime @default(now())
 
   group RoomGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)

@@ -1,5 +1,12 @@
 import type { Prisma, PrismaClient } from '@kestrel/db';
-import { RoomModel, type RoomGroupSpec, type RoomType } from '@kestrel/model';
+import {
+  DEFAULT_ON_CLOSE,
+  DEFAULT_ON_OPEN,
+  RoomModel,
+  TransitionAction,
+  type RoomGroupSpec,
+  type RoomType,
+} from '@kestrel/model';
 import {
   combinedKey,
   deriveCombinedModel,
@@ -24,7 +31,13 @@ export interface GroupInput {
   /** The ordinary rooms in the group, in the order they should read in names. */
   roomIds: string[];
   /** Dividers keep their id when edited, so what is stored about them survives. */
-  dividers: { id?: string; name: string; roomIds: string[] }[];
+  dividers: {
+    id?: string;
+    name: string;
+    roomIds: string[];
+    onOpen?: TransitionAction;
+    onClose?: TransitionAction;
+  }[];
 }
 
 interface RoomRow {
@@ -115,9 +128,23 @@ export async function saveGroup(db: GroupDb, orgId: string, input: GroupInput): 
     if (d.id && existing.some((e) => e.id === d.id))
       await db.roomDivider.update({
         where: { id: d.id },
-        data: { name: d.name, roomIds: d.roomIds },
+        data: {
+          name: d.name,
+          roomIds: d.roomIds,
+          ...(d.onOpen ? { onOpen: d.onOpen } : {}),
+          ...(d.onClose ? { onClose: d.onClose } : {}),
+        },
       });
-    else await db.roomDivider.create({ data: { groupId, name: d.name, roomIds: d.roomIds } });
+    else
+      await db.roomDivider.create({
+        data: {
+          groupId,
+          name: d.name,
+          roomIds: d.roomIds,
+          onOpen: d.onOpen ?? DEFAULT_ON_OPEN,
+          onClose: d.onClose ?? DEFAULT_ON_CLOSE,
+        },
+      });
   }
   return groupId;
 }
@@ -145,7 +172,15 @@ export interface GroupView {
   name: string;
   siteId: string;
   rooms: { id: string; name: string; gatewayId: string | null }[];
-  dividers: { id: string; name: string; roomIds: string[] }[];
+  dividers: {
+    id: string;
+    name: string;
+    roomIds: string[];
+    onOpen: TransitionAction;
+    onClose: TransitionAction;
+    /** Last reported by the gateway. */
+    open: boolean;
+  }[];
   combined: CombinedView[];
   /** Combined rooms that exist but that the dividers no longer allow. */
   orphaned: { roomId: string; name: string; deployed: boolean }[];
@@ -196,7 +231,14 @@ export async function loadGroup(
     name: group.name,
     siteId: group.siteId,
     rooms: members.map((r) => ({ id: r.id, name: r.name, gatewayId: r.gatewayId })),
-    dividers: dividers.map((d) => ({ id: d.id, name: d.name, roomIds: d.roomIds })),
+    dividers: dividers.map((d) => ({
+      id: d.id,
+      name: d.name,
+      roomIds: d.roomIds,
+      onOpen: transition(d.onOpen, DEFAULT_ON_OPEN),
+      onClose: transition(d.onClose, DEFAULT_ON_CLOSE),
+      open: d.open === true,
+    })),
     combined: sets.map((s) => ({
       key: s.key,
       roomIds: s.roomIds,
@@ -208,6 +250,11 @@ export async function loadGroup(
     problems: [...new Set(problems)],
   };
 }
+
+const transition = (value: unknown, fallback: TransitionAction): TransitionAction => {
+  const parsed = TransitionAction.safeParse(value);
+  return parsed.success ? parsed.data : fallback;
+};
 
 const combinedName = (roomIds: string[], members: { id: string; name: string }[]) =>
   members

@@ -114,6 +114,8 @@ function world() {
   const controlSession = table([]);
   const controlIntent = table([]);
   const roomCombination = table([]);
+  const roomGroup = table([]);
+  const roomDivider = table([]);
   const db = {
     gateway,
     room,
@@ -132,6 +134,8 @@ function world() {
     controlSession,
     controlIntent,
     roomCombination,
+    roomGroup,
+    roomDivider,
   } as unknown as Db;
   return {
     db,
@@ -152,6 +156,8 @@ function world() {
     controlSession,
     controlIntent,
     roomCombination,
+    roomGroup,
+    roomDivider,
   };
 }
 

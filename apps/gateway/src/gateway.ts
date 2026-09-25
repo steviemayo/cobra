@@ -218,6 +218,8 @@ export class Gateway {
         rooms: this.roomReports(),
         commandResults: results,
         combinations: this.combine.report(),
+        // Filled in when the gateway starts running room groups.
+        dividers: [],
       })
       .catch((e: unknown) => {
         if (e instanceof CloudError && e.unauthorised)

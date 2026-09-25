@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { PinnedDriver } from '../driver-spec';
 import { LocalId } from '../room/common';
+import { TransitionAction } from '../room/groups';
 import { RoomModel } from '../room/room-model';
 import { PanelIntent, PanelViewModel, RoomStatus } from '../runtime/panel';
 
@@ -194,6 +195,39 @@ export type CombinationConfig = z.infer<typeof CombinationConfig>;
 export const CombinationReport = z.object({ id: z.string().uuid(), combined: z.boolean() });
 export type CombinationReport = z.infer<typeof CombinationReport>;
 
+/**
+ * A room group as one gateway sees it: the rooms that can be joined, the movable walls between
+ * them, and the combined rooms that exist for each joined set. Combined rooms are ordinary rooms
+ * with their own release; `memberRoomIds` says which rooms one stands in for while it is live.
+ */
+export const GroupConfig = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  /** The ordinary rooms of the group. */
+  roomIds: z.array(z.string().uuid()).min(2),
+  dividers: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        name: z.string(),
+        roomIds: z.array(z.string().uuid()).min(2),
+        onOpen: TransitionAction,
+        onClose: TransitionAction,
+      }),
+    )
+    .max(100),
+  combined: z
+    .array(
+      z.object({ roomId: z.string().uuid(), memberRoomIds: z.array(z.string().uuid()).min(2) }),
+    )
+    .max(200),
+});
+export type GroupConfig = z.infer<typeof GroupConfig>;
+
+/** Whether a movable wall is open right now, as the gateway sees it. */
+export const DividerReport = z.object({ id: z.string().uuid(), open: z.boolean() });
+export type DividerReport = z.infer<typeof DividerReport>;
+
 export const HeartbeatRequest = z.object({
   protocol: z.literal(PROTOCOL_VERSION),
   gatewayVersion: z.string().max(50),
@@ -204,6 +238,8 @@ export const HeartbeatRequest = z.object({
   commandResults: z.array(CommandResult).max(50).default([]),
   /** Which combinations are joined right now, as the gateway sees them. */
   combinations: z.array(CombinationReport).max(100).default([]),
+  /** Which movable walls are open, for the groups this gateway runs. The gateway owns this state. */
+  dividers: z.array(DividerReport).max(500).default([]),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
 
@@ -244,6 +280,8 @@ export const ConfigResponse = z.object({
   publicKeys: z.array(PublicKey),
   /** Combinations of this gateway's rooms. */
   combinations: z.array(CombinationConfig).default([]),
+  /** Room groups whose rooms run on this gateway. */
+  groups: z.array(GroupConfig).default([]),
 });
 export type ConfigResponse = z.infer<typeof ConfigResponse>;
 
