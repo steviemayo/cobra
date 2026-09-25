@@ -25,6 +25,7 @@ Today Kestrel has no way for its own staff to see across customers. Extending a 
 - **Billing:** the customer pays Kestrel directly, even when an MSP manages them. Reseller/wholesale billing (MSP pays for its customers) can be added later without changing the rest
 - **MSP attachment:** an MSP is attached to a customer org or to specific sites of it, and a customer can have several MSPs (different MSPs can cover different buildings)
 - **Ticket first line:** the customer's MSP if there is one, otherwise Kestrel. Anyone handling a ticket can escalate it to Kestrel staff
+- **Also decided in review:** see "Decisions from review" at the end (customer block on view-as, audit retention and export, Teams/webhook notifications, SLAs later, marketplace review moves into the staff portal, first staff user)
 - **First version covers:** org directory with licence and trial controls, view-as (support sessions) with audit, a global ticket queue, and a fleet health overview
 
 ## Staff (platform) layer
@@ -96,13 +97,19 @@ All migrations additive first, as with room groups, because previews and product
 
 Slices 1 and 2 give the most value fastest and touch the least. Slice 5 changes the access core, so it gets the most tests.
 
-## Open questions
+## Decisions from review
 
-1. Should a customer be able to **block** Kestrel staff view-as for their org (enterprise customers often ask)? Proposed: allowed, but staff can still start a session with a ticket link when a customer asks for help
-2. Do MSPs need **their own branding** on the customer panels and portal (white label)? Later
-3. Do we need **audit retention** rules and export (for customers who ask)?
-4. **Notifications**: email is blocked on the Resend domain. Teams/webhook for MSPs in the meantime?
-5. **SLAs and priorities**: are they needed at launch, or after the first customers?
-6. Should the **marketplace review** move into the staff portal now? Proposed: yes, in slice 1
-7. Who are the first **staff users**, and do we want one separate `staff_billing` person from day one?
-8. A **separate domain and deployment** for the staff portal: worth it before real customers?
+1. **Customers can block staff view-as** for their org. Staff can still start a session when the customer raises a ticket and links it (the ticket is the customer's consent). The block is a setting on the org, owner only. (Proposed default accepted; unanswered in review, confirm when building.)
+2. **White label for MSPs**: later, not in the first versions
+3. **Audit retention and export**: yes. Needs a retention policy per org (default 12 months, staff can extend) and a CSV/JSON export of the activity log for owners and staff
+4. **Notifications**: email alongside Teams and webhook channels, so MSPs and staff are notified before the Resend domain exists. The existing alert channels are reused for ticket events
+5. **SLAs and priorities**: after the first customers. The `priority` field stays; no timers yet
+6. **Marketplace review moves into the staff portal in slice 1**, and `KESTREL_ADMIN_EMAILS` is retired after the first staff user is seeded
+7. **First staff user**: Steven (steven.mayo92@gmail.com), seeded as `staff_admin` and also holding `staff_billing`. The billing role exists from day one, so a separate person can be given it without code changes. Seeding is a one-off migration or CLI command, not an env var that stays on
+8. **Separate domain**: not yet. Build it as `/staff` in the same app, but keep every staff route and API behind one host and path check so it can move to an `admin.` subdomain (same deployment, host-based gate, or a second Vercel project) without changing the pages
+
+## Still open
+
+- Where the customer's "block staff access" setting lives in the org settings page, and its wording
+- Retention default (12 months is a proposal) and whether some events (billing, access changes) are kept longer
+- Whether an MSP can invite its own staff into a customer org directly, or only through the grant (proposed: only through the grant)
