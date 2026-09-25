@@ -397,7 +397,7 @@ Working rules that apply to all of them:
 |---|---|---|---|
 | A | Browser pass of the new screens (below) | small | you, with an authenticator app and two accounts |
 | B | Quick actions from drivers (Blank Screen, Privacy Mute) | medium | a display or projector that supports blank, to try |
-| C | Room groups: gateway runtime (R1 to R4) | large | decisions listed in C |
+| C | Room groups: gateway runtime (R1 to R4) | large | **built** (decisions in `docs/decisions.md`) |
 | D | Remove the old combinations code and table (R5) | medium | C deployed |
 | E | Audit retention and export | medium | retention default (12 months proposed) |
 | F | Panel function pages (cameras, microphones, recorder, room controls) | large | real devices to try |
@@ -451,6 +451,8 @@ Depends on: nothing. Done when: in the simulator a room with a PJLink display sh
 **Status: built** (branch `feat/quick-actions`). Differences from the plan above: no model `blank` capability (support is declared by the driver, per the decision); driver format is `quickActions: [ids]` plus standard commands `blank.on`/`blank.off`, not the label/icon object first sketched. Not done: a failed action is silent; blank is not cleared when the source changes; the browser simulator does not see an org's custom drivers. Details: `docs/driver-sdk.md` (Quick actions), `docs/panel-ui-requirements.md` (Slice 2).
 
 ### C. Room groups: gateway runtime
+
+**Status: built** in four pull requests (protocol and settings, gateway runtime, Link rooms menu, group deploy and simulator). The decisions asked below were answered by the user and are recorded with the ones made while building in `docs/decisions.md`. Still to do: apply the `divider_actions` migration; try it on a real gateway. The text below is the original brief.
 
 Why: the portal side is built (groups, walls, derived combined rooms). Nothing yet opens or closes a wall at runtime, so a combined room can be designed and deployed but never becomes live. This is the largest remaining piece.
 

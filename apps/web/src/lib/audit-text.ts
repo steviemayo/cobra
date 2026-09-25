@@ -116,6 +116,8 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `removed combined rooms “${s(meta.name)}”`;
     case 'combination.set':
       return `${meta.combined ? 'joined' : 'split'} “${s(meta.name)}”`;
+    case 'group.deploy':
+      return `deployed a room group (${s(meta.deployed)} of ${s(meta.rooms)} rooms sent, ${s(meta.published)} new releases)`;
     case 'wall.set':
       return `${meta.open ? 'combined' : 'separated'} “${s(meta.room)}” with its neighbouring rooms from the portal`;
     case 'room.hook_secret':

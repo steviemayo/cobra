@@ -1,5 +1,5 @@
 // A tiny in-memory stand-in for the parts of Prisma the services use, so they can be tested
-// without a database. Supports equality, not / in / lte conditions, orderBy and createMany.
+// without a database. Supports equality, not / in / lte conditions, orderBy, aggregate (_max) and createMany.
 export type Row = Record<string, unknown>;
 
 type Cond = {
@@ -57,6 +57,15 @@ export function table(rows: Row[], uniqueOn?: string[]) {
       return take ? hit.slice(0, take) : hit;
     },
     count: async ({ where }: { where?: Row } = {}) => rows.filter((r) => matches(r, where)).length,
+    aggregate: async ({ where, _max }: { where?: Row; _max: Record<string, true> }) => {
+      const hit = rows.filter((r) => matches(r, where));
+      const max: Record<string, unknown> = {};
+      for (const key of Object.keys(_max))
+        max[key] = hit.length
+          ? hit.map((r) => r[key] as number).reduce((a, b) => (b > a ? b : a))
+          : null;
+      return { _max: max };
+    },
     delete: async ({ where }: { where: Row }) => {
       const i = rows.findIndex((r) => matches(r, where));
       return rows.splice(i, 1)[0]!;
