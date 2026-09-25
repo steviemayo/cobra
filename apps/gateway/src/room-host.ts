@@ -66,7 +66,6 @@ export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger
 export class RoomHost {
   private readonly rooms = new Map<string, LoadedRoom>();
   private readonly reloadListeners = new Set<(roomId: string) => void>();
-  private combineListener: ((roomId: string, combined: boolean) => void) | null = null;
   private dividerListener: ((dividerId: string, open: boolean) => void) | null = null;
   private resolveActive: (roomId: string) => string = (roomId) => roomId;
   private readonly activeListeners = new Set<() => void>();
@@ -93,11 +92,6 @@ export class RoomHost {
   onReload(listener: (roomId: string) => void): () => void {
     this.reloadListeners.add(listener);
     return () => this.reloadListeners.delete(listener);
-  }
-
-  /** Set by the combine coordinator: a room's panel asked to join or split its combination. */
-  onCombineRequest(listener: (roomId: string, combined: boolean) => void) {
-    this.combineListener = listener;
   }
 
   /** Set by the group coordinator: a panel asked to open or close a movable wall. */
@@ -135,7 +129,6 @@ export class RoomHost {
       model: manifest.model,
       roomName: manifest.roomName,
       bus: built.bus,
-      onCombine: (combined) => this.combineListener?.(manifest.roomId, combined),
       onDivider: (dividerId, open) => this.dividerListener?.(dividerId, open),
     });
     const scheduler = new TriggerScheduler(manifest.model, { fire: (t) => runtime.fire(t.run) });

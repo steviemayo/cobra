@@ -1,6 +1,6 @@
 # Room groups and combined rooms (redesign)
 
-Status: design draft. Replaces the original "room combinations" feature (primary/secondary rooms with follow/blank), which was incorrect and is being removed. Decisions come from the panel UI planning session (see `docs/panel-ui-requirements.md`, Room Linking).
+Status: built (see the runtime and slices sections). Replaces the original "room combinations" feature (primary/secondary rooms with follow/blank), which was incorrect and has been removed. Decisions come from the panel UI planning session (see `docs/panel-ui-requirements.md`, Room Linking).
 
 ## Terms
 
@@ -63,7 +63,7 @@ How it works (see `docs/decisions.md`, C-1 to C-14):
 
 ## Slices (status)
 
-Slices 1 and 2 are built (migration `room_groups` applied to `kestrel-dev`). Slice 3 is built: runtime, protocol and per-wall settings (the migration `divider_actions` still has to be applied), the Link rooms menu, group deploy, and the browser group simulator. Slice 4 (drop `RoomCombination`) is step D in `docs/plan.md`.
+Slices 1 and 2 are built (migration `room_groups` applied to `kestrel-dev`). Slice 3 is built: runtime, protocol and per-wall settings (the migration `divider_actions` still has to be applied), the Link rooms menu, group deploy, and the browser group simulator. Slice 4: the old feature's code is removed; dropping the `RoomCombination` table is a follow-up migration once production runs this version (step D in `docs/plan.md`).
 
 - **Deploy group** (group editor): checks every room and combined room first (design valid, gateway assigned, combined rooms created), then publishes a release only where the design changed and deploys all of them, members first. Any problem stops the whole thing and is listed. Code: `apps/web/src/server/group-deploy.ts`
 - **Simulate** (group editor): runs every room of the group in the browser against simulated equipment with the same `GroupController` as the gateway (`packages/engine/src/groups/controller.ts`); a panel stands in a chosen room and follows the room that is running its space

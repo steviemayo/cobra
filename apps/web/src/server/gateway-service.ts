@@ -12,7 +12,6 @@ import { applyCommandResults, takePendingCommands } from './commands';
 import { applyReport, promoteDue } from './deployment-service';
 import { deliverAlerts } from './alerts';
 import { getEntitlements } from './billing';
-import { combinationsForGateway, recordCombined } from './combinations';
 import { groupsForGateway, recordDividers } from './gateway-groups';
 import { hasWaitingIntents, watchedRooms } from './control-service';
 import { maybeSweep, recordReports } from './monitoring';
@@ -37,7 +36,6 @@ export type Db = Pick<
   | 'org'
   | 'controlSession'
   | 'controlIntent'
-  | 'roomCombination'
   | 'roomGroup'
   | 'roomDivider'
 >;
@@ -59,14 +57,12 @@ const fail = (status: number, error: string): Result => ({ status, body: { error
 export function configVersion(
   assignments: { roomId: string; releaseId: string; deploymentId?: string }[],
   keyIds: string[],
-  combinations: unknown[] = [],
   groups: unknown[] = [],
 ): string {
   const canonical = JSON.stringify({
     rooms: [...assignments].sort((a, b) => a.roomId.localeCompare(b.roomId)),
     keys: [...keyIds].sort(),
-    // Only added when there are some, so a gateway without combinations keeps the version it had.
-    ...(combinations.length ? { combinations } : {}),
+    // Only added when there are some, so a gateway without groups keeps the version it had.
     ...(groups.length ? { groups } : {}),
   });
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
@@ -201,7 +197,6 @@ export async function heartbeat(
   // Monitoring is a plan feature: without it the gateway keeps running rooms, but nothing is analysed.
   const monitored = (await getEntitlements(db, gw.orgId, now)).monitoring;
   const jobs = monitored ? await recordReports(db, gw, parsed.data.rooms, now) : [];
-  await recordCombined(db, gw, parsed.data.combinations);
   await recordDividers(db, gw, parsed.data.dividers);
   await applyCommandResults(db, gw.id, parsed.data.commandResults, now);
   jobs.push(...(await maybeSweep(db, now)));
@@ -212,7 +207,6 @@ export async function heartbeat(
       configVersion: configVersion(
         list,
         keys.map((k) => k.keyId),
-        await combinationsForGateway(db, gw),
         await groupsForGateway(db, gw),
       ),
       serverTime: now.toISOString(),
@@ -227,7 +221,6 @@ export async function heartbeat(
 
 export async function config(db: Db, gw: GatewayRow, keys: PublicKey[]): Promise<Result> {
   const rooms = await assignments(db, gw.id);
-  const combinations = await combinationsForGateway(db, gw);
   const groups = await groupsForGateway(db, gw);
   return {
     status: 200,
@@ -236,12 +229,10 @@ export async function config(db: Db, gw: GatewayRow, keys: PublicKey[]): Promise
       configVersion: configVersion(
         rooms,
         keys.map((k) => k.keyId),
-        combinations,
         groups,
       ),
       rooms,
       publicKeys: keys,
-      combinations,
       groups,
     },
   };

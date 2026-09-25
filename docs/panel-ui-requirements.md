@@ -84,7 +84,7 @@ Also configurable: idle timeout back to the Idle screen, and whether the support
 
 ## Room Linking (built: menu and gateway runtime; see `docs/room-groups.md`)
 
-The old "Combining Rooms" bar is replaced by the Link rooms menu (screen 4a) and stays in the code only until step D removes it. Original intent:
+The old "Combining Rooms" bar has been replaced by the Link rooms menu (screen 4a) and removed. Original intent:
 
 - Combining is defined when a room group is first created, not afterwards
 - Create the large "all combined" room, then each independent room in the group, so every room is state-aware and knows the intended behaviour when combined
