@@ -31,9 +31,11 @@ enum GatewayChannel {
 }
 
 model Org {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String
-  createdAt DateTime @default(now())
+  id                 String   @id @default(uuid()) @db.Uuid
+  name               String
+  createdAt          DateTime @default(now())
+  /// When true, staff can only open a support session if they link one of this organisation's open tickets.
+  staffAccessBlocked Boolean  @default(false)
 
   members          Member[]
   sites            Site[]
@@ -588,6 +590,24 @@ model OrgNote {
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId, createdAt])
+}
+
+// A staff member working inside a customer organisation ("view-as"). read: they see what support
+// sees but cannot change anything. act: they can do what support can. Always has a reason and an
+// end time, and no foreign keys so the record outlives the organisation.
+model SupportSession {
+  id          String    @id @default(uuid()) @db.Uuid
+  staffUserId String    @db.Uuid
+  orgId       String    @db.Uuid
+  mode        String
+  reason      String
+  ticketId    String?   @db.Uuid
+  startedAt   DateTime  @default(now())
+  endsAt      DateTime
+  endedAt     DateTime?
+
+  @@index([orgId, startedAt])
+  @@index([staffUserId, endsAt])
 }
 
 // Kestrel staff: people who may use the /staff portal across every organisation. Separate from

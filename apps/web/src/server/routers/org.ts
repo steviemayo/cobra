@@ -3,6 +3,7 @@ import { db } from '@kestrel/db';
 import { TRIAL_DAYS } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { OrgBranding, readOrgBranding } from '../panel-settings';
+import { setStaffAccessBlocked } from '../support-sessions';
 import { authedProcedure, orgProcedure, requireRole, router } from '../trpc';
 
 const name = z.string().trim().min(1).max(100);
@@ -62,6 +63,29 @@ export const orgRouter = router({
         meta: { mode: input.branding.mode, language: input.branding.language },
       });
       return input.branding;
+    }),
+
+  // Whether Kestrel staff need a linked support ticket before they can open a session here.
+  getStaffAccess: orgProcedure
+    .input(z.object({ orgId: z.string().uuid() }))
+    .query(async ({ ctx }) => {
+      const org = await db.org.findFirst({
+        where: { id: ctx.orgId },
+        select: { staffAccessBlocked: true },
+      });
+      return { blocked: org?.staffAccessBlocked ?? false };
+    }),
+
+  setStaffAccess: orgProcedure
+    .input(z.object({ orgId: z.string().uuid(), blocked: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      await setStaffAccessBlocked(db, {
+        orgId: ctx.orgId,
+        blocked: input.blocked,
+        actorId: ctx.user.id,
+      });
+      return { blocked: input.blocked };
     }),
 
   rename: orgProcedure

@@ -3,6 +3,14 @@ import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { orgDetail, orgDirectory, recordStaffAudit, mfaRequired } from '../staff';
 import {
+  SESSION_MINUTES,
+  SessionError,
+  currentSession,
+  endSession,
+  openTickets,
+  startSession,
+} from '../support-sessions';
+import {
   LicenceError,
   addNote,
   licenceState,
@@ -19,7 +27,8 @@ import {
 } from '../trpc';
 
 function asTrpc(e: unknown): never {
-  if (e instanceof LicenceError) throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
+  if (e instanceof LicenceError || e instanceof SessionError)
+    throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
   throw e;
 }
 
@@ -36,6 +45,47 @@ export const staffRouter = router({
     mfaRequired: mfaRequired(),
     mfaSatisfied: ctx.mfaSatisfied,
   })),
+
+  // Working inside a customer organisation: reason, time limit, read-only or act, and a ticket link.
+  session: router({
+    current: staffIdentityProcedure.query(async ({ ctx }) => {
+      const s = await currentSession(db, ctx.staff.userId);
+      return s ? { id: s.id, orgId: s.orgId, mode: s.mode, endsAt: s.endsAt } : null;
+    }),
+
+    tickets: staffProcedure
+      .input(z.object({ orgId }))
+      .query(({ input }) => openTickets(db, input.orgId)),
+
+    start: staffProcedure
+      .input(
+        z.object({
+          orgId,
+          mode: z.enum(['read', 'act']),
+          reason: z.string().max(600),
+          minutes: z
+            .number()
+            .int()
+            .refine((m) => (SESSION_MINUTES as readonly number[]).includes(m)),
+          ticketId: z.string().uuid().nullish(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const res = await startSession(db, { staff: ctx.staff, input });
+          return { orgId: input.orgId, ...res };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    end: staffIdentityProcedure
+      .input(z.object({ sessionId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        await endSession(db, { sessionId: input.sessionId, staffUserId: ctx.staff.userId });
+        return { ok: true };
+      }),
+  }),
 
   // Licences and trials: what an organisation pays for, what it may do, and staff adjustments.
   licence: router({

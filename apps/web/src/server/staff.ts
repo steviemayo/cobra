@@ -65,6 +65,8 @@ export interface OrgSummary {
   name: string;
   createdAt: Date;
   members: number;
+  /** The organisation requires a linked ticket before staff can open a session. */
+  staffAccessBlocked: boolean;
   /** trial, basic, pro, or "none" if the org has no billing record yet. */
   plan: string;
   billingStatus: string;
@@ -122,6 +124,7 @@ export async function orgDirectory(db: StaffDb, now = new Date()): Promise<OrgSu
         name: o.name,
         createdAt: o.createdAt,
         members: (m.get(o.id) ?? []).length,
+        staffAccessBlocked: !!o.staffAccessBlocked,
         plan: bill?.plan ?? 'none',
         billingStatus: bill?.status ?? 'none',
         trialEndsAt: bill?.trialEndsAt ?? null,
