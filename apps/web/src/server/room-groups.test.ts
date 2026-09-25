@@ -137,6 +137,38 @@ describe('saving a group', () => {
     expect(w.rooms.rows.filter((r) => r.groupId === id).map((r) => r.id)).toEqual([A, B, C]);
   });
 
+  it('stores what each wall does when it opens and closes, with defaults, and keeps it when edited', async () => {
+    const w = world();
+    const id = await saveGroup(w.db, ORG, {
+      ...line([A!, B!, C!]),
+      dividers: [
+        { name: 'Wall 1', roomIds: [A!, B!], onOpen: 'on', onClose: 'restore' },
+        { name: 'Wall 2', roomIds: [B!, C!] },
+      ],
+    });
+    expect(w.roomDivider.rows.map((d) => [d.onOpen, d.onClose])).toEqual([
+      ['on', 'restore'],
+      ['follow', 'off'],
+    ]);
+    const [first, second] = w.roomDivider.rows;
+    // Saving again without saying keeps what was set; saying changes it.
+    await saveGroup(w.db, ORG, {
+      groupId: id,
+      name: 'Wing',
+      siteId: SITE,
+      roomIds: [A!, B!, C!],
+      dividers: [
+        { id: first!.id as string, name: 'Wall 1', roomIds: [A!, B!] },
+        { id: second!.id as string, name: 'Wall 2', roomIds: [B!, C!], onClose: 'follow' },
+      ],
+    });
+    const view = await loadGroup(w.db, ORG, id);
+    expect(view!.dividers.map((d) => [d.onOpen, d.onClose, d.open])).toEqual([
+      ['on', 'restore', false],
+      ['follow', 'follow', false],
+    ]);
+  });
+
   it('keeps a divider id when it is edited, and drops removed dividers and rooms', async () => {
     const w = world();
     const id = await saveGroup(w.db, ORG, line([A!, B!, C!]));

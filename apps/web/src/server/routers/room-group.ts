@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
+import { TransitionAction } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import {
   GroupError,
@@ -25,6 +26,8 @@ const Body = z.object({
         id: z.string().uuid().optional(),
         name: z.string().trim().min(1).max(80),
         roomIds: z.array(z.string().uuid()).min(2).max(20),
+        onOpen: TransitionAction.optional(),
+        onClose: TransitionAction.optional(),
       }),
     )
     .max(100),
