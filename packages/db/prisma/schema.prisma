@@ -466,6 +466,13 @@ model Ticket {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @default(now()) @updatedAt
   closedAt       DateTime?
+  /// Who is expected to act: "org" (the organisation's own team), "kestrel" (escalated to Kestrel
+  /// staff), or later "msp:<org id>".
+  routedTo       String    @default("org")
+  escalatedAt    DateTime?
+  escalatedBy    String?   @db.Uuid
+  /// A Kestrel staff member (StaffUser.userId) working the ticket.
+  staffAssignee  String?   @db.Uuid
 
   org      Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
   room     Room?           @relation(fields: [roomId], references: [id], onDelete: SetNull)
@@ -473,6 +480,7 @@ model Ticket {
 
   @@index([orgId, status, createdAt])
   @@index([roomId])
+  @@index([routedTo, status, createdAt])
 }
 
 model TicketComment {
@@ -482,6 +490,11 @@ model TicketComment {
   authorId    String?  @db.Uuid
   authorEmail String?
   body        String
+  /// public: everyone on the ticket. internal: the organisation's team and Kestrel staff only,
+  /// never the organisation's customer viewers.
+  visibility  String   @default("public")
+  /// Written by Kestrel staff. Shown to the organisation as "Kestrel support", not by name.
+  fromStaff   Boolean  @default(false)
   createdAt   DateTime @default(now())
 
   org    Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)

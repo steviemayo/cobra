@@ -1,7 +1,19 @@
 import { z } from 'zod';
+import { after } from 'next/server';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { orgDetail, orgDirectory, recordStaffAudit, mfaRequired } from '../staff';
+import { notifyOrg } from '../ticket-notify';
+import {
+  PRIORITIES,
+  STATUSES,
+  TicketError,
+  handBack,
+  staffComment,
+  staffQueue,
+  staffTicket,
+  staffUpdate,
+} from '../tickets';
 import {
   SESSION_MINUTES,
   SessionError,
@@ -27,12 +39,33 @@ import {
 } from '../trpc';
 
 function asTrpc(e: unknown): never {
-  if (e instanceof LicenceError || e instanceof SessionError)
+  if (e instanceof LicenceError || e instanceof SessionError || e instanceof TicketError)
     throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
   throw e;
 }
 
 const orgId = z.string().uuid();
+
+/** Tell the organisation's Teams and webhook channels about something Kestrel did on its ticket. */
+async function tellOrg(
+  ownerOrgId: string,
+  ticketId: string,
+  kind: 'staff_reply' | 'status_changed' | 'handed_back',
+  snippet?: string,
+) {
+  const [org, t] = await Promise.all([
+    db.org.findFirst({ where: { id: ownerOrgId } }),
+    db.ticket.findFirst({ where: { id: ticketId } }),
+  ]);
+  if (!org || !t) return;
+  await notifyOrg(db, {
+    kind,
+    orgId: ownerOrgId,
+    orgName: org.name,
+    ticket: { id: t.id, title: t.title, priority: t.priority, status: t.status },
+    snippet,
+  });
+}
 
 // Everything under /staff. These procedures are not limited to one organisation: they only exist
 // for Kestrel staff, and anything that reads a customer's organisation is written to the staff
@@ -45,6 +78,83 @@ export const staffRouter = router({
     mfaRequired: mfaRequired(),
     mfaSatisfied: ctx.mfaSatisfied,
   })),
+
+  // Tickets escalated to Kestrel, across every organisation.
+  tickets: router({
+    queue: staffProcedure
+      .input(
+        z
+          .object({
+            status: z.enum(['active', 'all', ...STATUSES]).optional(),
+            priority: z.enum(PRIORITIES).optional(),
+            orgId: z.string().uuid().optional(),
+          })
+          .default({}),
+      )
+      .query(({ input }) => staffQueue(db, input)),
+
+    get: staffProcedure
+      .input(z.object({ ticketId: z.string().uuid() }))
+      .query(async ({ ctx, input }) => {
+        const t = await staffTicket(db, input.ticketId, ctx.staff.userId);
+        if (!t) throw new TRPCError({ code: 'NOT_FOUND', message: 'Ticket not found' });
+        return t;
+      }),
+
+    comment: staffProcedure
+      .input(
+        z.object({
+          ticketId: z.string().uuid(),
+          body: z.string().max(5100),
+          visibility: z.enum(['public', 'internal']),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'support');
+        try {
+          const res = await staffComment(db, { ...input, staff: ctx.staff });
+          if (res.visibility === 'public')
+            after(() => tellOrg(res.orgId, input.ticketId, 'staff_reply', input.body));
+          return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    update: staffProcedure
+      .input(
+        z.object({
+          ticketId: z.string().uuid(),
+          status: z.enum(STATUSES).optional(),
+          priority: z.enum(PRIORITIES).optional(),
+          assignToMe: z.boolean().optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'support');
+        try {
+          const res = await staffUpdate(db, { ...input, staff: ctx.staff });
+          if (res.statusChanged) after(() => tellOrg(res.orgId, input.ticketId, 'status_changed'));
+          return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    handBack: staffProcedure
+      .input(z.object({ ticketId: z.string().uuid(), note: z.string().max(1000).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'support');
+        try {
+          await handBack(db, { ...input, staff: ctx.staff });
+          const t = await db.ticket.findFirst({ where: { id: input.ticketId } });
+          if (t) after(() => tellOrg(t.orgId, t.id, 'handed_back', input.note));
+          return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+  }),
 
   // Working inside a customer organisation: reason, time limit, read-only or act, and a ticket link.
   session: router({

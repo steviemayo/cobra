@@ -1,8 +1,28 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
+import { after } from 'next/server';
 import { writeAudit } from '../audit';
+import { notifyStaff } from '../ticket-notify';
+import { STAFF_LABEL, TicketError, escalateTicket, visibleComments } from '../tickets';
 import { orgProcedure, requireRole, router } from '../trpc';
+
+const TEAM = ['owner', 'dev', 'support'] as const;
+
+async function tellStaff(orgId: string, ticketId: string, kind: 'escalated', snippet?: string) {
+  const [org, t] = await Promise.all([
+    db.org.findFirst({ where: { id: orgId } }),
+    db.ticket.findFirst({ where: { id: ticketId, orgId } }),
+  ]);
+  if (!org || !t) return;
+  await notifyStaff({
+    kind,
+    orgId,
+    orgName: org.name,
+    ticket: { id: t.id, title: t.title, priority: t.priority, status: t.status },
+    snippet,
+  });
+}
 
 const orgId = z.string().uuid();
 const ticketId = z.string().uuid();
@@ -52,6 +72,7 @@ export const ticketRouter = router({
         priority: t.priority,
         roomId: t.roomId,
         roomName: t.roomId ? (roomName.get(t.roomId) ?? null) : null,
+        routedTo: t.routedTo,
         createdByEmail: t.createdByEmail,
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
@@ -85,15 +106,21 @@ export const ticketRouter = router({
       priority: t.priority,
       room,
       incidentId: t.incidentId,
+      routedTo: t.routedTo,
+      escalatedAt: t.escalatedAt,
       createdByEmail: t.createdByEmail,
       createdAt: t.createdAt,
       closedAt: t.closedAt,
       assignedTo: t.assignedTo,
       assigneeEmail: assignee?.email ?? null,
-      comments: comments.map((c) => ({
+      // Internal notes are for the organisation's team and Kestrel staff, not its customer viewers.
+      // Kestrel staff are shown by role, never by name.
+      comments: visibleComments(comments, ctx.role).map((c) => ({
         id: c.id,
         body: c.body,
-        authorEmail: c.authorEmail ?? 'Former member',
+        visibility: c.visibility,
+        fromStaff: c.fromStaff,
+        authorEmail: c.fromStaff ? STAFF_LABEL : (c.authorEmail ?? 'Former member'),
         createdAt: c.createdAt,
       })),
     };
@@ -108,6 +135,8 @@ export const ticketRouter = router({
         roomId: z.string().uuid().optional(),
         incidentId: z.string().uuid().optional(),
         priority: z.enum(PRIORITIES).default('normal'),
+        // A problem with Kestrel itself rather than with the organisation's own rooms.
+        toKestrel: z.boolean().default(false),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -135,6 +164,9 @@ export const ticketRouter = router({
           priority,
           createdBy: ctx.user.id,
           createdByEmail: ctx.user.email?.toLowerCase() ?? null,
+          ...(input.toKestrel
+            ? { routedTo: 'kestrel', escalatedAt: new Date(), escalatedBy: ctx.user.id }
+            : {}),
         },
       });
       await writeAudit({
@@ -142,15 +174,25 @@ export const ticketRouter = router({
         actorId: ctx.user.id,
         action: 'ticket.create',
         target: t.id,
-        meta: { title: t.title },
+        meta: { title: t.title, toKestrel: input.toKestrel },
       });
+      if (input.toKestrel) after(() => tellStaff(ctx.orgId, t.id, 'escalated', t.body));
       return { id: t.id };
     }),
 
   comment: orgProcedure
-    .input(z.object({ orgId, ticketId, body: z.string().trim().min(1).max(5000) }))
+    .input(
+      z.object({
+        orgId,
+        ticketId,
+        body: z.string().trim().min(1).max(5000),
+        // Only the organisation's team can write internal notes.
+        internal: z.boolean().default(false),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const t = await find(ctx.orgId, input.ticketId);
+      if (input.internal) requireRole(ctx.role, [...TEAM]);
       await db.ticketComment.create({
         data: {
           orgId: ctx.orgId,
@@ -158,6 +200,7 @@ export const ticketRouter = router({
           authorId: ctx.user.id,
           authorEmail: ctx.user.email?.toLowerCase() ?? null,
           body: input.body,
+          visibility: input.internal ? 'internal' : 'public',
         },
       });
       // A reply from the customer on a resolved ticket reopens it.
@@ -167,6 +210,27 @@ export const ticketRouter = router({
         where: { id: t.id },
         data: { updatedAt: new Date(), ...(reopen ? { status: 'open', closedAt: null } : {}) },
       });
+      return { ok: true };
+    }),
+
+  // The organisation's team sends a ticket to Kestrel support.
+  escalate: orgProcedure
+    .input(z.object({ orgId, ticketId, note: z.string().trim().max(1000).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, [...TEAM]);
+      try {
+        await escalateTicket(db, {
+          orgId: ctx.orgId,
+          ticketId: input.ticketId,
+          by: { userId: ctx.user.id, email: ctx.user.email?.toLowerCase() ?? null },
+          note: input.note,
+        });
+      } catch (e) {
+        if (e instanceof TicketError)
+          throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
+        throw e;
+      }
+      after(() => tellStaff(ctx.orgId, input.ticketId, 'escalated', input.note));
       return { ok: true };
     }),
 

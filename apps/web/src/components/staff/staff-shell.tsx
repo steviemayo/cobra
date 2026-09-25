@@ -1,11 +1,12 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Building2, Store } from 'lucide-react';
+import { Building2, LifeBuoy, Store } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const NAV = [
   { href: '/staff/orgs', label: 'Organisations', icon: Building2 },
+  { href: '/staff/tickets', label: 'Tickets', icon: LifeBuoy },
   { href: '/staff/marketplace', label: 'Marketplace review', icon: Store },
 ];
 
