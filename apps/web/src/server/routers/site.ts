@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { writeAudit } from '../audit';
+import { SITE_SCOPED, inScope } from '../site-scope';
 import { orgProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
@@ -25,17 +26,25 @@ async function findSite(ctxOrgId: string, siteId: string) {
 }
 
 export const siteRouter = router({
-  list: orgProcedure.input(z.object({ orgId })).query(({ ctx }) =>
-    db.site.findMany({
-      where: { orgId: ctx.orgId },
-      orderBy: { createdAt: 'asc' },
-      include: { _count: { select: { rooms: true, gateways: true } } },
-    }),
-  ),
+  list: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId }))
+    .query(({ ctx }) =>
+      db.site.findMany({
+        where: { orgId: ctx.orgId, ...(ctx.siteScope ? { id: { in: ctx.siteScope } } : {}) },
+        orderBy: { createdAt: 'asc' },
+        include: { _count: { select: { rooms: true, gateways: true } } },
+      }),
+    ),
 
   get: orgProcedure
+    .meta(SITE_SCOPED)
     .input(z.object({ orgId, siteId: z.string().uuid() }))
-    .query(({ ctx, input }) => findSite(ctx.orgId, input.siteId)),
+    .query(async ({ ctx, input }) => {
+      if (!inScope(ctx.siteScope, input.siteId))
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Site not found' });
+      return findSite(ctx.orgId, input.siteId);
+    }),
 
   create: orgProcedure
     .input(z.object({ orgId, name, timezone: timezone.optional() }))

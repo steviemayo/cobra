@@ -21,6 +21,7 @@ import {
   Settings,
   Store,
   Users,
+  Handshake,
 } from 'lucide-react';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
 import { StatusDot, roomHealth } from '@/components/common/status';
@@ -177,7 +178,11 @@ function EstateTree() {
 }
 
 export function AppSidebar() {
-  const { orgId, canEdit, canSeeTeam, canSupport, isOwner } = useOrg();
+  const { orgId, org, canEdit, canSeeTeam, canSupport, isOwner } = useOrg();
+  // A service provider has customers rather than an estate of its own.
+  const isMsp = org.kind === 'msp';
+  // A provider limited to some sites only gets the site-aware areas.
+  const scoped = !!org.scoped;
   const { openNewSite } = useDialogs();
   const base = orgPath(orgId);
   const isActive = useActive();
@@ -190,55 +195,81 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <NavItem href={base} icon={LayoutDashboard} label="Overview" exact />
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {isMsp ? (
+          <SidebarGroup>
+            <SidebarGroupLabel>Service provider</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <NavItem href={`${base}/msp`} icon={Handshake} label="Customers" exact />
+                <NavItem href={`${base}/msp/tickets`} icon={LifeBuoy} label="Support queue" />
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : (
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {scoped ? (
+                  <NavItem href={`${base}/rooms`} icon={DoorOpen} label="Rooms" exact />
+                ) : (
+                  <NavItem href={base} icon={LayoutDashboard} label="Overview" exact />
+                )}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
-        <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-          <SidebarGroupLabel>Estate</SidebarGroupLabel>
-          {canEdit && (
-            <SidebarGroupAction title="New site" onClick={openNewSite}>
-              <Plus />
-              <span className="sr-only">New site</span>
-            </SidebarGroupAction>
-          )}
-          <SidebarGroupContent>
-            <EstateTree />
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Manage</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {canSupport && <NavItem href={`${base}/sites`} icon={Building2} label="Sites" />}
-              <NavItem href={`${base}/rooms`} icon={DoorOpen} label="Rooms" />
+        {!isMsp && (
+          <>
+            <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+              <SidebarGroupLabel>Estate</SidebarGroupLabel>
               {canEdit && (
-                <NavItem href={`${base}/templates`} icon={LayoutTemplate} label="Templates" />
+                <SidebarGroupAction title="New site" onClick={openNewSite}>
+                  <Plus />
+                  <span className="sr-only">New site</span>
+                </SidebarGroupAction>
               )}
-              {canEdit && <NavItem href={`${base}/marketplace`} icon={Store} label="Marketplace" />}
-              {canEdit && <NavItem href={`${base}/drivers`} icon={Cpu} label="Custom drivers" />}
-              {canSupport && <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />}
-              {canSupport && (
-                <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />
-              )}
-              {canSupport && (
-                <NavItem href={`${base}/combinations`} icon={Link2} label="Combined rooms" />
-              )}
-              <NavItem href={`${base}/monitoring`} icon={Activity} label="Monitoring" />
-              {canSupport && (
-                <NavItem href={`${base}/incidents`} icon={AlertTriangle} label="Incidents" />
-              )}
-              <NavItem href={`${base}/tickets`} icon={LifeBuoy} label="Support" />
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+              <SidebarGroupContent>
+                <EstateTree />
+              </SidebarGroupContent>
+            </SidebarGroup>
 
-        {canSeeTeam && (
+            <SidebarGroup>
+              <SidebarGroupLabel>Manage</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {canSupport && <NavItem href={`${base}/sites`} icon={Building2} label="Sites" />}
+                  <NavItem href={`${base}/rooms`} icon={DoorOpen} label="Rooms" />
+                  {canEdit && !scoped && (
+                    <NavItem href={`${base}/templates`} icon={LayoutTemplate} label="Templates" />
+                  )}
+                  {canEdit && !scoped && (
+                    <NavItem href={`${base}/marketplace`} icon={Store} label="Marketplace" />
+                  )}
+                  {canEdit && !scoped && (
+                    <NavItem href={`${base}/drivers`} icon={Cpu} label="Custom drivers" />
+                  )}
+                  {canSupport && (
+                    <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />
+                  )}
+                  {canSupport && !scoped && (
+                    <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />
+                  )}
+                  {canSupport && !scoped && (
+                    <NavItem href={`${base}/groups`} icon={Link2} label="Room groups" />
+                  )}
+                  <NavItem href={`${base}/monitoring`} icon={Activity} label="Monitoring" />
+                  {canSupport && (
+                    <NavItem href={`${base}/incidents`} icon={AlertTriangle} label="Incidents" />
+                  )}
+                  <NavItem href={`${base}/tickets`} icon={LifeBuoy} label="Support" />
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        )}
+
+        {canSeeTeam && !scoped && (
           <SidebarGroup>
             <SidebarGroupLabel>Organisation</SidebarGroupLabel>
             <SidebarGroupContent>

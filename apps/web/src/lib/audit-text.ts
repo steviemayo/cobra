@@ -6,6 +6,36 @@ const role = (v: unknown) => ROLE_LABEL[s(v) as keyof typeof ROLE_LABEL] ?? s(v)
 // Human wording for audit log rows: "<actor> <this text>".
 export function describeAudit(action: string, meta: Record<string, unknown>): string {
   switch (action) {
+    case 'msp.invite':
+      return `invited ${s(meta.msp)} to look after this organisation (${s(meta.role)} access)`;
+    case 'msp.invited':
+      return `invited us to look after ${s(meta.customer)} (${s(meta.role)} access)`;
+    case 'msp.accepted':
+      return meta.msp
+        ? `${s(meta.msp)} accepted the invitation`
+        : `accepted the invitation from ${s(meta.customer)}`;
+    case 'msp.declined':
+      return meta.msp
+        ? `${s(meta.msp)} declined the invitation`
+        : `declined the invitation from ${s(meta.customer)}`;
+    case 'msp.ended':
+      return meta.msp
+        ? `ended the connection with ${s(meta.msp)}`
+        : `ended the connection with ${s(meta.customer)}`;
+    case 'ticket.route':
+      return `${meta.to === 'provider' ? 'sent' : 'took back'} support request “${s(meta.title)}”${meta.to === 'provider' ? ' to the service provider' : ' for your own team'}`;
+    case 'staff.session.start':
+      return `started a ${s(meta.mode) === 'act' ? 'support session where they can make changes' : 'view-only support session'} for ${s(meta.minutes)} minutes: “${s(meta.reason)}”${meta.ticketId ? ' (linked to a support ticket)' : ''}`;
+    case 'staff.session.end':
+      return 'ended their support session';
+    case 'org.staff_access':
+      return meta.blocked
+        ? 'required a support ticket before Kestrel staff can open a session here'
+        : 'allowed Kestrel staff to open a support session without a ticket';
+    case 'license.adjust':
+      return `adjusted this organisation’s licence: ${s(meta.summary)}`;
+    case 'license.revoke':
+      return 'removed an adjustment to this organisation’s licence';
     case 'org.create':
       return `created the organisation “${s(meta.name)}”`;
     case 'org.rename':
@@ -57,7 +87,9 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
     case 'command.result':
       return `the gateway finished a ${s(meta.type).replace('_', ' ')} command (${meta.ok ? 'worked' : 'failed'})`;
     case 'driver.save':
-      return meta.created ? 'created a custom driver' : `saved version ${s(meta.version)} of a custom driver`;
+      return meta.created
+        ? 'created a custom driver'
+        : `saved version ${s(meta.version)} of a custom driver`;
     case 'driver.delete':
       return `deleted the custom driver “${s(meta.name)}”`;
     case 'marketplace.publish':
@@ -107,7 +139,13 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
     case 'ticket.create':
       return `opened support request “${s(meta.title)}”`;
     case 'ticket.update':
-      return 'updated a support request';
+      return meta.status
+        ? `marked a support request ${s(meta.status).replace('_', ' ')}`
+        : 'updated a support request';
+    case 'ticket.escalate':
+      return `escalated support request “${s(meta.title)}” to Kestrel support`;
+    case 'ticket.handback':
+      return `handed support request “${s(meta.title)}” back to your team`;
     default:
       return action;
   }

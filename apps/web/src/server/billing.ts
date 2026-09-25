@@ -1,7 +1,8 @@
 import type { PrismaClient } from '@kestrel/db';
 import {
   TRIAL_DAYS,
-  entitlementsFor,
+  entitlementsWithOverride,
+  overrideActive,
   type Entitlements,
   type Feature,
   type PaidPlan,
@@ -10,7 +11,9 @@ import {
 
 // Billing state and entitlements. Functions take the database as a parameter so they can be tested
 // without one. Stripe itself is only touched in stripe.ts.
-export type EntitlementDb = Pick<PrismaClient, 'orgBilling' | 'org'>;
+// The override table is optional so callers (and tests) that only deal in plans need not have it.
+export type EntitlementDb = Pick<PrismaClient, 'orgBilling' | 'org'> &
+  Partial<Pick<PrismaClient, 'orgLicenseOverride'>>;
 export type BillingDb = EntitlementDb & Pick<PrismaClient, 'stripeEvent' | 'room'>;
 
 export interface PriceMap {
@@ -42,14 +45,25 @@ export async function ensureBilling(db: EntitlementDb, orgId: string, now = new 
   });
 }
 
+/** The staff adjustment that applies to an organisation right now, if any: the newest one not revoked or expired. */
+export async function activeOverride(db: EntitlementDb, orgId: string, now = new Date()) {
+  const rows =
+    (await db.orgLicenseOverride?.findMany({
+      where: { orgId, revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+    })) ?? [];
+  return rows.find((r) => overrideActive(r, now)) ?? null;
+}
+
 export async function getEntitlements(
   db: EntitlementDb,
   orgId: string,
   now = new Date(),
 ): Promise<Entitlements> {
   const b = await ensureBilling(db, orgId, now);
-  return entitlementsFor(
+  return entitlementsWithOverride(
     { plan: b.plan as StoredPlan, status: b.status, trialEndsAt: b.trialEndsAt },
+    await activeOverride(db, orgId, now),
     now,
   );
 }

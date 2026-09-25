@@ -81,6 +81,7 @@ export function NewTicketDialog({
   const [body, setBody] = useState('');
   const [roomId, setRoomId] = useState(defaults?.roomId ?? 'none');
   const [priority, setPriority] = useState<'low' | 'normal' | 'high' | 'urgent'>('normal');
+  const [toKestrel, setToKestrel] = useState(false);
   const create = useMutation(
     trpc.ticket.create.mutationOptions({
       onSuccess: async () => {
@@ -103,6 +104,7 @@ export function NewTicketDialog({
               title,
               body,
               priority,
+              toKestrel: canSupport && toKestrel,
               ...(roomId !== 'none' ? { roomId } : {}),
               ...(defaults?.incidentId ? { incidentId: defaults.incidentId } : {}),
             });
@@ -167,6 +169,23 @@ export function NewTicketDialog({
               </div>
             )}
           </div>
+          {canSupport && (
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={toKestrel}
+                onChange={(e) => setToKestrel(e.target.checked)}
+              />
+              <span>
+                Send to Kestrel support
+                <span className="block text-xs text-muted-foreground">
+                  For problems with Kestrel itself, not with your own rooms. Otherwise your own team
+                  picks it up first.
+                </span>
+              </span>
+            </label>
+          )}
           {create.error && <p className="text-sm text-destructive">{create.error.message}</p>}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
@@ -252,6 +271,16 @@ export function TicketsView() {
                     >
                       {t.title}
                     </Link>
+                    {t.routedTo.startsWith('msp:') && (
+                      <span className="ml-2 rounded-full border px-2 py-0.5 text-xs font-normal text-muted-foreground">
+                        With service provider
+                      </span>
+                    )}
+                    {t.routedTo === 'kestrel' && (
+                      <span className="ml-2 rounded-full border px-2 py-0.5 text-xs font-normal text-muted-foreground">
+                        With Kestrel
+                      </span>
+                    )}
                     {t.createdByEmail && (
                       <div className="text-xs text-muted-foreground">
                         {t.mine ? 'You' : t.createdByEmail}

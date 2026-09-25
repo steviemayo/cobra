@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { TRIAL_MAX_ROOMS, entitlementsFor, type BillingState } from './billing';
+import {
+  TRIAL_MAX_ROOMS,
+  entitlementsFor,
+  entitlementsWithOverride,
+  overrideActive,
+  type BillingState,
+} from './billing';
 
 const NOW = new Date('2026-09-24T00:00:00Z');
 const day = 86_400_000;
@@ -93,5 +99,79 @@ describe('entitlements', () => {
     for (const plan of ['trial', 'basic', 'pro'] as const)
       for (const status of ['none', 'active', 'canceled'])
         expect(entitlementsFor(state({ plan, status, trialEndsAt: null }), NOW).control).toBe(true);
+  });
+});
+
+describe('a staff adjustment', () => {
+  const NOW = new Date('2026-09-25T00:00:00Z');
+  const days = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
+  const expiredTrial = { plan: 'trial' as const, status: 'none', trialEndsAt: days(-3) };
+  const paid = { plan: 'basic' as const, status: 'active', trialEndsAt: days(-100) };
+
+  it('changes nothing when there is none, or when it has expired or been revoked', () => {
+    const plain = entitlementsFor(expiredTrial, NOW);
+    expect(entitlementsWithOverride(expiredTrial, null, NOW)).toEqual(plain);
+    expect(
+      entitlementsWithOverride(expiredTrial, { plan: 'pro', expiresAt: days(-1) }, NOW),
+    ).toEqual(plain);
+    expect(
+      entitlementsWithOverride(expiredTrial, { plan: 'pro', revokedAt: days(-1) }, NOW),
+    ).toEqual(plain);
+  });
+
+  it('extends an ended trial, so monitoring comes back', () => {
+    const e = entitlementsWithOverride(expiredTrial, { trialEndsAt: days(14) }, NOW);
+    expect(e).toMatchObject({ plan: 'trial', monitoring: true, trialDaysLeft: 14 });
+    expect(e.adjusted).toEqual({ until: null });
+  });
+
+  it('never shortens a trial that already runs longer', () => {
+    const long = { plan: 'trial' as const, status: 'none', trialEndsAt: days(20) };
+    expect(entitlementsWithOverride(long, { trialEndsAt: days(5) }, NOW).trialDaysLeft).toBe(20);
+  });
+
+  it('ignores a trial extension for an organisation that pays', () => {
+    expect(entitlementsWithOverride(paid, { trialEndsAt: days(14) }, NOW).plan).toBe('basic');
+  });
+
+  it('comps a plan without a subscription', () => {
+    const e = entitlementsWithOverride(expiredTrial, { plan: 'pro' }, NOW);
+    expect(e).toMatchObject({
+      plan: 'pro',
+      monitoring: true,
+      marketplacePublish: true,
+      driverCreate: true,
+      maxRooms: null,
+    });
+  });
+
+  it('can force monitoring on for a plan that lacks it, or off for one that has it', () => {
+    expect(entitlementsWithOverride(paid, { monitoring: true }, NOW).monitoring).toBe(true);
+    expect(
+      entitlementsWithOverride({ ...paid, plan: 'pro' }, { monitoring: false }, NOW).monitoring,
+    ).toBe(false);
+  });
+
+  it('sets or lifts the room limit', () => {
+    expect(entitlementsWithOverride(expiredTrial, { maxRooms: 12 }, NOW).maxRooms).toBe(12);
+    expect(
+      entitlementsWithOverride(expiredTrial, { unlimitedRooms: true }, NOW).maxRooms,
+    ).toBeNull();
+  });
+
+  it('says when it lasts until, and stops applying after that', () => {
+    const o = { plan: 'pro' as const, expiresAt: days(7) };
+    expect(entitlementsWithOverride(expiredTrial, o, NOW).adjusted).toEqual({ until: days(7) });
+    const later = new Date(NOW.getTime() + 8 * 86_400_000);
+    expect(entitlementsWithOverride(expiredTrial, o, later).plan).toBe('trial_expired');
+    expect(entitlementsWithOverride(expiredTrial, o, later).adjusted).toBeUndefined();
+  });
+
+  it('overrideActive reflects revoked and expired', () => {
+    expect(overrideActive(null, NOW)).toBe(false);
+    expect(overrideActive({}, NOW)).toBe(true);
+    expect(overrideActive({ expiresAt: days(1) }, NOW)).toBe(true);
+    expect(overrideActive({ expiresAt: days(-1) }, NOW)).toBe(false);
+    expect(overrideActive({ revokedAt: days(-1) }, NOW)).toBe(false);
   });
 });

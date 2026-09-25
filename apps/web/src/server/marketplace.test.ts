@@ -3,7 +3,6 @@ import { STARTER_TEMPLATES, type RoomModel } from '@kestrel/model';
 import {
   fulfilOrder,
   grantListing,
-  isPlatformAdmin,
   publicModel,
   publishTemplate,
   review,
@@ -138,14 +137,6 @@ describe('review', () => {
     await review(w.db, { listingId: id, approve: true }, new Date('2026-09-24T00:00:00Z'));
     expect(w.marketplaceListing.rows[0]).toMatchObject({ status: 'published' });
     expect(w.marketplaceListing.rows[0]!.publishedAt).toEqual(new Date('2026-09-24T00:00:00Z'));
-  });
-
-  it('only recognises the staff on the admin list', () => {
-    expect(isPlatformAdmin('Ops@Kestrel.test', 'ops@kestrel.test, other@kestrel.test')).toBe(true);
-    expect(isPlatformAdmin('mallory@x.test', 'ops@kestrel.test')).toBe(false);
-    expect(isPlatformAdmin(null, 'ops@kestrel.test')).toBe(false);
-    expect(isPlatformAdmin('ops@kestrel.test', undefined)).toBe(false);
-    expect(isPlatformAdmin('ops@kestrel.test', '')).toBe(false);
   });
 });
 

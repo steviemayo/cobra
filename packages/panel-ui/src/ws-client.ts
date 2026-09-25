@@ -150,7 +150,10 @@ export class WsPanelClient implements PanelClient {
           for (const l of this.viewListeners) l();
           break;
         case 'qr':
-          this.setConnection({ state: this.connection.state, qr: { url: msg.data.url, expiresAt: msg.data.expiresAt } });
+          this.setConnection({
+            state: this.connection.state,
+            qr: { url: msg.data.url, expiresAt: msg.data.expiresAt },
+          });
           break;
         case 'error':
           this.setConnection({

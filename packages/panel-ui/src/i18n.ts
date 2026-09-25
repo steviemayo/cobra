@@ -20,11 +20,6 @@ export const en = {
 
   // Panel chrome
   'nav.label': 'Activities',
-  'status.off': 'Off',
-  'status.starting': 'Starting',
-  'status.on': 'On',
-  'status.stopping': 'Turning off',
-  'status.fault': 'Needs attention',
   'sources.title': 'Show from',
   'source.connected': 'Cable connected',
   'source.disconnected': 'No cable',
@@ -54,6 +49,16 @@ export const en = {
   'combine.join': 'Combine with {rooms}',
   'combine.split': 'Split rooms',
   'combine.status': 'Combined with {rooms}',
+  'idle.begin': 'Touch to begin',
+  'idle.support': 'Need support?',
+  'volume.muted': 'Muted',
+  'quick.more': 'Quick actions',
+  'sheet.close': 'Close',
+  'power.button': 'Power',
+  'power.title': 'Power off system?',
+  'power.body': 'The displays and audio will turn off.',
+  'power.confirm': 'Power off',
+  'power.cancel': 'Cancel',
 } as const;
 
 export type TextKey = keyof typeof en;

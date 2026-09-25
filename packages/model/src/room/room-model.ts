@@ -1,9 +1,32 @@
 import { z } from 'zod';
 import { RoomType } from '../enums';
 import { Activity, Group, RoomState, Trigger } from './behaviour';
+import { LocalId } from './common';
 import { Connection, Device } from './device';
 
 export const ROOM_MODEL_SCHEMA_VERSION = 1;
+
+/** What "Touch to begin" does. wake: just open the panel. activity: start one. on: run the room's On state. */
+export const IdleAction = z.enum(['wake', 'activity', 'on']);
+export type IdleAction = z.infer<typeof IdleAction>;
+
+export const IdleSettings = z.object({
+  action: IdleAction.default('wake'),
+  /** For action "activity": which one. Falls back to the first non-Off activity. */
+  activityId: LocalId.optional(),
+  /** Minutes without a touch before the panel goes back to "Touch to begin". 0 = never show it. */
+  timeoutMinutes: z.number().int().min(0).max(240).default(0),
+  /** Shown on the idle screen, e.g. how to reach the service desk. */
+  supportText: z.string().max(200).optional(),
+  /** Shown as a QR code on the idle screen. */
+  supportUrl: z.string().url().optional(),
+});
+export type IdleSettings = z.infer<typeof IdleSettings>;
+
+export const PanelSettings = z.object({
+  idle: IdleSettings.default(() => IdleSettings.parse({})),
+});
+export type PanelSettings = z.infer<typeof PanelSettings>;
 
 export const RoomSettings = z.object({
   /** Default volume 0-100 unless overridden. */
@@ -27,6 +50,8 @@ export const RoomSettings = z.object({
       camera: z.boolean().default(false),
     })
     .default({ lights: false, blinds: false, camera: false }),
+  /** How the generated panel looks and behaves. */
+  panel: PanelSettings.default(() => PanelSettings.parse({})),
 });
 export type RoomSettings = z.infer<typeof RoomSettings>;
 

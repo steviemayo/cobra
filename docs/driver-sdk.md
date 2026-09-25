@@ -44,6 +44,23 @@ Custom drivers need the **Pro** plan. Kestrel ships built-in drivers for PJLink,
 - **`volumeScale`**: maps the room's 0-100 to the device's range, and back when reading feedback.
 - **`feedback`**: `poll` actions run on a timer; `patterns` are regular expressions tried on every line (TCP) or reply body (HTTP). `set` is one of `power`, `muted`, `volume`, `input`, `preset`, `online`; `value` is a literal (`on`, `off`, `true`, `false`) or `$1` for the first group.
 
+## Planned: quick actions (not built yet)
+
+Drivers will declare which panel quick actions their device supports, so the panel only offers what the room can actually do (for example Blank Screen only when a display's driver supports blank).
+
+```json
+"quickActions": [
+  { "id": "display.blank", "label": "Blank Screen", "icon": "blank", "kind": "toggle",
+    "on": "command.blank.on", "off": "command.blank.off", "stateFrom": "blanked" }
+]
+```
+
+- `id` is a standard id (`display.blank`, `mics.privacy_mute`, ...) so the same action on several devices becomes one button acting on all of them
+- `kind` is `toggle` (state from feedback) or `button` (one shot)
+- `stateFrom` is a new feedback field (`blanked`), added alongside `power`, `muted`, `volume`, `input`, `preset`, `online`
+- Whether an action shows also depends on the room: Privacy Mute needs conferencing microphones and a conference system in the model
+- Requirements: `docs/panel-ui-requirements.md`
+
 ## Safety
 
 - Values placed into a command are cleaned for where they land: control characters are removed from text sent to a device (so a preset name can't add a second command), URL path values are percent-encoded, and values inside a JSON body are JSON-escaped.

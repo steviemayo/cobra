@@ -1,8 +1,6 @@
-import type { Metadata } from 'next';
-import { MarketplaceReview } from '@/components/pages/marketplace';
+import { redirect } from 'next/navigation';
 
-export const metadata: Metadata = { title: 'Marketplace review' };
-
-export default function MarketplaceReviewPage() {
-  return <MarketplaceReview />;
+// Marketplace review moved into the staff portal.
+export default function OldMarketplaceReviewPage() {
+  redirect('/staff/marketplace');
 }

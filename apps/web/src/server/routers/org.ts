@@ -3,6 +3,7 @@ import { db } from '@kestrel/db';
 import { TRIAL_DAYS } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { OrgBranding, readOrgBranding } from '../panel-settings';
+import { setStaffAccessBlocked } from '../support-sessions';
 import { authedProcedure, orgProcedure, requireRole, router } from '../trpc';
 
 const name = z.string().trim().min(1).max(100);
@@ -19,29 +20,33 @@ export const orgRouter = router({
       id: m.org.id,
       name: m.org.name,
       createdAt: m.org.createdAt,
+      kind: m.org.kind,
       role: m.role,
     }));
   }),
 
-  create: authedProcedure.input(z.object({ name })).mutation(async ({ ctx, input }) => {
-    const org = await db.org.create({
-      data: {
-        name: input.name,
-        billing: { create: { trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86_400_000) } },
-        members: {
-          create: { userId: ctx.user.id, email: ctx.user.email?.toLowerCase(), role: 'owner' },
+  create: authedProcedure
+    .input(z.object({ name, kind: z.enum(['customer', 'msp']).default('customer') }))
+    .mutation(async ({ ctx, input }) => {
+      const org = await db.org.create({
+        data: {
+          name: input.name,
+          kind: input.kind,
+          billing: { create: { trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86_400_000) } },
+          members: {
+            create: { userId: ctx.user.id, email: ctx.user.email?.toLowerCase(), role: 'owner' },
+          },
         },
-      },
-    });
-    await writeAudit({
-      orgId: org.id,
-      actorId: ctx.user.id,
-      action: 'org.create',
-      target: org.id,
-      meta: { name: org.name },
-    });
-    return org;
-  }),
+      });
+      await writeAudit({
+        orgId: org.id,
+        actorId: ctx.user.id,
+        action: 'org.create',
+        target: org.id,
+        meta: { name: org.name },
+      });
+      return org;
+    }),
 
   // The default look of every room's panel. Rooms follow it unless they set their own.
   getBranding: orgProcedure.input(z.object({ orgId: z.string().uuid() })).query(async ({ ctx }) => {
@@ -62,6 +67,29 @@ export const orgRouter = router({
         meta: { mode: input.branding.mode, language: input.branding.language },
       });
       return input.branding;
+    }),
+
+  // Whether Kestrel staff need a linked support ticket before they can open a session here.
+  getStaffAccess: orgProcedure
+    .input(z.object({ orgId: z.string().uuid() }))
+    .query(async ({ ctx }) => {
+      const org = await db.org.findFirst({
+        where: { id: ctx.orgId },
+        select: { staffAccessBlocked: true },
+      });
+      return { blocked: org?.staffAccessBlocked ?? false };
+    }),
+
+  setStaffAccess: orgProcedure
+    .input(z.object({ orgId: z.string().uuid(), blocked: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      await setStaffAccessBlocked(db, {
+        orgId: ctx.orgId,
+        blocked: input.blocked,
+        actorId: ctx.user.id,
+      });
+      return { blocked: input.blocked };
     }),
 
   rename: orgProcedure

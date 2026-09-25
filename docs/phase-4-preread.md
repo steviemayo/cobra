@@ -44,7 +44,7 @@
 - `apps/gateway` — Node gateway service, `Dockerfile`, README (GHCR image, stable/beta channels)
 - `apps/panel` — Vite panel SPA served by gateways (PIN gate, reconnecting WebSocket)
 - `packages/model` (room schemas, device catalog, templates, protocol schemas) · `engine` (validator, RoomRuntime, activity planner, executor, design diff) · `drivers` (`sim/` simulated devices, `real/` PJLink, NVX, Q-SYS, generic TCP/serial/REST, VISCA, declarative + bundled `library/`, hybrid real/simulated bus, registry) · `crypto` (Ed25519 signed manifests, tokens, PIN hashing) · `panel-ui` (generated panel) · `db` · `config`
-- Migrations: init, room_drafts_templates, members_email_invites, gateway_releases_events, deployments, monitoring, billing_and_control, room_hook_secret, room_combinations, calendars, marketplace, custom_drivers, gateway_channel
+- Migrations: init, room_drafts_templates, members_email_invites, gateway_releases_events, deployments, monitoring, billing_and_control, room_hook_secret, room_combinations, calendars, marketplace, custom_drivers, gateway_channel, room_groups
 
 ## Rules learned (don't relearn)
 
@@ -68,7 +68,7 @@
 
 ## Ops (things a person must set up)
 
-- **Env vars** (all in `.env.example`): `KESTREL_SIGNING_KEY(_ID)` (generate with `pnpm --filter @kestrel/crypto keygen`), `CRON_SECRET`, `RESEND_API_KEY`, `ALERT_FROM_EMAIL`, `NEXT_PUBLIC_APP_URL`, `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`/`STRIPE_PRICE_BASIC`/`STRIPE_PRICE_PRO`, `KESTREL_SECRETS_KEY` (calendar credentials + phone-control secrets), `KESTREL_ADMIN_EMAILS` (marketplace review), `GATEWAY_LATEST_STABLE`/`GATEWAY_LATEST_BETA`. Set for Production and Preview on Vercel (`vercel login`, `vercel link` in `apps/web`, then `vercel env add`)
+- **Env vars** (all in `.env.example`): `KESTREL_SIGNING_KEY(_ID)` (generate with `pnpm --filter @kestrel/crypto keygen`), `CRON_SECRET`, `RESEND_API_KEY`, `ALERT_FROM_EMAIL`, `NEXT_PUBLIC_APP_URL`, `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`/`STRIPE_PRICE_BASIC`/`STRIPE_PRICE_PRO`, `KESTREL_SECRETS_KEY` (calendar credentials + phone-control secrets), `STAFF_REQUIRE_MFA` / `STAFF_HOST` (optional, staff portal), `GATEWAY_LATEST_STABLE`/`GATEWAY_LATEST_BETA`. Set for Production and Preview on Vercel (`vercel login`, `vercel link` in `apps/web`, then `vercel env add`)
 - **Scheduled jobs** (authorise with `Authorization: Bearer $CRON_SECRET`): `GET /api/cron/retention` (daily, in `vercel.json`), `GET /api/cron/sweep` (every 1-2 min: marks silent gateways offline and raises incidents), `GET /api/cron/calendar` (every 1-5 min). Use an external scheduler, Vercel Pro cron, or Supabase `pg_cron` + `pg_net`
 - **Stripe:** webhook endpoint `/api/stripe/webhook` (subscription + checkout events); create Basic and Pro prices
 - **Migrations:** apply to any DB other than `kestrel-dev` (`prisma migrate deploy`)

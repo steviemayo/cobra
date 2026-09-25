@@ -68,7 +68,7 @@
 ## Phase 7 — Expansion
 
 - Triggers: schedule, calendar (Graph/Google), occupancy, webhook/API
-- Combined rooms behaviour
+- Combined rooms behaviour (first version built; **redesign planned**: define combinations when a room group is created, see `docs/panel-ui-requirements.md`)
 - Marketplace (publish/buy templates), driver SDK + dev subscription
 - Gateway self-update channels, Windows installer, QR-to-phone control
 - Additional drivers (conference systems API control, cameras, env, mechanical)
@@ -109,6 +109,26 @@ Words used below:
 
 - All phases are built and merged to `dev` and `main` (PRs #9, #10 and the phases 5 to 7 PR). CI on them is green. What follows is setup and real-world checks that need you.
 - Use `docs/phase-4-preread.md` as the status source, and `.env.example` as the list of every env var.
+- **Status check on 2026-09-25** (checked with the Vercel, Supabase, GitHub and Prisma CLIs; secret values were not read). Production URL until a domain exists: `https://kestrel-lovat.vercel.app`. There is one database, `kestrel-dev`, used by Production and Preview alike.
+
+| Step | Status | Notes |
+|---|---|---|
+| 1. Secrets | Done | `KESTREL_SIGNING_KEY`, `_ID`, `CRON_SECRET`, `KESTREL_SECRETS_KEY` are on Vercel (Production + Preview) and in `.env` |
+| 2. Vercel env vars | Done (except Stripe) | See "Added to Vercel" below; redeploy needed |
+| 3. Migrations | Done | `prisma migrate status`: 13 migrations, "Database schema is up to date". Supabase CLI linked to `ntamimcbktoyvgvwesii` |
+| 4. Supabase housekeeping | **Unverified** | Password rotation and auth redirect URLs cannot be checked from the CLI. Confirm in the Supabase dashboard |
+| 5. Scheduled jobs | **Unverified** | Not tested. Run the `curl.exe` check in step 5 against `https://kestrel-lovat.vercel.app` and confirm the job exists in cron-job.org |
+| 6. Resend | Deferred | No domain yet. `RESEND_API_KEY` and `ALERT_FROM_EMAIL` are in local `.env` only, not on Vercel |
+| 7. Stripe | Deferred | Set up later |
+| 8. Marketplace review | Ready to try after redeploy | Now in the staff portal at `/staff/marketplace`; you are seeded as staff admin. Set up your authenticator app the first time |
+| 9. Gateway release | **Partly** | CI green on `main`, `:stable` and `:beta` images publicly pullable, `gateway-stable` release exists, workflow permissions are read/write. `GATEWAY_LATEST_*` now set on Vercel. No `gateway-beta` release was listed, check it |
+| 10 to 14 | Not started | Not a priority for now |
+
+**Added to Vercel on 2026-09-25** (Production and Preview): `NEXT_PUBLIC_APP_URL` (`https://kestrel-lovat.vercel.app`), `KESTREL_ADMIN_EMAILS` (no longer used: delete it from Vercel), `GATEWAY_LATEST_STABLE` and `GATEWAY_LATEST_BETA` (`0.1.0`), `NEXT_PUBLIC_GATEWAY_IMAGE`, and `RESEND_API_KEY` and `ALERT_FROM_EMAIL` (copied from local `.env`; email will not send from a real domain until step 6 is done).
+
+Still to add later: the four `STRIPE_*` vars (step 7). When a domain exists, update `NEXT_PUBLIC_APP_URL`.
+
+Env vars only apply to new deployments, so redeploy Production after adding any.
 
 ### 1. Generate the secrets
 
@@ -163,7 +183,7 @@ Full list (from `.env.example`). "Now" means set it before anything else works; 
 | `NEXT_PUBLIC_APP_URL` | now | your real public URL with no trailing slash, e.g. `https://<your-domain>`. Used for links in alert emails and Stripe return links |
 | `CRON_SECRET` | now | step 1 |
 | `KESTREL_SECRETS_KEY` | now | step 1 |
-| `KESTREL_ADMIN_EMAILS` | now | your email, comma-separated for more. Lets you review marketplace listings at `/admin/marketplace` |
+| `STAFF_REQUIRE_MFA`, `STAFF_HOST` | optional | leave both unset in production. See `docs/staff-portal-and-msp.md` |
 | `RESEND_API_KEY`, `ALERT_FROM_EMAIL` | step 6 | Resend |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_BASIC`, `STRIPE_PRICE_PRO` | step 7 | Stripe |
 | `GATEWAY_LATEST_STABLE`, `GATEWAY_LATEST_BETA` | step 9 | newest gateway version per channel, e.g. `0.1.0` |
@@ -187,6 +207,8 @@ The dev database (`kestrel-dev`) already has all 13 migrations because I ran the
    ```
    `migrate deploy` only applies committed migrations and never resets data. The docs: https://www.prisma.io/docs/orm/prisma-migrate/workflows/production-and-testing-environments
 3. Working when: `migrate status` says "Database schema is up to date".
+
+Current setup: only `kestrel-dev` exists and both Production and Preview use it, so nothing more is needed here yet.
 
 Better long term: make a separate `kestrel-prod` Supabase project (Sydney) before real customers, keep `kestrel-dev` for development, and point Vercel Production at prod and Preview at dev.
 
@@ -234,12 +256,16 @@ curl.exe -H "Authorization: Bearer <CRON_SECRET>" https://<app>/api/cron/sweep
 
 Alerts by email need a sender. Teams and webhook alerts do not.
 
+**Deferred (no domain yet).** Resend account and API key exist locally. Until a domain is verified, email alerts can only be tested to your own address via `onboarding@resend.dev`; leave the two vars off Vercel so email channels are skipped. Resume at item 1 once the domain is bought.
+
 1. Sign up at https://resend.com, then **Domains** > add your domain and add the DNS records it shows (https://resend.com/docs/dashboard/domains/introduction). Wait until it says Verified. (You cannot send from a domain you have not verified; testing with Resend's `onboarding@resend.dev` sender only delivers to your own email.)
 2. **API Keys** (https://resend.com/api-keys) > create one with "Sending access".
 3. Set `RESEND_API_KEY` to it and `ALERT_FROM_EMAIL` to an address on your verified domain, e.g. `alerts@<your domain>` (step 2).
 4. Working when: in the portal, **Alerts** > add an email channel > send a test, and it arrives.
 
 ### 7. Billing (Stripe)
+
+**Deferred, set up later.** Until then billing pages will not work; nothing else depends on it.
 
 Do this in Stripe **test mode** first (toggle at the top right of the dashboard). Real cards are not charged in test mode. Docs: https://docs.stripe.com/billing/subscriptions/build-subscriptions
 
@@ -256,7 +282,7 @@ Not built: paying marketplace publishers (needs Stripe Connect, https://docs.str
 
 ### 8. Marketplace review
 
-Publishing is limited to Pro orgs, and a listing is invisible until a Kestrel admin approves it. Set `KESTREL_ADMIN_EMAILS` (step 2), sign in with that email, and open `https://<app>/admin/marketplace` to approve or reject. Working when: you publish a template from **Templates** in a Pro org, approve it there, and it shows in **Marketplace** for another org.
+Publishing is limited to Pro orgs, and a listing is invisible until a Kestrel admin approves it. Kestrel staff review listings in the staff portal: sign in as a staff user (add one with `apps/web/scripts/add-staff.mts`), enter your authenticator code, and open `https://<app>/staff/marketplace` to approve or reject. Working when: you publish a template from **Templates** in a Pro org, approve it there, and it shows in **Marketplace** for another org.
 
 ### 9. Ship a gateway release (Docker images and Windows bundle)
 
@@ -328,7 +354,7 @@ Working when: a meeting starting in a test room mailbox starts the room's activi
 I have never opened these while signed in. Use a test org and click through, and tell Claude (or note here) anything that looks wrong or errors:
 
 - **Settings > Billing** `/o/<org>/settings/billing` (choose plan, Stripe test card, trial banner)
-- **Marketplace** `/o/<org>/marketplace`, **Templates** (publish), `/admin/marketplace` (approve)
+- **Marketplace** `/o/<org>/marketplace`, **Templates** (publish), `/staff/marketplace` (approve)
 - **Drivers** `/o/<org>/drivers` (create a custom driver from the example; Pro only), and the driver picker in a room's **Devices**
 - **Combinations** `/o/<org>/combinations`, then a room's **Control** page for the join/split bar
 - **Gateways** `/o/<org>/gateways` (channel badge, "Follow the beta channel" in the **...** menu)

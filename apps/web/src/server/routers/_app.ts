@@ -3,7 +3,9 @@ import { alertRouter } from './alert';
 import { auditRouter } from './audit';
 import { billingRouter } from './billing';
 import { calendarRouter } from './calendar';
-import { combinationRouter } from './combination';
+import { mspRouter } from './msp';
+import { roomGroupRouter } from './room-group';
+import { staffRouter } from './staff';
 import { commandRouter } from './command';
 import { controlRouter } from './control';
 import { deploymentRouter } from './deployment';
@@ -41,7 +43,9 @@ export const appRouter = router({
   driver: driverRouter,
   marketplace: marketplaceRouter,
   calendar: calendarRouter,
-  combination: combinationRouter,
+  msp: mspRouter,
+  roomGroup: roomGroupRouter,
+  staff: staffRouter,
   control: controlRouter,
 });
 export type AppRouter = typeof appRouter;

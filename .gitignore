@@ -15,3 +15,6 @@ apps/gateway/data
 *.db
 *.db-wal
 *.db-shm
+
+# Supabase CLI local link state
+supabase/.temp
