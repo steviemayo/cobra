@@ -14,7 +14,7 @@ const OTHER_MSP = '22222222-2222-4222-8222-222222222222';
 const [CAROL, DAN, ALICE, BOB, VIC, ZED] = Array.from(
   { length: 6 },
   (_, i) => `44444444-4444-4444-8444-44444444444${i + 1}`,
-);
+) as [string, string, string, string, string, string];
 
 function world(grants: Record<string, unknown>[] = []) {
   const member = table([
