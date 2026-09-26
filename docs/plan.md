@@ -378,6 +378,8 @@ Written 2026-09-26. Everything above this line is set-up and verification for wh
 
 - **A**: the browser pass. Yours: nothing built this round has been clicked through signed in, or run on real hardware
 - **Before the release PR `dev` to `main`**: apply the two migrations added this round with `pnpm --filter @kestrel/db exec prisma migrate deploy` (`20260926120000_divider_actions`, `20260926140000_org_retention`). They were not applied by the build. Then set `STAFF_TICKET_EMAIL` (and `RESEND_API_KEY`, `ALERT_FROM_EMAIL` once the sending domain exists) if you want email
+- **Driver classes slice 2**: apply migration `20260926180000_bindings_and_credentials` (two new tables, `Gateway.features`, `Room.reportedBindingsVersion`) with `prisma migrate deploy` **before** the release to `main`. Set `KESTREL_SECRETS_KEY` on the server if it is not already (logins cannot be stored without it). Update gateways to use binding-only releases; older gateways keep getting the merged values
+- **Driver classes slice 6**: apply migration `20260926200000_site_devices` (new `SiteDevice` table and `Release.siteDeviceIds`) the same way, **before** the release to `main`
 - ~~**D part 2**: drop the `RoomCombination` table~~ done (migration `20260926160000_drop_room_combination`, table was empty)
 - **L**: needs your decision on who pays (the provider, the customer, or per customer)
 - **M**: WSS push needs a host that can hold connections (Vercel functions cannot), Stripe Connect needs a Stripe account and payout rules, third-party drivers and sandboxed hooks each need a security design first

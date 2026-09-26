@@ -459,8 +459,8 @@ describe('function pages', () => {
       },
     ],
     microphones: [
-      { id: 'mic1', name: 'Ceiling mic', muted: false },
-      { id: 'mic2', name: 'Lectern mic', muted: null },
+      { id: 'mic1', name: 'Ceiling mic', muted: false, canVolume: false, volume: null },
+      { id: 'mic2', name: 'Lectern mic', muted: null, canVolume: false, volume: null },
     ],
     lights: [{ id: 'lights1', name: 'Room lights', scenes: ['Bright', 'Dim'], active: 'Dim' }],
     movers: [
@@ -477,6 +477,7 @@ describe('function pages', () => {
         actions: ['down' as const, 'up' as const],
       },
     ],
+    displays: [],
     ...over,
   });
   const nav = (name: string) => screen.getByRole('button', { name });
@@ -489,7 +490,7 @@ describe('function pages', () => {
 
   it('offers only the pages the room has', () => {
     const { client } = fakeClient(
-      running({ functions: functions({ cameras: [], lights: [], movers: [] }) }),
+      running({ functions: functions({ cameras: [], lights: [], movers: [], displays: [] }) }),
     );
     render(<PanelApp client={client} />);
     expect(screen.queryByRole('button', { name: 'Cameras' })).toBeNull();
@@ -629,3 +630,122 @@ describe('function pages', () => {
     expect(screen.queryByRole('heading', { name: 'Cameras' })).toBeNull();
   });
 });
+
+describe('display page', () => {
+  const display = (over: Record<string, unknown> = {}) => ({
+    id: 'tv1',
+    name: 'Left screen',
+    keys: true,
+    media: true,
+    apps: [
+      { id: 'app.netflix', name: 'Netflix' },
+      { id: 'app.signage', name: 'Signage' },
+    ],
+    activeApp: 'app.signage',
+    ...over,
+  });
+  const withDisplays = (displays: unknown[]) =>
+    running({
+      functions: { cameras: [], microphones: [], lights: [], movers: [], displays } as never,
+    });
+  const keys = (dispatched: { type: string }[]) => dispatched.filter((i) => i.type === 'display.key');
+
+  it('adds a Display page only when a display offers something', () => {
+    const none = fakeClient(withDisplays([]));
+    render(<PanelApp client={none.client} />);
+    expect(screen.queryByRole('button', { name: 'Display' })).toBeNull();
+    cleanup();
+    const some = fakeClient(withDisplays([display()]));
+    render(<PanelApp client={some.client} />);
+    expect(screen.getByRole('button', { name: 'Display' })).toBeTruthy();
+  });
+
+  it('launches an app and marks the one that is open', () => {
+    const { client, dispatched } = fakeClient(withDisplays([display()]));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Display' }));
+    expect(screen.getByRole('button', { name: 'Signage' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Netflix' }));
+    expect(dispatched).toContainEqual({ type: 'display.app', deviceId: 'tv1', appId: 'app.netflix' });
+  });
+
+  it('presses keys, and an arrow repeats while it is held', () => {
+    const { client, dispatched } = fakeClient(withDisplays([display()]));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Display' }));
+    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(keys(dispatched)).toEqual([
+      { type: 'display.key', deviceId: 'tv1', key: 'ok' },
+      { type: 'display.key', deviceId: 'tv1', key: 'pause' },
+    ]);
+    const before = keys(dispatched).length;
+    const down = screen.getByRole('button', { name: 'Down' });
+    fireEvent.pointerDown(down);
+    act(() => void vi.advanceTimersByTime(1100));
+    fireEvent.pointerUp(down);
+    expect(keys(dispatched).length - before).toBe(3);
+    act(() => void vi.advanceTimersByTime(2000));
+    expect(keys(dispatched).length - before).toBe(3);
+  });
+
+  it('shows only what the display supports, and names the display only when there are several', () => {
+    const one = fakeClient(withDisplays([display({ keys: false, media: false })]));
+    render(<PanelApp client={one.client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Display' }));
+    expect(screen.queryByRole('button', { name: 'OK' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Left screen' })).toBeNull();
+    cleanup();
+    const two = fakeClient(withDisplays([display(), display({ id: 'tv2', name: 'Right screen' })]));
+    render(<PanelApp client={two.client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Display' }));
+    expect(screen.getByRole('heading', { name: 'Left screen' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Right screen' })).toBeTruthy();
+  });
+});
+
+describe('microphone volume', () => {
+  const mics = (over: Record<string, unknown> = {}) =>
+    running({
+      functions: {
+        cameras: [],
+        lights: [],
+        movers: [],
+        displays: [],
+        microphones: [{ id: 'm1', name: 'Lectern mic', muted: false, canVolume: true, volume: 40, ...over }],
+      } as never,
+    });
+  const bumps = (dispatched: { type: string }[]) => dispatched.filter((i) => i.type === 'mic.bump');
+
+  it('has quieter and louder buttons that repeat while held, and shows the level', () => {
+    const { client, dispatched } = fakeClient(mics());
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Microphones' }));
+    expect(screen.getByText('40')).toBeTruthy();
+    const louder = screen.getByRole('button', { name: 'Lectern mic louder' });
+    fireEvent.pointerDown(louder);
+    act(() => void vi.advanceTimersByTime(600));
+    fireEvent.pointerUp(louder);
+    expect(bumps(dispatched)).toEqual([
+      { type: 'mic.bump', deviceId: 'm1', delta: 5 },
+      { type: 'mic.bump', deviceId: 'm1', delta: 5 },
+      { type: 'mic.bump', deviceId: 'm1', delta: 5 },
+    ]);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Lectern mic quieter' }));
+    expect(bumps(dispatched).at(-1)).toEqual({ type: 'mic.bump', deviceId: 'm1', delta: -5 });
+  });
+
+  it('shows no level when the microphone reports none, and no buttons when it has no volume', () => {
+    const noLevel = fakeClient(mics({ volume: null }));
+    render(<PanelApp client={noLevel.client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Microphones' }));
+    expect(screen.queryByText('40')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Lectern mic louder' })).toBeTruthy();
+    cleanup();
+    const none = fakeClient(mics({ canVolume: false }));
+    render(<PanelApp client={none.client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Microphones' }));
+    expect(screen.queryByRole('button', { name: 'Lectern mic louder' })).toBeNull();
+  });
+});
+

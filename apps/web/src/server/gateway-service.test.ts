@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateKeyPair, hashSecret } from '@kestrel/crypto';
+import { generateKeyPair, generateSealKey, hashSecret, verifyBindings } from '@kestrel/crypto';
 import {
   ConfigResponse,
   EnrollResponse,
@@ -9,6 +9,7 @@ import {
 } from '@kestrel/model';
 import {
   authenticateGateway,
+  bindings,
   config,
   configVersion,
   effectiveStatus,
@@ -115,6 +116,9 @@ function world() {
   const controlIntent = table([]);
   const roomGroup = table([]);
   const roomDivider = table([]);
+  const roomBinding = table([]);
+  const credentialSet = table([]);
+  const siteDevice = table([]);
   const db = {
     gateway,
     room,
@@ -134,6 +138,9 @@ function world() {
     controlIntent,
     roomGroup,
     roomDivider,
+    roomBinding,
+    credentialSet,
+    siteDevice,
   } as unknown as Db;
   return {
     db,
@@ -155,6 +162,9 @@ function world() {
     controlIntent,
     roomGroup,
     roomDivider,
+    roomBinding,
+    credentialSet,
+    siteDevice,
   };
 }
 
@@ -679,5 +689,79 @@ describe('plan gating over the heartbeat', () => {
     Object.assign(w.orgBilling.rows[0]!, { plan: 'pro', status: 'active' });
     await heartbeat(w.db, gw, hb([offlineReport as never]), keys);
     expect(w.incident.rows.length).toBeGreaterThan(0);
+  });
+});
+
+describe('bindings', () => {
+  const pair = generateKeyPair();
+  const signing = { keyId: 'k1', privateKeyPem: pair.privateKeyPem, publicKeyPem: pair.publicKeyPem };
+  const trusted = [{ keyId: 'k1', publicKeyPem: pair.publicKeyPem }];
+
+  it('remembers what a gateway says it can do, and the bindings version each room runs', async () => {
+    const w = world();
+    const gw = w.gateway.rows[0]! as never;
+    const req = { ...hb([{ roomId: ROOM, releaseId: REL, status: 'on', bindingsVersion: 4 }]), features: ['bindings'] };
+    await heartbeat(w.db, gw, req, keys);
+    expect(w.gateway.rows[0]!.features).toEqual(['bindings']);
+    expect(w.room.rows[0]!.reportedBindingsVersion).toBe(4);
+  });
+
+  it('assigns a room its bindings version, which changes the config version', async () => {
+    const w = world();
+    const gw = w.gateway.rows[0]! as never;
+    const before = ConfigResponse.parse((await config(w.db, gw, keys)).body);
+    expect(before.rooms[0]!.bindingsVersion).toBeUndefined();
+    w.roomBinding.rows.push({ id: 'b1', orgId: ORG, roomId: ROOM, version: 2, values: {}, sealed: null, credentialSets: {} });
+    const after = ConfigResponse.parse((await config(w.db, gw, keys)).body);
+    expect(after.rooms[0]!.bindingsVersion).toBe(2);
+    expect(after.configVersion).not.toBe(before.configVersion);
+  });
+
+  it('gives a gateway its own room’s bindings, signed', async () => {
+    const w = world();
+    w.roomBinding.rows.push({
+      id: 'b1',
+      orgId: ORG,
+      roomId: ROOM,
+      version: 2,
+      values: { dsp: { host: '10.0.0.5' } },
+      sealed: null,
+      credentialSets: {},
+    });
+    const res = await bindings(w.db, w.gateway.rows[0]! as never, ROOM, signing);
+    expect(res.status).toBe(200);
+    const checked = verifyBindings(res.body, trusted);
+    expect(checked.ok && checked.signed.payload).toMatchObject({
+      orgId: ORG,
+      roomId: ROOM,
+      version: 2,
+      devices: { dsp: { host: '10.0.0.5' } },
+    });
+  });
+
+  it('refuses a room that belongs to another gateway, and a room with none', async () => {
+    const w = world();
+    w.roomBinding.rows.push({ id: 'b2', orgId: ORG, roomId: ROOM2, version: 1, values: { a: { host: 'x' } }, sealed: null, credentialSets: {} });
+    expect((await bindings(w.db, w.gateway.rows[0]! as never, ROOM2, signing)).status).toBe(404);
+    expect((await bindings(w.db, w.gateway.rows[0]! as never, ROOM, signing)).status).toBe(404);
+  });
+
+  it('cannot sign without a key, and says so', async () => {
+    const w = world();
+    expect((await bindings(w.db, w.gateway.rows[0]! as never, ROOM, null)).status).toBe(503);
+  });
+
+  it('will not open logins when the server has lost its secrets key', async () => {
+    const w = world();
+    const sealed = 'v1.not-a-real-seal';
+    w.roomBinding.rows.push({ id: 'b1', orgId: ORG, roomId: ROOM, version: 1, values: {}, sealed, credentialSets: {} });
+    const prev = process.env.KESTREL_SECRETS_KEY;
+    process.env.KESTREL_SECRETS_KEY = generateSealKey();
+    try {
+      expect((await bindings(w.db, w.gateway.rows[0]! as never, ROOM, signing)).status).toBe(503);
+    } finally {
+      if (prev === undefined) delete process.env.KESTREL_SECRETS_KEY;
+      else process.env.KESTREL_SECRETS_KEY = prev;
+    }
   });
 });

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { writeAudit } from '../audit';
+import { checkDeployable } from '../deploy-check';
 import { roomDeployStates } from '../deployment-queries';
 import { cancelScheduled, createDeployment } from '../deployment-service';
 import { orgProcedure, requireRole, router } from '../trpc';
@@ -102,6 +103,14 @@ export const deploymentRouter = router({
       const [state] = await roomDeployStates(ctx.orgId, [room.id]);
       if (state!.state === 'in_sync' && state!.desiredRelease?.id === release.id)
         throw new TRPCError({ code: 'BAD_REQUEST', message: `Release ${release.number} is already running` });
+
+      const ready = await checkDeployable(db, {
+        orgId: ctx.orgId,
+        roomId: room.id,
+        gatewayId: room.gatewayId,
+        releaseId: release.id,
+      });
+      if (!ready.ok) throw new TRPCError({ code: 'BAD_REQUEST', message: ready.message });
 
       const current = state!.desiredRelease;
       const deployment = await createDeployment(db, {

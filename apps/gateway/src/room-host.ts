@@ -1,8 +1,10 @@
 import { RoomRuntime, TriggerScheduler } from '@kestrel/engine';
 import { createSimulation } from '@kestrel/drivers';
-import { HybridBus, createDriver, type DeviceDriver } from '@kestrel/drivers/real';
+import { HybridBus, attachVirtualDrivers, createDriver, type DeviceDriver } from '@kestrel/drivers/real';
+import { applyBindings } from '@kestrel/model';
 import type {
   DeviceBus,
+  DeviceValues,
   PanelAccess,
   PanelBranding,
   RoomReport,
@@ -10,6 +12,7 @@ import type {
   TelemetryEvent,
 } from '@kestrel/model';
 import type { Logger } from './log';
+import { SharedDevices } from './shared-devices';
 
 export type SimulateMode = 'off' | 'all' | 'missing';
 
@@ -22,6 +25,8 @@ export interface LoadedRoom {
   bus: DeviceBus;
   access: PanelAccess;
   branding: PanelBranding;
+  /** The addresses and logins this room runs with, when its release keeps them apart. */
+  bindings?: RoomBindings;
   /** Ids of this room's real devices that are unreachable right now. */
   offline(): string[];
   /** Starts anything that acts on its own (schedules). Called when the room goes live, not while staged. */
@@ -35,22 +40,57 @@ interface BuiltBus {
   close(): void;
 }
 
+/** What a room's addresses and logins are, as verified by the gateway. */
+export interface RoomBindings {
+  version: number;
+  devices: DeviceValues;
+  /** Devices that are a slice of a shared site device, by device id. */
+  sharedDevices?: Record<string, { siteDeviceId: string; exclusive: boolean }>;
+}
+
+/** The manifest with the room's bindings laid over each device's settings. What actually runs. */
+export function withBindings(signed: SignedManifest, bindings?: RoomBindings): SignedManifest {
+  if (!bindings) return signed;
+  const { manifest } = signed;
+  return { ...signed, manifest: { ...manifest, model: applyBindings(manifest.model, bindings.devices) } };
+}
+
 /** Real drivers where the room configures them; simulated devices fill the gaps if allowed. */
-export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger): BuiltBus {
+export function buildBus(
+  signed: SignedManifest,
+  mode: SimulateMode,
+  log: Logger,
+  /** Shared site devices: one connection for every room that uses one. Absent: each room has its own. */
+  sharing?: { shared: SharedDevices; devices: NonNullable<RoomBindings['sharedDevices']> },
+): BuiltBus {
   const model = signed.manifest.model;
   if (mode === 'all') {
     const sim = createSimulation(model, { customDrivers: signed.manifest.drivers });
     return { bus: sim, offline: () => [], close: () => sim.dispose() };
   }
   const real = new Map<string, DeviceDriver>();
-  for (const device of model.devices) {
-    const driver = createDriver(
+  const make = (device: typeof model.devices[number]) =>
+    createDriver(
       device,
       { log: (l, m, x) => log(l, m, { device: device.name, ...x }) },
       signed.manifest.drivers,
     );
+  for (const device of model.devices) {
+    const shared = sharing?.devices[device.id];
+    const driver = shared
+      ? sharing!.shared.attach({
+          siteDeviceId: shared.siteDeviceId,
+          exclusive: shared.exclusive,
+          roomId: signed.manifest.roomId,
+          roomName: signed.manifest.roomName,
+          device,
+          build: make,
+        })
+      : make(device);
     if (driver) real.set(device.id, driver);
   }
+  // The virtual switcher of an AVoIP system is logic over the other devices, so it is built last.
+  attachVirtualDrivers(model, real, { log: (l, m, x) => log(l, m, x) });
   const bus = new HybridBus(
     real,
     mode === 'missing' ? createSimulation(model, { customDrivers: signed.manifest.drivers }) : null,
@@ -69,12 +109,16 @@ export class RoomHost {
   private dividerListener: ((dividerId: string, open: boolean) => void) | null = null;
   private resolveActive: (roomId: string) => string = (roomId) => roomId;
   private readonly activeListeners = new Set<() => void>();
+  /** One connection per shared site device, whatever number of rooms use it. */
+  readonly shared: SharedDevices;
 
   constructor(
     private readonly mode: SimulateMode,
     private readonly log: Logger,
     private readonly emit: (event: TelemetryEvent) => void,
-  ) {}
+  ) {
+    this.shared = new SharedDevices(log);
+  }
 
   get(roomId: string): LoadedRoom | undefined {
     return this.rooms.get(roomId);
@@ -122,11 +166,17 @@ export class RoomHost {
   }
 
   /** Build a room and start connecting to its devices without replacing the one that is running. */
-  stage(signed: SignedManifest): LoadedRoom {
+  stage(signed: SignedManifest, bindings?: RoomBindings): LoadedRoom {
     const { manifest } = signed;
-    const built = buildBus(signed, this.mode, this.log);
+    // `signed` stays as verified (its hash is what is reported); the merged copy is what runs.
+    const running = withBindings(signed, bindings);
+    const sharing =
+      bindings?.sharedDevices && Object.keys(bindings.sharedDevices).length > 0
+        ? { shared: this.shared, devices: bindings.sharedDevices }
+        : undefined;
+    const built = buildBus(running, this.mode, this.log, sharing);
     const runtime = new RoomRuntime({
-      model: manifest.model,
+      model: running.manifest.model,
       roomName: manifest.roomName,
       bus: built.bus,
       onDivider: (dividerId, open) => this.dividerListener?.(dividerId, open),
@@ -136,6 +186,7 @@ export class RoomHost {
       roomId: manifest.roomId,
       releaseId: manifest.releaseId,
       signed,
+      ...(bindings ? { bindings } : {}),
       runtime,
       bus: built.bus,
       access: manifest.panel.access,
@@ -181,14 +232,15 @@ export class RoomHost {
     return room;
   }
 
-  load(signed: SignedManifest): LoadedRoom {
-    return this.activate(this.stage(signed));
+  load(signed: SignedManifest, bindings?: RoomBindings): LoadedRoom {
+    return this.activate(this.stage(signed, bindings));
   }
 
   unload(roomId: string, notify = true) {
     const room = this.rooms.get(roomId);
     if (!room) return;
     room.close();
+    this.shared.release(roomId);
     this.rooms.delete(roomId);
     this.log('info', 'Room unloaded', { roomId });
     if (notify) this.notify(roomId);
@@ -200,6 +252,7 @@ export class RoomHost {
       releaseId: r.releaseId,
       manifestHash: r.signed.hash,
       status: r.runtime.getSnapshot().status,
+      ...(r.bindings ? { bindingsVersion: r.bindings.version } : {}),
       devices: r.signed.manifest.model.devices.map((d) => ({
         deviceId: d.id,
         name: d.name,
@@ -250,6 +303,9 @@ export class RoomHost {
       const vm = room.runtime.getSnapshot();
       if (vm.status !== status) {
         status = vm.status;
+        // A device that serves one room at a time is held while the room is on.
+        if (status === 'starting' || status === 'on') this.shared.acquire(room.roomId, room.signed.manifest.roomName);
+        else if (status === 'off') this.shared.release(room.roomId);
         this.emit({ at: at(), type: 'room.status', roomId: room.roomId, data: { status } });
         if (status === 'fault')
           this.emit({

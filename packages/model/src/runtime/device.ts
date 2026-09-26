@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { LocalId } from '../room/common';
+import { DisplayKey, LocalId } from '../room/common';
+import type { ControlPoint, PointReading } from '../room/points';
 import type { QuickActionId } from './quick-actions';
 
 // The vocabulary the engine speaks to drivers (real or simulated). Drivers translate to protocol.
@@ -27,6 +28,21 @@ export const DeviceCommand = z.discriminatedUnion('type', [
   }),
   /** Displays: blank the picture (or bring it back) without powering off. */
   z.object({ type: z.literal('blank'), on: z.boolean() }),
+  /**
+   * Set a control point of a DSP or similar device. A level is 0 to 100 (the driver scales it to
+   * the range of the point), a mute is true or false, a selector is a number.
+   */
+  z.object({
+    type: z.literal('point'),
+    pointId: LocalId,
+    value: z.union([z.number(), z.boolean(), z.string().max(200)]),
+  }),
+  /** AVoIP decoders: receive the stream at this location (null: stop). The switcher works the location out from the encoder. */
+  z.object({ type: z.literal('set_stream'), location: z.string().max(500).nullable() }),
+  /** Displays: press a remote key. */
+  z.object({ type: z.literal('key'), key: DisplayKey }),
+  /** Displays: launch an app by its id from the device's app list. */
+  z.object({ type: z.literal('launch_app'), appId: z.string().min(1).max(200) }),
   z.object({
     type: z.literal('command'),
     name: z.string().min(1),
@@ -53,6 +69,14 @@ export const DeviceState = z.object({
   /** Displays: is the picture blanked (shutter, AV mute). */
   blanked: z.boolean().optional(),
   recording: z.boolean().optional(),
+  /** Point-based devices: the last value of each control point, by point id (a level as 0 to 100). */
+  points: z.record(z.string(), z.union([z.number(), z.boolean(), z.string()])).default({}),
+  /** AVoIP encoders: where the stream it makes can be picked up (a multicast address or stream id). */
+  streamLocation: z.string().optional(),
+  /** AVoIP decoders: is it receiving the stream it was pointed at. */
+  streamConnected: z.boolean().optional(),
+  /** Smart displays: the id of the app last launched. */
+  activeApp: z.string().optional(),
   /** Occupancy sensors: is anyone in the room. */
   occupied: z.boolean().optional(),
   /** Input port -> is a signal present. Only devices with signal_detect report this. */
@@ -73,6 +97,10 @@ export interface DeviceBus {
   subscribe(listener: (event: DeviceEvent) => void): () => void;
   /** The quick actions this device's driver supports. Absent means none. */
   quickActions?(deviceId: string): QuickActionId[];
+  /** The optional features of this device's driver class that its driver supports (see driver-classes). Absent means none. */
+  features?(deviceId: string): string[];
+  /** Read one control point from the device, to check it exists and learn its range. Rejects if it cannot. */
+  readPoint?(deviceId: string, point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>): Promise<PointReading>;
 }
 
-export const defaultDeviceState = (): DeviceState => ({ online: true, routes: {}, signal: {} });
+export const defaultDeviceState = (): DeviceState => ({ online: true, routes: {}, signal: {}, points: {} });

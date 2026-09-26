@@ -1,4 +1,7 @@
 import {
+  BUILT_IN_DRIVERS,
+  POINT_ROLE_INFO,
+  POINT_TYPE_LABEL,
   DEVICE_CATALOG,
   type Action,
   type Capability,
@@ -80,6 +83,134 @@ function checkDevices(model: RoomModel, opts: ValidateOptions, c: Collector) {
         kind: 'device',
         id: d.id,
       });
+  }
+}
+
+/** The AVoIP family a device's driver belongs to, when it names one. */
+const familyOf = (d: Device) =>
+  d.control?.kind === 'driver' ? BUILT_IN_DRIVERS[d.control.driverId]?.family : undefined;
+
+/**
+ * An AVoIP system is an encoder, a decoder and a switcher that share a handshake, so all the parts
+ * a switcher joins must come from one family. Endpoints wired to nothing are also flagged.
+ */
+function checkAvoip(model: RoomModel, c: Collector) {
+  const byId = new Map(model.devices.map((d) => [d.id, d]));
+  const switcherIds = new Set(
+    model.devices.filter((d) => d.category === 'video_matrix' && familyOf(d)).map((d) => d.id),
+  );
+  const linked = new Set<string>();
+  for (const conn of model.connections) {
+    const from = byId.get(conn.from.deviceId);
+    const to = byId.get(conn.to.deviceId);
+    if (!from || !to) continue;
+    const pair =
+      (switcherIds.has(to.id) && from.category === 'avoip_encoder' ? [to, from] : null) ??
+      (switcherIds.has(from.id) && to.category === 'avoip_decoder' ? [from, to] : null);
+    if (!pair) continue;
+    const [switcher, endpoint] = pair;
+    linked.add(endpoint!.id);
+    const wanted = familyOf(switcher!);
+    const got = familyOf(endpoint!);
+    if (wanted && got && wanted !== got)
+      c.error(
+        'avoip_family_mismatch',
+        `${endpoint!.name} is a ${got} device but ${switcher!.name} is a ${wanted} switcher. An encoder, decoder and switcher must come from the same family`,
+        { kind: 'device', id: endpoint!.id },
+      );
+    else if (wanted && endpoint!.control && !got)
+      c.warn('avoip_family_unknown', `${endpoint!.name} uses a driver that does not say which AVoIP family it belongs to`, { kind: 'device', id: endpoint!.id });
+  }
+  if (switcherIds.size === 0) return;
+  for (const d of model.devices)
+    if ((d.category === 'avoip_encoder' || d.category === 'avoip_decoder') && !linked.has(d.id))
+      c.warn(
+        'avoip_endpoint_unlinked',
+        `${d.name} is not connected to a virtual switcher, so nothing can route to or from it`,
+        { kind: 'device', id: d.id },
+      );
+}
+
+const POINT_CLASS_CATEGORIES = new Set(['audio_matrix', 'lighting', 'hvac']);
+
+/**
+ * Control points of a DSP or similar device: every point must fit its driver address form, and a
+ * role must fit the kind of point and the device it acts on.
+ */
+function checkPoints(model: RoomModel, c: Collector) {
+  const ownRoles = new Map<string, string>();
+  for (const d of model.devices) {
+    const points = d.points ?? [];
+    if (points.length === 0) continue;
+    const ref: IssueRef = { kind: 'device', id: d.id };
+    if (!POINT_CLASS_CATEGORIES.has(d.category)) {
+      c.error('points_not_supported', `${d.name} cannot have control points; they are for a DSP or a lighting or building processor`, ref);
+      continue;
+    }
+    const seen = new Set<string>();
+    const form =
+      d.control?.kind === 'driver' ? BUILT_IN_DRIVERS[d.control.driverId]?.points : undefined;
+    const driverName = d.control?.kind === 'driver' ? (BUILT_IN_DRIVERS[d.control.driverId]?.name ?? 'its driver') : 'its driver';
+    for (const p of points) {
+      const where = `${d.name}, point "${p.name}"`;
+      if (seen.has(p.id)) c.error('duplicate_id', `${d.name}: two control points share the id "${p.id}"`, ref);
+      seen.add(p.id);
+      if (!d.control) c.error('point_no_driver', `${where}: the device needs a driver before it can have control points`, ref);
+      if (form) {
+        const fields = form[p.type];
+        if (!fields) c.error('point_type_unsupported', `${where}: ${driverName} does not support ${POINT_TYPE_LABEL[p.type].toLowerCase()} points`, ref);
+        else
+          for (const f of fields)
+            if (p.address[f.key] === undefined || p.address[f.key] === '')
+              c.error('point_address_missing', `${where}: needs its ${f.label.toLowerCase()}`, ref);
+      }
+      if (p.type === 'level' && p.min !== undefined && p.max !== undefined && p.min >= p.max)
+        c.error('point_range', `${where}: the minimum must be below the maximum`, ref);
+      if (!p.role) continue;
+      const info = POINT_ROLE_INFO[p.role];
+      if (info.type !== p.type)
+        c.error('point_role_type', `${where}: the role "${info.label}" needs a ${POINT_TYPE_LABEL[info.type].toLowerCase()} point`, ref);
+      if (info.needsMic) {
+        const mic = p.targetId ? model.devices.find((m) => m.id === p.targetId) : undefined;
+        const wanted = p.role === 'mic_privacy_mute' ? 'voice_capture_mic' : 'reinforcement_mic';
+        if (!mic || mic.category !== wanted)
+          c.error(
+            'point_role_target',
+            `${where}: the role "${info.label}" needs a ${p.role === 'mic_privacy_mute' ? 'conferencing' : 'reinforcement'} microphone to act on`,
+            ref,
+          );
+        else {
+          const key = `${p.role}:${mic.id}`;
+          if (ownRoles.has(key))
+            c.warn('point_role_twice', `${where}: ${mic.name} already has a "${info.label}" point (${ownRoles.get(key)})`, ref);
+          ownRoles.set(key, `${d.name}, "${p.name}"`);
+          if (mic.control && p.role !== 'mic_privacy_mute')
+            c.warn('point_role_shadowed', `${where}: ${mic.name} has its own driver, which is used instead of this point`, ref);
+        }
+      } else {
+        const key = `${p.role}:${d.id}`;
+        if (ownRoles.has(key)) c.warn('point_role_twice', `${where}: ${d.name} already has a "${info.label}" point (${ownRoles.get(key)})`, ref);
+        ownRoles.set(key, `"${p.name}"`);
+      }
+    }
+  }
+}
+
+/**
+ * A conferencing microphone feeds the call, never the room speakers. Only what can be seen from
+ * the design is checked: a microphone wired straight to an audio output. (Through a DSP the design
+ * cannot tell, since the DSP program decides what is mixed.)
+ */
+function checkMicRouting(model: RoomModel, g: Graph, c: Collector) {
+  for (const conn of model.connections) {
+    const from = g.devices.get(conn.from.deviceId);
+    const to = g.devices.get(conn.to.deviceId);
+    if (from?.category === 'voice_capture_mic' && to?.category === 'audio_destination')
+      c.warn(
+        'mic_to_room_speakers',
+        `${from.name} is a conferencing microphone but is connected to ${to.name}. Conferencing microphones should only feed the call and the DSP`,
+        { kind: 'connection', id: conn.id },
+      );
   }
 }
 
@@ -243,6 +374,8 @@ function checkActions(
       if (!src || !dst) continue;
       const sc = deviceCapabilities(src);
       const dc = deviceCapabilities(dst);
+      if (src.category === 'voice_capture_mic' && dst.category === 'audio_destination')
+        c.warn('mic_to_room_speakers', `${owner}: routes the conferencing microphone ${src.name} to ${dst.name}. Conferencing microphones should only feed the call`, ref);
       if (!sc.has('video_source') && !sc.has('audio_source'))
         c.error('route_not_source', `${owner}: ${src.name} is not a source`, ref);
       else if (!dc.has('video_sink') && !dc.has('audio_sink'))
@@ -273,6 +406,10 @@ function checkActions(
       );
     if (a.type === 'env_scene' && !['lighting', 'hvac', 'blinds'].includes(d.category))
       c.error('capability_missing', `${owner}: ${d.name} is not an environmental device`, ref);
+    if ((a.type === 'press_key' || a.type === 'launch_app') && !['display', 'video_destination'].includes(d.category))
+      c.error('capability_missing', `${owner}: ${d.name} is not a display`, ref);
+    if ((a.type === 'press_key' || a.type === 'launch_app') && !d.control)
+      c.error('capability_missing', `${owner}: ${d.name} has no driver, so it cannot ${a.type === 'press_key' ? 'press keys' : 'launch apps'}`, ref);
     if (a.type === 'device_command' && !DEVICE_CATALOG[d.category].controllable)
       c.error('capability_missing', `${owner}: ${d.name} cannot receive commands`, ref);
   }
@@ -425,6 +562,9 @@ export function validateRoomModel(model: RoomModel, opts: ValidateOptions = {}):
   checkDuplicateIds(model, c);
   checkDevices(model, opts, c);
   checkConnections(model, g, c);
+  checkMicRouting(model, g, c);
+  checkPoints(model, c);
+  checkAvoip(model, c);
   checkGroups(model, g, c);
   checkStates(model, g, c);
   checkActivities(model, g, c);

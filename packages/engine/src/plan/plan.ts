@@ -1,4 +1,12 @@
-import type { Action, Activity, Device, DeviceCommand, RoomModel } from '@kestrel/model';
+import {
+  isAvoipEndpoint,
+  isVideoDestination,
+  type Action,
+  type Activity,
+  type Device,
+  type DeviceCommand,
+  type RoomModel,
+} from '@kestrel/model';
 import { buildGraph, findRoute, type Graph } from '../validate/graph';
 
 export interface PlanStep {
@@ -52,10 +60,13 @@ function routeSteps(
     });
     return;
   }
+  // The signal passes through AVoIP encoders and decoders, but the virtual switcher does the
+  // routing (it reads the stream, points the decoder at it and waits), so they get no command.
   for (const hop of path.hops)
-    b.add(hop.deviceId, { type: 'route', inputPortId: hop.inPortId, outputPortId: hop.outPortId });
+    if (!isAvoipEndpoint(ctx.graph.devices.get(hop.deviceId)?.category ?? 'video_matrix'))
+      b.add(hop.deviceId, { type: 'route', inputPortId: hop.inPortId, outputPortId: hop.outPortId });
   const dest = ctx.graph.devices.get(dst.deviceId);
-  if (dest?.category === 'video_destination')
+  if (dest && isVideoDestination(dest.category))
     b.add(dst.deviceId, { type: 'select_input', portId: path.destinationPortId });
 }
 
@@ -73,6 +84,10 @@ function commandFor(action: Extract<Action, { deviceId: string }>): DeviceComman
       return { type: 'camera_preset', name: action.preset };
     case 'env_scene':
       return { type: 'scene', name: action.scene };
+    case 'press_key':
+      return { type: 'key', key: action.key };
+    case 'launch_app':
+      return { type: 'launch_app', appId: action.appId };
     case 'device_command':
       return action.command === 'record'
         ? { type: 'record', on: action.args.on !== false }
@@ -109,10 +124,10 @@ function expandActions(b: Builder, ctx: Ctx, actions: Action[], visiting: Set<st
   }
 }
 
-// A display must be powered before it can take an input.
+// A display must be powered before it can take an input, launch an app or press a key.
 function addImplicitDependencies(b: Builder) {
   for (const step of b.steps) {
-    if (step.command.type !== 'select_input') continue;
+    if (!['select_input', 'launch_app', 'key'].includes(step.command.type)) continue;
     for (const other of b.steps)
       if (
         other.deviceId === step.deviceId &&

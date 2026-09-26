@@ -14,6 +14,7 @@ import { DevicesPanel } from './DevicesPanel';
 import { GraphPanel } from './GraphPanel';
 import { GroupsPanel } from './GroupsPanel';
 import { SettingsPanel } from './SettingsPanel';
+import { SetupPanel } from './SetupPanel';
 import { StatesPanel } from './StatesPanel';
 import { TemplatePicker } from './TemplatePicker';
 import { SaveStatusBadge, Toolbar } from './Toolbar';
@@ -24,6 +25,7 @@ import { useRoomEditor } from './use-room-editor';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'graph', label: 'Graph' },
   { id: 'devices', label: 'Devices' },
+  { id: 'setup', label: 'Setup' },
   { id: 'connections', label: 'Connections' },
   { id: 'groups', label: 'Groups' },
   { id: 'states', label: 'States' },
@@ -142,7 +144,8 @@ function RoomEditor(props: {
           />
           <fieldset disabled={props.readOnly} className="min-w-0">
             {tab === 'graph' && <GraphPanel {...panel} />}
-            {tab === 'devices' && <DevicesPanel {...panel} />}
+            {tab === 'devices' && <DevicesPanel {...panel} roomId={props.roomId} />}
+            {tab === 'setup' && <SetupPanel roomId={props.roomId} />}
             {tab === 'connections' && <ConnectionsPanel {...panel} />}
             {tab === 'groups' && <GroupsPanel {...panel} />}
             {tab === 'states' && <StatesPanel {...panel} />}

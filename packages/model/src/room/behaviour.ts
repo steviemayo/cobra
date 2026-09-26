@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Action } from './action';
 import { Capability, LocalId } from './common';
+import { MicStart } from './device';
 
 export const GroupMode = z.enum(['follow', 'independent']);
 export type GroupMode = z.infer<typeof GroupMode>;
@@ -52,6 +53,8 @@ export const Activity = z.object({
   /** Group whose displays the chosen source is routed to. */
   targetGroupId: LocalId.optional(),
   actions: z.array(Action).default([]),
+  /** While this activity runs, a reinforcement microphone does this instead of its default (for example stay muted during a video call). Keyed by device id. */
+  micOverrides: z.record(LocalId, MicStart).optional(),
 });
 export type Activity = z.infer<typeof Activity>;
 

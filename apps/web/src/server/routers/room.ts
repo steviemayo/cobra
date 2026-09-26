@@ -3,9 +3,11 @@ import { TRPCError } from '@trpc/server';
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
 import { generateSecret, hashSecret } from '@kestrel/crypto';
-import { RoomType } from '@kestrel/model';
+import { RoomModel, RoomType } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { canAddRoom, getEntitlements } from '../billing';
+import { checkDeployable } from '../deploy-check';
+import { sharedGatewayProblem } from '../site-devices';
 import { createDeployment } from '../deployment-service';
 import { effectiveStatus } from '../gateway-service';
 import { PanelInput, applyPanelInput, publicPanel, readPanel } from '../panel-settings';
@@ -52,8 +54,13 @@ async function applyGateway(
       reportedAt: null,
     },
   });
-  // A room that already has a release follows it to its new gateway.
-  if (gatewayId && room.desiredReleaseId)
+  // A room that already has a release follows it to its new gateway, unless it is not ready to run
+  // there (an address still to fill in, or a gateway that needs updating).
+  const ready =
+    gatewayId && room.desiredReleaseId
+      ? await checkDeployable(db, { orgId, roomId: room.id, gatewayId, releaseId: room.desiredReleaseId })
+      : null;
+  if (gatewayId && room.desiredReleaseId && ready?.ok)
     await createDeployment(db, {
       orgId,
       roomId: room.id,
@@ -68,7 +75,7 @@ async function applyGateway(
     actorId: userId,
     action: 'room.gateway',
     target: room.id,
-    meta: { room: room.name, gateway: gatewayName },
+    meta: { room: room.name, gateway: gatewayName, ...(ready && !ready.ok ? { notDeployed: ready.message } : {}) },
   });
 }
 
@@ -235,6 +242,21 @@ export const roomRouter = router({
             message: 'A room can only use a gateway at its own site',
           });
         gatewayName = gw.name;
+      }
+      // A shared device has one connection, so rooms that share one must run on one gateway.
+      if (input.gatewayId) {
+        const draft = await db.roomDraft.findFirst({ where: { roomId: room.id, orgId: ctx.orgId } });
+        const model = draft ? RoomModel.safeParse(draft.model) : null;
+        if (model?.success) {
+          const shared = await sharedGatewayProblem(db, {
+            orgId: ctx.orgId,
+            siteId: room.siteId,
+            roomId: room.id,
+            gatewayId: input.gatewayId,
+            model: model.data,
+          });
+          if (shared) throw new TRPCError({ code: 'BAD_REQUEST', message: shared });
+        }
       }
       // Rooms in a group are controlled together, so they always run on one gateway: move them all.
       const targets = room.groupId

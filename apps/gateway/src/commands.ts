@@ -1,5 +1,5 @@
 import { hostname } from 'node:os';
-import type { CommandResult, GatewayCommand } from '@kestrel/model';
+import { PointAddress, PointType, type CommandResult, type GatewayCommand } from '@kestrel/model';
 import type { RoomHost } from './room-host';
 
 export interface GatewayFacts {
@@ -19,15 +19,15 @@ const fail = (error: string, output: Record<string, unknown> = {}): CommandResul
  * Runs one allowlisted command. Anything the cloud sends that is not in the allowlist is refused
  * here as well: the gateway never trusts the far end to have checked.
  */
-export function runCommand(
+export async function runCommand(
   host: RoomHost,
   cmd: GatewayCommand,
   facts: GatewayFacts,
-): CommandResult {
-  return { ...execute(host, cmd, facts), id: cmd.id };
+): Promise<CommandResult> {
+  return { ...(await execute(host, cmd, facts)), id: cmd.id };
 }
 
-function execute(host: RoomHost, cmd: GatewayCommand, facts: GatewayFacts): CommandResult {
+async function execute(host: RoomHost, cmd: GatewayCommand, facts: GatewayFacts): Promise<CommandResult> {
   const room = host.get(cmd.roomId);
   if (!room) return fail('That room is not running on this gateway');
   const model = room.signed.manifest.model;
@@ -74,8 +74,29 @@ function execute(host: RoomHost, cmd: GatewayCommand, facts: GatewayFacts): Comm
         output: { device: device.name, online, state: state ?? null },
       };
     }
+    case 'verify_point': {
+      // Reads one control point of a DSP, to check it exists and learn its range. Changes nothing.
+      const device = model.devices.find((d) => d.id === cmd.args.deviceId);
+      if (!device) return fail('That device is not in this room');
+      const type = PointType.safeParse(cmd.args.type);
+      let address: unknown;
+      try {
+        address = JSON.parse(cmd.args.address ?? '');
+      } catch {
+        return fail('The control point address is not valid');
+      }
+      const parsed = PointAddress.safeParse(address);
+      if (!type.success || !parsed.success) return fail('The control point is not valid');
+      if (!room.bus.readPoint) return fail('This gateway cannot read control points');
+      try {
+        const reading = await room.bus.readPoint(device.id, { type: type.data, address: parsed.data });
+        return { id: '', ok: true, output: { device: device.name, ...reading } };
+      } catch (e) {
+        return fail(e instanceof Error ? e.message.slice(0, 300) : 'Could not read the control point');
+      }
+    }
     case 'restart_room': {
-      host.load(room.signed);
+      host.load(room.signed, room.bindings);
       return { id: '', ok: true, output: { restarted: room.signed.manifest.roomName } };
     }
     case 'room_off': {

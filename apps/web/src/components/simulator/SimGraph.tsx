@@ -58,6 +58,8 @@ function Summary({ device, state }: { device: Device; state: DeviceState }) {
     id ? (device.ports.find((p) => p.id === id)?.name ?? id) : '—';
   switch (device.category) {
     case 'video_destination':
+    case 'display':
+    case 'projector':
       return (
         <div className="flex flex-wrap gap-1">
           <Chip tone={state.power === 'on' ? 'ok' : state.power === 'off' ? undefined : 'warn'}>

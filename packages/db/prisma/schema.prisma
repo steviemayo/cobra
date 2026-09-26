@@ -72,6 +72,9 @@ model Org {
   listings            MarketplaceListing[]
   purchases           MarketplacePurchase[]
   customDrivers       CustomDriver[]
+  roomBindings        RoomBinding[]
+  credentialSets      CredentialSet[]
+  siteDevices         SiteDevice[]
 }
 
 model Member {
@@ -95,10 +98,11 @@ model Site {
   timezone  String   @default("Australia/Sydney")
   createdAt DateTime @default(now())
 
-  org      Org         @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  gateways Gateway[]
-  rooms    Room[]
-  groups   RoomGroup[]
+  org         Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  gateways    Gateway[]
+  rooms       Room[]
+  groups      RoomGroup[]
+  siteDevices SiteDevice[]
 
   @@index([orgId])
 }
@@ -117,6 +121,8 @@ model Gateway {
   channel              GatewayChannel @default(stable)
   hostname             String?
   os                   String?
+  /// What the gateway said it can do in its last heartbeat (for example "bindings"). Empty for older gateways.
+  features             String[]       @default([])
   lastSeenAt           DateTime?
   createdAt            DateTime       @default(now())
 
@@ -130,36 +136,39 @@ model Gateway {
 }
 
 model Room {
-  id                  String    @id @default(uuid()) @db.Uuid
-  orgId               String    @db.Uuid
-  siteId              String    @db.Uuid
-  gatewayId           String?   @db.Uuid
-  name                String
-  type                RoomType
-  createdAt           DateTime  @default(now())
-  panel               Json?
+  id                      String    @id @default(uuid()) @db.Uuid
+  orgId                   String    @db.Uuid
+  siteId                  String    @db.Uuid
+  gatewayId               String?   @db.Uuid
+  name                    String
+  type                    RoomType
+  createdAt               DateTime  @default(now())
+  panel                   Json?
   /// The room group this room belongs to, if it can be physically joined to other rooms.
-  groupId             String?   @db.Uuid
+  groupId                 String?   @db.Uuid
   /// standard: an ordinary room. combined: the room that exists while `memberRoomIds` are joined.
   /// Only standard rooms are billed.
-  kind                String    @default("standard")
-  memberRoomIds       String[]  @default([]) @db.Uuid
+  kind                    String    @default("standard")
+  memberRoomIds           String[]  @default([]) @db.Uuid
   /// Hash of the secret webhook callers present. Null until someone generates one.
-  hookSecretHash      String?
-  desiredReleaseId    String?   @db.Uuid
-  desiredDeploymentId String?   @db.Uuid
-  reportedReleaseId   String?   @db.Uuid
-  reportedHash        String?
-  reportedStatus      String?
-  reportedError       String?
-  reportedAt          DateTime?
-  updatedAt           DateTime  @default(now()) @updatedAt
+  hookSecretHash          String?
+  desiredReleaseId        String?   @db.Uuid
+  desiredDeploymentId     String?   @db.Uuid
+  reportedReleaseId       String?   @db.Uuid
+  reportedHash            String?
+  /// Version of the room's bindings the gateway is running with. Compared with RoomBinding.version.
+  reportedBindingsVersion Int?
+  reportedStatus          String?
+  reportedError           String?
+  reportedAt              DateTime?
+  updatedAt               DateTime  @default(now()) @updatedAt
 
   org         Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
   site        Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
   gateway     Gateway?        @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
   group       RoomGroup?      @relation(fields: [groupId], references: [id], onDelete: SetNull)
   draft       RoomDraft?
+  binding     RoomBinding?
   releases    Release[]
   deployments Deployment[]
   devices     DeviceStatus[]
@@ -170,6 +179,82 @@ model Room {
   @@index([orgId])
   @@index([siteId])
   @@index([groupId])
+}
+
+// A room's addresses and logins, kept apart from its design so templates carry none of them, an IP
+// change needs no new release and a password can be rotated in one place. See docs/driver-classes.md.
+model RoomBinding {
+  id             String   @id @default(uuid()) @db.Uuid
+  orgId          String   @db.Uuid
+  roomId         String   @unique @db.Uuid
+  /// Goes up on every change, including a change to a credential set this room uses.
+  version        Int      @default(1)
+  /// device id -> { setting key -> value }: addresses and other bindings that are not secret.
+  values         Json     @default("{}")
+  /// Sealed with KESTREL_SECRETS_KEY: JSON of device id -> { setting key -> value } for secrets. Never sent to a browser.
+  sealed         String?
+  /// device id -> credential set id. The set's fields sit under the device's own values.
+  credentialSets Json     @default("{}")
+  updatedBy      String?  @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+// One physical device known to a site, used by any number of rooms (a matrix or DSP serving two rooms,
+// a shared codec). Rooms refer to it from their design; its address and login live here once. See
+// docs/driver-classes.md, "Shared devices".
+model SiteDevice {
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @db.Uuid
+  siteId          String   @db.Uuid
+  name            String
+  /// The device category, so a room that uses it can be checked without asking the device.
+  category        String
+  /// How it is controlled: { kind: "driver", driverId } or { kind: "generic", protocol }.
+  control         Json
+  /// Design settings every room shares (not addresses or logins).
+  settings        Json     @default("{}")
+  /// Addresses, like RoomBinding.values but for this one device: setting key -> value.
+  values          Json     @default("{}")
+  /// Logins sealed with KESTREL_SECRETS_KEY: setting key -> value. Never sent to a browser.
+  sealed          String?
+  credentialSetId String?  @db.Uuid
+  /// A device that can serve only one room at a time (a codec, a recorder): a room in use holds it.
+  exclusive       Boolean  @default(false)
+  /// Goes up on every change to its address or login, so every room that uses it gets new bindings.
+  version         Int      @default(1)
+  updatedBy       String?  @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, name])
+  @@index([orgId])
+}
+
+// A login shared by many devices ("Site X Q-SYS admin"). `sealed` holds JSON of setting key -> value,
+// sealed with KESTREL_SECRETS_KEY. Only the field names are ever sent to a browser.
+model CredentialSet {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  name      String
+  sealed    String
+  /// The names of the fields in `sealed`, for display.
+  fields    String[] @default([])
+  updatedBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, name])
 }
 
 // How long an organisation's activity log is kept. No row means the default (12 months). Only staff
@@ -279,6 +364,8 @@ model Release {
   hash          String
   /// Which revision of the draft this release froze, to tell when the design has moved on since.
   draftRevision Int?
+  /// The shared site devices this release uses, so a gateway's bindings version can be worked out without opening the manifest.
+  siteDeviceIds String[] @default([])
   createdBy     String?  @db.Uuid
   createdAt     DateTime @default(now())
 

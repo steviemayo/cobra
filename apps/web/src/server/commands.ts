@@ -1,5 +1,12 @@
 import type { PrismaClient } from '@kestrel/db';
-import { COMMAND_INFO, CommandType, type CommandResult, type GatewayCommand } from '@kestrel/model';
+import {
+  COMMAND_INFO,
+  CommandType,
+  PointAddress,
+  PointType,
+  type CommandResult,
+  type GatewayCommand,
+} from '@kestrel/model';
 
 // Remote commands. Support asks in the portal; the gateway collects the request in its next
 // heartbeat response (it never accepts inbound connections), runs it if it is on the allowlist,
@@ -37,6 +44,23 @@ export async function requestCommand(
       : null;
     if (!device) return { ok: false, error: 'Choose one of this room’s devices' };
     args.deviceId = device.deviceId;
+  }
+  if (type.data === 'verify_point') {
+    // The point to read travels with the command, so it can be checked before it is published.
+    const kind = PointType.safeParse(input.args?.type);
+    const parse = (): ReturnType<typeof PointAddress.safeParse> | null => {
+      try {
+        return PointAddress.safeParse(JSON.parse(input.args?.address ?? ''));
+      } catch {
+        return null;
+      }
+    };
+    const address = parse();
+    if (!kind.success || !address?.success) return { ok: false, error: 'That control point is not valid' };
+    const text = JSON.stringify(address.data);
+    if (text.length > 200) return { ok: false, error: 'That control point address is too long' };
+    args.type = kind.data;
+    args.address = text;
   }
 
   const recent = await db.remoteCommand.count({

@@ -2,12 +2,14 @@ import { createHash } from 'node:crypto';
 import { generateSecret, hashSecret, roomAccessSecret } from '@kestrel/crypto';
 import type { PrismaClient } from '@kestrel/db';
 import {
+  RoomModel,
   EnrollRequest,
   HeartbeatRequest,
   TelemetryBatch,
   type AssignedRoom,
   type PublicKey,
 } from '@kestrel/model';
+import { signedBindingsFor } from './bindings';
 import { applyCommandResults, takePendingCommands } from './commands';
 import { applyReport, promoteDue } from './deployment-service';
 import { deliverAlerts } from './alerts';
@@ -15,6 +17,7 @@ import { getEntitlements } from './billing';
 import { groupsForGateway, recordDividers } from './gateway-groups';
 import { hasWaitingIntents, watchedRooms } from './control-service';
 import { maybeSweep, recordReports } from './monitoring';
+import type { SigningKey } from './signing';
 
 // The cloud's half of the gateway protocol. Route handlers are thin wrappers over these functions,
 // which take the database as a parameter so they can be tested without one.
@@ -38,6 +41,9 @@ export type Db = Pick<
   | 'controlIntent'
   | 'roomGroup'
   | 'roomDivider'
+  | 'roomBinding'
+  | 'credentialSet'
+  | 'siteDevice'
 >;
 type GatewayRow = NonNullable<Awaited<ReturnType<Db['gateway']['findFirst']>>>;
 export interface Result {
@@ -141,9 +147,23 @@ async function assignments(db: Db, gatewayId: string, masterKey = process.env.KE
   });
   const releases = await db.release.findMany({
     where: { id: { in: rooms.map((r) => r.desiredReleaseId!) } },
-    select: { id: true, roomId: true, number: true, hash: true },
+    select: { id: true, roomId: true, number: true, hash: true, siteDeviceIds: true },
   });
   const byId = new Map(releases.map((r) => [r.id, r]));
+  const bindingRows = rooms.length
+    ? await db.roomBinding.findMany({ where: { roomId: { in: rooms.map((r) => r.id) } } })
+    : [];
+  const bindingsOf = new Map(bindingRows.map((b) => [b.roomId, b.version]));
+  // A room that uses shared devices also changes when one of them does.
+  const sharedIds = [...new Set(releases.flatMap((r) => r.siteDeviceIds ?? []))];
+  const sharedVersions = new Map(
+    sharedIds.length ? (await db.siteDevice.findMany({ where: { id: { in: sharedIds } } })).map((d) => [d.id, d.version]) : [],
+  );
+  const versionFor = (roomId: string, releaseId: string | null) => {
+    const own = bindingsOf.get(roomId) ?? 0;
+    const shared = (byId.get(releaseId ?? '')?.siteDeviceIds ?? []).reduce((n, id) => n + (sharedVersions.get(id) ?? 0), 0);
+    return own + shared > 0 ? Math.max(1, own + shared) : undefined;
+  };
   const out: AssignedRoom[] = [];
   for (const room of rooms) {
     const rel = byId.get(room.desiredReleaseId!);
@@ -155,6 +175,7 @@ async function assignments(db: Db, gatewayId: string, masterKey = process.env.KE
         releaseNumber: rel.number,
         manifestHash: rel.hash,
         deploymentId: room.desiredDeploymentId!,
+        ...(versionFor(room.id, room.desiredReleaseId) ? { bindingsVersion: versionFor(room.id, room.desiredReleaseId)! } : {}),
         ...(masterKey ? { phoneSecret: roomAccessSecret(masterKey, room.id) } : {}),
       });
   }
@@ -172,7 +193,12 @@ export async function heartbeat(
   const now = new Date();
   await db.gateway.update({
     where: { id: gw.id },
-    data: { lastSeenAt: now, status: 'online', version: parsed.data.gatewayVersion },
+    data: {
+      lastSeenAt: now,
+      status: 'online',
+      version: parsed.data.gatewayVersion,
+      features: parsed.data.features,
+    },
   });
   // Rooms report themselves; a gateway can only report rooms assigned to it.
   await Promise.all(
@@ -182,6 +208,7 @@ export async function heartbeat(
         data: {
           reportedReleaseId: r.releaseId,
           reportedHash: r.manifestHash ?? null,
+          reportedBindingsVersion: r.bindingsVersion ?? null,
           reportedStatus: r.status,
           reportedError: r.error ?? null,
           reportedAt: now,
@@ -236,6 +263,35 @@ export async function config(db: Db, gw: GatewayRow, keys: PublicKey[]): Promise
       groups,
     },
   };
+}
+
+/**
+ * A room's addresses and logins, signed, for the gateway that runs it. Only the gateway a room is
+ * assigned to can fetch them. Anything a gateway is sent here could open its devices, so this is
+ * never cached and never logged.
+ */
+export async function bindings(
+  db: Db,
+  gw: GatewayRow,
+  roomId: string,
+  signing: SigningKey | null,
+): Promise<Result> {
+  if (!signing) return fail(503, 'The cloud has no signing key configured yet');
+  const room = await db.room.findFirst({ where: { id: roomId, gatewayId: gw.id, orgId: gw.orgId } });
+  if (!room) return fail(404, 'No such room for this gateway');
+  // The design this gateway will run says which shared devices it uses.
+  const release = room.desiredReleaseId
+    ? await db.release.findFirst({ where: { id: room.desiredReleaseId, roomId: room.id, orgId: gw.orgId } })
+    : null;
+  const parsed = RoomModel.safeParse((release?.manifest as { manifest?: { model?: unknown } } | null)?.manifest?.model);
+  let signed;
+  try {
+    signed = await signedBindingsFor(db, gw.orgId, room.id, signing, undefined, parsed.success ? parsed.data : undefined);
+  } catch {
+    return fail(503, 'The cloud cannot open this room’s logins right now');
+  }
+  if (!signed) return fail(404, 'This room has no bindings');
+  return { status: 200, body: signed };
 }
 
 export async function manifest(

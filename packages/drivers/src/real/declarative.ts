@@ -68,6 +68,10 @@ export class DeclarativeDriver extends BaseDriver {
     return fromSetting ?? this.spec.transport.port ?? (this.http?.https ? 443 : this.http ? 80 : 23);
   }
 
+  override features(): string[] {
+    return [...(this.spec.features ?? [])];
+  }
+
   /** The quick actions the driver declares. Others are refused by the room, not offered. */
   override quickActions(): QuickActionId[] {
     return [...new Set(this.spec.quickActions ?? [])];
@@ -192,6 +196,8 @@ export class DeclarativeDriver extends BaseDriver {
       this.update((s) => {
         s.online = true;
       });
+      // Say what the device is doing now, without waiting for the first interval.
+      for (const p of this.spec.feedback.poll) void this.poll(p.action);
     });
     socket.on('data', (chunk: string) => this.onData(chunk));
     socket.on('error', () => undefined);
@@ -224,7 +230,7 @@ export class DeclarativeDriver extends BaseDriver {
   private onData(chunk: string) {
     this.buffer += chunk;
     if (this.buffer.length > MAX_REPLY_BYTES) this.buffer = this.buffer.slice(-MAX_REPLY_BYTES);
-    const term = this.tcp?.terminator ?? '\r\n';
+    const term = this.tcp?.replyTerminator ?? this.tcp?.terminator ?? '\r\n';
     let i: number;
     while ((i = this.buffer.indexOf(term)) >= 0) {
       const line = this.buffer.slice(0, i);
@@ -288,12 +294,13 @@ export class DeclarativeDriver extends BaseDriver {
       });
       socket.on('data', (chunk: string) => {
         buffer = (buffer + chunk).slice(-MAX_REPLY_BYTES);
-        for (const line of buffer.split(t.terminator)) if (line) this.readText(line);
-        const lines = buffer.split(t.terminator);
-        if (expect ? lines.some((l) => expect.test(l)) : this.patterns.length > 0 && buffer.includes(t.terminator)) finish();
+        const replyEnd = t.replyTerminator ?? t.terminator;
+        for (const line of buffer.split(replyEnd)) if (line) this.readText(line);
+        const lines = buffer.split(replyEnd);
+        if (expect ? lines.some((l) => expect.test(l)) : this.patterns.length > 0 && buffer.includes(replyEnd)) finish();
       });
       socket.on('close', () => {
-        if (expect && !buffer.split(t.terminator).some((l) => expect.test(l)))
+        if (expect && !buffer.split(t.replyTerminator ?? t.terminator).some((l) => expect.test(l)))
           finish(new Error(`${this.device.name} sent an unexpected reply`));
         else finish();
       });
@@ -302,13 +309,14 @@ export class DeclarativeDriver extends BaseDriver {
 
   // ---- HTTP -----------------------------------------------------------------------------------
 
-  private async httpCall(action: Pick<DriverAction, 'method' | 'path' | 'body' | 'expect'>, allowAny = false, values: Values = {}): Promise<string> {
+  private async httpCall(action: Pick<DriverAction, 'method' | 'path' | 'body' | 'expect' | 'headers'>, allowAny = false, values: Values = {}): Promise<string> {
     const h = this.http!;
     const path = renderTemplate(action.path ?? '/', values, escapePath).replace(/^(?!\/)/, '/');
     const jsonBody = (action.body ?? '').trimStart().startsWith('{') || (action.body ?? '').trimStart().startsWith('[');
     const body = action.body === undefined ? undefined : renderTemplate(action.body, values, jsonBody ? escapeJson : escapeLine);
     const headers: Record<string, string> = {};
-    for (const [k, v] of Object.entries(h.headers)) headers[k] = renderTemplate(v, this.baseValues(), escapeLine);
+    for (const [k, v] of Object.entries({ ...h.headers, ...action.headers }))
+      headers[k] = renderTemplate(v, this.baseValues(), escapeLine);
     if (body !== undefined && !Object.keys(headers).some((k) => k.toLowerCase() === 'content-type'))
       headers['content-type'] = jsonBody ? 'application/json' : 'text/plain';
     const url = `${h.https ? 'https' : 'http'}://${this.host}:${this.port}${path}`;
@@ -401,6 +409,14 @@ export class DeclarativeDriver extends BaseDriver {
         return this.run(`record.${command.on ? 'on' : 'off'}`, v({}), () =>
           this.update((s) => {
             s.recording = command.on;
+          }),
+        );
+      case 'key':
+        return this.run(`key.${command.key}`, v({}), () => undefined);
+      case 'launch_app':
+        return this.run('app.launch', v({ appId: command.appId }), () =>
+          this.update((s) => {
+            s.activeApp = command.appId;
           }),
         );
       case 'command':

@@ -1,6 +1,7 @@
 import { hostname, platform, release as osRelease } from 'node:os';
-import { ANY_KEY_ID, verifyManifest } from '@kestrel/crypto';
+import { ANY_KEY_ID, verifyBindings, verifyManifest } from '@kestrel/crypto';
 import {
+  GATEWAY_FEATURES,
   PROTOCOL_VERSION,
   PublicKey,
   type AssignedRoom,
@@ -20,13 +21,15 @@ import { PhoneLinks } from './phone';
 import { GroupCoordinator } from './groups';
 import { runCommand } from './commands';
 import type { Logger } from './log';
-import type { RoomHost } from './room-host';
+import type { RoomBindings, RoomHost } from './room-host';
 import type { Store } from './store';
 
 const KEY_CREDENTIAL = 'credential';
 const KEY_IDENTITY = 'identity';
 const KEY_PUBLIC_KEYS = 'publicKeys';
 const KEY_CONFIG_VERSION = 'configVersion';
+const BINDINGS_PREFIX = 'bindings:';
+const keyBindings = (roomId: string) => `${BINDINGS_PREFIX}${roomId}`;
 const MAX_BACKOFF_MS = 60_000;
 const DEFAULT_HEALTH_TIMEOUT_MS = 15_000;
 const MAX_PARALLEL_DEPLOYS = 8;
@@ -135,8 +138,20 @@ export class Gateway {
         this.roomErrors.set(cached.roomId, `Cached release rejected (${result.reason})`);
         continue;
       }
+      let bindings: RoomBindings | undefined;
+      if (result.signed.manifest.bindingsExternal || this.store.get(keyBindings(cached.roomId))) {
+        const found = this.cachedBindings(cached.roomId, result.signed.manifest.orgId, keys);
+        if (found) bindings = found;
+        else if (result.signed.manifest.bindingsExternal) {
+          this.log('warn', 'Cached bindings missing or failed verification; room not started', {
+            roomId: cached.roomId,
+          });
+          this.roomErrors.set(cached.roomId, 'Saved addresses and logins are missing or were rejected');
+          continue;
+        }
+      }
       try {
-        this.host.load(result.signed);
+        this.host.load(result.signed, bindings);
       } catch (e) {
         this.log('error', 'Could not start cached room', {
           roomId: cached.roomId,
@@ -144,6 +159,55 @@ export class Gateway {
         });
       }
     }
+  }
+
+  /** Bindings saved by an earlier run, checked again like a cached manifest. */
+  private cachedBindings(roomId: string, orgId: string, keys: PublicKey[]): RoomBindings | null {
+    const raw = this.store.getJson<unknown>(keyBindings(roomId));
+    if (!raw) return null;
+    const result = verifyBindings(raw, keys);
+    if (!result.ok || result.signed.payload.roomId !== roomId || result.signed.payload.orgId !== orgId)
+      return null;
+    return {
+      version: result.signed.payload.version,
+      devices: result.signed.payload.devices as RoomBindings['devices'],
+      ...(result.signed.payload.sharedDevices ? { sharedDevices: result.signed.payload.sharedDevices } : {}),
+    };
+  }
+
+  /**
+   * Download and check a room's addresses and logins. Anything short of the version the cloud
+   * asked for, or for a different room or organisation, is refused. Network trouble is a retry.
+   */
+  private async fetchBindings(
+    credential: string,
+    assigned: AssignedRoom,
+    keys: PublicKey[],
+  ): Promise<{ ok: true; bindings: RoomBindings; raw: unknown } | { ok: false; retry: boolean; problem: string }> {
+    let raw: unknown;
+    try {
+      raw = await this.cloud.bindings(credential, assigned.roomId);
+    } catch (e) {
+      const missing = e instanceof CloudError && e.status === 404;
+      this.log('warn', 'Could not download a room’s bindings', { roomId: assigned.roomId, error: String(e) });
+      return { ok: false, retry: !missing, problem: missing ? 'the cloud has no addresses for this room' : 'could not download addresses' };
+    }
+    const result = verifyBindings(raw, keys);
+    if (!result.ok) return { ok: false, retry: false, problem: `addresses failed the signature check (${result.reason})` };
+    const { payload } = result.signed;
+    if (payload.roomId !== assigned.roomId || payload.orgId !== this.identity?.orgId)
+      return { ok: false, retry: false, problem: 'addresses are for a different room' };
+    if (assigned.bindingsVersion && payload.version < assigned.bindingsVersion)
+      return { ok: false, retry: true, problem: 'addresses are older than the cloud asked for' };
+    return {
+      ok: true,
+      raw,
+      bindings: {
+        version: payload.version,
+        devices: payload.devices as RoomBindings['devices'],
+        ...(payload.sharedDevices ? { sharedDevices: payload.sharedDevices } : {}),
+      },
+    };
   }
 
   // ---- Control loop ---------------------------------------------------------------------------
@@ -218,6 +282,7 @@ export class Gateway {
         rooms: this.roomReports(),
         commandResults: results,
         dividers: this.groups.report(),
+        features: [...GATEWAY_FEATURES],
       })
       .catch((e: unknown) => {
         if (e instanceof CloudError && e.unauthorised)
@@ -299,7 +364,7 @@ export class Gateway {
       for (const cmd of this.inbox.splice(0)) {
         let result: CommandResult;
         try {
-          result = runCommand(this.host, cmd, {
+          result = await runCommand(this.host, cmd, {
             version: this.cfg.version,
             uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
             bufferedEvents: this.store.unsentCount(),
@@ -389,16 +454,20 @@ export class Gateway {
       if (!wanted.has(id)) {
         this.host.unload(id);
         this.store.deleteManifest(id);
+        this.store.delete(keyBindings(id));
         this.store.delete(keyDeployment(id));
         this.roomErrors.delete(id);
         progressed = true;
       }
 
     const todo: AssignedRoom[] = [];
+    const rebind: AssignedRoom[] = [];
     for (const assigned of config.rooms) {
       const rec = this.deploymentRecord(assigned.roomId);
       if (this.host.releaseOf(assigned.roomId) === assigned.releaseId) {
         this.roomErrors.delete(assigned.roomId);
+        if (assigned.bindingsVersion && this.host.get(assigned.roomId)?.bindings?.version !== assigned.bindingsVersion)
+          rebind.push(assigned);
         if (rec?.deploymentId !== assigned.deploymentId) {
           // Already running (from the cache, or set up before deployments existed): that is this deployment's result.
           this.store.setJson(keyDeployment(assigned.roomId), {
@@ -425,6 +494,12 @@ export class Gateway {
         if (outcome === 'retry') allApplied = false;
         else progressed = true;
       }
+    }
+    // An address or login changed with no new release: restart the room on the new values.
+    for (const assigned of rebind) {
+      const outcome = await this.rebind(credential, assigned, keys);
+      if (outcome === 'retry') allApplied = false;
+      else progressed = true;
     }
     // Only remember this config version once every room is settled, so failed downloads get retried.
     if (allApplied) this.store.set(KEY_CONFIG_VERSION, config.configVersion);
@@ -475,10 +550,18 @@ export class Gateway {
           : null;
     if (problem || !result.ok) return this.refuse(rec, assigned, problem ?? 'unknown');
 
+    // Addresses and logins travel apart from the release when it says so, or when the room has them.
+    let bindings: { bindings: RoomBindings; raw: unknown } | undefined;
+    if (m!.bindingsExternal || assigned.bindingsVersion) {
+      const got = await this.fetchBindings(credential, assigned, keys);
+      if (!got.ok) return got.retry ? 'retry' : this.refuse(rec, assigned, got.problem);
+      bindings = got;
+    }
+
     this.mark(roomId, rec, 'staging');
     let staged;
     try {
-      staged = this.host.stage(result.signed);
+      staged = this.host.stage(result.signed, bindings?.bindings);
     } catch (e) {
       return this.refuse(
         rec,
@@ -509,9 +592,52 @@ export class Gateway {
 
     this.host.activate(staged);
     this.store.saveManifest(result.signed);
+    if (bindings) this.store.setJson(keyBindings(roomId), bindings.raw);
+    else this.store.delete(keyBindings(roomId));
     this.roomErrors.delete(roomId);
     delete rec.error;
     this.mark(roomId, rec, 'active');
+    return 'applied';
+  }
+
+  /**
+   * Run the release a room already has with new addresses or logins, the same careful way as a
+   * deployment: build alongside, wait for the devices to answer, then swap. On any failure the
+   * room keeps running with what it had.
+   */
+  private async rebind(credential: string, assigned: AssignedRoom, keys: PublicKey[]): Promise<DeployOutcome> {
+    const { roomId } = assigned;
+    const running = this.host.get(roomId);
+    if (!running) return 'refused';
+    const got = await this.fetchBindings(credential, assigned, keys);
+    const fail = (problem: string): DeployOutcome => {
+      const message = `New addresses rejected: ${problem}`;
+      this.log('error', message, { roomId });
+      this.roomErrors.set(roomId, message);
+      return 'refused';
+    };
+    if (!got.ok) return got.retry ? 'retry' : fail(got.problem);
+    let staged;
+    try {
+      staged = this.host.stage(running.signed, got.bindings);
+    } catch (e) {
+      return fail(`could not start the room (${e instanceof Error ? e.message : String(e)})`);
+    }
+    let unreachable: string[];
+    try {
+      unreachable = await this.host.healthCheck(staged, this.cfg.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS);
+    } catch (e) {
+      staged.close();
+      return fail(`health check failed (${e instanceof Error ? e.message : String(e)})`);
+    }
+    if (unreachable.length > 0) {
+      staged.close();
+      return fail(`could not reach ${unreachable.join(', ')}`);
+    }
+    this.host.activate(staged);
+    this.store.setJson(keyBindings(roomId), got.raw);
+    this.roomErrors.delete(roomId);
+    this.log('info', 'Room restarted on new addresses', { roomId, version: got.bindings.version });
     return 'applied';
   }
 

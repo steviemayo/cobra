@@ -115,6 +115,7 @@ const PAGE_LABEL = {
   cameras: 'fn.cameras',
   microphones: 'fn.microphones',
   controls: 'fn.controls',
+  display: 'fn.display',
 } as const;
 
 /**

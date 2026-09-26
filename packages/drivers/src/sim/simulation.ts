@@ -1,5 +1,8 @@
 import {
   defaultDeviceState,
+  type ControlPoint,
+  type PointReading,
+  isVideoDestination,
   type Device,
   type DeviceBus,
   type DeviceCommand,
@@ -10,7 +13,9 @@ import {
   type RoomModel,
 } from '@kestrel/model';
 import { buildGraph, splitPortKey, portKey, type Graph } from '@kestrel/engine';
-import { driverQuickActions } from '../quick-actions';
+import { driverFeatures, driverQuickActions } from '../quick-actions';
+
+const pointStart = (type: string): number | boolean => (type === 'mute' ? false : type === 'level' ? 50 : 0);
 
 export interface SimLatency {
   displayOn: number;
@@ -106,6 +111,20 @@ export class Simulation implements DeviceBus {
     return driverQuickActions(this.devices.get(deviceId)?.control, this.customDrivers);
   }
 
+  /** What a simulated device says about a control point: what it holds, with a made-up range for a level. */
+  async readPoint(deviceId: string, point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'> & { id?: string }): Promise<PointReading> {
+    const device = this.devices.get(deviceId);
+    if (!device) throw new Error(`Unknown device ${deviceId}`);
+    if (this.faults.get(deviceId)?.offline) throw new Error(`${device.name} is offline`);
+    const known = (device.points ?? []).find((p) => p.id === point.id);
+    if (point.type === 'level') return { value: -20, min: point.min ?? -100, max: point.max ?? 12 };
+    return { value: (known && this.states.get(deviceId)!.points[known.id]) || pointStart(point.type) };
+  }
+
+  features(deviceId: string): string[] {
+    return driverFeatures(this.devices.get(deviceId)?.control, this.customDrivers);
+  }
+
   async send(deviceId: string, command: DeviceCommand): Promise<void> {
     const device = this.devices.get(deviceId);
     if (!device) throw new Error(`Unknown device ${deviceId}`);
@@ -177,12 +196,17 @@ export class Simulation implements DeviceBus {
     const s = defaultDeviceState();
     switch (d.category) {
       case 'video_destination':
+      case 'display':
+      case 'projector':
         s.power = 'off';
         s.selectedInput = null;
         s.blanked = false;
         break;
-      case 'conference_system':
       case 'reinforcement_mic':
+        s.muted = false;
+        s.volume = 50;
+        break;
+      case 'conference_system':
       case 'voice_capture_mic':
         s.muted = false;
         break;
@@ -204,13 +228,14 @@ export class Simulation implements DeviceBus {
         s.occupied = false;
         break;
     }
+    for (const p of d.points ?? []) s.points[p.id] = pointStart(p.type);
     for (const p of d.ports)
       if (p.direction === 'in' && this.reportsSignal(d)) s.signal[p.id] = false;
     return s;
   }
 
   private reportsSignal(d: Device) {
-    return d.category === 'video_matrix' || d.category === 'video_destination';
+    return d.category === 'video_matrix' || isVideoDestination(d.category);
   }
 
   private delay(ms: number): Promise<void> {
@@ -240,7 +265,7 @@ export class Simulation implements DeviceBus {
     const cat = d.category;
     switch (c.type) {
       case 'power': {
-        if (cat !== 'video_destination') return this.unsupported(d, c);
+        if (!isVideoDestination(cat)) return this.unsupported(d, c);
         if (c.on && state.power !== 'on') {
           state.power = 'warming';
           this.emit(d.id);
@@ -257,7 +282,7 @@ export class Simulation implements DeviceBus {
         break;
       }
       case 'select_input': {
-        if (cat !== 'video_destination') return this.unsupported(d, c);
+        if (!isVideoDestination(cat)) return this.unsupported(d, c);
         if (!d.ports.some((p) => p.id === c.portId && p.direction === 'in'))
           throw new Error(`${d.name} has no input ${c.portId}`);
         if (state.power !== 'on') throw new Error(`${d.name} isn't on yet`);
@@ -276,7 +301,7 @@ export class Simulation implements DeviceBus {
         break;
       }
       case 'blank': {
-        if (cat !== 'video_destination') return this.unsupported(d, c);
+        if (!isVideoDestination(cat)) return this.unsupported(d, c);
         if (state.power !== 'on') throw new Error(`${d.name} isn't on yet`);
         await this.delay(this.latency.generic);
         state.blanked = c.on;
@@ -288,13 +313,19 @@ export class Simulation implements DeviceBus {
         // A conference system also mutes (Privacy Mute), and so does a microphone.
         if (
           cat !== 'audio_matrix' &&
-          !(c.type === 'mute' && (cat === 'conference_system' || MICS.has(cat)))
+          !(c.type === 'mute' && (cat === 'conference_system' || MICS.has(cat))) &&
+          !(c.type === 'volume' && cat === 'reinforcement_mic')
         )
           return this.unsupported(d, c);
         await this.delay(this.latency.dsp);
         if (c.type === 'mute') state.muted = c.muted;
         else if (c.type === 'volume') state.volume = c.level;
         else state.preset = c.name;
+        // A room volume or mute point follows what the device was just told.
+        for (const p of d.points ?? []) {
+          if (c.type === 'volume' && p.role === 'room_volume') state.points[p.id] = c.level;
+          if (c.type === 'mute' && p.role === 'room_mute') state.points[p.id] = c.muted;
+        }
         break;
       }
       case 'camera_move': {
@@ -318,6 +349,37 @@ export class Simulation implements DeviceBus {
         if (!ENVIRONMENT.has(cat)) return this.unsupported(d, c);
         await this.delay(this.latency.generic * 3);
         state.preset = c.name;
+        break;
+      }
+      case 'point': {
+        const point = (d.points ?? []).find((p) => p.id === c.pointId);
+        if (!point) throw new Error(`${d.name} has no control point ${c.pointId}`);
+        if (point.type === 'meter') throw new Error(`${point.name} is read only`);
+        await this.delay(this.latency.dsp);
+        state.points[point.id] = c.value;
+        if (point.role === 'room_volume' && typeof c.value === 'number') state.volume = c.value;
+        if (point.role === 'room_mute') state.muted = c.value === true;
+        break;
+      }
+      case 'set_stream': {
+        if (cat !== 'avoip_decoder') return this.unsupported(d, c);
+        await this.delay(this.latency.route);
+        state.streamConnected = c.location !== null;
+        if (c.location) state.streamLocation = c.location;
+        else delete state.streamLocation;
+        break;
+      }
+      case 'key': {
+        if (!isVideoDestination(cat)) return this.unsupported(d, c);
+        if (state.power !== 'on') throw new Error(`${d.name} isn't on yet`);
+        await this.delay(this.latency.generic);
+        break;
+      }
+      case 'launch_app': {
+        if (!isVideoDestination(cat)) return this.unsupported(d, c);
+        if (state.power !== 'on') throw new Error(`${d.name} isn't on yet`);
+        await this.delay(this.latency.generic * 3);
+        state.activeApp = c.appId;
         break;
       }
       case 'command': {
@@ -358,6 +420,18 @@ export class Simulation implements DeviceBus {
         arriving.add(inKey);
         const [deviceId, inPortId] = splitPortKey(inKey);
         const device = this.devices.get(deviceId)!;
+        // AVoIP endpoints pass the signal straight through (the switcher's routes decide where it goes).
+        if (device.category === 'avoip_encoder' || device.category === 'avoip_decoder') {
+          if (this.faults.get(deviceId)?.offline) continue;
+          for (const p of device.ports) {
+            const k = portKey(deviceId, p.id);
+            if (p.direction === 'out' && !present.has(k)) {
+              present.add(k);
+              queue.push(k);
+            }
+          }
+          continue;
+        }
         if (device.category !== 'video_matrix' && device.category !== 'audio_matrix') continue;
         if (this.faults.get(deviceId)?.offline) continue;
         const routes = this.states.get(deviceId)!.routes;

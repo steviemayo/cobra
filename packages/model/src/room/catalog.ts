@@ -12,8 +12,12 @@ export const DeviceCategory = z.enum([
   'voice_capture_mic',
   'conference_system',
   'video_matrix',
+  'avoip_encoder',
+  'avoip_decoder',
   'audio_matrix',
   'video_destination',
+  'display',
+  'projector',
   'audio_destination',
   'conference_output',
   'recorder',
@@ -25,6 +29,26 @@ export const DeviceCategory = z.enum([
   'occupancy_sensor',
 ]);
 export type DeviceCategory = z.infer<typeof DeviceCategory>;
+
+/**
+ * Categories kept only so rooms designed before the display/projector split still load.
+ * `video_destination` reads as a display until someone edits the device. New devices never get one.
+ */
+export const LEGACY_CATEGORIES: readonly DeviceCategory[] = ['video_destination'];
+
+/** Every category that shows a picture: what the engine treats as "a display". */
+export const VIDEO_DESTINATION_CATEGORIES: readonly DeviceCategory[] = [
+  'video_destination',
+  'display',
+  'projector',
+];
+/** The endpoints of an AVoIP system. Signal passes through them; the virtual switcher does the routing. */
+export const AVOIP_ENDPOINT_CATEGORIES: readonly DeviceCategory[] = ['avoip_encoder', 'avoip_decoder'];
+export const isAvoipEndpoint = (category: DeviceCategory): boolean =>
+  AVOIP_ENDPOINT_CATEGORIES.includes(category);
+
+export const isVideoDestination = (category: DeviceCategory): boolean =>
+  VIDEO_DESTINATION_CATEGORIES.includes(category);
 
 export interface PortTemplate {
   id: string;
@@ -131,6 +155,22 @@ export const DEVICE_CATALOG: Record<DeviceCategory, CategoryInfo> = {
     controllable: true,
     defaultPorts: [],
   },
+  // AVoIP endpoints are ordinary devices in the room. The signal passes through them, so they can
+  // route, but the switcher does the routing: the engine sends them no route command.
+  avoip_encoder: {
+    label: 'AVoIP encoder',
+    section: 'matrix',
+    capabilities: ['video_route', 'audio_route', 'signal_detect'],
+    controllable: true,
+    defaultPorts: [inp('in', 'HDMI in', 'av'), out('net', 'Network', 'av')],
+  },
+  avoip_decoder: {
+    label: 'AVoIP decoder',
+    section: 'matrix',
+    capabilities: ['video_route', 'audio_route'],
+    controllable: true,
+    defaultPorts: [inp('net', 'Network', 'av'), out('out', 'HDMI out', 'av')],
+  },
   audio_matrix: {
     label: 'Audio matrix / DSP',
     section: 'matrix',
@@ -139,7 +179,21 @@ export const DEVICE_CATALOG: Record<DeviceCategory, CategoryInfo> = {
     defaultPorts: [],
   },
   video_destination: {
-    label: 'Display / projector',
+    label: 'Display / projector (older rooms)',
+    section: 'destination',
+    capabilities: ['video_sink', 'audio_sink', 'power', 'signal_detect'],
+    controllable: true,
+    defaultPorts: [inp('in', 'Input', 'av')],
+  },
+  display: {
+    label: 'Display',
+    section: 'destination',
+    capabilities: ['video_sink', 'audio_sink', 'power', 'signal_detect'],
+    controllable: true,
+    defaultPorts: [inp('in', 'Input', 'av')],
+  },
+  projector: {
+    label: 'Projector',
     section: 'destination',
     capabilities: ['video_sink', 'audio_sink', 'power', 'signal_detect'],
     controllable: true,

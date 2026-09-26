@@ -47,11 +47,11 @@ const meetingTwoLaptops = RoomModel.parse({
       ],
     },
     {
-      ...deviceFromCategory('video_destination', 'display1', 'Display 1'),
+      ...deviceFromCategory('display', 'display1', 'Display 1'),
       control: { kind: 'generic', protocol: 'pjlink' },
     },
     {
-      ...deviceFromCategory('video_destination', 'display2', 'Display 2'),
+      ...deviceFromCategory('display', 'display2', 'Display 2'),
       control: { kind: 'generic', protocol: 'pjlink' },
     },
     {
@@ -196,11 +196,11 @@ const trainingRecorded = RoomModel.parse({
       ],
     },
     {
-      ...deviceFromCategory('video_destination', 'display1', 'Front display'),
+      ...deviceFromCategory('display', 'display1', 'Front display'),
       control: { kind: 'generic', protocol: 'pjlink' },
     },
     {
-      ...deviceFromCategory('video_destination', 'display2', 'Side display'),
+      ...deviceFromCategory('display', 'display2', 'Side display'),
       control: { kind: 'generic', protocol: 'pjlink' },
     },
     {

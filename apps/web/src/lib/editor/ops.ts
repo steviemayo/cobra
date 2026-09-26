@@ -147,6 +147,8 @@ export const ACTION_TYPES: { type: ActionType; label: string }[] = [
   { type: 'volume', label: 'Set volume' },
   { type: 'device_command', label: 'Device command' },
   { type: 'env_scene', label: 'Environment scene' },
+  { type: 'launch_app', label: 'Launch app' },
+  { type: 'press_key', label: 'Press key' },
   { type: 'run_state', label: 'Run state' },
 ];
 
@@ -163,6 +165,8 @@ const ACTION_CAP: Partial<Record<ActionType, Capability[]>> = {
 export function actionTargets(model: RoomModel, type: ActionType): Device[] {
   if (type === 'device_command')
     return model.devices.filter((d) => DEVICE_CATALOG[d.category].controllable);
+  if (type === 'launch_app' || type === 'press_key')
+    return model.devices.filter((d) => (d.category === 'display' || d.category === 'video_destination') && d.control);
   const caps = ACTION_CAP[type];
   return caps ? devicesWith(model, ...caps) : model.devices;
 }
@@ -199,6 +203,12 @@ export function newAction(model: RoomModel, type: ActionType, existing: Action[]
       return { ...base, type, deviceId, command: 'command', args: {} };
     case 'env_scene':
       return { ...base, type, deviceId, scene: 'default' };
+    case 'launch_app': {
+      const first = (target.settings.apps as { id?: unknown }[] | undefined)?.find((a) => typeof a?.id === 'string');
+      return { ...base, type, deviceId, appId: (first?.id as string | undefined) ?? 'app' };
+    }
+    case 'press_key':
+      return { ...base, type, deviceId, key: 'home' };
   }
 }
 

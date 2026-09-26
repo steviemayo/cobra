@@ -2,7 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@kestrel/db';
 import { signManifest } from '@kestrel/crypto';
 import { validateRoomModel } from '@kestrel/engine';
-import { RoomModel, type PanelBranding, type PinnedDriver } from '@kestrel/model';
+import {
+  RoomModel,
+  applyBindings,
+  type DeviceValues,
+  type PanelBranding,
+  type PinnedDriver,
+} from '@kestrel/model';
+import { absorbInline, resolveBindings, sharedRefs, type BindingsDb } from './bindings';
 import { pinDrivers, type DriverDb } from './custom-drivers';
 import { effectivePanel, readPanel } from './panel-settings';
 import type { SigningKey } from './signing';
@@ -10,7 +17,7 @@ import type { SigningKey } from './signing';
 // Turning a room's draft into a signed, immutable release. Shared by publishing one room and by
 // deploying a whole room group. These functions take the database as a parameter so they can be
 // tested without one.
-export type ReleaseDb = Pick<PrismaClient, 'release' | 'roomDraft'> & DriverDb;
+export type ReleaseDb = Pick<PrismaClient, 'release' | 'roomDraft' | 'room' | 'gateway'> & DriverDb & BindingsDb;
 
 export interface PublishableRoom {
   id: string;
@@ -22,8 +29,13 @@ export type Publishable =
   | {
       ok: true;
       draft: { revision: number };
+      /** The design: what the room is, without addresses or logins. */
       model: RoomModel;
       drivers: Record<string, PinnedDriver>;
+      /** The room's addresses and logins, credential sets resolved. */
+      bindings: DeviceValues;
+      /** True when the room's gateway can fetch bindings itself, so the release carries none. */
+      bindingsExternal: boolean;
     }
   | { ok: false; code: 'BAD_REQUEST'; message: string };
 
@@ -46,7 +58,31 @@ export async function checkPublishable(
     };
   const pinned = await pinDrivers(db, orgId, model);
   if (!pinned.ok) return { ok: false, code: 'BAD_REQUEST', message: pinned.problems[0]! };
-  return { ok: true, draft: { revision: draft.revision }, model, drivers: pinned.drivers };
+  // A room designed before bindings existed has its addresses inline: move them across first.
+  const { model: design } = await absorbInline(db, {
+    orgId,
+    roomId: room.id,
+    model,
+    custom: pinned.drivers,
+    userId: null,
+  });
+  const bindings = (await resolveBindings(db, orgId, room.id, undefined, design))?.devices ?? {};
+  return {
+    ok: true,
+    draft: { revision: draft.revision },
+    model: design,
+    drivers: pinned.drivers,
+    bindings,
+    bindingsExternal: await gatewayFetchesBindings(db, orgId, room.id),
+  };
+}
+
+/** Whether the gateway this room is assigned to says it can fetch bindings. No gateway yet: no. */
+async function gatewayFetchesBindings(db: ReleaseDb, orgId: string, roomId: string): Promise<boolean> {
+  const room = await db.room.findFirst({ where: { id: roomId, orgId } });
+  if (!room?.gatewayId) return false;
+  const gateway = await db.gateway.findFirst({ where: { id: room.gatewayId, orgId } });
+  return !!gateway?.features?.includes('bindings');
 }
 
 /** Sign and store the next release of a room. Two people publishing at once: the loser retries. */
@@ -75,7 +111,10 @@ export async function createRelease(
         releaseId: id,
         releaseNumber: number,
         createdAt: new Date().toISOString(),
-        model: checked.model,
+        // A gateway that fetches bindings gets the design here and the addresses separately. Any
+        // other gateway gets everything in the release, as it always did.
+        ...(checked.bindingsExternal ? { bindingsExternal: true } : {}),
+        model: checked.bindingsExternal ? checked.model : applyBindings(checked.model, checked.bindings),
         drivers: checked.drivers,
         panel: effectivePanel(readPanel(room.panel), orgBranding),
       },
@@ -90,6 +129,7 @@ export async function createRelease(
         manifest: signed as unknown as Prisma.InputJsonValue,
         hash: signed.hash,
         draftRevision: checked.draft.revision,
+        siteDeviceIds: [...new Set(sharedRefs(checked.model).map((r) => r.siteDeviceId))],
         createdBy: userId,
       },
     });

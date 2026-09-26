@@ -2,6 +2,7 @@ import http from 'node:http';
 import { createServer } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BUILT_IN_DRIVERS, STARTER_TEMPLATES, checkDriverSpec, type Device } from '@kestrel/model';
+import { AVOIP_SWITCHER_IDS } from '../real/avoip';
 import { DeclarativeDriver } from '../real/declarative';
 import { BUILT_IN_DRIVER_IDS, createDriver } from '../real/registry';
 import type { DeviceDriver } from '../real/types';
@@ -41,7 +42,7 @@ const httpServer = async (handler: http.RequestListener) => {
 
 describe('bundled drivers', () => {
   it('are all valid driver specs', () => {
-    expect(Object.keys(LIBRARY).sort()).toEqual(['lib:cisco-roomos', 'lib:extron-sis', 'lib:lutron-lip', 'lib:shelly-relay']);
+    expect(Object.keys(LIBRARY).sort()).toEqual(['lib:cisco-roomos', 'lib:extron-sis', 'lib:kramer-p3000', 'lib:lg-signage', 'lib:lutron-lip', 'lib:shelly-relay', 'lib:sony-bravia']);
     for (const spec of Object.values(LIBRARY)) expect(checkDriverSpec(spec).ok, spec.id).toBe(true);
   });
 
@@ -49,6 +50,8 @@ describe('bundled drivers', () => {
     for (const id of Object.keys(LIBRARY)) expect(BUILT_IN_DRIVERS[id], id).toBeDefined();
     for (const [id, info] of Object.entries(BUILT_IN_DRIVERS)) {
       expect(BUILT_IN_DRIVER_IDS, id).toContain(id);
+      // A virtual switcher has no address: the room builds it from the other devices (see avoip.ts).
+      if (AVOIP_SWITCHER_IDS.has(id)) continue;
       expect(createDriver(dev(id, info.example), ctx), id).not.toBeNull();
     }
   });

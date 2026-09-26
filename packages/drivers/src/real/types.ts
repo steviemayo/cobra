@@ -1,4 +1,4 @@
-import type { Device, DeviceCommand, DeviceState, QuickActionId } from '@kestrel/model';
+import type { ControlPoint, Device, DeviceCommand, DeviceState, PointReading, QuickActionId } from '@kestrel/model';
 
 /** A driver for one physical device. Translates engine commands into that device's protocol. */
 export interface DeviceDriver {
@@ -8,6 +8,12 @@ export interface DeviceDriver {
   getState(): DeviceState;
   /** The panel quick actions this device supports. Absent means none. */
   quickActions?(): QuickActionId[];
+  /** The optional features of its class this driver supports. Absent means none. */
+  features?(): string[];
+  /** AVoIP encoders: where the stream this device makes can be picked up. Rejects if it cannot say. */
+  streamLocation?(): Promise<string>;
+  /** Read one control point, to check it exists and learn its range. Rejects if it cannot. */
+  readPoint?(point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>): Promise<PointReading>;
   /** Called with a fresh snapshot whenever feedback changes. */
   onChange(listener: (state: DeviceState) => void): () => void;
   /** Start any background polling / connections. */

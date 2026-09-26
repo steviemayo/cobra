@@ -5,6 +5,7 @@ import {
   type DeviceState,
   type QuickActionId,
 } from '@kestrel/model';
+import { driverFeatures } from '../quick-actions';
 import type { DeviceDriver, DriverContext } from './types';
 
 export abstract class BaseDriver implements DeviceDriver {
@@ -23,6 +24,10 @@ export abstract class BaseDriver implements DeviceDriver {
   abstract send(command: DeviceCommand): Promise<void>;
   quickActions(): QuickActionId[] {
     return [];
+  }
+  /** Optional class features. Built-in drivers say them in the driver list; others override. */
+  features(): string[] {
+    return driverFeatures(this.device.control);
   }
   start(): void {}
   close(): void {}

@@ -77,6 +77,7 @@ const COMMAND_ICON: Record<CommandType, typeof Power> = {
   test_device: PlayCircle,
   restart_room: RotateCw,
   room_off: Power,
+  verify_point: Stethoscope,
 };
 
 const STATUS_LABEL: Record<string, string> = {

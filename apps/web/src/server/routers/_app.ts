@@ -2,6 +2,9 @@ import { router } from '../trpc';
 import { alertRouter } from './alert';
 import { auditRouter } from './audit';
 import { billingRouter } from './billing';
+import { bindingRouter } from './binding';
+import { bulkRouter } from './bulk';
+import { siteDeviceRouter } from './site-device';
 import { calendarRouter } from './calendar';
 import { mspRouter } from './msp';
 import { roomGroupRouter } from './room-group';
@@ -47,5 +50,8 @@ export const appRouter = router({
   roomGroup: roomGroupRouter,
   staff: staffRouter,
   control: controlRouter,
+  binding: bindingRouter,
+  bulk: bulkRouter,
+  siteDevice: siteDeviceRouter,
 });
 export type AppRouter = typeof appRouter;
