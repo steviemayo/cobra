@@ -47,11 +47,14 @@ function HoldButton({
   icon,
   onHold,
   onEnd,
+  every = REPEAT_MS,
 }: {
   label: string;
   icon: string;
   onHold: () => void;
   onEnd: () => void;
+  /** Milliseconds between repeats while held. */
+  every?: number;
 }) {
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const holding = useRef(false);
@@ -78,7 +81,7 @@ function HoldButton({
         e.currentTarget.setPointerCapture?.(e.pointerId);
         holding.current = true;
         onHold();
-        timer.current = setInterval(onHold, REPEAT_MS);
+        timer.current = setInterval(onHold, every);
       }}
       onPointerUp={end}
       onPointerCancel={end}
@@ -239,21 +242,47 @@ function DisplayCard({
   );
 }
 
+/** How often a held volume button repeats, and by how much each time (the same feel as the room volume). */
+const MIC_STEP = 5;
+const MIC_REPEAT_MS = 250;
+
 function MicRow({ mic, t, dispatch }: { mic: PanelMic; t: Translate; dispatch: Dispatch }) {
   const muted = mic.muted === true;
+  const bump = (delta: number) => () => dispatch({ type: 'mic.bump', deviceId: mic.id, delta });
   return (
-    <button
-      type="button"
-      className="kp-tile kp-tile-wide"
-      aria-pressed={muted}
-      onClick={() => dispatch({ type: 'mic.mute', deviceId: mic.id, muted: !muted })}
-    >
-      <Icon name={muted ? 'mic-off' : 'mic'} />
-      <span className="kp-tile-title">{mic.name}</span>
-      {mic.muted !== null && (
-        <span className="kp-tile-note">{muted ? t('mic.muted') : t('mic.live')}</span>
+    <div className="kp-mic-row">
+      <button
+        type="button"
+        className="kp-tile kp-tile-wide"
+        aria-pressed={muted}
+        onClick={() => dispatch({ type: 'mic.mute', deviceId: mic.id, muted: !muted })}
+      >
+        <Icon name={muted ? 'mic-off' : 'mic'} />
+        <span className="kp-tile-title">{mic.name}</span>
+        {mic.muted !== null && (
+          <span className="kp-tile-note">{muted ? t('mic.muted') : t('mic.live')}</span>
+        )}
+      </button>
+      {mic.canVolume && (
+        <div className="kp-mic-volume" role="group" aria-label={`${mic.name} ${t('volume.label')}`}>
+          <HoldButton
+            label={`${mic.name} ${t('mic.quieter')}`}
+            icon="minus"
+            every={MIC_REPEAT_MS}
+            onHold={bump(-MIC_STEP)}
+            onEnd={() => undefined}
+          />
+          {mic.volume !== null && <span className="kp-mic-level">{mic.volume}</span>}
+          <HoldButton
+            label={`${mic.name} ${t('mic.louder')}`}
+            icon="plus"
+            every={MIC_REPEAT_MS}
+            onHold={bump(MIC_STEP)}
+            onEnd={() => undefined}
+          />
+        </div>
       )}
-    </button>
+    </div>
   );
 }
 

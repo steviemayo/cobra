@@ -83,6 +83,24 @@ function checkDevices(model: RoomModel, opts: ValidateOptions, c: Collector) {
   }
 }
 
+/**
+ * A conferencing microphone feeds the call, never the room speakers. Only what can be seen from
+ * the design is checked: a microphone wired straight to an audio output. (Through a DSP the design
+ * cannot tell, since the DSP program decides what is mixed.)
+ */
+function checkMicRouting(model: RoomModel, g: Graph, c: Collector) {
+  for (const conn of model.connections) {
+    const from = g.devices.get(conn.from.deviceId);
+    const to = g.devices.get(conn.to.deviceId);
+    if (from?.category === 'voice_capture_mic' && to?.category === 'audio_destination')
+      c.warn(
+        'mic_to_room_speakers',
+        `${from.name} is a conferencing microphone but is connected to ${to.name}. Conferencing microphones should only feed the call and the DSP`,
+        { kind: 'connection', id: conn.id },
+      );
+  }
+}
+
 function checkConnections(model: RoomModel, g: Graph, c: Collector) {
   const inUse = new Map<string, string>();
   const outUse = new Map<string, number>();
@@ -243,6 +261,8 @@ function checkActions(
       if (!src || !dst) continue;
       const sc = deviceCapabilities(src);
       const dc = deviceCapabilities(dst);
+      if (src.category === 'voice_capture_mic' && dst.category === 'audio_destination')
+        c.warn('mic_to_room_speakers', `${owner}: routes the conferencing microphone ${src.name} to ${dst.name}. Conferencing microphones should only feed the call`, ref);
       if (!sc.has('video_source') && !sc.has('audio_source'))
         c.error('route_not_source', `${owner}: ${src.name} is not a source`, ref);
       else if (!dc.has('video_sink') && !dc.has('audio_sink'))
@@ -429,6 +449,7 @@ export function validateRoomModel(model: RoomModel, opts: ValidateOptions = {}):
   checkDuplicateIds(model, c);
   checkDevices(model, opts, c);
   checkConnections(model, g, c);
+  checkMicRouting(model, g, c);
   checkGroups(model, g, c);
   checkStates(model, g, c);
   checkActivities(model, g, c);

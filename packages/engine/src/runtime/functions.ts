@@ -6,7 +6,8 @@ import { MEDIA_KEYS, NAVIGATION_KEYS, type DeviceBus, type Device, type DisplayK
 
 export interface FunctionSets {
   cameras: { device: Device; presets: string[] }[];
-  microphones: Device[];
+  /** Reinforcement microphones a person can control, in the order the panel shows them. */
+  microphones: { device: Device; label: string }[];
   lights: { device: Device; scenes: string[] }[];
   movers: { device: Device; kind: 'blinds' | 'screen' | 'lifter'; actions: MoverAction[] }[];
   /** Smart displays. What each offers depends on its driver, which only the bus knows. */
@@ -91,10 +92,14 @@ export function functionSets(model: RoomModel): FunctionSets {
       });
     }
 
+  // Only reinforcement microphones: people hear through them, so they are theirs to mute and turn
+  // up. Conferencing microphones have a fixed level and only take part in Privacy Mute.
   if (userControls.microphones)
-    for (const d of model.devices)
-      if ((d.category === 'reinforcement_mic' || d.category === 'voice_capture_mic') && driven(d))
-        sets.microphones.push(d);
+    sets.microphones = model.devices
+      .filter((d) => d.category === 'reinforcement_mic' && driven(d) && !d.mic?.hidden)
+      .map((device, index) => ({ device, label: device.mic?.label ?? device.name, index }))
+      .sort((a, b) => (a.device.mic?.order ?? 1000) - (b.device.mic?.order ?? 1000) || a.index - b.index)
+      .map(({ device, label }) => ({ device, label }));
 
   if (userControls.lights)
     for (const d of model.devices) {
@@ -132,11 +137,17 @@ export function functionsView(sets: FunctionSets, bus: DeviceBus): PanelFunction
       activePreset: bus.getState(device.id)?.preset ?? null,
       canMove: true,
     })),
-    microphones: sets.microphones.map((d) => ({
-      id: d.id,
-      name: d.name,
-      muted: bus.getState(d.id)?.muted ?? null,
-    })),
+    microphones: sets.microphones.map(({ device, label }) => {
+      const state = bus.getState(device.id);
+      const canVolume = (bus.features?.(device.id) ?? []).includes('volume');
+      return {
+        id: device.id,
+        name: label,
+        muted: state?.muted ?? null,
+        canVolume,
+        volume: canVolume ? (state?.volume ?? null) : null,
+      };
+    }),
     lights: sets.lights.map(({ device, scenes }) => ({
       id: device.id,
       name: device.name,

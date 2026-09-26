@@ -17,6 +17,7 @@ import { activitySources, planActivity, planState, planStopOverlay, type Plan } 
 import { buildGraph, deviceCapabilities, type Graph } from '../validate/graph';
 import { availableActivities, detectorsFor, type SignalDetector } from './activities';
 import { functionSets, functionsView, isMediaKey, keysFor, type FunctionSets } from './functions';
+import { micStartSteps, micStopSteps, type MicStep } from './mics';
 import {
   quickActionActive,
   quickActionCommand,
@@ -115,6 +116,10 @@ export class RoomRuntime implements PanelClient {
   private disposed = false;
   /** While a combined room that includes this one is live, this room must not touch the devices. */
   private suspended = false;
+  /** Bringing back a parked room: its microphones are left as they are, not reset to the on default. */
+  private restoring = false;
+  /** The level each microphone was last set to from the panel, for one that reports none. */
+  private readonly micLevels = new Map<string, number>();
   private linking: PanelLinking | null = null;
 
   constructor(private readonly opts: RuntimeOptions) {
@@ -191,9 +196,22 @@ export class RoomRuntime implements PanelClient {
       case 'camera.move':
         return this.moveCamera(intent.deviceId, intent.pan, intent.tilt, intent.zoom);
       case 'mic.mute':
-        if (this.functions.microphones.some((d) => d.id === intent.deviceId))
+        if (this.functions.microphones.some((m) => m.device.id === intent.deviceId))
           this.tell(intent.deviceId, { type: 'mute', muted: intent.muted });
         return;
+      case 'mic.bump': {
+        const mic = this.functions.microphones.find((m) => m.device.id === intent.deviceId);
+        if (!mic || !(this.bus.features?.(mic.device.id) ?? []).includes('volume')) return;
+        const current =
+          this.bus.getState(mic.device.id)?.volume ??
+          this.micLevels.get(mic.device.id) ??
+          mic.device.mic?.defaultVolume ??
+          50;
+        const level = Math.min(100, Math.max(0, Math.round(current + intent.delta)));
+        this.micLevels.set(mic.device.id, level);
+        this.tell(mic.device.id, { type: 'volume', level });
+        return;
+      }
       case 'display.key': {
         const display = this.functions.displays.find((d) => d.device.id === intent.deviceId);
         const { keys, media } = keysFor(this.bus.features?.(intent.deviceId) ?? []);
@@ -340,13 +358,18 @@ export class RoomRuntime implements PanelClient {
   /** Bring back what a room was doing. A room that was off (or never ran) is turned off. */
   async restore(state: ParkedState | undefined): Promise<void> {
     if (!state || !state.on) return this.turnOff();
-    if (state.primary) {
-      await this.startActivity(state.primary.activityId, state.primary.sourceId);
+    this.restoring = true;
+    try {
+      if (state.primary) {
+        await this.startActivity(state.primary.activityId, state.primary.sourceId);
+        for (const id of state.overlays) await this.startActivity(id);
+        return;
+      }
+      await this.turnOn();
       for (const id of state.overlays) await this.startActivity(id);
-      return;
+    } finally {
+      this.restoring = false;
     }
-    await this.turnOn();
-    for (const id of state.overlays) await this.startActivity(id);
   }
 
   // ---- Triggers -------------------------------------------------------------------------------
@@ -378,16 +401,24 @@ export class RoomRuntime implements PanelClient {
     return hooks.length;
   }
 
+  /** Best effort: a microphone that will not answer never stops the room. */
+  private applyMics(steps: MicStep[]) {
+    for (const s of steps) this.tell(s.deviceId, s.command);
+  }
+
   private async runState(stateId: string) {
     const state = this.model.states.find((s) => s.id === stateId);
     if (!state) return;
     if (state.kind === 'off') return this.roomOff();
+    const wasOff = this.status === 'off';
     const { run, signal } = this.begin(state.kind === 'on' ? 'starting' : this.status);
     this.notify();
     const ok = await this.run(planState(this.model, stateId), run, signal);
     if (!ok) return;
-    if (state.kind === 'on') this.status = 'on';
-    else if (this.status === 'starting') this.status = this.primary ? 'on' : 'off';
+    if (state.kind === 'on') {
+      this.status = 'on';
+      this.applyMics(micStartSteps(this.model, undefined, wasOff && !this.restoring));
+    } else if (this.status === 'starting') this.status = this.primary ? 'on' : 'off';
     this.adoptDeviceState();
     this.evaluateIdle();
     this.notify();
@@ -453,6 +484,7 @@ export class RoomRuntime implements PanelClient {
   private async startPrimary(activity: Activity, sourceId?: string) {
     const sources = activitySources(this.model, activity);
     const source = sources.find((s) => s.id === sourceId) ?? sources[0];
+    const wasOff = this.status === 'off';
     const { run, signal } = this.begin('starting');
     this.starting = activity.id;
     this.notify();
@@ -466,6 +498,7 @@ export class RoomRuntime implements PanelClient {
       sourceId: source?.id,
       sourceDeviceId: plan.sourceDeviceId,
     };
+    this.applyMics(micStartSteps(this.model, activity, wasOff && !this.restoring));
     this.adoptDeviceState();
     this.evaluateIdle();
     this.notify();
@@ -538,6 +571,7 @@ export class RoomRuntime implements PanelClient {
     this.primary = null;
     this.overlays.clear();
     this.status = 'off';
+    this.applyMics(micStopSteps(this.model));
     if (hadRecording) this.savedUntil = Date.now() + 4000;
     this.adoptDeviceState();
     this.notify();
