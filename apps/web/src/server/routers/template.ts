@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { RoomModel, STARTER_TEMPLATES } from '@kestrel/model';
 import { orgProcedure, requireRole, router } from '../trpc';
-import { assertRoom, findTemplateModel, toJson } from './room-model-helpers';
+import { assertRoom, designOnly, findTemplateModel, toJson } from './room-model-helpers';
 
 const meta = z.object({
   name: z.string().trim().min(1).max(100),
@@ -46,7 +46,7 @@ export const templateRouter = router({
           name: input.name,
           description: input.description,
           roomType: room.type,
-          model: toJson(RoomModel.parse(draft.model)),
+          model: toJson(await designOnly(ctx.orgId, RoomModel.parse(draft.model))),
           createdBy: ctx.user.id,
         },
         select: { id: true, name: true },

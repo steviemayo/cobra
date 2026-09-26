@@ -99,6 +99,11 @@ export class CloudClient {
     });
   }
 
+  /** A room's addresses and logins, returned raw: they must be verified before use. */
+  bindings(credential: string, roomId: string): Promise<unknown> {
+    return this.request('GET', `/rooms/${roomId}/bindings`, null, { credential });
+  }
+
   async telemetry(credential: string, body: TelemetryBatch): Promise<void> {
     await this.request('POST', '/telemetry', null, { body, credential });
   }

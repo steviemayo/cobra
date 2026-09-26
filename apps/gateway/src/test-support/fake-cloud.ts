@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { generateKeyPair, signManifest } from '@kestrel/crypto';
+import { generateKeyPair, signBindings, signManifest } from '@kestrel/crypto';
 import {
   EnrollRequest,
   HeartbeatRequest,
   PROTOCOL_VERSION,
   TelemetryBatch,
+  type DeviceValues,
   type GatewayCommand,
   type RoomModel,
   type SignedManifest,
@@ -24,6 +25,7 @@ interface Assignment {
   releaseNumber: number;
   deploymentId: string;
   signed: unknown;
+  bindingsVersion?: number;
 }
 
 /** A stand-in for the Kestrel cloud that speaks protocol v1 and signs releases with a real key. */
@@ -42,6 +44,8 @@ export class FakeCloud {
   readonly polls: { panels: { roomId: string; vm: unknown }[] }[] = [];
   readonly telemetry: TelemetryEvent[] = [];
   readonly manifestFetches: string[] = [];
+  readonly bindingsFetches: string[] = [];
+  private bindings = new Map<string, { version: number; devices: DeviceValues; tamper?: boolean }>();
   private assignments = new Map<string, Assignment>();
   private version = 1;
   private server: Server | null = null;
@@ -74,7 +78,7 @@ export class FakeCloud {
   assign(
     roomId: string,
     model: RoomModel,
-    opts: { number?: number; name?: string; tamper?: boolean } = {},
+    opts: { number?: number; name?: string; tamper?: boolean; external?: boolean } = {},
   ): SignedManifest {
     const number = opts.number ?? (this.assignments.get(roomId)?.releaseNumber ?? 0) + 1;
     const releaseId = `4444444${number}-4444-4444-8444-444444444444`.slice(0, 36);
@@ -87,6 +91,7 @@ export class FakeCloud {
         releaseId,
         releaseNumber: number,
         createdAt: new Date().toISOString(),
+        ...(opts.external ? { bindingsExternal: true } : {}),
         model,
       },
       { privateKeyPem: this.keys.privateKeyPem, keyId: this.keyId },
@@ -100,9 +105,24 @@ export class FakeCloud {
       releaseNumber: number,
       deploymentId: randomUUID(),
       signed: wire,
+      ...this.bindingsOf(roomId),
     });
     this.version++;
     return signed;
+  }
+
+  private bindingsOf(roomId: string) {
+    const b = this.bindings.get(roomId);
+    return b ? { bindingsVersion: b.version } : {};
+  }
+
+  /** Set a room's addresses and logins. Each call is a new version, as in the cloud. */
+  setBindings(roomId: string, devices: DeviceValues, opts: { tamper?: boolean } = {}) {
+    const version = (this.bindings.get(roomId)?.version ?? 0) + 1;
+    this.bindings.set(roomId, { version, devices, ...opts });
+    const a = this.assignments.get(roomId);
+    if (a) a.bindingsVersion = version;
+    this.version++;
   }
 
   /** Ask for the current release again as a new deployment, so a refused one gets another go. */
@@ -186,6 +206,7 @@ export class FakeCloud {
           releaseNumber: a.releaseNumber,
           deploymentId: a.deploymentId,
           manifestHash: (a.signed as { hash: string }).hash,
+          ...(a.bindingsVersion ? { bindingsVersion: a.bindingsVersion } : {}),
         })),
         publicKeys: this.extraKeys ?? this.publicKeys,
         groups: this.groups,
@@ -198,6 +219,19 @@ export class FakeCloud {
         return this.json(res, 404, { error: 'No such release' });
       this.manifestFetches.push(a.releaseId);
       return this.json(res, 200, a.signed);
+    }
+    const b = /^\/rooms\/([^/]+)\/bindings$/.exec(path);
+    if (req.method === 'GET' && b) {
+      const found = this.bindings.get(b[1]!);
+      if (!found) return this.json(res, 404, { error: 'This room has no bindings' });
+      this.bindingsFetches.push(b[1]!);
+      const signed = signBindings(
+        { orgId: ORG_ID, roomId: b[1]!, version: found.version, devices: found.devices },
+        { privateKeyPem: this.keys.privateKeyPem, keyId: this.keyId },
+      );
+      const wire = JSON.parse(JSON.stringify(signed)) as { payload: { devices: DeviceValues } };
+      if (found.tamper) wire.payload.devices = { injected: { host: '6.6.6.6' } };
+      return this.json(res, 200, wire);
     }
     if (req.method === 'POST' && path === '/telemetry') {
       const parsed = TelemetryBatch.safeParse(await this.body(req));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { generateKeyPair } from '@kestrel/crypto';
-import { STARTER_TEMPLATES } from '@kestrel/model';
+import { STARTER_TEMPLATES, slotsFor } from '@kestrel/model';
 import { deployGroup, planGroupDeploy, type GroupDeployDb } from './group-deploy';
 import { saveGroup, syncCombinedRooms } from './room-groups';
 import { table } from './test-db';
@@ -13,7 +13,14 @@ const [A, B, C] = Array.from(
   (_, i) => `33333333-3333-4333-8333-33333333333${i + 1}`,
 );
 
-const meeting = () => structuredClone(STARTER_TEMPLATES[0]!.model);
+// The starter room with an address and login typed inline for every device that needs one, as rooms
+// designed before bindings existed have. A device with a real driver cannot deploy without them.
+const meeting = () => {
+  const model = structuredClone(STARTER_TEMPLATES[0]!.model);
+  for (const d of model.devices)
+    for (const slot of slotsFor(d)) if (slot.required) d.settings[slot.key] = slot.key === 'port' ? 4352 : `${d.id}-${slot.key}`;
+  return model;
+};
 const pair = generateKeyPair();
 const ctx = {
   key: { keyId: 'k1', privateKeyPem: pair.privateKeyPem, publicKeyPem: pair.publicKeyPem },
@@ -57,6 +64,9 @@ async function world({ gateway = GW as string | null } = {}) {
   const deploymentEvent = table([]);
   const customDriver = table([]);
   const customDriverVersion = table([]);
+  const roomBinding = table([]);
+  const credentialSet = table([]);
+  const gateways = table([{ id: GW, orgId: ORG, features: [] }]);
   let seq = 0;
   for (const t of [rooms, roomGroup, roomDivider, roomDraft, deployment]) {
     const create = t.create;
@@ -79,6 +89,9 @@ async function world({ gateway = GW as string | null } = {}) {
     deploymentEvent,
     customDriver,
     customDriverVersion,
+    roomBinding,
+    credentialSet,
+    gateway: gateways,
   } as unknown as GroupDeployDb;
 
   const groupId = await saveGroup(db, ORG, {

@@ -6,6 +6,7 @@ import { RoomModel, SignedManifest } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { createDeployment } from '../deployment-service';
 import { readOrgBranding } from '../panel-settings';
+import { setupProblem } from '../deploy-check';
 import { checkPublishable, createRelease } from '../release-service';
 import { SigningNotConfigured, loadSigningKey } from '../signing';
 import { orgProcedure, requireRole, router } from '../trpc';
@@ -97,6 +98,9 @@ export const releaseRouter = router({
       const room = await assertRoom(ctx.orgId, input.roomId);
       const checked = await checkPublishable(db, ctx.orgId, room);
       if (!checked.ok) throw new TRPCError({ code: checked.code, message: checked.message });
+      // Deploying means running on real devices, so their addresses must be in first.
+      const setup = input.deploy && room.gatewayId ? setupProblem(checked.model, checked.bindings, checked.drivers) : null;
+      if (setup) throw new TRPCError({ code: 'BAD_REQUEST', message: setup });
 
       let key;
       try {

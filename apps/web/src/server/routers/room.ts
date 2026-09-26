@@ -6,6 +6,7 @@ import { generateSecret, hashSecret } from '@kestrel/crypto';
 import { RoomType } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { canAddRoom, getEntitlements } from '../billing';
+import { checkDeployable } from '../deploy-check';
 import { createDeployment } from '../deployment-service';
 import { effectiveStatus } from '../gateway-service';
 import { PanelInput, applyPanelInput, publicPanel, readPanel } from '../panel-settings';
@@ -52,8 +53,13 @@ async function applyGateway(
       reportedAt: null,
     },
   });
-  // A room that already has a release follows it to its new gateway.
-  if (gatewayId && room.desiredReleaseId)
+  // A room that already has a release follows it to its new gateway, unless it is not ready to run
+  // there (an address still to fill in, or a gateway that needs updating).
+  const ready =
+    gatewayId && room.desiredReleaseId
+      ? await checkDeployable(db, { orgId, roomId: room.id, gatewayId, releaseId: room.desiredReleaseId })
+      : null;
+  if (gatewayId && room.desiredReleaseId && ready?.ok)
     await createDeployment(db, {
       orgId,
       roomId: room.id,
@@ -68,7 +74,7 @@ async function applyGateway(
     actorId: userId,
     action: 'room.gateway',
     target: room.id,
-    meta: { room: room.name, gateway: gatewayName },
+    meta: { room: room.name, gateway: gatewayName, ...(ready && !ready.ok ? { notDeployed: ready.message } : {}) },
   });
 }
 

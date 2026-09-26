@@ -37,6 +37,11 @@ export const RoomManifest = z.object({
   releaseId: z.string().uuid(),
   releaseNumber: z.number().int().min(1),
   createdAt: z.string().datetime(),
+  /**
+   * True when addresses and logins were left out of the model and travel as the room's bindings
+   * instead. A gateway that cannot fetch bindings must not run such a release.
+   */
+  bindingsExternal: z.boolean().optional(),
   model: RoomModel,
   /** Custom drivers this release uses, pinned at the version it was built with. */
   drivers: z.record(z.string(), PinnedDriver).default({}),
@@ -178,6 +183,8 @@ export const RoomReport = z.object({
   deployment: DeploymentReport.optional(),
   /** Whether each device in the running release is reachable. */
   devices: z.array(DeviceReport).max(300).default([]),
+  /** Version of the bindings (addresses and logins) the room is running with. Absent when it has none. */
+  bindingsVersion: z.number().int().min(1).optional(),
 });
 export type RoomReport = z.infer<typeof RoomReport>;
 
@@ -224,6 +231,8 @@ export const HeartbeatRequest = z.object({
   commandResults: z.array(CommandResult).max(50).default([]),
   /** Which movable walls are open, for the groups this gateway runs. The gateway owns this state. */
   dividers: z.array(DividerReport).max(500).default([]),
+  /** What this gateway can do beyond the basics (see GATEWAY_FEATURES). Older gateways send none. */
+  features: z.array(z.string().max(40)).max(20).default([]),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
 
@@ -252,6 +261,8 @@ export const AssignedRoom = z.object({
   manifestHash: z.string(),
   /** Which deployment asked for this release. A new id lets a gateway retry a release that failed. */
   deploymentId: z.string().uuid(),
+  /** Version of the room's bindings (addresses and logins) to run with. Absent when it has none. */
+  bindingsVersion: z.number().int().min(1).optional(),
   /** Lets this gateway sign the short-lived links on the panel's QR code. Absent when the server has no secrets key. */
   phoneSecret: z.string().min(20).optional(),
 });
