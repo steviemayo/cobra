@@ -18,7 +18,7 @@ import type { SigningKey } from './signing';
 // A room's addresses and logins, kept apart from its design (docs/driver-classes.md). Secrets are
 // sealed with KESTREL_SECRETS_KEY before they reach the database and are never sent to a browser.
 // These functions take the database as a parameter so they can be tested without one.
-export type BindingsDb = Pick<PrismaClient, 'roomBinding' | 'credentialSet'>;
+export type BindingsDb = Pick<PrismaClient, 'roomBinding' | 'credentialSet' | 'siteDevice'>;
 
 export const MAX_CREDENTIAL_SETS_PER_ORG = 200;
 
@@ -104,30 +104,75 @@ async function credentialFields(db: BindingsDb, orgId: string, ids: string[], ke
   return out;
 }
 
+// ---- Shared site devices -------------------------------------------------------------------------
+
+/** The devices of a room that are a slice of a shared site device. */
+export function sharedRefs(model: RoomModel | undefined): { deviceId: string; siteDeviceId: string }[] {
+  return (model?.devices ?? []).flatMap((d) => (d.siteDeviceId ? [{ deviceId: d.id, siteDeviceId: d.siteDeviceId }] : []));
+}
+
+/**
+ * What a shared site device gives a room: its design settings, then its credential set, then its
+ * addresses, then its own logins (each layer over the last). Null when it no longer exists.
+ */
+async function siteDeviceFields(db: BindingsDb, orgId: string, siteDeviceId: string, key: string | undefined) {
+  const row = await db.siteDevice.findFirst({ where: { id: siteDeviceId, orgId } });
+  if (!row) return null;
+  if (row.sealed && !key) throw new Error('A shared device has stored logins but the server has no KESTREL_SECRETS_KEY');
+  const own = row.sealed ? openFields(row.sealed, key!) : {};
+  const set = row.credentialSetId ? (await credentialFields(db, orgId, [row.credentialSetId], key)).get(row.credentialSetId) : undefined;
+  const fields: Fields = {
+    ...(isObject(row.settings) ? row.settings : {}),
+    ...set,
+    ...(isObject(row.values) ? row.values : {}),
+    ...own,
+  };
+  return { version: row.version, exclusive: row.exclusive, fields, name: row.name };
+}
+
 // ---- What a gateway gets -------------------------------------------------------------------------
 
 /**
  * A room's addresses and logins with credential sets resolved, for a gateway. For each device the
  * credential set's fields sit under the device's own addresses, which sit under its own logins.
- * Null when the room has none.
+ * A device that is a slice of a shared site device (found in `model`) starts from that device's
+ * values, so an address is kept in one place. The version adds the versions of those shared
+ * devices, so changing one gives every room that uses it a new version. Null when there is nothing.
  */
 export async function resolveBindings(
   db: BindingsDb,
   orgId: string,
   roomId: string,
   key = secretsKey(),
-): Promise<{ version: number; devices: DeviceValues } | null> {
+  model?: RoomModel,
+): Promise<{
+  version: number;
+  devices: DeviceValues;
+  sharedDevices: Record<string, { siteDeviceId: string; exclusive: boolean }>;
+} | null> {
   const stored = await read(db, roomId, key);
-  if (!stored) return null;
-  const sets = await credentialFields(db, orgId, Object.values(stored.credentialSets), key);
-  const ids = new Set([...Object.keys(stored.values), ...Object.keys(stored.secrets), ...Object.keys(stored.credentialSets)]);
+  const refs = sharedRefs(model);
+  if (!stored && refs.length === 0) return null;
   const devices: DeviceValues = {};
-  for (const id of ids) {
-    const setId = stored.credentialSets[id];
-    const merged = { ...(setId ? sets.get(setId) : undefined), ...stored.values[id], ...stored.secrets[id] };
-    if (Object.keys(merged).length > 0) devices[id] = merged;
+  const sharedDevices: Record<string, { siteDeviceId: string; exclusive: boolean }> = {};
+  let version = stored?.version ?? 0;
+  for (const ref of refs) {
+    const shared = await siteDeviceFields(db, orgId, ref.siteDeviceId, key);
+    if (!shared) continue;
+    version += shared.version;
+    sharedDevices[ref.deviceId] = { siteDeviceId: ref.siteDeviceId, exclusive: shared.exclusive };
+    if (Object.keys(shared.fields).length > 0) devices[ref.deviceId] = shared.fields;
   }
-  return { version: stored.version, devices };
+  if (stored) {
+    const sets = await credentialFields(db, orgId, Object.values(stored.credentialSets), key);
+    const ids = new Set([...Object.keys(stored.values), ...Object.keys(stored.secrets), ...Object.keys(stored.credentialSets)]);
+    for (const id of ids) {
+      const setId = stored.credentialSets[id];
+      const merged = { ...(setId ? sets.get(setId) : undefined), ...stored.values[id], ...stored.secrets[id] };
+      if (Object.keys(merged).length > 0) devices[id] = { ...devices[id], ...merged };
+    }
+  }
+  return { version: Math.max(1, version), devices, sharedDevices };
 }
 
 /** The bindings version a gateway should run a room with, or undefined when the room has none. */
@@ -143,10 +188,21 @@ export async function signedBindingsFor(
   roomId: string,
   signing: SigningKey,
   key = secretsKey(),
+  /** The design the gateway will run, which says which shared devices it uses. */
+  model?: RoomModel,
 ): Promise<SignedBindings | null> {
-  const bindings = await resolveBindings(db, orgId, roomId, key);
+  const bindings = await resolveBindings(db, orgId, roomId, key, model);
   if (!bindings) return null;
-  return signBindings({ orgId, roomId, version: bindings.version, devices: bindings.devices }, signing);
+  return signBindings(
+    {
+      orgId,
+      roomId,
+      version: bindings.version,
+      devices: bindings.devices,
+      ...(Object.keys(bindings.sharedDevices).length > 0 ? { sharedDevices: bindings.sharedDevices } : {}),
+    },
+    signing,
+  );
 }
 
 // ---- Changing them -------------------------------------------------------------------------------
@@ -180,6 +236,8 @@ export async function saveDeviceBinding(
     next.credentialSets = { ...current.credentialSets };
   }
   const id = input.device.id;
+  if (input.device.siteDeviceId)
+    return { ok: false, message: 'This device is shared. Change its address or login on the Shared devices page' };
 
   for (const [k, v] of Object.entries(input.set ?? {})) {
     const scope = scopeOfSetting(input.device, k, custom);
@@ -342,6 +400,8 @@ export interface SlotView extends BindingSlot {
 export interface DeviceBindingView {
   deviceId: string;
   name: string;
+  /** Set when this device is a slice of a shared site device, whose address and login are kept there. */
+  sharedFrom: string | null;
   slots: SlotView[];
   credentialSetId: string | null;
 }
@@ -360,8 +420,13 @@ export async function bindingView(
 ): Promise<BindingView> {
   const custom = input.custom ?? {};
   const stored = await read(db, input.roomId, key);
-  const resolved = await resolveBindings(db, input.orgId, input.roomId, key);
+  const resolved = await resolveBindings(db, input.orgId, input.roomId, key, input.model);
   const devices: DeviceBindingView[] = [];
+  const sharedNames = new Map<string, string>();
+  for (const ref of sharedRefs(input.model)) {
+    const row = await db.siteDevice.findFirst({ where: { id: ref.siteDeviceId, orgId: input.orgId } });
+    sharedNames.set(ref.deviceId, row?.name ?? 'a shared device that no longer exists');
+  }
   for (const d of input.model.devices) {
     const slots = slotsFor(d, custom);
     if (slots.length === 0) continue;
@@ -370,6 +435,7 @@ export async function bindingView(
     devices.push({
       deviceId: d.id,
       name: d.name,
+      sharedFrom: sharedNames.get(d.id) ?? null,
       credentialSetId: stored?.credentialSets[d.id] ?? null,
       slots: slots.map((s) => ({
         ...s,
@@ -403,6 +469,11 @@ const cleanName = (n: string) => n.trim().replace(/\s+/g, ' ');
 async function usersOf(db: BindingsDb, orgId: string, setId: string) {
   const rows = await db.roomBinding.findMany({ where: { orgId } });
   return rows.filter((r) => isObject(r.credentialSets) && Object.values(r.credentialSets).includes(setId));
+}
+
+/** Shared site devices that take their login from a credential set. */
+async function siteDevicesUsing(db: BindingsDb, orgId: string, setId: string) {
+  return db.siteDevice.findMany({ where: { orgId, credentialSetId: setId } });
 }
 
 export async function listCredentialSets(db: BindingsDb, orgId: string): Promise<CredentialSetView[]> {
@@ -476,7 +547,10 @@ export async function updateCredentialSet(
   });
   const users = await usersOf(db, input.orgId, row.id);
   for (const u of users) await db.roomBinding.update({ where: { id: u.id }, data: { version: u.version + 1 } });
-  return { ok: true, id: row.id, roomsUpdated: users.length };
+  // A shared device that uses the set gives every room that uses it a new version too.
+  const shared = await siteDevicesUsing(db, input.orgId, row.id);
+  for (const d of shared) await db.siteDevice.update({ where: { id: d.id }, data: { version: d.version + 1 } });
+  return { ok: true, id: row.id, roomsUpdated: users.length + shared.length };
 }
 
 /** A set that rooms still use cannot be deleted. */
@@ -488,8 +562,12 @@ export async function deleteCredentialSet(
   const row = await db.credentialSet.findFirst({ where: { id, orgId } });
   if (!row) return { ok: false, message: 'That credential set does not exist' };
   const users = await usersOf(db, orgId, id);
-  if (users.length > 0)
-    return { ok: false, message: `${users.length} room${users.length === 1 ? ' uses' : 's use'} this credential set. Remove it from them first` };
+  const shared = await siteDevicesUsing(db, orgId, id);
+  if (users.length + shared.length > 0)
+    return {
+      ok: false,
+      message: `${users.length + shared.length} room${users.length + shared.length === 1 ? ' or shared device uses' : 's or shared devices use'} this credential set. Remove it from them first`,
+    };
   await db.credentialSet.delete({ where: { id } });
   return { ok: true };
 }

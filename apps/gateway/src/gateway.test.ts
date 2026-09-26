@@ -597,4 +597,55 @@ describe('bindings', () => {
     await gateway.tick();
     expect(store.get(`bindings:${ROOM}`)).toBeNull();
   });
+
+  it('two rooms that share a device use one connection to it', async () => {
+    const connections: number[] = [];
+    const server = createServer((socket) => {
+      connections.push(1);
+      socket.on('error', () => undefined);
+    });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as { port: number }).port;
+    const shared = { dsp: { siteDeviceId: '77777777-7777-4777-8777-777777777771', exclusive: false } };
+    for (const room of [ROOM, ROOM2]) {
+      cloud.assign(room, design(), { external: true });
+      cloud.setBindings(room, dspAt(port), { shared });
+    }
+    const { gateway, host } = boot({ healthTimeoutMs: 1000 }, cloud.url, 'missing');
+    await gateway.tick();
+    expect(host.ids().sort()).toEqual([ROOM, ROOM2]);
+    await wait(200);
+    expect(connections).toHaveLength(1);
+    expect(host.shared.size).toBe(1);
+    // Both rooms see the device online.
+    expect(host.reports().every((r) => r.devices.find((d) => d.deviceId === 'dsp')!.online)).toBe(true);
+    // Unloading one keeps the connection for the other; unloading both closes it.
+    host.unload(ROOM);
+    expect(host.shared.size).toBe(1);
+    host.unload(ROOM2);
+    expect(host.shared.size).toBe(0);
+  });
+
+  it('a room that is not told a device is shared keeps its own connection', async () => {
+    const connections: number[] = [];
+    const server = createServer((socket) => {
+      connections.push(1);
+      socket.on('error', () => undefined);
+    });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as { port: number }).port;
+    for (const room of [ROOM, ROOM2]) {
+      cloud.assign(room, design(), { external: true });
+      cloud.setBindings(room, dspAt(port));
+    }
+    const { gateway, host } = boot({ healthTimeoutMs: 1000 }, cloud.url, 'missing');
+    await gateway.tick();
+    await wait(200);
+    expect(host.ids()).toHaveLength(2);
+    expect(connections).toHaveLength(2);
+    expect(host.shared.size).toBe(0);
+  });
 });
+

@@ -157,6 +157,25 @@ describe('the starting program for a combined room', () => {
   ];
   const model = deriveCombinedModel(members);
 
+  it('keeps a shared device shared: the combined room refers to the same site device, with the same port mapping', () => {
+    const SHARED = '77777777-7777-4777-8777-777777777771';
+    const a = meeting();
+    const b = meeting();
+    for (const m of [a, b]) {
+      const matrix = m.devices.find((d) => d.category === 'video_matrix')!;
+      matrix.siteDeviceId = SHARED;
+      matrix.ports[0]!.maps = 'phys1';
+    }
+    const combined = deriveCombinedModel([
+      { key: 'r1', name: 'Room 1', model: a },
+      { key: 'r2', name: 'Room 2', model: b },
+    ]);
+    const copies = combined.devices.filter((d) => d.siteDeviceId === SHARED);
+    expect(copies.map((d) => d.id)).toEqual(['r1__matrix', 'r2__matrix']);
+    expect(copies.every((d) => d.ports[0]!.maps === 'phys1')).toBe(true);
+    expect(() => RoomModel.parse(combined)).not.toThrow();
+  });
+
   it('is a valid room model with both rooms devices side by side', () => {
     expect(() => RoomModel.parse(model)).not.toThrow();
     expect(model.devices).toHaveLength(members[0]!.model.devices.length * 2);

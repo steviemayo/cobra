@@ -27,11 +27,12 @@ function world(rooms: Record<string, unknown>[] = []) {
   const roomDraft = table([]);
   const roomBinding = table([]);
   const credentialSet = table([{ id: SET, orgId: ORG, name: 'Site login' }]);
+  const siteDevice = table([]);
   const gateway = table([
     { id: GW, orgId: ORG, siteId: SITE },
     { id: 'other-gw', orgId: ORG, siteId: OTHER_SITE },
   ]);
-  const db = { room, roomDraft, roomBinding, credentialSet, gateway } as unknown as BulkDb;
+  const db = { room, roomDraft, roomBinding, credentialSet, siteDevice, gateway } as unknown as BulkDb;
   const input = (rows: BulkRow[], over: Partial<BulkInput> = {}): BulkInput => ({
     orgId: ORG,
     siteId: SITE,

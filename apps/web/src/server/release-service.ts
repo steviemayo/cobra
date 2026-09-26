@@ -9,7 +9,7 @@ import {
   type PanelBranding,
   type PinnedDriver,
 } from '@kestrel/model';
-import { absorbInline, resolveBindings, type BindingsDb } from './bindings';
+import { absorbInline, resolveBindings, sharedRefs, type BindingsDb } from './bindings';
 import { pinDrivers, type DriverDb } from './custom-drivers';
 import { effectivePanel, readPanel } from './panel-settings';
 import type { SigningKey } from './signing';
@@ -66,7 +66,7 @@ export async function checkPublishable(
     custom: pinned.drivers,
     userId: null,
   });
-  const bindings = (await resolveBindings(db, orgId, room.id))?.devices ?? {};
+  const bindings = (await resolveBindings(db, orgId, room.id, undefined, design))?.devices ?? {};
   return {
     ok: true,
     draft: { revision: draft.revision },
@@ -129,6 +129,7 @@ export async function createRelease(
         manifest: signed as unknown as Prisma.InputJsonValue,
         hash: signed.hash,
         draftRevision: checked.draft.revision,
+        siteDeviceIds: [...new Set(sharedRefs(checked.model).map((r) => r.siteDeviceId))],
         createdBy: userId,
       },
     });

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { generateSecret, hashSecret, roomAccessSecret } from '@kestrel/crypto';
 import type { PrismaClient } from '@kestrel/db';
 import {
+  RoomModel,
   EnrollRequest,
   HeartbeatRequest,
   TelemetryBatch,
@@ -42,6 +43,7 @@ export type Db = Pick<
   | 'roomDivider'
   | 'roomBinding'
   | 'credentialSet'
+  | 'siteDevice'
 >;
 type GatewayRow = NonNullable<Awaited<ReturnType<Db['gateway']['findFirst']>>>;
 export interface Result {
@@ -145,13 +147,23 @@ async function assignments(db: Db, gatewayId: string, masterKey = process.env.KE
   });
   const releases = await db.release.findMany({
     where: { id: { in: rooms.map((r) => r.desiredReleaseId!) } },
-    select: { id: true, roomId: true, number: true, hash: true },
+    select: { id: true, roomId: true, number: true, hash: true, siteDeviceIds: true },
   });
   const byId = new Map(releases.map((r) => [r.id, r]));
   const bindingRows = rooms.length
     ? await db.roomBinding.findMany({ where: { roomId: { in: rooms.map((r) => r.id) } } })
     : [];
   const bindingsOf = new Map(bindingRows.map((b) => [b.roomId, b.version]));
+  // A room that uses shared devices also changes when one of them does.
+  const sharedIds = [...new Set(releases.flatMap((r) => r.siteDeviceIds ?? []))];
+  const sharedVersions = new Map(
+    sharedIds.length ? (await db.siteDevice.findMany({ where: { id: { in: sharedIds } } })).map((d) => [d.id, d.version]) : [],
+  );
+  const versionFor = (roomId: string, releaseId: string | null) => {
+    const own = bindingsOf.get(roomId) ?? 0;
+    const shared = (byId.get(releaseId ?? '')?.siteDeviceIds ?? []).reduce((n, id) => n + (sharedVersions.get(id) ?? 0), 0);
+    return own + shared > 0 ? Math.max(1, own + shared) : undefined;
+  };
   const out: AssignedRoom[] = [];
   for (const room of rooms) {
     const rel = byId.get(room.desiredReleaseId!);
@@ -163,7 +175,7 @@ async function assignments(db: Db, gatewayId: string, masterKey = process.env.KE
         releaseNumber: rel.number,
         manifestHash: rel.hash,
         deploymentId: room.desiredDeploymentId!,
-        ...(bindingsOf.has(room.id) ? { bindingsVersion: bindingsOf.get(room.id)! } : {}),
+        ...(versionFor(room.id, room.desiredReleaseId) ? { bindingsVersion: versionFor(room.id, room.desiredReleaseId)! } : {}),
         ...(masterKey ? { phoneSecret: roomAccessSecret(masterKey, room.id) } : {}),
       });
   }
@@ -267,9 +279,14 @@ export async function bindings(
   if (!signing) return fail(503, 'The cloud has no signing key configured yet');
   const room = await db.room.findFirst({ where: { id: roomId, gatewayId: gw.id, orgId: gw.orgId } });
   if (!room) return fail(404, 'No such room for this gateway');
+  // The design this gateway will run says which shared devices it uses.
+  const release = room.desiredReleaseId
+    ? await db.release.findFirst({ where: { id: room.desiredReleaseId, roomId: room.id, orgId: gw.orgId } })
+    : null;
+  const parsed = RoomModel.safeParse((release?.manifest as { manifest?: { model?: unknown } } | null)?.manifest?.model);
   let signed;
   try {
-    signed = await signedBindingsFor(db, gw.orgId, room.id, signing);
+    signed = await signedBindingsFor(db, gw.orgId, room.id, signing, undefined, parsed.success ? parsed.data : undefined);
   } catch {
     return fail(503, 'The cloud cannot open this room’s logins right now');
   }

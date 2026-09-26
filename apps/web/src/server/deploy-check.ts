@@ -1,11 +1,12 @@
 import type { PrismaClient } from '@kestrel/db';
 import { gatewayNeeds, missingBindings, type CustomDrivers, type DeviceValues, type RoomModel } from '@kestrel/model';
 import { resolveBindings, type BindingsDb } from './bindings';
+import { sharedGatewayProblem } from './site-devices';
 
 // Whether a release can go to a room's gateway right now: the gateway must be able to run it, and
 // every address and login the room needs must be filled in. These functions take the database as a
 // parameter so they can be tested without one.
-export type DeployCheckDb = Pick<PrismaClient, 'release' | 'gateway'> & BindingsDb;
+export type DeployCheckDb = Pick<PrismaClient, 'release' | 'gateway' | 'room' | 'roomDraft'> & BindingsDb;
 
 export type DeployCheck = { ok: true } | { ok: false; message: string };
 
@@ -60,10 +61,23 @@ export async function checkDeployable(
       };
   }
 
+  // A shared device has one connection, so every room that uses it must run on one gateway.
+  const room = await db.room.findFirst({ where: { id: input.roomId, orgId: input.orgId } });
+  if (room) {
+    const shared = await sharedGatewayProblem(db, {
+      orgId: input.orgId,
+      siteId: room.siteId,
+      roomId: input.roomId,
+      gatewayId: input.gatewayId,
+      model: manifest.model,
+    });
+    if (shared) return { ok: false, message: shared };
+  }
+
   const tooOld = await gatewayTooOld(db, input.orgId, input.gatewayId, manifest.model);
   if (tooOld) return { ok: false, message: tooOld };
 
-  const resolved = await resolveBindings(db, input.orgId, input.roomId);
+  const resolved = await resolveBindings(db, input.orgId, input.roomId, undefined, manifest.model);
   const problem = setupProblem(manifest.model, resolved?.devices ?? {}, manifest.drivers ?? {});
   return problem ? { ok: false, message: problem } : { ok: true };
 }
