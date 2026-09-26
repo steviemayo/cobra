@@ -5,6 +5,10 @@ import {
   DEVICE_CATALOG,
   addAvoipSystem,
   avoipFamilies,
+  declaredSettings,
+  settingDefaults,
+  type CustomSettingSources,
+  type DeclaredSetting,
   DeviceCategory,
   LEGACY_CATEGORIES,
   GenericProtocol,
@@ -16,7 +20,9 @@ import {
 } from '@kestrel/model';
 import { useQuery } from '@tanstack/react-query';
 import { useOrg } from '@/components/shell/org-context';
+import { fieldKind, parseFieldValue, type FieldKind } from '@/lib/editor/driver-settings';
 import { PointsEditor } from './PointsEditor';
+import { useDriverSources } from './use-driver-sources';
 import { addDevice, addPort, removeDevice, removePort } from '@/lib/editor/ops';
 import { useTRPC } from '@/trpc/client';
 import {
@@ -176,10 +182,8 @@ function DeviceCard({
   update: PanelProps['update'];
   issues: PanelProps['issues'];
 }) {
-  const trpc = useTRPC();
-  const { orgId } = useOrg();
-  const custom = useQuery({ ...trpc.driver.options.queryOptions({ orgId }), staleTime: 60_000 });
-  const customIds = (custom.data ?? []).map((d) => d.id);
+  const { sources, drivers: customDrivers, ready } = useDriverSources();
+  const [typingId, setTypingId] = useState(false);
   const edit = (fn: (dev: Device) => void) =>
     update((m) => {
       const dev = m.devices.find((x) => x.id === d.id);
@@ -209,47 +213,45 @@ function DeviceCard({
             onChange={(v) =>
               edit((dev) => {
                 if (v === 'none') delete dev.control;
-                else if (v === 'driver')
-                  dev.control = { kind: 'driver', driverId: BUILT_IN_HINTS[0]! };
-                else dev.control = { kind: 'generic', protocol: v };
+                else if (v === 'driver') {
+                  dev.control = { kind: 'driver', driverId: suggestedDriver(dev.category) };
+                  Object.assign(dev.settings, settingDefaults(dev, sources));
+                } else dev.control = { kind: 'generic', protocol: v };
               })
             }
           />
         </Label>
         {d.control?.kind === 'driver' && (
-          <Label text="Driver id">
-            <TextInput
-              list="driver-hints"
-              value={d.control.driverId}
-              onChange={(v) =>
-                edit((dev) => {
-                  if (dev.control?.kind === 'driver') dev.control.driverId = v;
-                })
-              }
-            />
-            <datalist id="driver-hints">
-              {[...BUILT_IN_HINTS, ...customIds].map((h) => (
-                <option key={h} value={h} />
-              ))}
-            </datalist>
+          <Label text="Driver">
+            {typingId || !(driverKnown(d.control.driverId, customDrivers) || (!ready && d.control.driverId.startsWith('custom:'))) ? (
+              <TextInput
+                value={d.control.driverId}
+                placeholder="Driver id"
+                onChange={(v) =>
+                  edit((dev) => {
+                    if (dev.control?.kind === 'driver') dev.control.driverId = v;
+                  })
+                }
+              />
+            ) : (
+              <DriverSelect
+                device={d}
+                customDrivers={customDrivers}
+                onChange={(id) => {
+                  if (id === OTHER) return setTypingId(true);
+                  edit((dev) => {
+                    if (dev.control?.kind !== 'driver' || dev.control.driverId === id) return;
+                    // A new driver starts from its own defaults. What the old one set stays, listed under the fields.
+                    dev.control = { kind: 'driver', driverId: id };
+                    Object.assign(dev.settings, settingDefaults(dev, sources));
+                  });
+                }}
+              />
+            )}
           </Label>
         )}
         {d.control?.kind === 'driver' && BUILT_IN_DRIVERS[d.control.driverId] && (
-          <div className="basis-full text-xs text-muted-foreground">
-            {BUILT_IN_DRIVERS[d.control.driverId]!.description}{' '}
-            <button
-              type="button"
-              className="text-foreground underline-offset-4 hover:underline"
-              onClick={() =>
-                edit((dev) => {
-                  if (dev.control?.kind === 'driver')
-                    dev.settings = structuredClone(BUILT_IN_DRIVERS[dev.control.driverId]!.example);
-                })
-              }
-            >
-              Use example settings
-            </button>
-          </div>
+          <div className="basis-full text-xs text-muted-foreground">{BUILT_IN_DRIVERS[d.control.driverId]!.description}</div>
         )}
         <div className="ml-auto">
           <ConfirmButton
@@ -342,8 +344,199 @@ function DeviceCard({
         <PointsEditor model={model} device={d} edit={edit} roomId={roomId} />
       )}
 
+      <SettingFields device={d} sources={sources} edit={edit} />
       <SettingsEditor value={d.settings} onChange={(v) => edit((dev) => (dev.settings = v))} />
     </Card>
+  );
+}
+
+const OTHER = '__other__';
+
+const driverKnown = (id: string, custom: { id: string }[]) => id in BUILT_IN_DRIVERS || custom.some((c) => c.id === id);
+
+/** The built-in driver that best fits a kind of device, to start from when someone picks "Driver". */
+function suggestedDriver(category: DeviceCategory): string {
+  return BUILT_IN_HINTS.find((id) => BUILT_IN_DRIVERS[id]!.categories.includes(category)) ?? BUILT_IN_HINTS[0]!;
+}
+
+function DriverSelect({
+  device,
+  customDrivers,
+  onChange,
+}: {
+  device: Device;
+  customDrivers: { id: string; name: string }[];
+  onChange: (id: string) => void;
+}) {
+  const current = device.control?.kind === 'driver' ? device.control.driverId : '';
+  const fits = BUILT_IN_HINTS.filter((id) => BUILT_IN_DRIVERS[id]!.categories.includes(device.category));
+  const others = BUILT_IN_HINTS.filter((id) => !fits.includes(id));
+  const opts = (ids: string[]) =>
+    ids.map((id) => (
+      <option key={id} value={id}>
+        {BUILT_IN_DRIVERS[id]!.name}
+      </option>
+    ));
+  return (
+    <select className={inputCls} value={current} onChange={(e) => onChange(e.target.value)}>
+      {fits.length > 0 && <optgroup label={`For ${DEVICE_CATALOG[device.category].label}`}>{opts(fits)}</optgroup>}
+      {others.length > 0 && <optgroup label="Other built-in drivers">{opts(others)}</optgroup>}
+      {customDrivers.length > 0 && (
+        <optgroup label="Your drivers">
+          {customDrivers.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </optgroup>
+      )}
+      <option value={OTHER}>Other: type a driver id…</option>
+    </select>
+  );
+}
+
+/**
+ * A driver's design settings as fields, so nobody has to write them as JSON. Addresses and logins
+ * are not here: they are entered on the Setup tab and kept out of the design.
+ */
+function SettingFields({
+  device: d,
+  sources,
+  edit,
+}: {
+  device: Device;
+  sources: CustomSettingSources;
+  edit: (fn: (dev: Device) => void) => void;
+}) {
+  const declared = d.control ? declaredSettings(d, sources) : undefined;
+  if (!declared) return null;
+  const design = declared.filter((s) => s.scope === 'design');
+  const setup = declared.filter((s) => s.scope !== 'design');
+  const known = new Set(declared.map((s) => s.key));
+  const extra = Object.keys(d.settings).filter((k) => !known.has(k));
+  const setValue = (key: string, value: unknown) =>
+    edit((dev) => {
+      if (value === undefined) delete dev.settings[key];
+      else dev.settings[key] = value;
+    });
+  return (
+    <div className="space-y-2">
+      {design.length > 0 && (
+        <>
+          <div className="text-xs text-muted-foreground">Settings</div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {design.map((s) => (
+              <SettingField key={s.key} setting={s} value={d.settings[s.key]} onChange={(v) => setValue(s.key, v)} />
+            ))}
+          </div>
+        </>
+      )}
+      {setup.length > 0 && (
+        <p className="text-xs text-muted-foreground">Set on the Setup tab: {setup.map((s) => s.label).join(', ')}.</p>
+      )}
+      {extra.length > 0 && (
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          Not read by this driver:
+          {extra.map((k) => (
+            <span key={k} className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono">
+              {k}
+              <button type="button" className="text-destructive" title={`Remove ${k}`} onClick={() => setValue(k, undefined)}>
+                ×
+              </button>
+            </span>
+          ))}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function SettingField({
+  setting: s,
+  value,
+  onChange,
+}: {
+  setting: DeclaredSetting;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const kind = fieldKind(s, value);
+  if (kind === 'boolean')
+    return (
+      <label className="flex items-center gap-2 pt-5 text-sm" title={s.help}>
+        <input type="checkbox" checked={value === true} onChange={(e) => onChange(e.target.checked)} />
+        {s.label}
+      </label>
+    );
+  return (
+    <Label text={`${s.label}${s.required ? ' (required)' : ''}`}>
+      <ValueInput kind={kind} value={value} placeholder={s.default === undefined ? '' : String(s.default)} onChange={onChange} />
+      {s.help && <span className="text-[11px] font-normal">{s.help}</span>}
+    </Label>
+  );
+}
+
+/** A text, number or JSON entry that keeps what is being typed until it is valid. */
+export function ValueInput({
+  kind,
+  value,
+  placeholder,
+  dataCell,
+  disabled,
+  onChange,
+}: {
+  kind: Exclude<FieldKind, 'boolean'>;
+  value: unknown;
+  placeholder?: string;
+  /** Where this is in a table, for moving between cells with the keyboard. */
+  dataCell?: string;
+  disabled?: boolean;
+  onChange: (v: unknown) => void;
+}) {
+  const shown = value === undefined ? '' : kind === 'json' ? JSON.stringify(value, null, 2) : String(value);
+  const [text, setText] = useState(shown);
+  const [seen, setSeen] = useState(shown);
+  const [error, setError] = useState('');
+  if (seen !== shown) {
+    setSeen(shown);
+    setText(shown);
+    setError('');
+  }
+  const commit = (t: string) => {
+    const r = parseFieldValue(kind, t);
+    if (!r.ok) return setError(r.message);
+    setError('');
+    onChange(r.value);
+  };
+  return (
+    <>
+      {kind === 'json' ? (
+        <textarea
+          className={`${inputCls} h-20 w-full font-mono text-xs`}
+          value={text}
+          disabled={disabled ?? false}
+          {...(dataCell ? { 'data-cell': dataCell } : {})}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={() => commit(text)}
+        />
+      ) : (
+        <input
+          className={inputCls}
+          type={kind === 'number' ? 'number' : 'text'}
+          value={text}
+          disabled={disabled ?? false}
+          {...(dataCell ? { 'data-cell': dataCell } : {})}
+          {...(placeholder ? { placeholder } : {})}
+          onChange={(e) => {
+            setText(e.target.value);
+            // Text applies as it is typed, like the other fields. A number or JSON waits until it parses.
+            if (kind === 'text') onChange(e.target.value === '' ? undefined : e.target.value);
+          }}
+          onBlur={() => commit(text)}
+        />
+      )}
+      {error && <span className="text-xs text-destructive">{error}</span>}
+    </>
   );
 }
 

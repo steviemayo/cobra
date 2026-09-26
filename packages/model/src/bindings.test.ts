@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   RoomModel,
   applyBindings,
+  declaredSettings,
   missingBindings,
+  settingDefaults,
   scopeOfSetting,
   slotsFor,
   splitSettings,
@@ -86,6 +88,52 @@ describe('slots and scope', () => {
 
   it('a device with no driver needs nothing', () => {
     expect(slotsFor(device({}))).toEqual([]);
+  });
+});
+
+describe('what a driver starts from', () => {
+  const visca = (settings: Record<string, unknown> = {}) =>
+    device({ category: 'ptz_camera', control: { kind: 'driver', driverId: 'visca-ip' }, settings });
+
+  it('lists every setting of a driver with what it is for', () => {
+    expect(declaredSettings(visca())!.map((s) => [s.key, s.scope])).toEqual([
+      ['host', 'binding'],
+      ['port', 'binding'],
+      ['presets', 'design'],
+      ['cameraAddress', 'design'],
+    ]);
+    expect(declaredSettings(device({}))).toBeUndefined();
+  });
+
+  it('starts design settings from the example, never an address or a placeholder', () => {
+    expect(settingDefaults(visca())).toEqual({ presets: { Wide: 0, Podium: 1 } });
+    const sony = device({ control: { kind: 'driver', driverId: 'lib:sony-bravia' } });
+    expect(settingDefaults(sony)).toEqual({});
+  });
+
+  it('leaves what the device already has', () => {
+    expect(settingDefaults(visca({ presets: { Stage: 4 } }))).toEqual({});
+  });
+
+  it('gives a copy, so a device cannot change the driver’s example', () => {
+    const a = settingDefaults(visca()).presets as Record<string, number>;
+    a.Wide = 9;
+    expect(settingDefaults(visca()).presets).toEqual({ Wide: 0, Podium: 1 });
+  });
+
+  it('starts a custom driver from its own defaults, design settings only', () => {
+    const sources = {
+      'custom:mine': {
+        spec: {
+          settings: [
+            { key: 'zone', label: 'Zone', type: 'number' as const, required: false, default: 3 },
+            { key: 'pin', label: 'PIN', type: 'secret' as const, required: true, default: '0000' },
+          ],
+        },
+      },
+    };
+    const d = device({ control: { kind: 'driver', driverId: 'custom:mine' } });
+    expect(settingDefaults(d, sources)).toEqual({ zone: 3 });
   });
 });
 

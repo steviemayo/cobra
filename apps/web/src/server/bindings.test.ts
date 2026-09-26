@@ -9,6 +9,7 @@ import {
   listCredentialSets,
   resolveBindings,
   saveDeviceBinding,
+  saveDeviceBindings,
   signedBindingsFor,
   updateCredentialSet,
   type BindingsDb,
@@ -88,6 +89,37 @@ describe('saving a device binding', () => {
     expect(await saveDeviceBinding(w.db, { ...base, device: dsp, set: { host: '10.0.0.5' } }, undefined)).toMatchObject({
       ok: true,
     });
+  });
+});
+
+describe('saving many device bindings at once', () => {
+  it('gives the room one new version for all of them', async () => {
+    const w = world();
+    const r = await saveDeviceBindings(
+      w.db,
+      {
+        ...base,
+        changes: [
+          { device: dsp, set: { host: '10.0.0.5', password: 'hunter2' } },
+          { device: proj, set: { host: '10.0.0.9' } },
+        ],
+      },
+      KEY,
+    );
+    expect(r).toEqual({ ok: true, version: 1 });
+    expect(w.roomBinding.rows[0]!.values).toEqual({ dsp: { host: '10.0.0.5' }, proj: { host: '10.0.0.9' } });
+    expect(JSON.parse(open(w.roomBinding.rows[0]!.sealed as string, KEY))).toEqual({ dsp: { password: 'hunter2' } });
+  });
+
+  it('saves nothing when one of the changes is not allowed', async () => {
+    const w = world();
+    const r = await saveDeviceBindings(
+      w.db,
+      { ...base, changes: [{ device: dsp, set: { host: '10.0.0.5' } }, { device: proj, set: { inputs: 'x' } }] },
+      KEY,
+    );
+    expect(r).toMatchObject({ ok: false });
+    expect(w.roomBinding.rows).toHaveLength(0);
   });
 });
 
