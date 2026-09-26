@@ -402,7 +402,7 @@ Working rules that apply to all of them:
 | E | Audit retention and export | medium | **built** (default 12 months, see `docs/decisions.md`); apply migration `org_retention` |
 | F | Panel function pages (cameras, microphones, recorder, room controls) | large | **built** except tracking and a recorder page (`docs/decisions.md`, F-1 to F-9); try on real devices |
 | G | Org accent colour in the portal | small | **built** (`docs/decisions.md`, G-1 to G-4) |
-| H | Email notifications (tickets and alerts) | small | a domain, Resend verified (step 6 above) |
+| H | Email notifications (tickets and alerts) | small | **built**, sends once Resend is set up (`docs/decisions.md`, H-1 to H-6) |
 | I | Staff user management and a staff audit viewer | small | **built** (`docs/decisions.md`, I-1 to I-6) |
 | J | Assign tickets to provider people | medium | **built** (`docs/decisions.md`, J-1 to J-6) |
 | K | SLAs and priority timers | medium | after first customers |
@@ -522,6 +522,8 @@ Pre-read: `packages/panel-ui/src/theme.ts` (`legibleAccent`), `apps/web/src/comp
 Do: apply the org's accent to the portal's primary tokens for that organisation, using `legibleAccent` in both themes; warn in the branding form when the chosen colour had to be adjusted. Done when: changing the accent changes the portal and the panel and never produces unreadable text.
 
 ### H. Email notifications
+
+**Status: built.** It only sends once `RESEND_API_KEY` and `ALERT_FROM_EMAIL` are set (needs the sending domain, step 6), and staff get escalation emails when `STAFF_TICKET_EMAIL` is set. The text below is the original brief.
 
 Blocked on a domain and a verified Resend sender (step 6 above).
 
