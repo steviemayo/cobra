@@ -575,6 +575,65 @@ Needs a business decision first: today the customer pays Kestrel directly and th
 
 WSS push (removes the first-connect lag), Stripe Connect payouts for marketplace publishers, third-party driver marketplace, sandboxed custom-logic hooks. Pre-read for each: `docs/phase-4-preread.md` ("Known limitations", "Suggested next steps"), `docs/driver-sdk.md`, `docs/plan.md` (Key Architectural Bets).
 
+### Launch readiness (added 2026-09-26, do soon, none done)
+
+From the MVP-to-launch review. Legal items need a lawyer; the rest are build or setup work. A code scan on 2026-09-26 found no Terms or Privacy pages, no rate limiting, no CSP or security headers, no customer MFA (staff only) and no backup or incident docs; re-check before starting.
+
+**Before any paying customer**
+
+- [ ] **LR-1 Terms of Service / SaaS agreement.** Liability cap (including a bad deploy taking rooms down), acceptable use, IP ownership of customer room programs.
+- [ ] **LR-2 Privacy Policy.** Australian Privacy Act 1988 / APPs; GDPR too if any EU or UK customers or users. State the real data location (Vercel compute may not be in AU).
+- [ ] **LR-3 Data Processing Addendum (DPA) template.** Kestrel acts as processor. Enterprise customers will ask.
+- [ ] **LR-4 Subprocessor list.** Supabase, Vercel, Stripe, Resend, GitHub/GHCR, plus any email or Teams providers. Publish it.
+- [ ] **LR-5 Acceptance flow.** Click-through at sign-up and org creation; store the terms version and timestamp per user or org. Terms and Privacy pages in the portal.
+- [ ] **LR-6 SLA position.** Decide what is promised, or state nothing is promised at launch.
+- [ ] **LR-7 Stripe live and tax.** Move from test to live; GST/tax settings, invoices, refund and cancellation terms.
+- [ ] **LR-8 Company basics.** Registered entity, professional indemnity and cyber insurance, owned domain and sending domain (SPF/DKIM/DMARC; already blocks email in step 6).
+- [ ] **LR-9 Rate limiting and lockout.** Login, password reset, gateway enrollment, panel PIN attempts, tRPC API.
+- [ ] **LR-10 Security headers.** CSP, HSTS, frame-ancestors; CSRF review of the Stripe and cron endpoints.
+- [ ] **LR-11 Prod and dev separation.** Separate Supabase and Stripe projects; rotate secrets used during development.
+- [ ] **LR-12 Backups.** Supabase point-in-time recovery (paid tier) and a tested restore.
+- [ ] **LR-13 Breach runbook.** Australian Notifiable Data Breaches scheme: who decides, who notifies the OAIC and affected people, and within what time.
+- [ ] **LR-14 Personal data map.** What is held (emails, names, IPs, audit logs, ticket contents, calendar data), why, and for how long. Feeds LR-2 and LR-3.
+
+**Before the first enterprise deal**
+
+- [ ] **LR-15 Customer MFA.** Available to all; enforced for owner and dev roles.
+- [ ] **LR-16 Org deletion and full data export.** Deletion that cascades, plus user and org export (audit export exists; the rest does not).
+- [ ] **LR-17 Retention policy.** Extend beyond the 90-day telemetry and audit settings: tickets, deleted accounts, backups.
+- [ ] **LR-18 Row Level Security as defence-in-depth,** plus cross-tenant access tests on every router.
+- [ ] **LR-19 Signing key plan.** Storage, rotation and compromise recovery for the manifest signing key.
+- [ ] **LR-20 Gateway hardening.** Enrollment token revocation, image signing (cosign) with a pinned digest, updater that cannot be hijacked.
+- [ ] **LR-21 Supply chain.** Dependabot, `pnpm audit` in CI, lockfile review.
+- [ ] **LR-22 Error tracking and alerting.** Sentry (or similar) with PII scrubbing; alerts on failed cron jobs and webhooks.
+- [ ] **LR-23 Third-party penetration test,** `security.txt` and a disclosure contact.
+- [ ] **LR-24 Operations.** Vercel Pro (cron limits and commercial-use terms), status page, staged gateway rollout with a tested rollback, support intake and onboarding doc.
+- [ ] **LR-25 Load and soak test.** ~50 rooms per gateway; many gateways sending heartbeat and telemetry together.
+- [ ] **LR-26 SOC 2 or ISO 27001 groundwork.** Start collecting evidence early (Vanta or Drata). Essential Eight / IRAP only if targeting Australian government.
+
+### Post-launch roadmap (added 2026-09-26, none built)
+
+Candidates from the MVP-to-launch review. Only usage and occupancy analytics was kept from the "big value adds"; predictive health, AI room design, the marketplace and simulator sharing were dropped (the marketplace stays under M as before). Order and sizing still to decide.
+
+**N. Usage and occupancy analytics.** Room utilisation, which activities people use, peak times, no-show bookings (once booking integration exists). Built on signals the gateway already reports (occupancy, signal detect, activity taps). Pre-read: `docs/phase-4-preread.md` (telemetry), `packages/model` (protocol messages), the retention job (90-day telemetry limit; aggregates may need to be kept longer).
+
+**Missing features**
+
+- **O. Bulk operations and staged rollouts.** Deploy, update or roll back many rooms or sites at once, with a canary room first, then the rest.
+- **P. Room cloning and site templates.** Copy a room; stamp out many identical rooms from one master.
+- **Q. Config diff and history.** What changed between releases, who changed it, one-click revert.
+- **R. Pre-deploy validation and dry run.** Warn before a release goes out if a room will break (for example the driver is missing on its gateway). Extends the engine validator.
+- **S. Device discovery.** The gateway scans its network for known device types and prefills the room model.
+- **T. Firmware and driver update management.** Track device firmware versions; flag out-of-date or vulnerable ones.
+- **U. Room booking integration.** Current and next meeting on the panel, auto-start, check-in, release no-shows. Goes beyond the existing calendar triggers.
+- **V. Notification and escalation rules.** On-call schedules, quiet hours, repeat alerts until acknowledged. Extends the alert channels.
+- **W. Reporting.** Monthly PDF or email per customer: uptime, usage, tickets. Depends on N.
+- **X. Public API and outbound webhooks.** API keys per organisation; an event stream for building systems, ITSM and chat tools.
+- **Y. Mobile tech app and commissioning checklist.** Guided per-room test (each source, mic, camera) with a saved pass/fail record and sign-off.
+- **Z. Staging rooms.** Try a program on a real gateway without touching production rooms.
+- **AA. White label for service providers.** Custom domain and branding. Same business decision as L.
+- **AB. SSO (SAML/OIDC).** Enterprise requirement.
+
 ### Small fixes to fit in anywhere
 
 - One gateway test (`apps/gateway/src/panel-server.test.ts`, "greet the panel and stream the room state") failed once in a full run and passed twice on rerun: make it deterministic
