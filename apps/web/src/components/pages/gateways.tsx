@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Copy, MoreHorizontal, Pencil, Plus, RefreshCw, Rocket, Router, Trash2 } from 'lucide-react';
+import { Check, Copy, Download, MoreHorizontal, Pencil, Plus, RefreshCw, Rocket, Router, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
@@ -9,7 +9,7 @@ import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { useOrg } from '@/components/shell/org-context';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -46,6 +46,10 @@ import type { RouterOutputs } from '@/trpc/types';
 type Gateway = RouterOutputs['gateway']['list'][number];
 
 const IMAGE = process.env.NEXT_PUBLIC_GATEWAY_IMAGE ?? 'ghcr.io/steviemayo/kestrel-gateway:stable';
+// The self-contained Windows bundle (brings its own Node, no Docker needed), published by CI to the stable release.
+const WINDOWS_BUNDLE =
+  process.env.NEXT_PUBLIC_GATEWAY_WINDOWS_URL ??
+  'https://github.com/steviemayo/cobra/releases/download/gateway-stable/kestrel-gateway-win-x64.zip';
 
 function StatusPill({ status }: { status: Gateway['status'] }) {
   const tone = { online: 'bg-success', offline: 'bg-destructive', pending: 'bg-warning' }[status];
@@ -121,11 +125,20 @@ export function GatewaysView() {
         title="Gateways"
         description="On-site machines that run your rooms, keep them working offline and report their status."
         actions={
-          canEdit && (
-            <Button size="sm" onClick={() => setAdding(true)}>
-              <Plus data-icon="inline-start" /> Add gateway
-            </Button>
-          )
+          <>
+            <a
+              href={WINDOWS_BUNDLE}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              title="Self-contained gateway for Windows. No Docker needed"
+            >
+              <Download data-icon="inline-start" /> Windows bundle
+            </a>
+            {canEdit && (
+              <Button size="sm" onClick={() => setAdding(true)}>
+                <Plus data-icon="inline-start" /> Add gateway
+              </Button>
+            )}
+          </>
         }
       />
       {gateways.isPending ? (
@@ -386,6 +399,13 @@ function TokenDialog({
             </DialogHeader>
             <CopyBox label="Enrolment token" text={token.token} />
             <CopyBox label="Run on the gateway machine (Docker)" text={runCommand(token.token)} />
+            <p className="text-xs text-muted-foreground">
+              No Docker on the machine?{' '}
+              <a className="underline underline-offset-4" href={WINDOWS_BUNDLE}>
+                Download the Windows bundle
+              </a>
+              .
+            </p>
             <DialogFooter>
               <Button onClick={onClose}>Done</Button>
             </DialogFooter>

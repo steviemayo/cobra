@@ -419,6 +419,7 @@ Working rules that apply to all of them:
 | K | SLAs and priority timers | medium | **built** early (`docs/decisions.md`, K-1 to K-7); confirm the default targets with a first customer |
 | L | Provider billing and white label | large | a business decision on who pays |
 | M | Earlier candidates: WSS push, Stripe Connect payouts, third-party drivers, sandboxed logic hooks | large each | see `docs/phase-4-preread.md` |
+| N | Windows gateway download from the Gateways page | small | **built** (header button and enrolment dialog; `NEXT_PUBLIC_GATEWAY_WINDOWS_URL`). Needs the `gateway-stable` release asset to be downloadable without a GitHub sign-in: on 2026-09-26 it answered 404 to a signed-out request (private repo), so publish the zip somewhere public or serve it through the portal |
 
 Do A first: nothing from the last round has been clicked through while signed in. Then B and C are the highest value.
 

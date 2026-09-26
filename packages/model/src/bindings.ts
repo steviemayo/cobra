@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { DriverSpec } from './driver-spec';
+import type { DriverSetting, DriverSpec } from './driver-spec';
 import { BUILT_IN_DRIVERS } from './room/drivers';
 import { settingScope, type SettingScope } from './room/driver-classes';
 import type { Device } from './room/device';
@@ -41,11 +41,26 @@ const GENERIC_SLOTS: Record<string, BindingSlot[]> = {
   ],
 };
 
+/** What the editor needs of a custom driver: its settings. A `CustomDrivers` entry has more, and fits. */
+export type CustomSettingSources = Record<string, { spec: { settings: DriverSetting[] } }>;
+
+/** One setting a driver reads, with what it is for and, where the driver has one, a value to start from. */
+export interface DeclaredSetting {
+  key: string;
+  label: string;
+  scope: SettingScope;
+  required: boolean;
+  /** How the value is entered. Left out for a built-in driver, where the type is read from the starting value. */
+  type?: DriverSetting['type'];
+  default?: unknown;
+  help?: string;
+}
+
+/** An example value with a <placeholder> anywhere in it is something to replace, not a value to start from. */
+const isPlaceholder = (v: unknown) => /"<[^">]*>"/.test(JSON.stringify(v) ?? '');
+
 /** Every setting a driver says it reads, with what each is for. Undefined for a driver we know nothing about. */
-function declared(
-  device: Device,
-  custom: CustomDrivers,
-): { key: string; label: string; scope: SettingScope; required: boolean }[] | undefined {
+function declared(device: Device, custom: CustomSettingSources): DeclaredSetting[] | undefined {
   const control = device.control;
   if (!control) return undefined;
   if (control.kind === 'generic') return GENERIC_SLOTS[control.protocol];
@@ -57,18 +72,47 @@ function declared(
       label: s.label,
       scope: settingScope(s.key, { scope: s.scope, type: s.type }),
       required: s.required,
+      type: s.type,
+      ...(s.default !== undefined ? { default: s.default } : {}),
+      ...(s.help ? { help: s.help } : {}),
     }));
     const keys = new Set(own.map((s) => s.key));
     return [...(keys.has('host') ? [] : [HOST]), ...(keys.has('port') ? [] : [PORT]), ...own];
   }
   const info = BUILT_IN_DRIVERS[control.driverId];
-  return info?.settings.map((s) => ({ key: s.key, label: s.label, scope: s.scope, required: !!s.required }));
+  return info?.settings.map((s) => {
+    const example = info.example[s.key];
+    return {
+      key: s.key,
+      label: s.label,
+      scope: s.scope,
+      required: !!s.required,
+      ...(example !== undefined && !isPlaceholder(example) ? { default: example } : {}),
+    };
+  });
+}
+
+/** Every setting of a device's driver, whatever it is for, for showing them as fields. Undefined when the driver is not known. */
+export function declaredSettings(device: Device, custom: CustomSettingSources = {}): DeclaredSetting[] | undefined {
+  return declared(device, custom);
+}
+
+/**
+ * The design settings a device's driver starts from that the device does not have yet. Addresses and
+ * logins never appear here: they are filled in on the Setup tab, and no example value is a real one.
+ */
+export function settingDefaults(device: Device, custom: CustomSettingSources = {}): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const s of declared(device, custom) ?? [])
+    if (s.scope === 'design' && s.default !== undefined && device.settings[s.key] === undefined)
+      out[s.key] = structuredClone(s.default);
+  return out;
 }
 
 /** What someone has to fill in for this device outside the design. Empty for a device with no driver. */
 export function slotsFor(device: Device, custom: CustomDrivers = {}): BindingSlot[] {
-  return (declared(device, custom) ?? []).filter(
-    (s): s is BindingSlot => s.scope === 'binding' || s.scope === 'secret',
+  return (declared(device, custom) ?? []).flatMap((s): BindingSlot[] =>
+    s.scope === 'design' ? [] : [{ key: s.key, label: s.label, scope: s.scope, required: s.required }],
   );
 }
 

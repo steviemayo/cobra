@@ -5,14 +5,18 @@ import { toast } from 'sonner';
 import type { DeviceBindingView } from '@/server/bindings';
 import { useOrg } from '@/components/shell/org-context';
 import { useTRPC } from '@/trpc/client';
-import { Card, Label, btnCls, ghostBtnCls, inputCls } from './ui';
+import { SetupTable } from './SetupTable';
+import { Card, Label, btnCls, ghostBtnCls, inputCls, type PanelProps } from './ui';
 
 // Where each device is and how to log in to it. These are kept out of the design, so templates
 // carry none of them and an address can change without a new release. Logins are write-only: once
 // saved they are never shown again, only "set".
-export function SetupPanel({ roomId }: { roomId: string }) {
+export function SetupPanel({ roomId, model, update }: Pick<PanelProps, 'model' | 'update'> & { roomId: string }) {
   const trpc = useTRPC();
   const { orgId, canEdit } = useOrg();
+  // Cards show one device at a time and can test a connection. The table is for filling many quickly.
+  const [layout, setLayout] = useState<'cards' | 'table' | null>(null);
+  const [tableDirty, setTableDirty] = useState(false);
   const view = useQuery({ ...trpc.binding.view.queryOptions({ orgId, roomId }), staleTime: 0, refetchOnWindowFocus: false });
   const sets = useQuery({
     ...trpc.binding.credentialSets.list.queryOptions({ orgId }),
@@ -23,6 +27,8 @@ export function SetupPanel({ roomId }: { roomId: string }) {
   if (view.isError) return <p className="text-sm text-destructive">{view.error.message}</p>;
   const data = view.data;
   const pending = data.version !== null && data.hasGateway && data.reportedVersion !== data.version;
+  // With many devices the table is the quicker way in, so it opens first.
+  const shown = layout ?? (data.devices.length > 5 ? 'table' : 'cards');
 
   return (
     <div className="space-y-4">
@@ -55,22 +61,55 @@ export function SetupPanel({ roomId }: { roomId: string }) {
           </p>
         )}
       </div>
-      <p className="text-xs text-muted-foreground">
-        Enter addresses and logins here, not in a device’s driver settings. A value entered here wins over one in the settings.
-      </p>
-      {data.devices.length === 0 && (
-        <p className="text-sm text-muted-foreground">No device in this room needs an address or login.</p>
-      )}
-      {data.devices.map((d) => (
-        <DeviceSetup
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          Enter addresses and logins here, not in a device’s driver settings. A value entered here wins over one in the settings.
+        </p>
+        <div className="inline-flex rounded-lg border border-border p-0.5 text-sm">
+          {(['cards', 'table'] as const).map((l) => (
+            <button
+              key={l}
+              type="button"
+              className={`rounded-md px-3 py-1 ${shown === l ? 'bg-muted font-medium' : 'text-muted-foreground'}`}
+              onClick={() => {
+                if (l === shown) return;
+                if (tableDirty && !window.confirm('Discard the changes in the table that are not saved?')) return;
+                setTableDirty(false);
+                setLayout(l);
+              }}
+            >
+              {l === 'cards' ? 'Cards' : 'Table'}
+            </button>
+          ))}
+        </div>
+      </div>
+      {shown === 'table' ? (
+        <SetupTable
           roomId={roomId}
-          key={`${d.deviceId}:${data.version}`}
-          device={d}
+          model={model}
+          update={update}
+          views={data.devices}
           sets={sets.data ?? []}
           canEdit={canEdit}
-          hasGateway={data.hasGateway}
+          onDirty={setTableDirty}
         />
-      ))}
+      ) : (
+        <>
+          {data.devices.length === 0 && (
+            <p className="text-sm text-muted-foreground">No device in this room needs an address or login.</p>
+          )}
+          {data.devices.map((d) => (
+            <DeviceSetup
+              roomId={roomId}
+              key={`${d.deviceId}:${data.version}`}
+              device={d}
+              sets={sets.data ?? []}
+              canEdit={canEdit}
+              hasGateway={data.hasGateway}
+            />
+          ))}
+        </>
+      )}
     </div>
   );
 }

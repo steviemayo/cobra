@@ -209,6 +209,12 @@ export async function signedBindingsFor(
 
 export type SaveResult = { ok: true; version: number } | { ok: false; message: string };
 
+export interface DeviceBindingChange {
+  device: Device;
+  set?: Fields;
+  credentialSetId?: string | null;
+}
+
 /**
  * Set, replace or clear addresses and logins for one device. `set` may only name settings the
  * driver says are a binding or a secret; design settings belong in the device editor. An empty
@@ -227,6 +233,32 @@ export async function saveDeviceBinding(
   },
   key = secretsKey(),
 ): Promise<SaveResult> {
+  const { device, set, credentialSetId, ...rest } = input;
+  return saveDeviceBindings(
+    db,
+    {
+      ...rest,
+      changes: [{ device, ...(set ? { set } : {}), ...(credentialSetId !== undefined ? { credentialSetId } : {}) }],
+    },
+    key,
+  );
+}
+
+/**
+ * The same for many devices of one room at once, so the room gets one new version. Nothing is
+ * saved unless every change is allowed.
+ */
+export async function saveDeviceBindings(
+  db: BindingsDb,
+  input: {
+    orgId: string;
+    roomId: string;
+    custom?: CustomDrivers;
+    changes: DeviceBindingChange[];
+    userId: string | null;
+  },
+  key = secretsKey(),
+): Promise<SaveResult> {
   const custom = input.custom ?? {};
   const next = emptyNext();
   const current = await read(db, input.roomId, key);
@@ -235,27 +267,29 @@ export async function saveDeviceBinding(
     next.secrets = structuredClone(current.secrets);
     next.credentialSets = { ...current.credentialSets };
   }
-  const id = input.device.id;
-  if (input.device.siteDeviceId)
-    return { ok: false, message: 'This device is shared. Change its address or login on the Shared devices page' };
+  for (const change of input.changes) {
+    const id = change.device.id;
+    if (change.device.siteDeviceId)
+      return { ok: false, message: 'This device is shared. Change its address or login on the Shared devices page' };
 
-  for (const [k, v] of Object.entries(input.set ?? {})) {
-    const scope = scopeOfSetting(input.device, k, custom);
-    if (scope === 'design')
-      return { ok: false, message: `“${k}” is part of the device’s design, not its address or login` };
-    const bucket = scope === 'secret' ? next.secrets : next.values;
-    if (blank(v)) {
-      if (bucket[id]) delete bucket[id][k];
-    } else (bucket[id] ??= {})[k] = v;
-  }
-  for (const b of [next.values, next.secrets]) if (b[id] && Object.keys(b[id]).length === 0) delete b[id];
+    for (const [k, v] of Object.entries(change.set ?? {})) {
+      const scope = scopeOfSetting(change.device, k, custom);
+      if (scope === 'design')
+        return { ok: false, message: `“${k}” is part of the device’s design, not its address or login` };
+      const bucket = scope === 'secret' ? next.secrets : next.values;
+      if (blank(v)) {
+        if (bucket[id]) delete bucket[id][k];
+      } else (bucket[id] ??= {})[k] = v;
+    }
+    for (const b of [next.values, next.secrets]) if (b[id] && Object.keys(b[id]).length === 0) delete b[id];
 
-  if (input.credentialSetId !== undefined) {
-    if (input.credentialSetId === null) delete next.credentialSets[id];
-    else {
-      const set = await db.credentialSet.findFirst({ where: { id: input.credentialSetId, orgId: input.orgId } });
-      if (!set) return { ok: false, message: 'That credential set does not exist' };
-      next.credentialSets[id] = set.id;
+    if (change.credentialSetId !== undefined) {
+      if (change.credentialSetId === null) delete next.credentialSets[id];
+      else {
+        const set = await db.credentialSet.findFirst({ where: { id: change.credentialSetId, orgId: input.orgId } });
+        if (!set) return { ok: false, message: 'That credential set does not exist' };
+        next.credentialSets[id] = set.id;
+      }
     }
   }
   const secretCount = Object.values(next.secrets).reduce((n, f) => n + Object.keys(f).length, 0);
