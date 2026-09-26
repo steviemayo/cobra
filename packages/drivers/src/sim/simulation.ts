@@ -55,6 +55,7 @@ const ALWAYS_ON_SOURCES = new Set([
   'conference_system',
   ...CAMERAS,
 ]);
+const MICS = new Set(['reinforcement_mic', 'voice_capture_mic']);
 const ENVIRONMENT = new Set(['lighting', 'hvac', 'blinds', 'lifter', 'screen']);
 
 /**
@@ -181,6 +182,8 @@ export class Simulation implements DeviceBus {
         s.blanked = false;
         break;
       case 'conference_system':
+      case 'reinforcement_mic':
+      case 'voice_capture_mic':
         s.muted = false;
         break;
       case 'video_matrix':
@@ -282,13 +285,21 @@ export class Simulation implements DeviceBus {
       case 'mute':
       case 'volume':
       case 'preset': {
-        // A conference system also mutes, for Privacy Mute.
-        if (cat !== 'audio_matrix' && !(c.type === 'mute' && cat === 'conference_system'))
+        // A conference system also mutes (Privacy Mute), and so does a microphone.
+        if (
+          cat !== 'audio_matrix' &&
+          !(c.type === 'mute' && (cat === 'conference_system' || MICS.has(cat)))
+        )
           return this.unsupported(d, c);
         await this.delay(this.latency.dsp);
         if (c.type === 'mute') state.muted = c.muted;
         else if (c.type === 'volume') state.volume = c.level;
         else state.preset = c.name;
+        break;
+      }
+      case 'camera_move': {
+        if (!CAMERAS.has(cat)) return this.unsupported(d, c);
+        await this.delay(this.latency.generic);
         break;
       }
       case 'camera_preset': {

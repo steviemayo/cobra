@@ -15,6 +15,16 @@ export const DeviceCommand = z.discriminatedUnion('type', [
   z.object({ type: z.literal('camera_preset'), name: z.string().min(1) }),
   z.object({ type: z.literal('scene'), name: z.string().min(1) }),
   z.object({ type: z.literal('record'), on: z.boolean() }),
+  /**
+   * Point a camera: pan and tilt left/right and up/down, zoom in/out. -1, 0 or 1 for each; all zero
+   * stops. A camera keeps moving until it is told to stop.
+   */
+  z.object({
+    type: z.literal('camera_move'),
+    pan: z.number().int().min(-1).max(1),
+    tilt: z.number().int().min(-1).max(1),
+    zoom: z.number().int().min(-1).max(1),
+  }),
   /** Displays: blank the picture (or bring it back) without powering off. */
   z.object({ type: z.literal('blank'), on: z.boolean() }),
   z.object({

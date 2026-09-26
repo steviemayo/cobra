@@ -250,6 +250,35 @@ describe('VISCA over IP camera driver', () => {
     expect(cam.power).toBe('off');
   });
 
+  it('points the camera: pan, tilt and zoom, and stops', async () => {
+    const cam = await fakeCamera();
+    const d = make(cam, { panSpeed: 8, tiltSpeed: 6, zoomSpeed: 2 });
+    d.start();
+    await until(() => d.getState().online);
+    await d.send({ type: 'camera_move', pan: -1, tilt: 1, zoom: 1 });
+    const drive = () => cam.received.filter((p) => p[2] === 0x06 && p[3] === 0x01).at(-1);
+    const zoom = () => cam.received.filter((p) => p[2] === 0x04 && p[3] === 0x07).at(-1);
+    // left (01) and up (01), at the set speeds; zoom in (tele) at speed 2
+    expect(drive()).toEqual([0x81, 0x01, 0x06, 0x01, 8, 6, 0x01, 0x01, 0xff]);
+    expect(zoom()).toEqual([0x81, 0x01, 0x04, 0x07, 0x22, 0xff]);
+    await d.send({ type: 'camera_move', pan: 1, tilt: -1, zoom: -1 });
+    expect(drive()).toEqual([0x81, 0x01, 0x06, 0x01, 8, 6, 0x02, 0x02, 0xff]);
+    expect(zoom()).toEqual([0x81, 0x01, 0x04, 0x07, 0x32, 0xff]);
+    await d.send({ type: 'camera_move', pan: 0, tilt: 0, zoom: 0 });
+    expect(drive()).toEqual([0x81, 0x01, 0x06, 0x01, 8, 6, 0x03, 0x03, 0xff]);
+    expect(zoom()).toEqual([0x81, 0x01, 0x04, 0x07, 0x00, 0xff]);
+  });
+
+  it('keeps moving speeds within what a camera accepts', async () => {
+    const cam = await fakeCamera();
+    const d = make(cam, { panSpeed: 999, tiltSpeed: 0, zoomSpeed: 99 });
+    d.start();
+    await until(() => d.getState().online);
+    await d.send({ type: 'camera_move', pan: 1, tilt: 1, zoom: 1 });
+    expect(cam.received.filter((p) => p[2] === 0x06).at(-1)!.slice(4, 6)).toEqual([24, 1]);
+    expect(cam.received.filter((p) => p[2] === 0x04 && p[3] === 0x07).at(-1)![4]).toBe(0x27);
+  });
+
   it('refuses presets it does not know, commands it does not support, and errors the camera reports', async () => {
     const cam = await fakeCamera();
     const d = make(cam);
