@@ -7,7 +7,8 @@ import type { DriverContext } from './types';
 // used for camera presets and power. Settings:
 //   host, port (52381), presets: { "Wide": 0, "Podium": 1 }  (name -> the camera's preset number,
 //   0-127; a name that is just a number is used as it is), cameraAddress (1), pollMs (10000),
-//   timeoutMs (1500)
+//   timeoutMs (1500), panSpeed (1-24, default 12), tiltSpeed (1-20, default 10), zoomSpeed (0-7,
+//   default 3)
 // VISCA over IP wraps each command in an 8 byte header (type, length, sequence number) and sends
 // it as a UDP datagram; the camera answers with an ACK and then a completion.
 
@@ -151,6 +152,23 @@ export class ViscaDriver extends BaseDriver {
         this.update((s) => {
           s.online = true;
           s.preset = command.name;
+        });
+        return;
+      }
+      case 'camera_move': {
+        // Pan/tilt drive: speeds, then direction (01 left / 02 right / 03 stop, 01 up / 02 down / 03 stop).
+        const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(v)));
+        const pan = clamp(this.setting<number>('panSpeed', 12), 1, 24);
+        const tilt = clamp(this.setting<number>('tiltSpeed', 10), 1, 20);
+        const horizontal = command.pan < 0 ? 0x01 : command.pan > 0 ? 0x02 : 0x03;
+        const vertical = command.tilt > 0 ? 0x01 : command.tilt < 0 ? 0x02 : 0x03;
+        await this.exchange(TYPE_COMMAND, [a, 0x01, 0x06, 0x01, pan, tilt, horizontal, vertical, 0xff], completion);
+        // Zoom: 00 stop, 2p variable tele (in), 3p variable wide (out).
+        const speed = clamp(this.setting<number>('zoomSpeed', 3), 0, 7);
+        const zoom = command.zoom > 0 ? 0x20 | speed : command.zoom < 0 ? 0x30 | speed : 0x00;
+        await this.exchange(TYPE_COMMAND, [a, 0x01, 0x04, 0x07, zoom, 0xff], completion);
+        this.update((s) => {
+          s.online = true;
         });
         return;
       }

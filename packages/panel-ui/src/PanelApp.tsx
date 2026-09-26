@@ -14,6 +14,7 @@ import {
   type PanelViewModel,
 } from '@kestrel/model';
 import { BottomBar } from './BottomBar';
+import { FunctionPage, PAGE_ICON, functionPages, type PageId } from './FunctionPages';
 import { IdleScreen } from './IdleScreen';
 import { LinkingSheet } from './LinkingSheet';
 import { PowerDialog } from './PowerDialog';
@@ -110,6 +111,11 @@ function defaultSource(a: PanelActivity): string | undefined {
 }
 
 const DEFAULT_UI = PanelSettings.parse({});
+const PAGE_LABEL = {
+  cameras: 'fn.cameras',
+  microphones: 'fn.microphones',
+  controls: 'fn.controls',
+} as const;
 
 /**
  * The activities as one glass pill, with a highlight that slides to the one being shown. The
@@ -120,11 +126,18 @@ function ActivityNav({
   activities,
   currentId,
   onChoose,
+  pages = [],
+  currentPage = null,
+  onPage,
 }: {
   label: string;
   activities: PanelActivity[];
   currentId: string | undefined;
   onChoose: (a: PanelActivity) => void;
+  /** Camera, microphone and room control pages that sit beside the activities. */
+  pages?: { id: PageId; label: string }[];
+  currentPage?: PageId | null;
+  onPage?: (id: PageId) => void;
 }) {
   const nav = useRef<HTMLElement>(null);
   const [anchor, setAnchor] = useState<{ left: number; width: number } | null>(null);
@@ -144,7 +157,7 @@ function ActivityNav({
       cancelAnimationFrame(frame);
       observer?.disconnect();
     };
-  }, [currentId, activities.length]);
+  }, [currentId, activities.length, currentPage, pages.length]);
 
   return (
     <nav className="kp-nav" aria-label={label} ref={nav}>
@@ -161,7 +174,7 @@ function ActivityNav({
           key={a.id}
           type="button"
           className="kp-nav-item"
-          aria-pressed={currentId === a.id}
+          aria-pressed={currentPage === null && currentId === a.id}
           data-active={a.active || undefined}
           data-kind={a.kind}
           onClick={() => onChoose(a)}
@@ -169,6 +182,19 @@ function ActivityNav({
           <Icon name={a.icon ?? a.kind} />
           <span>{a.name}</span>
           {a.busy && <span className="kp-spinner kp-spinner-sm" aria-hidden />}
+        </button>
+      ))}
+      {pages.map((p) => (
+        <button
+          key={p.id}
+          type="button"
+          className="kp-nav-item"
+          aria-pressed={currentPage === p.id}
+          data-kind="page"
+          onClick={() => onPage?.(p.id)}
+        >
+          <Icon name={PAGE_ICON[p.id]} />
+          <span>{p.label}</span>
         </button>
       ))}
     </nav>
@@ -209,6 +235,7 @@ export function PanelApp({
   const [picked, setPicked] = useState<string | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
   const [linkingOpen, setLinkingOpen] = useState(false);
+  const [page, setPage] = useState<PageId | null>(null);
 
   // "Touch to begin": shown on load and again after `timeoutMinutes` without a touch (0 = never).
   const idleMs = ui.idle.timeoutMinutes * 60_000;
@@ -247,7 +274,12 @@ export function PanelApp({
     vm.activities[0];
   const off = vm.status === 'off';
 
+  // Camera, microphone and room control pages: only while the room is on, and only ones it offers.
+  const offered = functionPages(vm.functions);
+  const shownPage = !off && page && offered.includes(page) ? page : null;
+
   const choose = (a: PanelActivity) => {
+    setPage(null);
     setPicked(a.id);
     if (a.overlay) {
       dispatch(
@@ -318,6 +350,9 @@ export function PanelApp({
               activities={tiles}
               currentId={current?.id}
               onChoose={choose}
+              pages={offered.map((id) => ({ id, label: t(PAGE_LABEL[id]) }))}
+              currentPage={shownPage}
+              onPage={setPage}
             />
           )}
 
@@ -363,6 +398,8 @@ export function PanelApp({
                 ))}
               </div>
             </section>
+          ) : shownPage && vm.functions ? (
+            <FunctionPage page={shownPage} functions={vm.functions} t={t} dispatch={dispatch} />
           ) : (
             current && (
               <section className="kp-activity" aria-label={current.name}>

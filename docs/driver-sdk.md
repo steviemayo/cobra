@@ -66,6 +66,18 @@ A driver declares which panel quick actions its device supports, so the panel on
 - Built in: PJLink declares `display.blank` (AVMT picture mute; a projector that does not know AVMT stays usable and refuses the blank in plain words); the Cisco RoomOS library driver declares `mics.privacy_mute`
 - Requirements: `docs/panel-ui-requirements.md`
 
+## What the panel's extra pages use
+
+The panel's Cameras, Microphones and Room controls pages (see `docs/panel-ui-requirements.md`) drive devices through commands a driver already has, so a custom driver gets them by supplying:
+
+- **Microphone mute**: `mute.on` and `mute.off`
+- **Camera views**: `camera_preset` (`{name}`); the device's `presets` setting lists the names
+- **Lighting scenes**: `scene` (`{name}`); the device's `scenes` setting lists the names
+- **Blinds**: `command.open` and `command.close`. **Screens and lifters**: `command.down` and `command.up`
+- **Camera pan, tilt and zoom**: not expressible in the driver format yet; only the built-in VISCA over IP driver does it
+
+A page is only offered when the room turns it on and the device has a driver.
+
 ## Safety
 
 - Values placed into a command are cleaned for where they land: control characters are removed from text sent to a device (so a preset name can't add a second command), URL path values are percent-encoded, and values inside a JSON body are JSON-escaped.

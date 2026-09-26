@@ -111,6 +111,7 @@ const SETTING_LABEL: Record<string, string> = {
   'userControls.lights': 'Lights control on panel',
   'userControls.blinds': 'Blinds control on panel',
   'userControls.camera': 'Camera control on panel',
+  'userControls.microphones': 'Microphone control on panel',
   'panel.idle.action': 'Touch to begin action',
   'panel.idle.activityId': 'Touch to begin activity',
   'panel.idle.timeoutMinutes': 'Panel idle timeout (minutes)',

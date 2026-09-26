@@ -146,7 +146,7 @@ Slice 2 (built, branch `feat/quick-actions`): quick actions from drivers
 - Not done: a failed action is silent (the button just does not turn on); blank is not cleared by changing source; a model `blank` capability was not added (support lives in the driver, as decided); the browser simulator does not see an org's custom drivers, so their quick actions only show on the gateway
 
 Next slices:
-- Function pages: cameras, microphones/audio, recorder, room controls
+- Function pages: cameras (presets, pan/tilt/zoom), microphones (mute each) and room controls (lighting scenes, blinds, screens) are built (Slice 3); camera tracking and a separate recorder page are not (see `docs/decisions.md`, F-2)
 - Org accent colour setting applied to the portal (same contrast check)
 - Room linking redesign
 - Check on real 7" and 10" panels

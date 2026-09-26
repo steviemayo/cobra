@@ -42,14 +42,15 @@ export const RoomSettings = z.object({
     .default({ enabled: true, warnSeconds: 30, idleSeconds: 600 }),
   /** Seconds before auto-switching when a second source appears mid-activity. */
   sourceConflictSeconds: z.number().int().min(0).max(120).default(10),
-  /** Extras exposed to users (lights/blinds/camera) only if enabled. */
+  /** Extras exposed to users (lights, blinds and screens, camera, microphones) only if enabled. */
   userControls: z
     .object({
       lights: z.boolean().default(false),
       blinds: z.boolean().default(false),
       camera: z.boolean().default(false),
+      microphones: z.boolean().default(false),
     })
-    .default({ lights: false, blinds: false, camera: false }),
+    .default({ lights: false, blinds: false, camera: false, microphones: false }),
   /** How the generated panel looks and behaves. */
   panel: PanelSettings.default(() => PanelSettings.parse({})),
 });

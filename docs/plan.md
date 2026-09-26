@@ -400,7 +400,7 @@ Working rules that apply to all of them:
 | C | Room groups: gateway runtime (R1 to R4) | large | **built** (decisions in `docs/decisions.md`) |
 | D | Remove the old combinations code and table (R5) | medium | code removal **built**; table drop waits for the release |
 | E | Audit retention and export | medium | **built** (default 12 months, see `docs/decisions.md`); apply migration `org_retention` |
-| F | Panel function pages (cameras, microphones, recorder, room controls) | large | real devices to try |
+| F | Panel function pages (cameras, microphones, recorder, room controls) | large | **built** except tracking and a recorder page (`docs/decisions.md`, F-1 to F-9); try on real devices |
 | G | Org accent colour in the portal | small | **built** (`docs/decisions.md`, G-1 to G-4) |
 | H | Email notifications (tickets and alerts) | small | a domain, Resend verified (step 6 above) |
 | I | Staff user management and a staff audit viewer | small | **built** (`docs/decisions.md`, I-1 to I-6) |
@@ -502,6 +502,8 @@ Do: a per-organisation retention setting (12 months by default; billing and acce
 Decide: the default period and which events are kept longer. Done when: old rows are purged by the cron and an owner can download their log.
 
 ### F. Panel function pages
+
+**Status: built** (cameras, microphones, room controls). Left for later: camera tracking and a recorder page (F-2). Try it on real devices: a VISCA camera, a Shelly relay screen, a lighting processor. The text below is the original brief.
 
 Why: the panel shows Sources and Record only. The planned pages (cameras, microphones and audio, recorder, room controls) need model and engine data that does not exist yet.
 

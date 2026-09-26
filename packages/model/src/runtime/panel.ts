@@ -3,6 +3,10 @@ import { LocalId } from '../room/common';
 import { ActivityKind } from '../room/behaviour';
 import { PanelSettings } from '../room/room-model';
 
+/** What the "room controls" page can tell blinds, a screen or a lifter to do. */
+export const MoverAction = z.enum(['open', 'close', 'up', 'down']);
+export type MoverAction = z.infer<typeof MoverAction>;
+
 // Panels send intents, never device commands. Validated at the gateway boundary.
 export const PanelIntent = z.discriminatedUnion('type', [
   z.object({
@@ -26,6 +30,26 @@ export const PanelIntent = z.discriminatedUnion('type', [
   }),
   /** Run the room's On state ("Touch to begin" set to turn the room on). */
   z.object({ type: z.literal('room.on') }),
+  /** Recall a camera preset. Ids and names come from `functions.cameras`. */
+  z.object({
+    type: z.literal('camera.preset'),
+    deviceId: LocalId,
+    preset: z.string().min(1).max(80),
+  }),
+  /** Point a camera. Sent again every half second while a button is held; all zero stops it. */
+  z.object({
+    type: z.literal('camera.move'),
+    deviceId: LocalId,
+    pan: z.number().int().min(-1).max(1),
+    tilt: z.number().int().min(-1).max(1),
+    zoom: z.number().int().min(-1).max(1),
+  }),
+  /** Mute or unmute one microphone. */
+  z.object({ type: z.literal('mic.mute'), deviceId: LocalId, muted: z.boolean() }),
+  /** Recall a lighting scene. */
+  z.object({ type: z.literal('scene.set'), deviceId: LocalId, scene: z.string().min(1).max(80) }),
+  /** Move blinds, a screen or a lifter. */
+  z.object({ type: z.literal('mover.run'), deviceId: LocalId, action: MoverAction }),
   /** Open or close a movable wall from the Room linking menu. Ids come from `linking.dividers`. */
   z.object({
     type: z.literal('divider.set'),
@@ -97,6 +121,51 @@ export const PanelQuickAction = z.object({
 });
 export type PanelQuickAction = z.infer<typeof PanelQuickAction>;
 
+/** A camera with what a person can do to it. */
+export const PanelCamera = z.object({
+  id: LocalId,
+  name: z.string(),
+  presets: z.array(z.string()),
+  /** The preset last recalled, if the camera says. */
+  activePreset: z.string().nullable(),
+  /** Pan, tilt and zoom are available. */
+  canMove: z.boolean(),
+});
+export type PanelCamera = z.infer<typeof PanelCamera>;
+
+export const PanelMic = z.object({
+  id: LocalId,
+  name: z.string(),
+  /** null: the microphone does not say. */
+  muted: z.boolean().nullable(),
+});
+export type PanelMic = z.infer<typeof PanelMic>;
+
+export const PanelLight = z.object({
+  id: LocalId,
+  name: z.string(),
+  scenes: z.array(z.string()),
+  active: z.string().nullable(),
+});
+export type PanelLight = z.infer<typeof PanelLight>;
+
+export const PanelMover = z.object({
+  id: LocalId,
+  name: z.string(),
+  kind: z.enum(['blinds', 'screen', 'lifter']),
+  actions: z.array(MoverAction),
+});
+export type PanelMover = z.infer<typeof PanelMover>;
+
+/** The pages behind the top nav. A page is offered only if the room has the equipment and enables it. */
+export const PanelFunctions = z.object({
+  cameras: z.array(PanelCamera),
+  microphones: z.array(PanelMic),
+  lights: z.array(PanelLight),
+  movers: z.array(PanelMover),
+});
+export type PanelFunctions = z.infer<typeof PanelFunctions>;
+
 /** One way to link rooms, as the "Link rooms" menu shows it: one per movable wall. */
 export const PanelDivider = z.object({
   id: z.string().min(1).max(64),
@@ -144,6 +213,8 @@ export const PanelViewModel = z.object({
   warning: z.object({ text: PanelText, secondsLeft: z.number() }).nullable(),
   /** Present only for rooms in a room group: the walls and what is joined. */
   linking: PanelLinking.optional(),
+  /** Camera, microphone, lighting and blinds pages. Absent when the room offers none. */
+  functions: PanelFunctions.optional(),
 });
 export type PanelViewModel = z.infer<typeof PanelViewModel>;
 

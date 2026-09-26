@@ -15,6 +15,7 @@ import { executePlan } from '../plan/execute';
 import { activitySources, planActivity, planState, planStopOverlay, type Plan } from '../plan/plan';
 import { buildGraph, deviceCapabilities, type Graph } from '../validate/graph';
 import { availableActivities, detectorsFor, type SignalDetector } from './activities';
+import { functionSets, functionsView, type FunctionSets } from './functions';
 import {
   quickActionActive,
   quickActionCommand,
@@ -78,6 +79,9 @@ export class RoomRuntime implements PanelClient {
   private readonly activities: Activity[];
   private readonly volumeDevices: string[];
   private readonly quickActions: RoomQuickAction[];
+  private readonly functions: FunctionSets;
+  /** A moving camera stops by itself if the panel stops asking, so a dropped connection never leaves it running. */
+  private readonly cameraStops = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly listeners = new Set<() => void>();
   private readonly unsubscribe: () => void;
   private readonly stepTimeoutMs?: number;
@@ -123,6 +127,7 @@ export class RoomRuntime implements PanelClient {
       .filter((d) => deviceCapabilities(d).has('volume'))
       .map((d) => d.id);
     this.quickActions = roomQuickActions(this.model, this.bus);
+    this.functions = functionSets(this.model);
     this.volume = this.model.settings.defaultVolume;
     this.adoptDeviceState();
     for (const [source] of this.detectors) this.lastPresence.set(source, this.presence(source));
@@ -176,10 +181,67 @@ export class RoomRuntime implements PanelClient {
       case 'divider.set':
         this.opts.onDivider?.(intent.dividerId, intent.open);
         return;
+      case 'camera.preset': {
+        const cam = this.functions.cameras.find((c) => c.device.id === intent.deviceId);
+        if (cam?.presets.includes(intent.preset))
+          this.tell(cam.device.id, { type: 'camera_preset', name: intent.preset });
+        return;
+      }
+      case 'camera.move':
+        return this.moveCamera(intent.deviceId, intent.pan, intent.tilt, intent.zoom);
+      case 'mic.mute':
+        if (this.functions.microphones.some((d) => d.id === intent.deviceId))
+          this.tell(intent.deviceId, { type: 'mute', muted: intent.muted });
+        return;
+      case 'scene.set': {
+        const light = this.functions.lights.find((l) => l.device.id === intent.deviceId);
+        if (light?.scenes.includes(intent.scene))
+          this.tell(light.device.id, { type: 'scene', name: intent.scene });
+        return;
+      }
+      case 'mover.run': {
+        const mover = this.functions.movers.find((m) => m.device.id === intent.deviceId);
+        if (mover?.actions.includes(intent.action))
+          this.tell(mover.device.id, { type: 'command', name: intent.action, args: {} });
+        return;
+      }
     }
   }
 
+  /** Send one command to a device and refresh the panel; a device that refuses just does not change. */
+  private tell(deviceId: string, command: Parameters<DeviceBus['send']>[1]) {
+    void this.bus
+      .send(deviceId, command)
+      .catch(() => undefined)
+      .finally(() => this.notify());
+  }
+
+  private moveCamera(deviceId: string, pan: number, tilt: number, zoom: number) {
+    if (!this.functions.cameras.some((c) => c.device.id === deviceId)) return;
+    const running = this.cameraStops.get(deviceId);
+    if (running) clearTimeout(running);
+    this.cameraStops.delete(deviceId);
+    this.tell(deviceId, { type: 'camera_move', pan, tilt, zoom });
+    if (pan === 0 && tilt === 0 && zoom === 0) return;
+    // Held buttons repeat every half second; if they stop, so does the camera.
+    const stop = setTimeout(() => {
+      this.cameraStops.delete(deviceId);
+      this.tell(deviceId, { type: 'camera_move', pan: 0, tilt: 0, zoom: 0 });
+    }, 2000);
+    stop.unref?.();
+    this.cameraStops.set(deviceId, stop);
+  }
+
+  private stopCameras() {
+    for (const [deviceId, timer] of this.cameraStops) {
+      clearTimeout(timer);
+      this.tell(deviceId, { type: 'camera_move', pan: 0, tilt: 0, zoom: 0 });
+    }
+    this.cameraStops.clear();
+  }
+
   dispose() {
+    this.stopCameras();
     this.disposed = true;
     this.abort?.abort();
     this.unsubscribe();
@@ -224,6 +286,7 @@ export class RoomRuntime implements PanelClient {
     this.clearPrompt();
     this.clearWarning();
     this.stopTicker();
+    this.stopCameras();
     this.notify();
     return parked;
   }
@@ -779,6 +842,7 @@ export class RoomRuntime implements PanelClient {
       message = { text: { key: 'ready', params: {} }, tone: 'success' };
     else message = { text: { key: 'room_off', params: {} }, tone: 'info' };
 
+    const functions = functionsView(this.functions, this.bus);
     const promptSource = this.prompt
       ? activitySources(
           this.model,
@@ -827,6 +891,7 @@ export class RoomRuntime implements PanelClient {
             }
           : null,
       ...(this.linking ? { linking: this.linking } : {}),
+      ...(functions ? { functions } : {}),
     };
   }
 }

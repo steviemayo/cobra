@@ -68,6 +68,18 @@ const paths: Record<string, React.ReactNode> = {
     <path d="M9 5a3 3 0 0 1 6 0v6a3 3 0 0 1-.4 1.5M5 11a7 7 0 0 0 11 5.7M12 18v3M4 4l16 16" />
   ),
   more: <path d="M6 12h.01M12 12h.01M18 12h.01" strokeWidth="3" />,
+  camera: (
+    <>
+      <path d="M4 8h3l1.5-2h7L17 8h3v11H4z" />
+      <circle cx="12" cy="13" r="3.2" />
+    </>
+  ),
+  mic: <path d="M9 5a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0zM5 11a7 7 0 0 0 14 0M12 18v3" />,
+  controls: <path d="M5 6h9M18 6h1M5 12h3M12 12h7M5 18h11M20 18h-1M14 4v4M8 10v4M16 16v4" />,
+  'arrow-up': <path d="M12 19V5M6 11l6-6 6 6" />,
+  'arrow-down': <path d="M12 5v14M6 13l6 6 6-6" />,
+  'arrow-left': <path d="M19 12H5M11 6l-6 6 6 6" />,
+  'arrow-right': <path d="M5 12h14M13 6l6 6-6 6" />,
   link: (
     <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
   ),
