@@ -52,6 +52,8 @@ export class TesiraDriver extends BaseDriver {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private retries = 0;
   private closed = false;
+  /** Goes up on every write, so a read that began before one is not allowed to overwrite it. */
+  private writes = 0;
 
   constructor(device: Device, ctx: DriverContext) {
     super(device, ctx);
@@ -249,7 +251,9 @@ export class TesiraDriver extends BaseDriver {
       for (const p of this.points) {
         if (!['level', 'mute', 'crosspoint'].includes(p.type)) continue;
         try {
+          const epoch = this.writes;
           const v = TesiraDriver.value(await this.read(p));
+          if (this.writes !== epoch) continue; // something was set while this was being read: the read is stale
           this.update((s) => {
             s.points[p.id] = p.type === 'level' && typeof v === 'number' ? pointToLevel(p, v) : v;
             if (p.role === 'room_volume' && typeof v === 'number') s.volume = pointToLevel(p, v);
@@ -284,6 +288,7 @@ export class TesiraDriver extends BaseDriver {
   }
 
   private async setPoint(p: ControlPoint, value: number | boolean | string) {
+    this.writes++;
     if (p.type === 'level') await this.command(`${this.tag(p)} set level ${this.index(p)} ${pointFromLevel(p, Number(value))}`);
     else if (p.type === 'mute') await this.command(`${this.tag(p)} set mute ${this.index(p)} ${value === true || value === 'true' ? 'true' : 'false'}`);
     else if (p.type === 'crosspoint')

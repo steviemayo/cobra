@@ -55,6 +55,8 @@ export class QsysDriver extends BaseDriver {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private retries = 0;
   private closed = false;
+  /** Goes up on every write, so a read that began before one is not allowed to overwrite it. */
+  private writes = 0;
 
   constructor(device: Device, ctx: DriverContext) {
     super(device, ctx);
@@ -222,10 +224,12 @@ export class QsysDriver extends BaseDriver {
       byComponent.set(component, [...(byComponent.get(component) ?? []), p]);
     }
     for (const [component, points] of byComponent) {
+      const epoch = this.writes;
       const res = (await this.rpc('Component.Get', {
         Name: component,
         Controls: points.map((p) => ({ Name: this.address(p).control })),
       })) as { Controls?: QrcControl[] };
+      if (this.writes !== epoch) continue; // something was set while this was being read: the read is stale
       const byName = new Map((res.Controls ?? []).map((c) => [c.Name, c.Value]));
       this.update((s) => {
         for (const p of points) {
@@ -252,6 +256,7 @@ export class QsysDriver extends BaseDriver {
   }
 
   private async setPoint(p: ControlPoint, value: number | boolean | string) {
+    this.writes++;
     if (p.type === 'meter') this.fail('a meter is read only');
     const { component, control } = this.address(p);
     await this.rpc('Component.Set', { Name: component, Controls: [{ Name: control, Value: this.toNative(p, value) }] });
