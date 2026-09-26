@@ -3,7 +3,9 @@ import { LIBRARY } from '../library';
 import { DeclarativeDriver } from './declarative';
 import { GenericTcpDriver } from './generic-tcp';
 import { genericRestDriver } from './generic-rest';
+import { AVOIP_SWITCHER_IDS } from './avoip';
 import { NvxDriver } from './nvx';
+import { NvxDecoderDriver, NvxEncoderDriver } from './nvx-endpoints';
 import { PjlinkDriver } from './pjlink';
 import { QsysDriver } from './qsys';
 import { SerialDriver } from './serial';
@@ -44,8 +46,10 @@ export function createDriver(
 /** Drivers that ship with Kestrel, by the id a device names in its control setting. */
 const BUILT_IN: Record<string, (device: Device, ctx: DriverContext) => DeviceDriver> = {
   'crestron-dm-nvx': (d, c) => new NvxDriver(d, c),
+  'crestron-nvx-encoder': (d, c) => new NvxEncoderDriver(d, c),
+  'crestron-nvx-decoder': (d, c) => new NvxDecoderDriver(d, c),
   'qsys-core': (d, c) => new QsysDriver(d, c),
   'biamp-tesira': (d, c) => new TesiraDriver(d, c),
   'visca-ip': (d, c) => new ViscaDriver(d, c),
 };
-export const BUILT_IN_DRIVER_IDS = [...Object.keys(BUILT_IN), ...Object.keys(LIBRARY)];
+export const BUILT_IN_DRIVER_IDS = [...Object.keys(BUILT_IN), ...AVOIP_SWITCHER_IDS, ...Object.keys(LIBRARY)];

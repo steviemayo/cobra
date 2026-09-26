@@ -27,10 +27,10 @@ interface Endpoint {
 }
 type Dict = Record<string, unknown>;
 
-const isRecord = (v: unknown): v is Dict => !!v && typeof v === 'object' && !Array.isArray(v);
+export const isRecord = (v: unknown): v is Dict => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** One NVX unit: logs in once, keeps its cookies, logs in again if it is told to (401). */
-class NvxSession {
+export class NvxSession {
   private cookies = new Map<string, string>();
   private readonly agent: http.Agent | https.Agent;
 
@@ -145,7 +145,7 @@ class NvxSession {
   }
 }
 
-const dig = (v: unknown, ...keys: string[]): unknown =>
+export const dig = (v: unknown, ...keys: string[]): unknown =>
   keys.reduce<unknown>((o, k) => (isRecord(o) ? o[k] : undefined), v);
 
 export class NvxDriver extends BaseDriver {

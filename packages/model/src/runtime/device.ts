@@ -37,6 +37,8 @@ export const DeviceCommand = z.discriminatedUnion('type', [
     pointId: LocalId,
     value: z.union([z.number(), z.boolean(), z.string().max(200)]),
   }),
+  /** AVoIP decoders: receive the stream at this location (null: stop). The switcher works the location out from the encoder. */
+  z.object({ type: z.literal('set_stream'), location: z.string().max(500).nullable() }),
   /** Displays: press a remote key. */
   z.object({ type: z.literal('key'), key: DisplayKey }),
   /** Displays: launch an app by its id from the device's app list. */
@@ -69,6 +71,10 @@ export const DeviceState = z.object({
   recording: z.boolean().optional(),
   /** Point-based devices: the last value of each control point, by point id (a level as 0 to 100). */
   points: z.record(z.string(), z.union([z.number(), z.boolean(), z.string()])).default({}),
+  /** AVoIP encoders: where the stream it makes can be picked up (a multicast address or stream id). */
+  streamLocation: z.string().optional(),
+  /** AVoIP decoders: is it receiving the stream it was pointed at. */
+  streamConnected: z.boolean().optional(),
   /** Smart displays: the id of the app last launched. */
   activeApp: z.string().optional(),
   /** Occupancy sensors: is anyone in the room. */

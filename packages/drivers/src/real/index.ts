@@ -3,6 +3,8 @@ export * from './types';
 export * from './base';
 export * from './pjlink';
 export * from './nvx';
+export * from './nvx-endpoints';
+export * from './avoip';
 export * from './qsys';
 export * from './declarative';
 export * from './generic-rest';

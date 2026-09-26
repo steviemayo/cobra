@@ -2,8 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, type Server } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { STARTER_TEMPLATES, type RoomModel } from '@kestrel/model';
+import { STARTER_TEMPLATES, addAvoipSystem, type RoomModel } from '@kestrel/model';
 import { CloudClient } from './cloud';
 import type { GatewayConfig } from './config';
 import { Gateway } from './gateway';
@@ -646,6 +647,31 @@ describe('bindings', () => {
     expect(host.ids()).toHaveLength(2);
     expect(connections).toHaveLength(2);
     expect(host.shared.size).toBe(0);
+  });
+
+  it('runs an AVoIP system: the room builds the virtual switcher over its endpoints and they answer', async () => {
+    const unit = createHttpServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      if (req.url === '/Device/StreamTransmit') res.end(JSON.stringify({ Device: { StreamTransmit: { Streams: [{ UUID: 'u1' }] } } }));
+      else if (req.url === '/Device/AvRouting') res.end(JSON.stringify({ Device: { AvRouting: { Routes: [{ VideoSource: 'u1' }] } } }));
+      else res.end(JSON.stringify({ Device: { AudioVideoInputOutput: { Inputs: [{ Ports: [{ IsSyncDetected: true }] }] } } }));
+    });
+    await new Promise<void>((r) => unit.listen(0, '127.0.0.1', r));
+    const port = (unit.address() as { port: number }).port;
+    const m = design();
+    for (const d of m.devices) delete d.control;
+    const made = addAvoipSystem(m, { family: 'crestron-nvx', encoders: 1, decoders: 1 });
+    if (!made.ok) throw new Error(made.message);
+    const endpoint = { host: '127.0.0.1', port, protocol: 'http', username: 'admin', password: 'x' };
+    cloud.assign(ROOM, m, { external: true });
+    cloud.setBindings(ROOM, { [made.encoderIds![0]!]: endpoint, [made.decoderIds![0]!]: endpoint });
+    const { gateway, host } = boot({ healthTimeoutMs: 3000 }, cloud.url, 'missing');
+    await gateway.tick();
+    expect(host.ids()).toEqual([ROOM]);
+    const online = () => Object.fromEntries(host.reports()[0]!.devices.map((d) => [d.deviceId, d.online]));
+    await until(() => online()[made.switcherId!] === true);
+    expect(online()).toMatchObject({ [made.encoderIds![0]!]: true, [made.decoderIds![0]!]: true, [made.switcherId!]: true });
+    unit.close();
   });
 });
 

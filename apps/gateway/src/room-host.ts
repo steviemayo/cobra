@@ -1,6 +1,6 @@
 import { RoomRuntime, TriggerScheduler } from '@kestrel/engine';
 import { createSimulation } from '@kestrel/drivers';
-import { HybridBus, createDriver, type DeviceDriver } from '@kestrel/drivers/real';
+import { HybridBus, attachVirtualDrivers, createDriver, type DeviceDriver } from '@kestrel/drivers/real';
 import { applyBindings } from '@kestrel/model';
 import type {
   DeviceBus,
@@ -89,6 +89,8 @@ export function buildBus(
       : make(device);
     if (driver) real.set(device.id, driver);
   }
+  // The virtual switcher of an AVoIP system is logic over the other devices, so it is built last.
+  attachVirtualDrivers(model, real, { log: (l, m, x) => log(l, m, x) });
   const bus = new HybridBus(
     real,
     mode === 'missing' ? createSimulation(model, { customDrivers: signed.manifest.drivers }) : null,

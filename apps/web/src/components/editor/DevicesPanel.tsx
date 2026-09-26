@@ -3,6 +3,8 @@ import { useState } from 'react';
 import {
   BUILT_IN_DRIVERS,
   DEVICE_CATALOG,
+  addAvoipSystem,
+  avoipFamilies,
   DeviceCategory,
   LEGACY_CATEGORIES,
   GenericProtocol,
@@ -64,6 +66,7 @@ export function DevicesPanel({ model, update, issues, roomId }: PanelProps & { r
   return (
     <div className="space-y-4">
       <SharedPicker model={model} update={update} roomId={roomId} />
+      <AvoipAdder update={update} />
       <div className="flex flex-wrap items-center gap-2">
         <Select value={category} options={categoryOptions} onChange={setCategory} />
         <button className={btnCls} onClick={() => update((m) => void addDevice(m, category))}>
@@ -78,6 +81,44 @@ export function DevicesPanel({ model, update, issues, roomId }: PanelProps & { r
       {model.devices.map((d) => (
         <DeviceCard key={d.id} model={model} roomId={roomId} device={d} update={update} issues={issuesForDevice(issues, d.id)} />
       ))}
+    </div>
+  );
+}
+
+/** Add an AVoIP system: a switcher and its encoders and decoders, created and wired together. */
+function AvoipAdder({ update }: { update: PanelProps['update'] }) {
+  const families = avoipFamilies();
+  const [family, setFamily] = useState(families[0]?.id ?? '');
+  const [encoders, setEncoders] = useState('2');
+  const [decoders, setDecoders] = useState('2');
+  const [problem, setProblem] = useState('');
+  if (families.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-end gap-2 rounded-lg border border-border bg-card p-2">
+      <span className="basis-full text-xs text-muted-foreground">
+        Add an AVoIP system: a virtual switcher with its encoders and decoders, wired together. Then connect your sources to the encoders and the decoders to your displays.
+      </span>
+      <Select value={family} options={families.map((f) => ({ value: f.id, label: f.label }))} onChange={setFamily} />
+      <Label text="Encoders">
+        <input className={`${inputCls} w-20`} type="number" min={1} value={encoders} onChange={(e) => setEncoders(e.target.value)} />
+      </Label>
+      <Label text="Decoders">
+        <input className={`${inputCls} w-20`} type="number" min={1} value={decoders} onChange={(e) => setDecoders(e.target.value)} />
+      </Label>
+      <button
+        type="button"
+        className={ghostBtnCls}
+        onClick={() => {
+          const out: { result?: ReturnType<typeof addAvoipSystem> } = {};
+          update((m) => {
+            out.result = addAvoipSystem(m, { family, encoders: Number(encoders), decoders: Number(decoders) });
+          });
+          setProblem(out.result && !out.result.ok ? (out.result.message ?? '') : '');
+        }}
+      >
+        Add AVoIP system
+      </button>
+      {problem && <span className="text-xs text-destructive">{problem}</span>}
     </div>
   );
 }
