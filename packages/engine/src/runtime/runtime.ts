@@ -17,7 +17,7 @@ import { activitySources, planActivity, planState, planStopOverlay, type Plan } 
 import { buildGraph, deviceCapabilities, type Graph } from '../validate/graph';
 import { availableActivities, detectorsFor, type SignalDetector } from './activities';
 import { functionSets, functionsView, isMediaKey, keysFor, type FunctionSets } from './functions';
-import { micStartSteps, micStopSteps, type MicStep } from './mics';
+import { levelCommand, micCanVolume, micReported, micStartSteps, micStopSteps, muteCommand, type MicStep } from './mics';
 import {
   quickActionActive,
   quickActionCommand,
@@ -195,21 +195,22 @@ export class RoomRuntime implements PanelClient {
       }
       case 'camera.move':
         return this.moveCamera(intent.deviceId, intent.pan, intent.tilt, intent.zoom);
-      case 'mic.mute':
-        if (this.functions.microphones.some((m) => m.device.id === intent.deviceId))
-          this.tell(intent.deviceId, { type: 'mute', muted: intent.muted });
+      case 'mic.mute': {
+        const mic = this.functions.microphones.find((m) => m.device.id === intent.deviceId);
+        if (mic) this.tell(mic.target.deviceId, muteCommand(mic.target, intent.muted));
         return;
+      }
       case 'mic.bump': {
         const mic = this.functions.microphones.find((m) => m.device.id === intent.deviceId);
-        if (!mic || !(this.bus.features?.(mic.device.id) ?? []).includes('volume')) return;
+        if (!mic || !micCanVolume(this.bus, mic.device, mic.target)) return;
         const current =
-          this.bus.getState(mic.device.id)?.volume ??
+          micReported(this.bus, mic.target).volume ??
           this.micLevels.get(mic.device.id) ??
           mic.device.mic?.defaultVolume ??
           50;
         const level = Math.min(100, Math.max(0, Math.round(current + intent.delta)));
         this.micLevels.set(mic.device.id, level);
-        this.tell(mic.device.id, { type: 'volume', level });
+        this.tell(mic.target.deviceId, levelCommand(mic.target, level));
         return;
       }
       case 'display.key': {
@@ -633,9 +634,10 @@ export class RoomRuntime implements PanelClient {
     const action = this.quickActions.find((a) => a.id === id);
     if (!action) return;
     const on = active ?? !quickActionActive(action, (d) => this.bus.getState(d));
-    await Promise.allSettled(
-      action.devices.map((d) => this.bus.send(d, quickActionCommand(action.id, on))),
-    );
+    await Promise.allSettled([
+      ...action.devices.map((d) => this.bus.send(d, quickActionCommand(action.id, on))),
+      ...(action.points ?? []).map((p) => this.bus.send(p.deviceId, { type: 'point', pointId: p.pointId, value: on })),
+    ]);
     this.notify();
   }
 

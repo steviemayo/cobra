@@ -1,5 +1,12 @@
 import { connect, type Socket } from 'node:net';
-import type { Device, DeviceCommand } from '@kestrel/model';
+import {
+  pointFromLevel,
+  pointToLevel,
+  type ControlPoint,
+  type Device,
+  type DeviceCommand,
+  type PointReading,
+} from '@kestrel/model';
 import { BaseDriver } from './base';
 import type { DriverContext } from './types';
 
@@ -12,6 +19,10 @@ import type { DriverContext } from './types';
 //   minDb (-40) and maxDb (0): the volume scale, 0-100 on the panel is minDb-maxDb on the Core,
 //   snapshotBank (1) and snapshotRamp (2 s) for presets, pollMs (5000), timeoutMs (3000).
 //
+// Control points: a device can also list named controls to drive (docs/driver-classes.md). A point's
+// address is a component and a control. A point with the role "room volume" or "room mute" is what
+// the panel volume and mute act on; without one, the gain component above is used (as before).
+//
 // Routing on a DSP is part of the Q-SYS design, so `route` and `power` are accepted and do nothing.
 const NUL = '\0';
 const MAX_BACKOFF_MS = 15_000;
@@ -20,6 +31,13 @@ interface Pending {
   resolve: (result: unknown) => void;
   reject: (e: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+}
+
+interface QrcControl {
+  Name: string;
+  Value?: number | boolean | string;
+  ValueMin?: number;
+  ValueMax?: number;
 }
 
 interface QrcReply {
@@ -51,6 +69,23 @@ export class QsysDriver extends BaseDriver {
   }
   private get maxDb() {
     return this.setting<number>('maxDb', 0);
+  }
+
+  private get points(): ControlPoint[] {
+    return this.device.points ?? [];
+  }
+  private roleOf(role: ControlPoint['role']) {
+    return this.points.find((p) => p.role === role);
+  }
+  private address(point: Pick<ControlPoint, 'address'>): { component: string; control: string } {
+    const component = String(point.address.component ?? '');
+    const control = String(point.address.control ?? '');
+    if (!component || !control) this.fail('the control point has no component and control');
+    return { component, control };
+  }
+  /** Room volume and mute come from points when there are some, else from the gain component. */
+  private get usesPoints() {
+    return !!(this.roleOf('room_volume') || this.roleOf('room_mute'));
   }
 
   private toDb(level: number): number {
@@ -179,10 +214,83 @@ export class QsysDriver extends BaseDriver {
     });
   }
 
+  /** Reads every control point, one request per component. */
+  private async readPoints() {
+    const byComponent = new Map<string, ControlPoint[]>();
+    for (const p of this.points) {
+      const { component } = this.address(p);
+      byComponent.set(component, [...(byComponent.get(component) ?? []), p]);
+    }
+    for (const [component, points] of byComponent) {
+      const res = (await this.rpc('Component.Get', {
+        Name: component,
+        Controls: points.map((p) => ({ Name: this.address(p).control })),
+      })) as { Controls?: QrcControl[] };
+      const byName = new Map((res.Controls ?? []).map((c) => [c.Name, c.Value]));
+      this.update((s) => {
+        for (const p of points) {
+          const v = byName.get(this.address(p).control);
+          if (v === undefined) continue;
+          s.points[p.id] = this.fromNative(p, v);
+          if (p.role === 'room_volume' && typeof v === 'number') s.volume = pointToLevel(p, v);
+          if (p.role === 'room_mute') s.muted = v === true || v === 1;
+        }
+      });
+    }
+  }
+
+  private fromNative(p: ControlPoint, v: number | boolean | string): number | boolean | string {
+    if (p.type === 'level') return typeof v === 'number' ? pointToLevel(p, v) : 0;
+    if (p.type === 'mute') return v === true || v === 1;
+    return v;
+  }
+
+  private toNative(p: ControlPoint, value: number | boolean | string): number | string {
+    if (p.type === 'level') return pointFromLevel(p, Number(value));
+    if (p.type === 'mute') return value === true || value === 1 || value === 'true' ? 1 : 0;
+    return typeof value === 'boolean' ? (value ? 1 : 0) : value;
+  }
+
+  private async setPoint(p: ControlPoint, value: number | boolean | string) {
+    if (p.type === 'meter') this.fail('a meter is read only');
+    const { component, control } = this.address(p);
+    await this.rpc('Component.Set', { Name: component, Controls: [{ Name: control, Value: this.toNative(p, value) }] });
+    this.update((s) => {
+      s.points[p.id] = p.type === 'mute' ? this.fromNative(p, this.toNative(p, value)) : value;
+      if (p.role === 'room_volume') s.volume = Number(value);
+      if (p.role === 'room_mute') s.muted = value === true;
+    });
+  }
+
+  /** Reads one control point, to check it exists and learn its range. */
+  async readPoint(point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>): Promise<PointReading> {
+    const { component, control } = this.address(point);
+    const res = (await this.rpc('Component.Get', { Name: component, Controls: [{ Name: control }] })) as {
+      Controls?: QrcControl[];
+    };
+    const found = (res.Controls ?? []).find((c) => c.Name === control);
+    if (!found || found.Value === undefined) this.fail(`there is no control "${control}" on "${component}"`);
+    const value = found.Value;
+    if (point.type === 'level')
+      return {
+        value: typeof value === 'number' ? value : 0,
+        ...(typeof found.ValueMin === 'number' ? { min: found.ValueMin } : {}),
+        ...(typeof found.ValueMax === 'number' ? { max: found.ValueMax } : {}),
+      };
+    return { value: point.type === 'mute' ? value === true || value === 1 : value };
+  }
+
   /** Reads the gain component. Doubles as the keep-alive. */
   private async refresh(first = false) {
     if (!this.socket) return;
     try {
+      if (this.points.length > 0) await this.readPoints();
+      if (this.usesPoints) {
+        this.update((s) => {
+          s.online = true;
+        });
+        return;
+      }
       const res = (await this.rpc('Component.Get', {
         Name: this.gain,
         Controls: [
@@ -214,7 +322,14 @@ export class QsysDriver extends BaseDriver {
 
   async send(command: DeviceCommand): Promise<void> {
     switch (command.type) {
+      case 'point': {
+        const point = this.points.find((p) => p.id === command.pointId);
+        if (!point) this.fail(`has no control point "${command.pointId}"`);
+        return this.setPoint(point, command.value);
+      }
       case 'volume': {
+        const roomVolume = this.roleOf('room_volume');
+        if (roomVolume) return this.setPoint(roomVolume, command.level);
         await this.rpc('Component.Set', {
           Name: this.gain,
           Controls: [
@@ -227,6 +342,8 @@ export class QsysDriver extends BaseDriver {
         return;
       }
       case 'mute': {
+        const roomMute = this.roleOf('room_mute');
+        if (roomMute) return this.setPoint(roomMute, command.muted);
         await this.rpc('Component.Set', {
           Name: this.gain,
           Controls: [

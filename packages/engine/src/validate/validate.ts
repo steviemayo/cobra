@@ -1,4 +1,7 @@
 import {
+  BUILT_IN_DRIVERS,
+  POINT_ROLE_INFO,
+  POINT_TYPE_LABEL,
   DEVICE_CATALOG,
   type Action,
   type Capability,
@@ -80,6 +83,71 @@ function checkDevices(model: RoomModel, opts: ValidateOptions, c: Collector) {
         kind: 'device',
         id: d.id,
       });
+  }
+}
+
+const POINT_CLASS_CATEGORIES = new Set(['audio_matrix', 'lighting', 'hvac']);
+
+/**
+ * Control points of a DSP or similar device: every point must fit its driver address form, and a
+ * role must fit the kind of point and the device it acts on.
+ */
+function checkPoints(model: RoomModel, c: Collector) {
+  const ownRoles = new Map<string, string>();
+  for (const d of model.devices) {
+    const points = d.points ?? [];
+    if (points.length === 0) continue;
+    const ref: IssueRef = { kind: 'device', id: d.id };
+    if (!POINT_CLASS_CATEGORIES.has(d.category)) {
+      c.error('points_not_supported', `${d.name} cannot have control points; they are for a DSP or a lighting or building processor`, ref);
+      continue;
+    }
+    const seen = new Set<string>();
+    const form =
+      d.control?.kind === 'driver' ? BUILT_IN_DRIVERS[d.control.driverId]?.points : undefined;
+    const driverName = d.control?.kind === 'driver' ? (BUILT_IN_DRIVERS[d.control.driverId]?.name ?? 'its driver') : 'its driver';
+    for (const p of points) {
+      const where = `${d.name}, point "${p.name}"`;
+      if (seen.has(p.id)) c.error('duplicate_id', `${d.name}: two control points share the id "${p.id}"`, ref);
+      seen.add(p.id);
+      if (!d.control) c.error('point_no_driver', `${where}: the device needs a driver before it can have control points`, ref);
+      if (form) {
+        const fields = form[p.type];
+        if (!fields) c.error('point_type_unsupported', `${where}: ${driverName} does not support ${POINT_TYPE_LABEL[p.type].toLowerCase()} points`, ref);
+        else
+          for (const f of fields)
+            if (p.address[f.key] === undefined || p.address[f.key] === '')
+              c.error('point_address_missing', `${where}: needs its ${f.label.toLowerCase()}`, ref);
+      }
+      if (p.type === 'level' && p.min !== undefined && p.max !== undefined && p.min >= p.max)
+        c.error('point_range', `${where}: the minimum must be below the maximum`, ref);
+      if (!p.role) continue;
+      const info = POINT_ROLE_INFO[p.role];
+      if (info.type !== p.type)
+        c.error('point_role_type', `${where}: the role "${info.label}" needs a ${POINT_TYPE_LABEL[info.type].toLowerCase()} point`, ref);
+      if (info.needsMic) {
+        const mic = p.targetId ? model.devices.find((m) => m.id === p.targetId) : undefined;
+        const wanted = p.role === 'mic_privacy_mute' ? 'voice_capture_mic' : 'reinforcement_mic';
+        if (!mic || mic.category !== wanted)
+          c.error(
+            'point_role_target',
+            `${where}: the role "${info.label}" needs a ${p.role === 'mic_privacy_mute' ? 'conferencing' : 'reinforcement'} microphone to act on`,
+            ref,
+          );
+        else {
+          const key = `${p.role}:${mic.id}`;
+          if (ownRoles.has(key))
+            c.warn('point_role_twice', `${where}: ${mic.name} already has a "${info.label}" point (${ownRoles.get(key)})`, ref);
+          ownRoles.set(key, `${d.name}, "${p.name}"`);
+          if (mic.control && p.role !== 'mic_privacy_mute')
+            c.warn('point_role_shadowed', `${where}: ${mic.name} has its own driver, which is used instead of this point`, ref);
+        }
+      } else {
+        const key = `${p.role}:${d.id}`;
+        if (ownRoles.has(key)) c.warn('point_role_twice', `${where}: ${d.name} already has a "${info.label}" point (${ownRoles.get(key)})`, ref);
+        ownRoles.set(key, `"${p.name}"`);
+      }
+    }
   }
 }
 
@@ -450,6 +518,7 @@ export function validateRoomModel(model: RoomModel, opts: ValidateOptions = {}):
   checkDevices(model, opts, c);
   checkConnections(model, g, c);
   checkMicRouting(model, g, c);
+  checkPoints(model, c);
   checkGroups(model, g, c);
   checkStates(model, g, c);
   checkActivities(model, g, c);

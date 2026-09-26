@@ -144,7 +144,7 @@ function RoomEditor(props: {
           />
           <fieldset disabled={props.readOnly} className="min-w-0">
             {tab === 'graph' && <GraphPanel {...panel} />}
-            {tab === 'devices' && <DevicesPanel {...panel} />}
+            {tab === 'devices' && <DevicesPanel {...panel} roomId={props.roomId} />}
             {tab === 'setup' && <SetupPanel roomId={props.roomId} />}
             {tab === 'connections' && <ConnectionsPanel {...panel} />}
             {tab === 'groups' && <GroupsPanel {...panel} />}

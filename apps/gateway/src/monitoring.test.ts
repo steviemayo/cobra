@@ -189,6 +189,21 @@ describe('remote commands', () => {
     expect(resultFor(test.id)).toMatchObject({ ok: false, output: { online: false } });
   });
 
+  it('checks a control point: refuses a bad address, and a simulated room answers with a made-up range', async () => {
+    const g = await ready();
+    const point = (over: Record<string, string>) =>
+      command('verify_point', { deviceId: 'dsp', type: 'level', address: '{"component":"C","control":"gain"}', ...over });
+    const bad = point({ address: 'not json' });
+    const wrongType = point({ type: 'nonsense' });
+    const generic = point({});
+    // (A room on real hardware asks the driver; a driver that cannot read points refuses, tested with the drivers.)
+    cloud.queuedCommands.push(bad, wrongType, generic);
+    await g.gateway.tick();
+    expect(resultFor(bad.id)).toMatchObject({ ok: false, error: 'The control point address is not valid' });
+    expect(resultFor(wrongType.id)).toMatchObject({ ok: false, error: 'The control point is not valid' });
+    expect(resultFor(generic.id)).toMatchObject({ ok: true, output: { device: 'DSP', value: -20, min: -100, max: 12 } });
+  });
+
   it('fails cleanly for a device that is not in the room, or a room the gateway does not run', async () => {
     const g = await ready();
     const badDevice = command('test_device', { deviceId: 'ghost' });

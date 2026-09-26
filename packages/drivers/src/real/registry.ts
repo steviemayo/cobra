@@ -7,6 +7,7 @@ import { NvxDriver } from './nvx';
 import { PjlinkDriver } from './pjlink';
 import { QsysDriver } from './qsys';
 import { SerialDriver } from './serial';
+import { TesiraDriver } from './tesira';
 import { ViscaDriver } from './visca';
 import type { DeviceDriver, DriverContext } from './types';
 
@@ -44,6 +45,7 @@ export function createDriver(
 const BUILT_IN: Record<string, (device: Device, ctx: DriverContext) => DeviceDriver> = {
   'crestron-dm-nvx': (d, c) => new NvxDriver(d, c),
   'qsys-core': (d, c) => new QsysDriver(d, c),
+  'biamp-tesira': (d, c) => new TesiraDriver(d, c),
   'visca-ip': (d, c) => new ViscaDriver(d, c),
 };
 export const BUILT_IN_DRIVER_IDS = [...Object.keys(BUILT_IN), ...Object.keys(LIBRARY)];

@@ -1,8 +1,10 @@
 import type {
+  ControlPoint,
   DeviceBus,
   DeviceCommand,
   DeviceEvent,
   DeviceState,
+  PointReading,
   QuickActionId,
 } from '@kestrel/model';
 import type { Simulation } from '../sim/simulation';
@@ -39,6 +41,12 @@ export class HybridBus implements DeviceBus {
     const driver = this.real.get(deviceId);
     if (driver) return driver.features?.() ?? [];
     return this.sim?.features(deviceId) ?? [];
+  }
+
+  readPoint(deviceId: string, point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>): Promise<PointReading> {
+    const driver = this.real.get(deviceId);
+    if (driver?.readPoint) return driver.readPoint(point);
+    return this.sim?.readPoint(deviceId, point) ?? Promise.reject(new Error('This device cannot read control points'));
   }
 
   subscribe(listener: (event: DeviceEvent) => void): () => void {

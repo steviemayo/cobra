@@ -188,3 +188,31 @@ describe('retention', () => {
     expect(controlIntent.rows.map((r) => r.id)).toEqual(['n2']);
   });
 });
+
+describe('checking a control point', () => {
+  const point = (args: Record<string, string>) => ({ type: 'verify_point', args: { deviceId: 'dsp', ...args } });
+
+  it('queues the point with the command, cleaned up', async () => {
+    const w = world();
+    const res = await ask(w, point({ type: 'level', address: '{ "component": "Room",  "control": "gain" }' }));
+    expect(res.ok).toBe(true);
+    expect(w.remoteCommand.rows[0]).toMatchObject({
+      type: 'verify_point',
+      args: { deviceId: 'dsp', type: 'level', address: '{"component":"Room","control":"gain"}' },
+    });
+  });
+
+  it('refuses a point that is not valid, or too long, or for a device that is not in the room', async () => {
+    const w = world();
+    expect(await ask(w, point({ type: 'nonsense', address: '{}' }))).toEqual({ ok: false, error: 'That control point is not valid' });
+    expect(await ask(w, point({ type: 'level', address: 'nope' }))).toEqual({ ok: false, error: 'That control point is not valid' });
+    expect(await ask(w, point({ type: 'level', address: '["a"]' }))).toEqual({ ok: false, error: 'That control point is not valid' });
+    const long = JSON.stringify({ component: 'x'.repeat(190), control: 'y'.repeat(20) });
+    expect(await ask(w, point({ type: 'level', address: long }))).toMatchObject({ ok: false });
+    expect(
+      await ask(w, { type: 'verify_point', args: { deviceId: 'ghost', type: 'level', address: '{}' } }),
+    ).toEqual({ ok: false, error: 'Choose one of this room’s devices' });
+    expect(w.remoteCommand.rows).toHaveLength(0);
+  });
+});
+

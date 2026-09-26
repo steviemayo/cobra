@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
-import { RoomModel, type CustomDrivers } from '@kestrel/model';
+import { PointAddress, PointType, RoomModel, type CustomDrivers } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import {
   bindingView,
@@ -118,7 +118,34 @@ export const bindingRouter = router({
         where: { id: input.commandId, orgId: ctx.orgId, roomId: input.roomId },
       });
       if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Test not found' });
-      return { status: row.status, error: row.error };
+      return {
+        status: row.status,
+        error: row.error,
+        output: (row.output ?? null) as Record<string, unknown> | null,
+      };
+    }),
+
+  // Ask the room's gateway to read one control point of a DSP, to check it exists and learn its
+  // range. Like Test connection it needs the room running, and the address is sent with the request.
+  verifyPoint: orgProcedure
+    .input(
+      roomInput.extend({
+        deviceId: z.string().min(1).max(100),
+        type: PointType,
+        address: PointAddress,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const res = await requestCommand(db, {
+        orgId: ctx.orgId,
+        roomId: input.roomId,
+        type: 'verify_point',
+        args: { deviceId: input.deviceId, type: input.type, address: JSON.stringify(input.address) },
+        requestedBy: ctx.user.id,
+      });
+      if (!res.ok) return fail(res.error);
+      return { commandId: res.id };
     }),
 
   credentialSets: router({

@@ -14,6 +14,7 @@ import {
 } from '@kestrel/model';
 import { useQuery } from '@tanstack/react-query';
 import { useOrg } from '@/components/shell/org-context';
+import { PointsEditor } from './PointsEditor';
 import { addDevice, addPort, removeDevice, removePort } from '@/lib/editor/ops';
 import { useTRPC } from '@/trpc/client';
 import {
@@ -58,7 +59,7 @@ function controlChoice(d: Device): ControlChoice {
   return d.control.kind === 'driver' ? 'driver' : d.control.protocol;
 }
 
-export function DevicesPanel({ model, update, issues }: PanelProps) {
+export function DevicesPanel({ model, update, issues, roomId }: PanelProps & { roomId?: string }) {
   const [category, setCategory] = useState<DeviceCategory>('video_source');
   return (
     <div className="space-y-4">
@@ -74,17 +75,21 @@ export function DevicesPanel({ model, update, issues }: PanelProps) {
         </p>
       )}
       {model.devices.map((d) => (
-        <DeviceCard key={d.id} device={d} update={update} issues={issuesForDevice(issues, d.id)} />
+        <DeviceCard key={d.id} model={model} roomId={roomId} device={d} update={update} issues={issuesForDevice(issues, d.id)} />
       ))}
     </div>
   );
 }
 
 function DeviceCard({
+  model,
+  roomId,
   device: d,
   update,
   issues,
 }: {
+  model: PanelProps['model'];
+  roomId?: string;
   device: Device;
   update: PanelProps['update'];
   issues: PanelProps['issues'];
@@ -236,6 +241,9 @@ function DeviceCard({
       </div>
 
       {d.category === 'reinforcement_mic' && <MicEditor device={d} edit={edit} />}
+      {['audio_matrix', 'lighting', 'hvac'].includes(d.category) && d.control?.kind === 'driver' && (
+        <PointsEditor model={model} device={d} edit={edit} roomId={roomId} />
+      )}
 
       <SettingsEditor value={d.settings} onChange={(v) => edit((dev) => (dev.settings = v))} />
     </Card>

@@ -1,5 +1,7 @@
 import {
   defaultDeviceState,
+  type ControlPoint,
+  type PointReading,
   isVideoDestination,
   type Device,
   type DeviceBus,
@@ -12,6 +14,8 @@ import {
 } from '@kestrel/model';
 import { buildGraph, splitPortKey, portKey, type Graph } from '@kestrel/engine';
 import { driverFeatures, driverQuickActions } from '../quick-actions';
+
+const pointStart = (type: string): number | boolean => (type === 'mute' ? false : type === 'level' ? 50 : 0);
 
 export interface SimLatency {
   displayOn: number;
@@ -105,6 +109,16 @@ export class Simulation implements DeviceBus {
   quickActions(deviceId: string): QuickActionId[] {
     // Same as the real drivers: what the device's driver declares, not what the category could do.
     return driverQuickActions(this.devices.get(deviceId)?.control, this.customDrivers);
+  }
+
+  /** What a simulated device says about a control point: what it holds, with a made-up range for a level. */
+  async readPoint(deviceId: string, point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'> & { id?: string }): Promise<PointReading> {
+    const device = this.devices.get(deviceId);
+    if (!device) throw new Error(`Unknown device ${deviceId}`);
+    if (this.faults.get(deviceId)?.offline) throw new Error(`${device.name} is offline`);
+    const known = (device.points ?? []).find((p) => p.id === point.id);
+    if (point.type === 'level') return { value: -20, min: point.min ?? -100, max: point.max ?? 12 };
+    return { value: (known && this.states.get(deviceId)!.points[known.id]) || pointStart(point.type) };
   }
 
   features(deviceId: string): string[] {
@@ -214,6 +228,7 @@ export class Simulation implements DeviceBus {
         s.occupied = false;
         break;
     }
+    for (const p of d.points ?? []) s.points[p.id] = pointStart(p.type);
     for (const p of d.ports)
       if (p.direction === 'in' && this.reportsSignal(d)) s.signal[p.id] = false;
     return s;
@@ -306,6 +321,11 @@ export class Simulation implements DeviceBus {
         if (c.type === 'mute') state.muted = c.muted;
         else if (c.type === 'volume') state.volume = c.level;
         else state.preset = c.name;
+        // A room volume or mute point follows what the device was just told.
+        for (const p of d.points ?? []) {
+          if (c.type === 'volume' && p.role === 'room_volume') state.points[p.id] = c.level;
+          if (c.type === 'mute' && p.role === 'room_mute') state.points[p.id] = c.muted;
+        }
         break;
       }
       case 'camera_move': {
@@ -329,6 +349,16 @@ export class Simulation implements DeviceBus {
         if (!ENVIRONMENT.has(cat)) return this.unsupported(d, c);
         await this.delay(this.latency.generic * 3);
         state.preset = c.name;
+        break;
+      }
+      case 'point': {
+        const point = (d.points ?? []).find((p) => p.id === c.pointId);
+        if (!point) throw new Error(`${d.name} has no control point ${c.pointId}`);
+        if (point.type === 'meter') throw new Error(`${point.name} is read only`);
+        await this.delay(this.latency.dsp);
+        state.points[point.id] = c.value;
+        if (point.role === 'room_volume' && typeof c.value === 'number') state.volume = c.value;
+        if (point.role === 'room_mute') state.muted = c.value === true;
         break;
       }
       case 'key': {
