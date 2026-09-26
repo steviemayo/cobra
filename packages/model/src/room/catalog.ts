@@ -12,6 +12,8 @@ export const DeviceCategory = z.enum([
   'voice_capture_mic',
   'conference_system',
   'video_matrix',
+  'avoip_encoder',
+  'avoip_decoder',
   'audio_matrix',
   'video_destination',
   'display',
@@ -40,6 +42,11 @@ export const VIDEO_DESTINATION_CATEGORIES: readonly DeviceCategory[] = [
   'display',
   'projector',
 ];
+/** The endpoints of an AVoIP system. Signal passes through them; the virtual switcher does the routing. */
+export const AVOIP_ENDPOINT_CATEGORIES: readonly DeviceCategory[] = ['avoip_encoder', 'avoip_decoder'];
+export const isAvoipEndpoint = (category: DeviceCategory): boolean =>
+  AVOIP_ENDPOINT_CATEGORIES.includes(category);
+
 export const isVideoDestination = (category: DeviceCategory): boolean =>
   VIDEO_DESTINATION_CATEGORIES.includes(category);
 
@@ -147,6 +154,22 @@ export const DEVICE_CATALOG: Record<DeviceCategory, CategoryInfo> = {
     capabilities: ['video_route', 'audio_route', 'signal_detect'],
     controllable: true,
     defaultPorts: [],
+  },
+  // AVoIP endpoints are ordinary devices in the room. The signal passes through them, so they can
+  // route, but the switcher does the routing: the engine sends them no route command.
+  avoip_encoder: {
+    label: 'AVoIP encoder',
+    section: 'matrix',
+    capabilities: ['video_route', 'audio_route', 'signal_detect'],
+    controllable: true,
+    defaultPorts: [inp('in', 'HDMI in', 'av'), out('net', 'Network', 'av')],
+  },
+  avoip_decoder: {
+    label: 'AVoIP decoder',
+    section: 'matrix',
+    capabilities: ['video_route', 'audio_route'],
+    controllable: true,
+    defaultPorts: [inp('net', 'Network', 'av'), out('out', 'HDMI out', 'av')],
   },
   audio_matrix: {
     label: 'Audio matrix / DSP',

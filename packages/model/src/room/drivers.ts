@@ -18,6 +18,8 @@ export interface DriverInfo {
   /** The driver class it implements, and the optional features it supports (docs/driver-classes.md). */
   class: DriverClass;
   features: string[];
+  /** AVoIP: the family an encoder, decoder and switcher belong to. All three of a system must match. */
+  family?: string;
   categories: DeviceCategory[];
   /** Every setting the driver reads. */
   settings: DriverSettingInfo[];
@@ -35,6 +37,12 @@ const QSYS_CONTROL = [
 const TESIRA_CHANNEL = [
   { key: 'tag', label: 'Instance tag' },
   { key: 'index', label: 'Channel' },
+];
+
+const NVX_ENDPOINT_SETTINGS: DriverSettingInfo[] = [
+  { key: 'host', label: 'Endpoint address', scope: 'binding', required: true },
+  { key: 'username', label: 'NVX logon name', scope: 'binding', required: true },
+  { key: 'password', label: 'NVX password', scope: 'secret', required: true },
 ];
 
 export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
@@ -135,6 +143,36 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     ],
     categories: ['lighting'],
     example: { host: '<processor IP>', zone: 1, keypad: 1 },
+  },
+  'crestron-nvx-encoder': {
+    name: 'Crestron NVX encoder',
+    description: 'A Crestron NVX encoder (E30, E20 and similar) as a device in the room. Reports the location of its stream and whether its input has a signal. Needs the NVX logon.',
+    class: 'avoip_encoder',
+    features: ['stream_location', 'signal_detect'],
+    family: 'crestron-nvx',
+    settings: NVX_ENDPOINT_SETTINGS,
+    categories: ['avoip_encoder'],
+    example: { host: '<encoder IP>', username: 'admin', password: '<NVX password>' },
+  },
+  'crestron-nvx-decoder': {
+    name: 'Crestron NVX decoder',
+    description: 'A Crestron NVX decoder (D30, DM-NVX-351 and similar) as a device in the room. Pointed at an encoder stream by its switcher. Needs the NVX logon.',
+    class: 'avoip_decoder',
+    features: ['set_stream', 'stream_state'],
+    family: 'crestron-nvx',
+    settings: NVX_ENDPOINT_SETTINGS,
+    categories: ['avoip_decoder'],
+    example: { host: '<decoder IP>', username: 'admin', password: '<NVX password>' },
+  },
+  'crestron-nvx-switcher': {
+    name: 'Crestron NVX virtual switcher',
+    description: 'The routing logic for NVX encoders and decoders that are devices in the room. It has no address of its own: routing reads the encoder stream, points the decoder at it and waits until the decoder is receiving.',
+    class: 'avoip_switching',
+    features: ['route', 'signal_detect'],
+    family: 'crestron-nvx',
+    settings: [],
+    categories: ['video_matrix'],
+    example: {},
   },
   'crestron-dm-nvx': {
     name: 'Crestron DM NVX (virtual matrix)',

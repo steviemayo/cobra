@@ -10,6 +10,8 @@ export interface DeviceDriver {
   quickActions?(): QuickActionId[];
   /** The optional features of its class this driver supports. Absent means none. */
   features?(): string[];
+  /** AVoIP encoders: where the stream this device makes can be picked up. Rejects if it cannot say. */
+  streamLocation?(): Promise<string>;
   /** Read one control point, to check it exists and learn its range. Rejects if it cannot. */
   readPoint?(point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>): Promise<PointReading>;
   /** Called with a fresh snapshot whenever feedback changes. */

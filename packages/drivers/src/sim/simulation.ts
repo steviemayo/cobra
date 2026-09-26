@@ -361,6 +361,14 @@ export class Simulation implements DeviceBus {
         if (point.role === 'room_mute') state.muted = c.value === true;
         break;
       }
+      case 'set_stream': {
+        if (cat !== 'avoip_decoder') return this.unsupported(d, c);
+        await this.delay(this.latency.route);
+        state.streamConnected = c.location !== null;
+        if (c.location) state.streamLocation = c.location;
+        else delete state.streamLocation;
+        break;
+      }
       case 'key': {
         if (!isVideoDestination(cat)) return this.unsupported(d, c);
         if (state.power !== 'on') throw new Error(`${d.name} isn't on yet`);
@@ -412,6 +420,18 @@ export class Simulation implements DeviceBus {
         arriving.add(inKey);
         const [deviceId, inPortId] = splitPortKey(inKey);
         const device = this.devices.get(deviceId)!;
+        // AVoIP endpoints pass the signal straight through (the switcher's routes decide where it goes).
+        if (device.category === 'avoip_encoder' || device.category === 'avoip_decoder') {
+          if (this.faults.get(deviceId)?.offline) continue;
+          for (const p of device.ports) {
+            const k = portKey(deviceId, p.id);
+            if (p.direction === 'out' && !present.has(k)) {
+              present.add(k);
+              queue.push(k);
+            }
+          }
+          continue;
+        }
         if (device.category !== 'video_matrix' && device.category !== 'audio_matrix') continue;
         if (this.faults.get(deviceId)?.offline) continue;
         const routes = this.states.get(deviceId)!.routes;

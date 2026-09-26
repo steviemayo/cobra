@@ -10,6 +10,8 @@ export const DriverClass = z.enum([
   'display',
   'video_switching',
   'avoip_switching',
+  'avoip_encoder',
+  'avoip_decoder',
   'point_based',
   'camera',
   'conference_system',
@@ -78,6 +80,22 @@ export const DRIVER_CLASSES: Record<DriverClass, DriverClassInfo> = {
     features: {
       route: 'Points decoders at encoder streams',
       signal_detect: 'Reports whether an encoder input has a signal',
+    },
+  },
+  avoip_encoder: {
+    label: 'AVoIP encoder',
+    categories: ['avoip_encoder'],
+    features: {
+      stream_location: 'Reports where its stream can be picked up',
+      signal_detect: 'Reports whether its input has a signal',
+    },
+  },
+  avoip_decoder: {
+    label: 'AVoIP decoder',
+    categories: ['avoip_decoder'],
+    features: {
+      set_stream: 'Can be pointed at a stream',
+      stream_state: 'Reports whether it is receiving its stream',
     },
   },
   point_based: {

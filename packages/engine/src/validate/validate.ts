@@ -86,6 +86,51 @@ function checkDevices(model: RoomModel, opts: ValidateOptions, c: Collector) {
   }
 }
 
+/** The AVoIP family a device's driver belongs to, when it names one. */
+const familyOf = (d: Device) =>
+  d.control?.kind === 'driver' ? BUILT_IN_DRIVERS[d.control.driverId]?.family : undefined;
+
+/**
+ * An AVoIP system is an encoder, a decoder and a switcher that share a handshake, so all the parts
+ * a switcher joins must come from one family. Endpoints wired to nothing are also flagged.
+ */
+function checkAvoip(model: RoomModel, c: Collector) {
+  const byId = new Map(model.devices.map((d) => [d.id, d]));
+  const switcherIds = new Set(
+    model.devices.filter((d) => d.category === 'video_matrix' && familyOf(d)).map((d) => d.id),
+  );
+  const linked = new Set<string>();
+  for (const conn of model.connections) {
+    const from = byId.get(conn.from.deviceId);
+    const to = byId.get(conn.to.deviceId);
+    if (!from || !to) continue;
+    const pair =
+      (switcherIds.has(to.id) && from.category === 'avoip_encoder' ? [to, from] : null) ??
+      (switcherIds.has(from.id) && to.category === 'avoip_decoder' ? [from, to] : null);
+    if (!pair) continue;
+    const [switcher, endpoint] = pair;
+    linked.add(endpoint!.id);
+    const wanted = familyOf(switcher!);
+    const got = familyOf(endpoint!);
+    if (wanted && got && wanted !== got)
+      c.error(
+        'avoip_family_mismatch',
+        `${endpoint!.name} is a ${got} device but ${switcher!.name} is a ${wanted} switcher. An encoder, decoder and switcher must come from the same family`,
+        { kind: 'device', id: endpoint!.id },
+      );
+    else if (wanted && endpoint!.control && !got)
+      c.warn('avoip_family_unknown', `${endpoint!.name} uses a driver that does not say which AVoIP family it belongs to`, { kind: 'device', id: endpoint!.id });
+  }
+  if (switcherIds.size === 0) return;
+  for (const d of model.devices)
+    if ((d.category === 'avoip_encoder' || d.category === 'avoip_decoder') && !linked.has(d.id))
+      c.warn(
+        'avoip_endpoint_unlinked',
+        `${d.name} is not connected to a virtual switcher, so nothing can route to or from it`,
+        { kind: 'device', id: d.id },
+      );
+}
+
 const POINT_CLASS_CATEGORIES = new Set(['audio_matrix', 'lighting', 'hvac']);
 
 /**
@@ -519,6 +564,7 @@ export function validateRoomModel(model: RoomModel, opts: ValidateOptions = {}):
   checkConnections(model, g, c);
   checkMicRouting(model, g, c);
   checkPoints(model, c);
+  checkAvoip(model, c);
   checkGroups(model, g, c);
   checkStates(model, g, c);
   checkActivities(model, g, c);

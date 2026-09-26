@@ -1,4 +1,5 @@
 import {
+  isAvoipEndpoint,
   isVideoDestination,
   type Action,
   type Activity,
@@ -59,8 +60,11 @@ function routeSteps(
     });
     return;
   }
+  // The signal passes through AVoIP encoders and decoders, but the virtual switcher does the
+  // routing (it reads the stream, points the decoder at it and waits), so they get no command.
   for (const hop of path.hops)
-    b.add(hop.deviceId, { type: 'route', inputPortId: hop.inPortId, outputPortId: hop.outPortId });
+    if (!isAvoipEndpoint(ctx.graph.devices.get(hop.deviceId)?.category ?? 'video_matrix'))
+      b.add(hop.deviceId, { type: 'route', inputPortId: hop.inPortId, outputPortId: hop.outPortId });
   const dest = ctx.graph.devices.get(dst.deviceId);
   if (dest && isVideoDestination(dest.category))
     b.add(dst.deviceId, { type: 'select_input', portId: path.destinationPortId });
