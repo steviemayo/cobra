@@ -3,6 +3,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { LifeBuoy } from 'lucide-react';
+import { SlaBadge } from '@/components/common/sla-badge';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { orgPath, useOrg } from '@/components/shell/org-context';
@@ -60,6 +61,7 @@ export function MspTickets() {
                 <th className="px-3 py-2 font-medium">Customer</th>
                 <th className="px-3 py-2 font-medium">Priority</th>
                 <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Target</th>
                 <th className="px-3 py-2 font-medium">Updated</th>
               </tr>
             </thead>
@@ -85,6 +87,9 @@ export function MspTickets() {
                     {PRIORITY_LABEL[t.priority]}
                   </td>
                   <td className="px-3 py-2">{TICKET_STATUS_LABEL[t.status]}</td>
+                  <td className="px-3 py-2">
+                    <SlaBadge sla={t.sla} />
+                  </td>
                   <td className="px-3 py-2 text-muted-foreground">{timeAgo(t.updatedAt)}</td>
                 </tr>
               ))}

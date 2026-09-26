@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LifeBuoy, Plus } from 'lucide-react';
 import { toast } from 'sonner';
+import { SlaBadge } from '@/components/common/sla-badge';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
@@ -257,6 +258,7 @@ export function TicketsView() {
                 <TableHead>Request</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Priority</TableHead>
+                <TableHead>Target</TableHead>
                 <TableHead>Room</TableHead>
                 <TableHead className="text-right">Updated</TableHead>
               </TableRow>
@@ -292,6 +294,9 @@ export function TicketsView() {
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {PRIORITY_LABEL[t.priority]}
+                  </TableCell>
+                  <TableCell>
+                    <SlaBadge sla={t.sla} />
                   </TableCell>
                   <TableCell className="text-muted-foreground">{t.roomName ?? '–'}</TableCell>
                   <TableCell className="text-right text-muted-foreground">

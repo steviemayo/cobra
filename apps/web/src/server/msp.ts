@@ -7,9 +7,11 @@ import {
   mspRoute,
   type GrantRole,
   type OrgRole,
+  type TicketSla,
 } from '@kestrel/model';
 import { effectiveStatus } from './gateway-status';
 import { clearStaleAssignees } from './ticket-assignees';
+import { slaForTicket, slaUrgency } from './tickets';
 
 // Managed service providers. An MSP is an organisation of kind "msp"; a customer's owner invites
 // it, the MSP's owner accepts, and either side can end it. While it is active, the MSP's people
@@ -17,7 +19,16 @@ import { clearStaleAssignees } from './ticket-assignees';
 // Functions take the database as a parameter so they can be tested without one.
 export type MspDb = Pick<
   PrismaClient,
-  'org' | 'member' | 'mspGrant' | 'auditLog' | 'ticket' | 'room' | 'gateway' | 'incident' | 'site'
+  | 'org'
+  | 'member'
+  | 'mspGrant'
+  | 'auditLog'
+  | 'ticket'
+  | 'ticketComment'
+  | 'room'
+  | 'gateway'
+  | 'incident'
+  | 'site'
 >;
 
 export class MspError extends Error {}
@@ -446,6 +457,8 @@ export interface MspTicketRow {
   priority: string;
   createdAt: Date;
   updatedAt: Date;
+  /** Against the response and resolution targets, from when the request was raised. */
+  sla: TicketSla;
 }
 
 const RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
@@ -468,6 +481,13 @@ export async function mspTickets(
   });
   const orgs = await db.org.findMany({ where: { id: { in: ids } } });
   const name = new Map(orgs.map((o) => [o.id, o.name]));
+  const comments = rows.length
+    ? await db.ticketComment.findMany({
+        where: { ticketId: { in: rows.map((r) => r.id) }, visibility: 'public' },
+        orderBy: { createdAt: 'asc' },
+      })
+    : [];
+  const now = new Date();
   return rows
     .map((t) => ({
       id: t.id,
@@ -478,10 +498,16 @@ export async function mspTickets(
       priority: t.priority,
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
+      sla: slaForTicket(
+        t,
+        comments.filter((c) => c.ticketId === t.id),
+        now,
+      ),
     }))
     .sort(
       (a, b) =>
         (RANK[a.priority] ?? 9) - (RANK[b.priority] ?? 9) ||
+        slaUrgency(a.sla) - slaUrgency(b.sla) ||
         a.createdAt.getTime() - b.createdAt.getTime(),
     );
 }

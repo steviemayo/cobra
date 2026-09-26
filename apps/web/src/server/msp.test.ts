@@ -54,6 +54,7 @@ function world() {
   const mspGrant = withIds(table([]), 'g');
   const auditLog = withIds(table([]), 'a');
   const ticket = table([]);
+  const ticketComment = table([]);
   const site = table([
     { id: 'site-a', orgId: CUSTOMER, name: 'Head office' },
     { id: 'site-b', orgId: CUSTOMER, name: 'Warehouse' },
@@ -85,6 +86,7 @@ function world() {
       mspGrant,
       auditLog,
       ticket,
+      ticketComment,
       room,
       gateway,
       incident,
@@ -93,6 +95,7 @@ function world() {
     mspGrant,
     auditLog,
     ticket,
+    ticketComment,
   };
 }
 
