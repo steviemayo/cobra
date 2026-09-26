@@ -670,6 +670,26 @@
   gap: 0.8em;
   text-align: left;
 }
+.kp-mic-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.6em;
+  align-items: stretch;
+}
+.kp-mic-volume {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+.kp-mic-volume .kp-hold {
+  min-height: 3.5em;
+  min-width: 3.5em;
+}
+.kp-mic-level {
+  min-width: 2.2em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 .kp-pad {
   display: grid;
   grid-template-columns: repeat(3, 5.5em);

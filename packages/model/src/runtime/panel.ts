@@ -48,6 +48,8 @@ export const PanelIntent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('display.key'), deviceId: LocalId, key: DisplayKey }),
   /** Launch an app on a smart display. Ids come from `functions.displays`. */
   z.object({ type: z.literal('display.app'), deviceId: LocalId, appId: z.string().min(1).max(200) }),
+  /** Nudge one reinforcement microphone's volume. Sent again while a button is held. */
+  z.object({ type: z.literal('mic.bump'), deviceId: LocalId, delta: z.number().int().min(-25).max(25) }),
   /** Mute or unmute one microphone. */
   z.object({ type: z.literal('mic.mute'), deviceId: LocalId, muted: z.boolean() }),
   /** Recall a lighting scene. */
@@ -142,6 +144,10 @@ export const PanelMic = z.object({
   name: z.string(),
   /** null: the microphone does not say. */
   muted: z.boolean().nullable(),
+  /** The volume buttons work (the driver declares volume). */
+  canVolume: z.boolean().default(false),
+  /** 0 to 100, only when the microphone reports its level. */
+  volume: z.number().min(0).max(100).nullable().default(null),
 });
 export type PanelMic = z.infer<typeof PanelMic>;
 

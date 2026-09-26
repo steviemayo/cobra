@@ -8,6 +8,8 @@ import {
   GenericProtocol,
   PortDirection,
   SignalKind,
+  MicStart,
+  MicStop,
   type Device,
 } from '@kestrel/model';
 import { useQuery } from '@tanstack/react-query';
@@ -233,8 +235,69 @@ function DeviceCard({
         </div>
       </div>
 
+      {d.category === 'reinforcement_mic' && <MicEditor device={d} edit={edit} />}
+
       <SettingsEditor value={d.settings} onChange={(v) => edit((dev) => (dev.settings = v))} />
     </Card>
+  );
+}
+
+/** How a reinforcement microphone appears on the panel and what it does with the room. */
+function MicEditor({ device: d, edit }: { device: Device; edit: (fn: (dev: Device) => void) => void }) {
+  const set = (fn: (m: NonNullable<Device['mic']>) => void) =>
+    edit((dev) => {
+      const m = { ...dev.mic };
+      fn(m);
+      // Nothing set means nothing stored, so the device stays as it was.
+      const cleaned = Object.fromEntries(Object.entries(m).filter(([, v]) => v !== undefined && v !== ''));
+      if (Object.keys(cleaned).length) dev.mic = cleaned;
+      else delete dev.mic;
+    });
+  return (
+    <div className="space-y-2">
+      <div className="text-xs text-muted-foreground">Microphone</div>
+      <div className="flex flex-wrap items-end gap-3">
+        <Label text="Label on the panel">
+          <TextInput
+            value={d.mic?.label ?? ''}
+            placeholder={d.name}
+            onChange={(v) => set((m) => (m.label = v.trim() === '' ? undefined : v))}
+          />
+        </Label>
+        <Label text="Order">
+          <input
+            className={`${inputCls} w-20`}
+            type="number"
+            min={0}
+            max={999}
+            value={d.mic?.order ?? ''}
+            onChange={(e) => set((m) => (m.order = e.target.value === '' ? undefined : Math.round(Number(e.target.value))))}
+          />
+        </Label>
+        <Label text="When the room turns on">
+          <Select
+            value={d.mic?.onStart ?? 'unmute'}
+            options={MicStart.options.map((o) => ({ value: o, label: o[0]!.toUpperCase() + o.slice(1) }))}
+            onChange={(v) => set((m) => (m.onStart = v === 'unmute' ? undefined : v))}
+          />
+        </Label>
+        <Label text="When the room turns off">
+          <Select
+            value={d.mic?.onStop ?? 'mute'}
+            options={MicStop.options.map((o) => ({ value: o, label: o[0]!.toUpperCase() + o.slice(1) }))}
+            onChange={(v) => set((m) => (m.onStop = v === 'mute' ? undefined : v))}
+          />
+        </Label>
+        <label className="flex items-center gap-2 pb-1.5 text-sm">
+          <input
+            type="checkbox"
+            checked={d.mic?.hidden ?? false}
+            onChange={(e) => set((m) => (m.hidden = e.target.checked ? true : undefined))}
+          />
+          Hide from the panel
+        </label>
+      </div>
+    </div>
   );
 }
 

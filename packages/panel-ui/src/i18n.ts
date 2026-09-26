@@ -74,6 +74,8 @@ export const en = {
   'cam.zoom_out': 'Zoom out',
   'mic.muted': 'Muted',
   'mic.live': 'Live',
+  'mic.quieter': 'quieter',
+  'mic.louder': 'louder',
   'controls.lights': 'Lighting',
   'controls.blinds': 'Blinds and screens',
   'mover.open': 'Open',

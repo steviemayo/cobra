@@ -49,7 +49,8 @@ const equipped = (
     }),
     device({ id: 'blinds1', name: 'Window blinds', category: 'blinds', control: driver }),
     device({ id: 'screen1', name: 'Projection screen', category: 'screen', control: driver }),
-    device({ id: 'mic1', name: 'Ceiling mic', category: 'voice_capture_mic', control: driver }),
+    device({ id: 'mic1', name: 'Lectern mic', category: 'reinforcement_mic', control: driver }),
+    device({ id: 'mic2', name: 'Ceiling mic', category: 'voice_capture_mic', control: driver }),
   );
   return m;
 };
@@ -88,7 +89,7 @@ describe('which pages a room offers', () => {
     setup(equipped({ lights: true, blinds: true, microphones: true }));
     expect(fn()!.cameras).toEqual([]);
     expect(fn()!.lights.map((l) => l.name)).toEqual(['Room lights']);
-    expect(fn()!.microphones.map((m) => m.name)).toEqual(['Ceiling mic']);
+    expect(fn()!.microphones.map((m) => m.name)).toEqual(['Lectern mic']);
     expect(fn()!.movers.map((m) => [m.kind, m.actions])).toEqual([
       ['blinds', ['open', 'close']],
       ['screen', ['down', 'up']],

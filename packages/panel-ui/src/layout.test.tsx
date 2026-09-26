@@ -459,8 +459,8 @@ describe('function pages', () => {
       },
     ],
     microphones: [
-      { id: 'mic1', name: 'Ceiling mic', muted: false },
-      { id: 'mic2', name: 'Lectern mic', muted: null },
+      { id: 'mic1', name: 'Ceiling mic', muted: false, canVolume: false, volume: null },
+      { id: 'mic2', name: 'Lectern mic', muted: null, canVolume: false, volume: null },
     ],
     lights: [{ id: 'lights1', name: 'Room lights', scenes: ['Bright', 'Dim'], active: 'Dim' }],
     movers: [
@@ -701,6 +701,51 @@ describe('display page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Display' }));
     expect(screen.getByRole('heading', { name: 'Left screen' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Right screen' })).toBeTruthy();
+  });
+});
+
+describe('microphone volume', () => {
+  const mics = (over: Record<string, unknown> = {}) =>
+    running({
+      functions: {
+        cameras: [],
+        lights: [],
+        movers: [],
+        displays: [],
+        microphones: [{ id: 'm1', name: 'Lectern mic', muted: false, canVolume: true, volume: 40, ...over }],
+      } as never,
+    });
+  const bumps = (dispatched: { type: string }[]) => dispatched.filter((i) => i.type === 'mic.bump');
+
+  it('has quieter and louder buttons that repeat while held, and shows the level', () => {
+    const { client, dispatched } = fakeClient(mics());
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Microphones' }));
+    expect(screen.getByText('40')).toBeTruthy();
+    const louder = screen.getByRole('button', { name: 'Lectern mic louder' });
+    fireEvent.pointerDown(louder);
+    act(() => void vi.advanceTimersByTime(600));
+    fireEvent.pointerUp(louder);
+    expect(bumps(dispatched)).toEqual([
+      { type: 'mic.bump', deviceId: 'm1', delta: 5 },
+      { type: 'mic.bump', deviceId: 'm1', delta: 5 },
+      { type: 'mic.bump', deviceId: 'm1', delta: 5 },
+    ]);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Lectern mic quieter' }));
+    expect(bumps(dispatched).at(-1)).toEqual({ type: 'mic.bump', deviceId: 'm1', delta: -5 });
+  });
+
+  it('shows no level when the microphone reports none, and no buttons when it has no volume', () => {
+    const noLevel = fakeClient(mics({ volume: null }));
+    render(<PanelApp client={noLevel.client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Microphones' }));
+    expect(screen.queryByText('40')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Lectern mic louder' })).toBeTruthy();
+    cleanup();
+    const none = fakeClient(mics({ canVolume: false }));
+    render(<PanelApp client={none.client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Microphones' }));
+    expect(screen.queryByRole('button', { name: 'Lectern mic louder' })).toBeNull();
   });
 });
 

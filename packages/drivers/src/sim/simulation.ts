@@ -188,8 +188,11 @@ export class Simulation implements DeviceBus {
         s.selectedInput = null;
         s.blanked = false;
         break;
-      case 'conference_system':
       case 'reinforcement_mic':
+        s.muted = false;
+        s.volume = 50;
+        break;
+      case 'conference_system':
       case 'voice_capture_mic':
         s.muted = false;
         break;
@@ -295,7 +298,8 @@ export class Simulation implements DeviceBus {
         // A conference system also mutes (Privacy Mute), and so does a microphone.
         if (
           cat !== 'audio_matrix' &&
-          !(c.type === 'mute' && (cat === 'conference_system' || MICS.has(cat)))
+          !(c.type === 'mute' && (cat === 'conference_system' || MICS.has(cat))) &&
+          !(c.type === 'volume' && cat === 'reinforcement_mic')
         )
           return this.unsupported(d, c);
         await this.delay(this.latency.dsp);

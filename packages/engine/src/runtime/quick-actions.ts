@@ -30,10 +30,14 @@ export function roomQuickActions(model: RoomModel, bus: DeviceBus): RoomQuickAct
   const displays = supporting(isVideoDestination, 'display.blank');
   if (displays.length > 0) offered.push({ id: 'display.blank', devices: displays });
 
+  // Privacy Mute acts on every conferencing microphone that can mute itself, and on the conference
+  // system where its driver can mute the microphones. It is offered when a microphone can do it, or
+  // when the room has conferencing microphones and a conference system that can.
   const conferencing = supporting((c) => c === 'conference_system', 'mics.privacy_mute');
-  const hasMics = model.devices.some((d) => d.category === 'voice_capture_mic');
-  if (hasMics && conferencing.length > 0)
-    offered.push({ id: 'mics.privacy_mute', devices: conferencing });
+  const mics = model.devices.filter((d) => d.category === 'voice_capture_mic');
+  const muting = mics.filter((d) => bus.features?.(d.id)?.includes('privacy_mute')).map((d) => d.id);
+  if (muting.length > 0 || (mics.length > 0 && conferencing.length > 0))
+    offered.push({ id: 'mics.privacy_mute', devices: [...muting, ...conferencing] });
   return offered;
 }
 

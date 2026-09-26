@@ -76,7 +76,7 @@ Also configurable: idle timeout back to the Idle screen, and whether the support
 
 - A quick action is offered only when the room has what it needs. The **driver** declares which quick actions its device supports, and the room model decides whether they appear
 - **Blank Screen**: only if the room has a display device and that display's driver supports blank. Acts on the display group
-- **Privacy Mute**: only if the room has conferencing microphones and a conference system. Mutes the conferencing mics and shows state
+- **Privacy Mute**: only if a conferencing microphone can mute itself, or the room has conferencing microphones and a conference system that can. Mutes every such microphone and the conference system, and shows their combined state
 - Same action on several devices (e.g. two displays) is one button acting on all of them
 - Driver-declared quick actions can be toggles (with on/off state from feedback) or one-shot buttons
 - Order of the bottom bar: fixed order from the room type, devs can hide or reorder, max 3 in the bar and the rest in the Quick Actions sheet
@@ -150,3 +150,9 @@ Next slices:
 - Org accent colour setting applied to the portal (same contrast check)
 - Room linking redesign
 - Check on real 7" and 10" panels
+
+## Microphones and Display pages (driver classes slice 4)
+
+- **Microphones page:** reinforcement microphones only, under friendly labels, in the order set in the portal. Each has a mute button and, where its driver has volume, − and + (tap, hold to repeat) with the level when the microphone reports it. Conferencing microphones never appear; they act through Privacy Mute
+- **Display page:** opt-in per room (Extra controls: display). Apps the dev listed, a direction pad with OK, Back, Home and Menu, and media keys, each only if the display's driver declares it. Arrows repeat while held. Never on the start or activity screens
+

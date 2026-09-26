@@ -1,5 +1,5 @@
 'use client';
-import { ActivityKind, Capability, type Activity } from '@kestrel/model';
+import { ActivityKind, Capability, MicStart, type Activity } from '@kestrel/model';
 import { generateDefaultActivities, uniqueId } from '@/lib/editor/ops';
 import { ActionsEditor } from './ActionsEditor';
 import {
@@ -217,6 +217,37 @@ export function ActivitiesPanel({ model, update, issues }: PanelProps) {
             actions={a.actions}
             mutate={(fn) => edit(a.id, (x) => fn(x.actions))}
           />
+
+          {model.devices.some((d) => d.category === 'reinforcement_mic' && d.control) && (
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">
+                Microphones during this activity (a microphone left on its default follows its own start setting)
+              </div>
+              {model.devices
+                .filter((d) => d.category === 'reinforcement_mic' && d.control)
+                .map((d) => (
+                  <div key={d.id} className="flex items-center gap-2 text-sm">
+                    <span className="w-48 truncate">{d.mic?.label ?? d.name}</span>
+                    <Select
+                      value={a.micOverrides?.[d.id] ?? 'default'}
+                      options={[
+                        { value: 'default', label: 'Default' },
+                        ...MicStart.options.map((o) => ({ value: o, label: o[0]!.toUpperCase() + o.slice(1) })),
+                      ]}
+                      onChange={(v) =>
+                        edit(a.id, (x) => {
+                          const next = { ...x.micOverrides };
+                          if (v === 'default') delete next[d.id];
+                          else next[d.id] = v;
+                          if (Object.keys(next).length) x.micOverrides = next;
+                          else delete x.micOverrides;
+                        })
+                      }
+                    />
+                  </div>
+                ))}
+            </div>
+          )}
         </Card>
       ))}
     </div>
