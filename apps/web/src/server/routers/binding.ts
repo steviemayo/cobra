@@ -4,11 +4,13 @@ import { db } from '@kestrel/db';
 import { PointAddress, PointType, RoomModel, type CustomDrivers } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import {
+  type DeviceBindingChange,
   bindingView,
   createCredentialSet,
   deleteCredentialSet,
   listCredentialSets,
   saveDeviceBinding,
+  saveDeviceBindings,
   updateCredentialSet,
 } from '../bindings';
 import { requestCommand } from '../commands';
@@ -91,6 +93,61 @@ export const bindingRouter = router({
         },
       });
       return { version: res.version };
+    }),
+
+  // Many devices at once, from the settings table: one new version for the room, and nothing is
+  // saved unless every change is allowed.
+  saveDevices: orgProcedure
+    .input(
+      roomInput.extend({
+        changes: z
+          .array(
+            z.object({
+              deviceId: z.string().min(1).max(100),
+              set: z.record(z.string().min(1).max(60), value).optional(),
+              credentialSetId: z.string().uuid().nullable().optional(),
+            }),
+          )
+          .min(1)
+          .max(200),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const { room, model, custom } = await loadDesign(ctx.orgId, input.roomId);
+      const changes: DeviceBindingChange[] = [];
+      for (const c of input.changes) {
+        const device = model.devices.find((d) => d.id === c.deviceId);
+        if (!device) return fail('A device in this change is not in this room’s design');
+        changes.push({
+          device,
+          ...(c.set ? { set: c.set } : {}),
+          ...(c.credentialSetId !== undefined ? { credentialSetId: c.credentialSetId } : {}),
+        });
+      }
+      const res = await saveDeviceBindings(db, {
+        orgId: ctx.orgId,
+        roomId: room.id,
+        custom,
+        changes,
+        userId: ctx.user.id,
+      });
+      if (!res.ok) return fail(res.message);
+      // Names only: never the values, which may be logins.
+      for (const c of changes)
+        await writeAudit({
+          orgId: ctx.orgId,
+          actorId: ctx.user.id,
+          action: 'room.bindings',
+          target: room.id,
+          meta: {
+            room: room.name,
+            device: c.device.name,
+            changed: Object.keys(c.set ?? {}),
+            ...(c.credentialSetId !== undefined ? { credentialSet: c.credentialSetId } : {}),
+          },
+        });
+      return { version: res.version, devices: changes.length };
     }),
 
   // Ask the room's gateway whether a device answers. It tests what the room is running now, so

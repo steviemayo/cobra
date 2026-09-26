@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
-import { checkDriverSpec } from '@kestrel/model';
+import { DriverSetting, checkDriverSpec } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { saveDriver } from '../custom-drivers';
 import { featureProcedure, orgProcedure, requireRole, router } from '../trpc';
@@ -10,10 +10,25 @@ const orgId = z.string().uuid();
 const proProcedure = featureProcedure('driverCreate');
 
 export const driverRouter = router({
-  // Names only, for the device picker: available to anyone who can design a room.
+  // Names and the settings each driver reads, for the device picker and its fields: available to
+  // anyone who can design a room.
   options: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
     const rows = await db.customDriver.findMany({ where: { orgId: ctx.orgId }, orderBy: { name: 'asc' } });
-    return rows.map((d) => ({ id: `custom:${d.slug}`, name: d.name, latestVersion: d.latestVersion }));
+    const versions = rows.length
+      ? await db.customDriverVersion.findMany({
+          where: { OR: rows.map((d) => ({ driverId: d.id, version: d.latestVersion })) },
+        })
+      : [];
+    return rows.map((d) => {
+      const spec = versions.find((v) => v.driverId === d.id && v.version === d.latestVersion)?.spec;
+      const settings = DriverSetting.array().safeParse((spec as { settings?: unknown } | null)?.settings);
+      return {
+        id: `custom:${d.slug}`,
+        name: d.name,
+        latestVersion: d.latestVersion,
+        settings: settings.success ? settings.data : [],
+      };
+    });
   }),
 
   list: proProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
