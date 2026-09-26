@@ -71,7 +71,7 @@ export const bulkRouter = router({
     return planBulk(db as unknown as BulkDb, bulk);
   }),
 
-  apply: orgProcedure.input(gridInput).mutation(async ({ ctx, input }) => {
+  create: orgProcedure.input(gridInput).mutation(async ({ ctx, input }) => {
     requireRole(ctx.role, ['owner', 'dev']);
     const { site, bulk } = await prepare(ctx, input);
     const result = await db.$transaction((tx) => applyBulk(tx as unknown as BulkDb, bulk), {

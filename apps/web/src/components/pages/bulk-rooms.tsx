@@ -65,7 +65,7 @@ export function BulkRoomsView() {
   });
   const preview = useMutation(trpc.bulk.preview.mutationOptions({ onError: (e) => toast.error(e.message) }));
   const apply = useMutation(
-    trpc.bulk.apply.mutationOptions({
+    trpc.bulk.create.mutationOptions({
       onSuccess: async (r) => {
         toast.success(`${r.created.length} created, ${r.updated.length} updated`);
         await qc.invalidateQueries({ queryKey: trpc.room.overview.queryKey() });
