@@ -1,6 +1,7 @@
 'use client';
 import { languageOptions } from '@kestrel/panel-ui';
 import type { PanelBranding } from '@kestrel/model';
+import { accentAdjustments } from '@/lib/accent';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SimpleSelect } from './simple-select';
@@ -39,6 +40,7 @@ export function BrandingFields({
   id: string;
 }) {
   const set = (patch: Partial<BrandingDraft>) => onChange({ ...value, ...patch });
+  const adjusted = accentAdjustments(value.accent);
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <div className="space-y-2">
@@ -85,6 +87,15 @@ export function BrandingFields({
             }}
           />
         </div>
+        {adjusted?.changed && (
+          <p className="text-xs text-warning">
+            Adjusted so text stays readable: {adjusted.light.accent} in the light theme,{' '}
+            {adjusted.dark.accent} in the dark theme.
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Also colours buttons and highlights in the portal.
+        </p>
       </div>
       <div className="space-y-2">
         <Label htmlFor={`${id}-logo`}>Logo address</Label>

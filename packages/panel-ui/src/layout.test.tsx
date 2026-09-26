@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import {
   PanelSettings,
   type PanelClient,
@@ -243,6 +243,15 @@ describe('quick actions', () => {
     });
   });
 
+  it('translates the standard actions by id, and shows any other label as given', () => {
+    const { client } = fakeClient(
+      running({ quickActions: [action('display.blank'), action('custom.thing')] }),
+    );
+    render(<PanelApp client={client} language="es" />);
+    expect(screen.getByRole('button', { name: 'Pantalla en negro' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'custom.thing' })).toBeTruthy();
+  });
+
   it('keeps two in the bar and the rest in a sheet when there are more than three', () => {
     const { client, dispatched } = fakeClient(
       running({ quickActions: ['a', 'b', 'c', 'd'].map((id) => action(id)) }),
@@ -333,5 +342,290 @@ describe('touch to begin', () => {
     render(<PanelApp client={client} />);
     expect(screen.getByText('Dial 9925 8000')).toBeTruthy();
     expect(document.querySelector('.kp-idle .kp-qr')).toBeTruthy();
+  });
+});
+
+describe('linking rooms', () => {
+  const wall = (over: Record<string, unknown> = {}) => ({
+    id: 'w1',
+    name: 'Wall 1',
+    open: false,
+    rooms: ['Room A', 'Room B'],
+    adds: ['Room B'],
+    available: true,
+    ...over,
+  });
+  const linking = (dividers = [wall()], space = ['Room A']) => ({ dividers, space });
+
+  it('is not offered to a room that is not in a group', () => {
+    const { client } = fakeClient(running());
+    render(<PanelApp client={client} />);
+    expect(screen.queryByRole('button', { name: 'Link rooms' })).toBeNull();
+  });
+
+  it('is offered even while the room is off, so rooms can be linked before starting', () => {
+    const { client } = fakeClient({ ...base(), linking: linking() });
+    render(<PanelApp client={client} />);
+    expect(screen.getByRole('button', { name: 'Link rooms' })).toBeTruthy();
+  });
+
+  it('offers to combine with each neighbouring room, in words for the room, not the building', () => {
+    const { client } = fakeClient(running({ linking: linking() }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    const sheet = screen.getByRole('dialog', { name: 'Link rooms' });
+    expect(sheet.textContent).toContain('Combine with Room B');
+    expect(sheet.textContent).toContain('This room is on its own.');
+    expect(sheet.textContent).not.toMatch(/wall/i);
+  });
+
+  it('a wall that joins two other rooms is one choice naming both', () => {
+    const three = wall({ rooms: ['Large', 'Room B', 'Room C'], adds: ['Large', 'Room C'] });
+    const { client } = fakeClient(running({ linking: linking([three], ['Room B']) }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    expect(screen.getByText('Combine with Large + Room C')).toBeTruthy();
+  });
+
+  it('asks before combining, and only then sends it', () => {
+    const { client, dispatched } = fakeClient(running({ linking: linking() }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Combine' }));
+    expect(dispatched.some((i) => i.type === 'divider.set')).toBe(false);
+    const ask = screen.getByRole('alertdialog');
+    expect(ask.textContent).toContain('Combine with Room B?');
+    expect(ask.textContent).toContain('work together as one');
+    fireEvent.click(within(ask).getByRole('button', { name: 'Combine' }));
+    expect(dispatched.at(-1)).toEqual({ type: 'divider.set', dividerId: 'w1', open: true });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('cancelling the question changes nothing', () => {
+    const { client, dispatched } = fakeClient(running({ linking: linking() }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Combine' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(dispatched.some((i) => i.type === 'divider.set')).toBe(false);
+  });
+
+  it('linked rooms say so and offer to separate', () => {
+    const { client, dispatched } = fakeClient(
+      running({ linking: linking([wall({ open: true, adds: [] })], ['Room A', 'Room B']) }),
+    );
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    const sheet = screen.getByRole('dialog', { name: 'Link rooms' });
+    expect(sheet.textContent).toContain('Linked together: Room A + Room B');
+    expect(sheet.textContent).toContain('Linked with Room A + Room B');
+    fireEvent.click(screen.getByRole('button', { name: 'Separate' }));
+    const ask = screen.getByRole('alertdialog');
+    expect(ask.textContent).toContain('Each room will work on its own again.');
+    fireEvent.click(within(ask).getByRole('button', { name: 'Separate' }));
+    expect(dispatched.at(-1)).toEqual({ type: 'divider.set', dividerId: 'w1', open: false });
+  });
+
+  it('a choice that cannot be made yet is disabled and says why', () => {
+    const { client } = fakeClient(running({ linking: linking([wall({ available: false })]) }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    expect((screen.getByRole('button', { name: 'Combine' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(screen.getByText('Not set up yet')).toBeTruthy();
+  });
+
+  it('drops a question that went stale because the rooms were linked meanwhile', () => {
+    const { client, set } = fakeClient(running({ linking: linking() }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Link rooms' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Combine' }));
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+    set(running({ linking: linking([wall({ open: true, adds: [] })], ['Room A', 'Room B']) }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+});
+
+describe('function pages', () => {
+  const functions = (over: Record<string, unknown> = {}) => ({
+    cameras: [
+      {
+        id: 'ptz1',
+        name: 'Front camera',
+        presets: ['Wide', 'Podium'],
+        activePreset: 'Wide',
+        canMove: true,
+      },
+    ],
+    microphones: [
+      { id: 'mic1', name: 'Ceiling mic', muted: false },
+      { id: 'mic2', name: 'Lectern mic', muted: null },
+    ],
+    lights: [{ id: 'lights1', name: 'Room lights', scenes: ['Bright', 'Dim'], active: 'Dim' }],
+    movers: [
+      {
+        id: 'blinds1',
+        name: 'Window blinds',
+        kind: 'blinds' as const,
+        actions: ['open' as const, 'close' as const],
+      },
+      {
+        id: 'screen1',
+        name: 'Projection screen',
+        kind: 'screen' as const,
+        actions: ['down' as const, 'up' as const],
+      },
+    ],
+    ...over,
+  });
+  const nav = (name: string) => screen.getByRole('button', { name });
+
+  it('adds a page to the top nav for each thing the room offers', () => {
+    const { client } = fakeClient(running({ functions: functions() }));
+    render(<PanelApp client={client} />);
+    for (const name of ['Cameras', 'Microphones', 'Room controls']) expect(nav(name)).toBeTruthy();
+  });
+
+  it('offers only the pages the room has', () => {
+    const { client } = fakeClient(
+      running({ functions: functions({ cameras: [], lights: [], movers: [] }) }),
+    );
+    render(<PanelApp client={client} />);
+    expect(screen.queryByRole('button', { name: 'Cameras' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Room controls' })).toBeNull();
+    expect(nav('Microphones')).toBeTruthy();
+  });
+
+  it('shows none while the room is off, or when the room offers none', () => {
+    const off = fakeClient({ ...base(), functions: functions() });
+    render(<PanelApp client={off.client} />);
+    expect(screen.queryByRole('button', { name: 'Cameras' })).toBeNull();
+    cleanup();
+    const none = fakeClient(running());
+    render(<PanelApp client={none.client} />);
+    expect(screen.queryByRole('button', { name: 'Cameras' })).toBeNull();
+  });
+
+  it('recalls a camera preset, and marks the one that is active', () => {
+    const { client, dispatched } = fakeClient(running({ functions: functions() }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(nav('Cameras'));
+    expect(screen.getByRole('button', { name: 'Wide' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Podium' }));
+    expect(dispatched.at(-1)).toEqual({
+      type: 'camera.preset',
+      deviceId: 'ptz1',
+      preset: 'Podium',
+    });
+  });
+
+  describe('pointing the camera', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+    const moves = (d: PanelIntent[]) => d.filter((i) => i.type === 'camera.move');
+    const stop = { type: 'camera.move', deviceId: 'ptz1', pan: 0, tilt: 0, zoom: 0 };
+
+    it('moves while a button is held, repeating, and stops on release', () => {
+      const { client, dispatched } = fakeClient(running({ functions: functions() }));
+      render(<PanelApp client={client} />);
+      fireEvent.click(nav('Cameras'));
+      const left = screen.getByRole('button', { name: 'Left' });
+      fireEvent.pointerDown(left);
+      expect(moves(dispatched)).toEqual([
+        { type: 'camera.move', deviceId: 'ptz1', pan: -1, tilt: 0, zoom: 0 },
+      ]);
+      act(() => void vi.advanceTimersByTime(1100));
+      expect(moves(dispatched)).toHaveLength(3); // pressed, then twice more while held
+      fireEvent.pointerUp(left);
+      expect(moves(dispatched).at(-1)).toEqual(stop);
+      const after = moves(dispatched).length;
+      act(() => void vi.advanceTimersByTime(2000));
+      expect(moves(dispatched)).toHaveLength(after); // no more repeats
+    });
+
+    it('zooms and tilts with the other buttons', () => {
+      const { client, dispatched } = fakeClient(running({ functions: functions() }));
+      render(<PanelApp client={client} />);
+      fireEvent.click(nav('Cameras'));
+      for (const [name, pan, tilt, zoom] of [
+        ['Up', 0, 1, 0],
+        ['Down', 0, -1, 0],
+        ['Right', 1, 0, 0],
+        ['Zoom in', 0, 0, 1],
+        ['Zoom out', 0, 0, -1],
+      ] as const) {
+        const b = screen.getByRole('button', { name });
+        fireEvent.pointerDown(b);
+        expect(moves(dispatched).at(-1), name).toEqual({
+          type: 'camera.move',
+          deviceId: 'ptz1',
+          pan,
+          tilt,
+          zoom,
+        });
+        fireEvent.pointerUp(b);
+      }
+    });
+
+    it('stops the camera if the page goes away while a button is held', () => {
+      const { client, dispatched } = fakeClient(running({ functions: functions() }));
+      render(<PanelApp client={client} />);
+      fireEvent.click(nav('Cameras'));
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Right' }));
+      fireEvent.click(nav('Microphones')); // leaves the camera page
+      expect(moves(dispatched).at(-1)).toEqual(stop);
+    });
+
+    it('stops if the pointer is dragged off the button or interrupted', () => {
+      const { client, dispatched } = fakeClient(running({ functions: functions() }));
+      render(<PanelApp client={client} />);
+      fireEvent.click(nav('Cameras'));
+      const up = screen.getByRole('button', { name: 'Up' });
+      fireEvent.pointerDown(up);
+      fireEvent.pointerLeave(up);
+      expect(moves(dispatched).at(-1)).toEqual(stop);
+      fireEvent.pointerDown(up);
+      fireEvent.pointerCancel(up);
+      expect(moves(dispatched).at(-1)).toEqual(stop);
+    });
+  });
+
+  it('mutes and unmutes microphones, showing state only when the microphone says', () => {
+    const { client, dispatched } = fakeClient(running({ functions: functions() }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(nav('Microphones'));
+    expect(screen.getAllByText('Live')).toHaveLength(1); // the second microphone does not say
+    fireEvent.click(screen.getByRole('button', { name: /Ceiling mic/ }));
+    expect(dispatched.at(-1)).toEqual({ type: 'mic.mute', deviceId: 'mic1', muted: true });
+    fireEvent.click(screen.getByRole('button', { name: /Lectern mic/ }));
+    expect(dispatched.at(-1)).toEqual({ type: 'mic.mute', deviceId: 'mic2', muted: true });
+  });
+
+  it('room controls: lighting scenes and blinds and screens', () => {
+    const { client, dispatched } = fakeClient(running({ functions: functions() }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(nav('Room controls'));
+    expect(screen.getByRole('button', { name: 'Dim' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Bright' }));
+    expect(dispatched.at(-1)).toEqual({ type: 'scene.set', deviceId: 'lights1', scene: 'Bright' });
+    const blinds = within(screen.getByRole('region', { name: 'Window blinds' }));
+    fireEvent.click(blinds.getByRole('button', { name: 'Close' }));
+    expect(dispatched.at(-1)).toEqual({ type: 'mover.run', deviceId: 'blinds1', action: 'close' });
+    const screenCard = within(screen.getByRole('region', { name: 'Projection screen' }));
+    fireEvent.click(screenCard.getByRole('button', { name: 'Lower' }));
+    expect(dispatched.at(-1)).toEqual({ type: 'mover.run', deviceId: 'screen1', action: 'down' });
+  });
+
+  it('going back to an activity leaves the page, and a room that turns off drops it', () => {
+    const { client, set } = fakeClient(running({ functions: functions() }));
+    render(<PanelApp client={client} />);
+    fireEvent.click(nav('Cameras'));
+    expect(screen.getByRole('heading', { name: 'Cameras' })).toBeTruthy();
+    fireEvent.click(nav('Present'));
+    expect(screen.queryByRole('heading', { name: 'Cameras' })).toBeNull();
+    fireEvent.click(nav('Cameras'));
+    set({ ...base(), functions: functions() });
+    expect(screen.queryByRole('heading', { name: 'Cameras' })).toBeNull();
   });
 });

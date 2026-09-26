@@ -17,7 +17,7 @@ import {
 import { CloudClient, CloudError } from './cloud';
 import type { GatewayConfig } from './config';
 import { PhoneLinks } from './phone';
-import { CombineCoordinator } from './combine';
+import { GroupCoordinator } from './groups';
 import { runCommand } from './commands';
 import type { Logger } from './log';
 import type { RoomHost } from './room-host';
@@ -80,7 +80,7 @@ export class Gateway {
     private readonly host: RoomHost,
     private readonly log: Logger,
   ) {
-    this.combine = new CombineCoordinator(host, store, log);
+    this.groups = new GroupCoordinator(host, store, log);
     this.phone = new PhoneLinks(store, cfg.cloudUrl);
   }
 
@@ -88,7 +88,7 @@ export class Gateway {
   readonly phone: PhoneLinks;
   private announcedUpdate: string | null = null;
 
-  private readonly combine: CombineCoordinator;
+  private readonly groups: GroupCoordinator;
 
   // ---- Lifecycle ------------------------------------------------------------------------------
 
@@ -217,7 +217,7 @@ export class Gateway {
         configVersion: this.store.get(KEY_CONFIG_VERSION),
         rooms: this.roomReports(),
         commandResults: results,
-        combinations: this.combine.report(),
+        dividers: this.groups.report(),
       })
       .catch((e: unknown) => {
         if (e instanceof CloudError && e.unauthorised)
@@ -264,16 +264,16 @@ export class Gateway {
     let next = 1000;
     try {
       const panels = [...this.watch].flatMap((roomId) => {
-        const room = this.host.get(roomId);
+        // While walls are open, a member room shows (and is controlled through) the combined room.
+        const room = this.host.active(roomId);
         return room ? [{ roomId, vm: room.runtime.getSnapshot() }] : [];
       });
       const res = await this.cloud.poll(credential, { protocol: PROTOCOL_VERSION, panels });
       this.watch = new Set(res.watch);
       for (const { roomId, intent } of res.intents) {
-        const runtime = this.host.get(roomId)?.runtime;
+        const runtime = this.host.active(roomId)?.runtime;
         if (!runtime) continue;
-        if (intent.type === 'combination.set')
-          this.combine.set(intent.combinationId, intent.combined);
+        if (intent.type === 'divider.set') void this.groups.set(intent.dividerId, intent.open);
         else if (intent.type === 'trigger') {
           const ran = runtime.fireTrigger(intent.triggerId);
           this.log('info', 'Trigger requested', { roomId, trigger: intent.triggerId, ran });
@@ -379,7 +379,7 @@ export class Gateway {
   private async syncConfig(credential: string): Promise<boolean> {
     const config: ConfigResponse = await this.cloud.config(credential);
     if (config.publicKeys.length) this.store.setJson(KEY_PUBLIC_KEYS, config.publicKeys);
-    this.combine.setConfig(config.combinations);
+    this.groups.setConfig(config.groups);
     this.phone.setSecrets(config.rooms);
     const keys = this.trustedKeys();
     const wanted = new Map(config.rooms.map((r) => [r.roomId, r]));

@@ -116,6 +116,14 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `removed combined rooms “${s(meta.name)}”`;
     case 'combination.set':
       return `${meta.combined ? 'joined' : 'split'} “${s(meta.name)}”`;
+    case 'group.deploy':
+      return `deployed a room group (${s(meta.deployed)} of ${s(meta.rooms)} rooms sent, ${s(meta.published)} new releases)`;
+    case 'org.retention':
+      return `set how long the activity log is kept to ${s(meta.days)} days: “${s(meta.reason)}”`;
+    case 'audit.export':
+      return `downloaded the activity log (${s(meta.rows)} rows, ${s(meta.format)})`;
+    case 'wall.set':
+      return `${meta.open ? 'combined' : 'separated'} “${s(meta.room)}” with its neighbouring rooms from the portal`;
     case 'room.hook_secret':
       return `generated a new webhook secret for “${s(meta.room)}”`;
     case 'hook.fire':

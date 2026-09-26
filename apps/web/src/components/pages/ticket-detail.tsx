@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, LifeBuoy, Lock } from 'lucide-react';
 import { toast } from 'sonner';
+import { SlaBadge } from '@/components/common/sla-badge';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
@@ -25,7 +26,11 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     ...trpc.ticket.get.queryOptions({ orgId, ticketId }),
     refetchInterval: 10_000,
   });
-  const members = useQuery({ ...trpc.member.list.queryOptions({ orgId }), enabled: canSupport });
+  // The team, and people from a connected service provider.
+  const assignees = useQuery({
+    ...trpc.ticket.assignees.queryOptions({ orgId, ticketId }),
+    enabled: canSupport,
+  });
   const [reply, setReply] = useState('');
   const [internal, setInternal] = useState(false);
   const [confirmEscalate, setConfirmEscalate] = useState(false);
@@ -87,7 +92,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
       </PageContainer>
     );
   const t = ticket.data;
-  const staff = (members.data ?? []).filter((m) => m.role !== 'customer_viewer');
+  const staff = assignees.data ?? [];
   const closed = t.status === 'closed';
 
   return (
@@ -203,6 +208,11 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
         <aside className="space-y-4">
           {canSupport ? (
             <>
+              {t.sla && (
+                <Field label="Target">
+                  <SlaBadge sla={t.sla} className="text-sm" />
+                </Field>
+              )}
               <Field label="Status">
                 <SimpleSelect
                   className="w-full"
@@ -262,7 +272,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                     { value: 'none', label: 'Unassigned' },
                     ...staff.map((m) => ({
                       value: m.userId,
-                      label: m.userId === user.id ? 'Me' : (m.email ?? 'Member'),
+                      label: m.userId === user.id ? 'Me' : m.label,
                     })),
                   ]}
                 />

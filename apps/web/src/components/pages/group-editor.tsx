@@ -3,10 +3,17 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeft, Check, Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Play, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { enumerateCombinedRooms, validateGroupSpec } from '@kestrel/engine';
+import {
+  DEFAULT_ON_CLOSE,
+  DEFAULT_ON_OPEN,
+  TRANSITION_LABELS,
+  type TransitionAction,
+} from '@kestrel/model';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
+import { GroupDeployDialog } from '@/components/pages/group-deploy-dialog';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { useOrg } from '@/components/shell/org-context';
@@ -26,7 +33,14 @@ interface DividerDraft {
   id?: string;
   name: string;
   roomIds: string[];
+  onOpen: TransitionAction;
+  onClose: TransitionAction;
 }
+
+const TRANSITION_OPTIONS = (Object.keys(TRANSITION_LABELS) as TransitionAction[]).map((value) => ({
+  value,
+  label: TRANSITION_LABELS[value],
+}));
 
 let counter = 0;
 const nextKey = () => `d${++counter}`;
@@ -52,10 +66,11 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
   const [roomIds, setRoomIds] = useState<string[]>([]);
   const [dividers, setDividers] = useState<DividerDraft[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deployOpen, setDeployOpen] = useState(false);
   const [saved, setSaved] = useState<string>('');
 
   const serialise = (n: string, s: string, r: string[], d: DividerDraft[]) =>
-    JSON.stringify([n, s, r, d.map((x) => [x.id ?? '', x.name, x.roomIds])]);
+    JSON.stringify([n, s, r, d.map((x) => [x.id ?? '', x.name, x.roomIds, x.onOpen, x.onClose])]);
 
   // Load the saved group into the form once.
   const [filled, setFilled] = useState(false);
@@ -67,6 +82,8 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
       id: d.id,
       name: d.name,
       roomIds: d.roomIds,
+      onOpen: d.onOpen,
+      onClose: d.onClose,
     }));
     setName(g.name);
     setSiteId(g.siteId);
@@ -111,6 +128,8 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
     [problems, roomIds, dividers],
   );
   const existing = new Map((loaded.data?.combined ?? []).map((c) => [c.key, c.roomId]));
+  // Walls the gateway last said are open, so a dev can see the rooms are joined right now.
+  const openNow = new Set((loaded.data?.dividers ?? []).filter((d) => d.open).map((d) => d.id));
 
   const refresh = async () => {
     await Promise.all([
@@ -192,9 +211,20 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
         title={groupId ? name || 'Room group' : 'New room group'}
         description="Say which rooms share movable walls, and which rooms each wall joins when it is open."
         actions={
-          <Button size="sm" variant="ghost" render={<Link href={base} />}>
-            <ArrowLeft data-icon="inline-start" /> All groups
-          </Button>
+          <>
+            {groupId && (
+              <Button
+                size="sm"
+                variant="outline"
+                render={<Link href={`${base}/${groupId}/simulate`} />}
+              >
+                <Play data-icon="inline-start" /> Simulate
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" render={<Link href={base} />}>
+              <ArrowLeft data-icon="inline-start" /> All groups
+            </Button>
+          </>
         }
       />
 
@@ -280,7 +310,13 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
               onClick={() =>
                 setDividers((d) => [
                   ...d,
-                  { key: nextKey(), name: `Wall ${d.length + 1}`, roomIds: [] },
+                  {
+                    key: nextKey(),
+                    name: `Wall ${d.length + 1}`,
+                    roomIds: [],
+                    onOpen: DEFAULT_ON_OPEN,
+                    onClose: DEFAULT_ON_CLOSE,
+                  },
                 ])
               }
             >
@@ -307,6 +343,11 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
                   )
                 }
               />
+              {d.id && openNow.has(d.id) && (
+                <span className="inline-flex items-center gap-1 text-xs text-success">
+                  <Check className="size-3.5" /> Open now
+                </span>
+              )}
               {canEdit && (
                 <Button
                   size="icon"
@@ -328,6 +369,34 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
                   />
                   {nameOf(id)}
                 </label>
+              ))}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(
+                [
+                  ['onOpen', 'When it opens, the joined room', `grp-open-${d.key}`],
+                  ['onClose', 'When it closes, each room', `grp-close-${d.key}`],
+                ] as const
+              ).map(([field, label, id]) => (
+                <div key={field} className="space-y-1">
+                  <Label htmlFor={id} className="text-xs text-muted-foreground">
+                    {label}
+                  </Label>
+                  <SimpleSelect
+                    id={id}
+                    className="w-full"
+                    value={d[field]}
+                    disabled={!canEdit}
+                    onValueChange={(v) =>
+                      setDividers((ds) =>
+                        ds.map((x) =>
+                          x.key === d.key ? { ...x, [field]: v as TransitionAction } : x,
+                        ),
+                      )
+                    }
+                    options={TRANSITION_OPTIONS}
+                  />
+                </div>
               ))}
             </div>
           </div>
@@ -402,7 +471,13 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
                 name,
                 siteId,
                 roomIds,
-                dividers: dividers.map((d) => ({ id: d.id, name: d.name, roomIds: d.roomIds })),
+                dividers: dividers.map((d) => ({
+                  id: d.id,
+                  name: d.name,
+                  roomIds: d.roomIds,
+                  onOpen: d.onOpen,
+                  onClose: d.onClose,
+                })),
               })
             }
           >
@@ -421,6 +496,16 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
           )}
           {groupId && (
             <Button
+              variant="outline"
+              disabled={dirty}
+              title={dirty ? 'Save your changes first' : undefined}
+              onClick={() => setDeployOpen(true)}
+            >
+              Deploy group
+            </Button>
+          )}
+          {groupId && (
+            <Button
               variant="ghost"
               className="ml-auto text-destructive"
               onClick={() => setConfirmDelete(true)}
@@ -429,6 +514,10 @@ export function GroupEditor({ groupId }: { groupId: string | null }) {
             </Button>
           )}
         </div>
+      )}
+
+      {groupId && (
+        <GroupDeployDialog groupId={groupId} open={deployOpen} onOpenChange={setDeployOpen} />
       )}
 
       <ConfirmDialog

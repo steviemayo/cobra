@@ -98,15 +98,3 @@ export const Trigger = z.discriminatedUnion('type', [
 ]);
 export type Trigger = z.infer<typeof Trigger>;
 export type TriggerType = Trigger['type'];
-
-export const RoomCombination = z.object({
-  id: LocalId,
-  name: z.string().min(1).max(80),
-  /** Kestrel Room record ids (database ids, not model-local ids). */
-  primaryRoomId: z.string().min(1),
-  secondaryRoomIds: z.array(z.string().min(1)).min(1),
-  secondaryVideo: z.enum(['follow', 'blank']).default('follow'),
-  secondaryAudio: z.enum(['follow', 'blank']).default('follow'),
-  onUncombine: z.literal('off').default('off'),
-});
-export type RoomCombination = z.infer<typeof RoomCombination>;

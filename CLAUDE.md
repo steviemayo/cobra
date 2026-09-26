@@ -30,11 +30,11 @@
 
 - Devs architect room logically; Kestrel derives routing/logic/UI from model
 - Flow: new room → template or Room Type (initial: Meeting, Training) → type supplies default behaviours
-- Model: devices (by category), ports, connections, groups, states, activities, triggers, rules, room combinations
+- Model: devices (by category), ports, connections, groups, states, activities, triggers, rules, room groups (combined rooms)
 - Device categories: video/audio sources, conf/fixed/PTZ/auto-framing cameras, reinforcement + voice-capture mics, conference systems (MTR/Codec), video matrix (virtual/physical — same model), audio matrix/DSP, video + audio destinations, conference outputs, environmental (lighting/HVAC/blinds), mechanical (lifters/screens)
 - Groups: Display Group = members + allowed sources + mode (follow | independent)
 - States: Off / On / custom = ordered actions (routes, DSP presets, device cmds, env scenes)
-- **Combined rooms:** a room can be Combined; behaviour is configurable: primary vs secondary role; secondary video follows|blanks; secondary audio follows|blanks; on uncombine revert to Off. **REDESIGN PLANNED (not built):** define combining when a room group is first created: create the large all-combined room plus each independent room, and every physically possible combination of rooms (defined by which movable walls join which rooms), so each room is state-aware. Design: `docs/room-groups.md` (room groups + dividers; combined rooms are ordinary rooms). Portal side built; the old `RoomCombination` gateway coordinator and panel bar are still in place until the gateway slice
+- **Combined rooms (BUILT):** combining is defined when a room group is created: the large all-combined room plus each independent room, and every physically possible combination (defined by which movable walls join which rooms), each an ordinary room with its own program. People combine rooms from the panel's **Link rooms** menu ("Combine with Room B"); when rooms are linked the combined room runs and the rooms it stands for are suspended. What the new space does is a per-wall setting in the portal (off, on, follow, restore). A group deploys as one action. Design: `docs/room-groups.md`; decisions: `docs/decisions.md`. The old primary/secondary "RoomCombination" feature is removed (its table is dropped in a follow-up migration)
 - Target: 90% rooms = 1–2 laptop inputs → 1–2 displays + speakers. Custom logic hooks (sandboxed scripts) DEFERRED; edge cases via rules
 - Runtime on gateway = generic interpreter of a signed manifest (same engine package also runs in-browser simulator)
 - Devices without driver: generic TCP/serial (and PJLink/REST templates) allowed in v1
@@ -61,7 +61,7 @@
 - Responsive UI (fixed panels, tablets); QR-to-phone later. Generated from model with editable elements + per-org themes (logo/colours) + multilingual
 - Panel auth: open on LAN v1, optional PIN, trusted-device bypass by verified IP (MAC only if same L2 subnet — see Risks)
 - Activities derived from Room Type + model; only offered if required capabilities exist in room
-- **Quick actions come from drivers** (PLANNED): a driver declares the quick actions its device supports (e.g. Blank Screen); the room shows one only if the room has the device and the driver supports it. Privacy Mute only if the room has conferencing mics and a conference system. Max 3 in the panel bottom bar, rest in a Quick Actions sheet
+- **Quick actions come from drivers** (built: Blank Screen, Privacy Mute; `docs/driver-sdk.md`): a driver declares the quick actions its device supports (e.g. Blank Screen); the room shows one only if the room has the device and the driver supports it. Privacy Mute only if the room has conferencing mics and a conference system. Max 3 in the panel bottom bar, rest in a Quick Actions sheet
 - **Panel UI requirements draft:** `docs/panel-ui-requirements.md` (no slider for volume, per-room "touch to begin" action, top-nav activities, power button with confirmation, per-org accent colour for portal and panel)
 
 ## Triggers (all in v1)
@@ -133,6 +133,7 @@
 - API responses via tRPC types; gateway↔cloud protocol versioned and defined in `packages/model`
 - Never omit `orgId` scoping; never hardcode secrets
 - Status: Phases 0-7 built and merged to `dev`/`main`. Remaining work is setup and real-world verification (see "Next steps by dev" in `docs/plan.md`). **Read `docs/phase-4-preread.md` first** (status table, verified-vs-untested list, ops setup, rules learned, next steps). Progress lives there, not in plan.md
+- Since phase 7 (all merged to `dev`): panel UI redesign, room groups (portal, gateway runtime, Link rooms menu, group deploy, group simulator), staff portal (team, audit trail, retention and export), service providers, quick actions from drivers, panel camera/microphone/room control pages, portal accent colour, ticket email, provider assignees and SLA targets. **What is left: the end of `docs/plan.md`** (browser pass, two migrations to apply, table drop, business decisions). **Every decision made while building is in `docs/decisions.md`.** Staff/MSP design and status: `docs/staff-portal-and-msp.md`
 - Pins: TypeScript ^6 (typescript-eslint lacks TS7 support), Prisma 7.x (CLI must match client), pnpm 12, Next 16 (`proxy.ts` replaces middleware)
 - Env: see `.env.example`; Prisma CLI reads `DIRECT_URL`, runtime uses `DATABASE_URL`
 - Every org-scoped tRPC procedure uses `orgProcedure` (membership check) and filters by `ctx.orgId`

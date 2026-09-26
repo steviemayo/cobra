@@ -276,3 +276,44 @@ describe('custom drivers in a release', () => {
     expect(createDriver(other, ctx, pinned)).toBeNull();
   });
 });
+
+describe('quick actions in a driver', () => {
+  const blanker = {
+    ...amp(true),
+    quickActions: ['display.blank'],
+    commands: {
+      ...amp(true).commands,
+      'blank.on': { send: 'BLANK ON', expect: '^OK$' },
+      'blank.off': { send: 'BLANK OFF', expect: '^OK$' },
+    },
+  };
+
+  it('reports what the spec declares, and nothing when it declares nothing', () => {
+    expect(make(blanker, { host: '127.0.0.1' }).quickActions()).toEqual(['display.blank']);
+    expect(make(amp(true), { host: '127.0.0.1' }).quickActions()).toEqual([]);
+  });
+
+  it('runs the blank commands and tracks the state, which powering off clears', async () => {
+    const dev = await fakeTcp();
+    const d = make(blanker, { host: '127.0.0.1', port: dev.port });
+    d.start();
+    await until(() => d.getState().online);
+    // The fake answers "ERR" to commands it does not know, so teach it the two it needs.
+    dev.clients.forEach((c) =>
+      c.on('data', (b: string) => /BLANK (ON|OFF)/.test(String(b)) && c.write('OK\r\n')),
+    );
+    await d.send({ type: 'blank', on: true });
+    expect(dev.received).toContain('BLANK ON');
+    expect(d.getState().blanked).toBe(true);
+    await d.send({ type: 'power', on: false });
+    expect(d.getState().blanked).toBe(false);
+  });
+
+  it('refuses blank when the driver has no such command', async () => {
+    const dev = await fakeTcp();
+    const d = make(amp(true), { host: '127.0.0.1', port: dev.port });
+    d.start();
+    await until(() => d.getState().online);
+    await expect(d.send({ type: 'blank', on: true })).rejects.toThrow('does not support "blank.on"');
+  });
+});

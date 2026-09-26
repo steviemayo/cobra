@@ -1,10 +1,11 @@
 import {
   PanelIntent,
+  QUICK_ACTIONS,
   type Activity,
   type DeviceBus,
   type DeviceEvent,
   type PanelClient,
-  type PanelCombination,
+  type PanelLinking,
   type PanelViewModel,
   type RoomModel,
   type RoomStatus,
@@ -14,6 +15,13 @@ import { executePlan } from '../plan/execute';
 import { activitySources, planActivity, planState, planStopOverlay, type Plan } from '../plan/plan';
 import { buildGraph, deviceCapabilities, type Graph } from '../validate/graph';
 import { availableActivities, detectorsFor, type SignalDetector } from './activities';
+import { functionSets, functionsView, type FunctionSets } from './functions';
+import {
+  quickActionActive,
+  quickActionCommand,
+  roomQuickActions,
+  type RoomQuickAction,
+} from './quick-actions';
 
 export interface RuntimeOptions {
   model: RoomModel;
@@ -21,8 +29,17 @@ export interface RuntimeOptions {
   bus: DeviceBus;
   /** Per-step limit passed to the executor. */
   stepTimeoutMs?: number;
-  /** The panel asked to join or split the room with its combined partners. */
-  onCombine?: (combined: boolean) => void;
+  /** The panel asked to open or close a movable wall (Room linking menu). */
+  onDivider?: (dividerId: string, open: boolean) => void;
+}
+
+/** What a room was doing when it was suspended, so it can be brought back. */
+export interface ParkedState {
+  /** The room was on (or starting). */
+  on: boolean;
+  primary: { activityId: string; sourceId?: string } | null;
+  /** Overlay activities that were running, such as Record. */
+  overlays: string[];
 }
 
 interface Primary {
@@ -61,6 +78,10 @@ export class RoomRuntime implements PanelClient {
   private readonly detectors: Map<string, SignalDetector | null>;
   private readonly activities: Activity[];
   private readonly volumeDevices: string[];
+  private readonly quickActions: RoomQuickAction[];
+  private readonly functions: FunctionSets;
+  /** A moving camera stops by itself if the panel stops asking, so a dropped connection never leaves it running. */
+  private readonly cameraStops = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly listeners = new Set<() => void>();
   private readonly unsubscribe: () => void;
   private readonly stepTimeoutMs?: number;
@@ -79,9 +100,6 @@ export class RoomRuntime implements PanelClient {
   private warningDeadline: number | null = null;
   private savedUntil = 0;
   private lastPresence = new Map<string, boolean | null>();
-  private combination: PanelCombination | null = null;
-  private secondary: { video: 'follow' | 'blank'; audio: 'follow' | 'blank' } | null = null;
-  private followedActivity: string | null = null;
   private lastOccupied = new Map<string, boolean | undefined>();
 
   private runId = 0;
@@ -94,6 +112,9 @@ export class RoomRuntime implements PanelClient {
   private volumeQueued: number | null = null;
   private snapshot: PanelViewModel;
   private disposed = false;
+  /** While a combined room that includes this one is live, this room must not touch the devices. */
+  private suspended = false;
+  private linking: PanelLinking | null = null;
 
   constructor(private readonly opts: RuntimeOptions) {
     this.model = opts.model;
@@ -105,6 +126,8 @@ export class RoomRuntime implements PanelClient {
     this.volumeDevices = this.model.devices
       .filter((d) => deviceCapabilities(d).has('volume'))
       .map((d) => d.id);
+    this.quickActions = roomQuickActions(this.model, this.bus);
+    this.functions = functionSets(this.model);
     this.volume = this.model.settings.defaultVolume;
     this.adoptDeviceState();
     for (const [source] of this.detectors) this.lastPresence.set(source, this.presence(source));
@@ -129,12 +152,10 @@ export class RoomRuntime implements PanelClient {
 
   dispatch(raw: PanelIntent): void {
     const parsed = PanelIntent.safeParse(raw);
-    if (!parsed.success || this.disposed) return;
+    if (!parsed.success || this.disposed || this.suspended) return;
     const intent = parsed.data;
     // Any touch counts as someone being here: cancel a pending auto-off.
     if (intent.type !== 'warning.dismiss') this.userPresent();
-    // While combined as a secondary, the primary room's panel is in charge.
-    if (this.secondary && intent.type !== 'combine.set') return;
     switch (intent.type) {
       case 'activity.start':
         return void this.startActivity(intent.activityId, intent.sourceId);
@@ -150,18 +171,77 @@ export class RoomRuntime implements PanelClient {
         return this.respondToPrompt(intent.promptId, intent.accept);
       case 'warning.dismiss':
         return this.dismissWarning();
+      case 'quickaction.run':
+        return void this.runQuickAction(intent.id, intent.active);
       case 'room.on': {
         const on = this.model.states.find((s) => s.kind === 'on');
         if (on && this.status === 'off') void this.runState(on.id);
         return;
       }
-      case 'combine.set':
-        if (this.combination?.role === 'primary') this.opts.onCombine?.(intent.combined);
+      case 'divider.set':
+        this.opts.onDivider?.(intent.dividerId, intent.open);
         return;
+      case 'camera.preset': {
+        const cam = this.functions.cameras.find((c) => c.device.id === intent.deviceId);
+        if (cam?.presets.includes(intent.preset))
+          this.tell(cam.device.id, { type: 'camera_preset', name: intent.preset });
+        return;
+      }
+      case 'camera.move':
+        return this.moveCamera(intent.deviceId, intent.pan, intent.tilt, intent.zoom);
+      case 'mic.mute':
+        if (this.functions.microphones.some((d) => d.id === intent.deviceId))
+          this.tell(intent.deviceId, { type: 'mute', muted: intent.muted });
+        return;
+      case 'scene.set': {
+        const light = this.functions.lights.find((l) => l.device.id === intent.deviceId);
+        if (light?.scenes.includes(intent.scene))
+          this.tell(light.device.id, { type: 'scene', name: intent.scene });
+        return;
+      }
+      case 'mover.run': {
+        const mover = this.functions.movers.find((m) => m.device.id === intent.deviceId);
+        if (mover?.actions.includes(intent.action))
+          this.tell(mover.device.id, { type: 'command', name: intent.action, args: {} });
+        return;
+      }
     }
   }
 
+  /** Send one command to a device and refresh the panel; a device that refuses just does not change. */
+  private tell(deviceId: string, command: Parameters<DeviceBus['send']>[1]) {
+    void this.bus
+      .send(deviceId, command)
+      .catch(() => undefined)
+      .finally(() => this.notify());
+  }
+
+  private moveCamera(deviceId: string, pan: number, tilt: number, zoom: number) {
+    if (!this.functions.cameras.some((c) => c.device.id === deviceId)) return;
+    const running = this.cameraStops.get(deviceId);
+    if (running) clearTimeout(running);
+    this.cameraStops.delete(deviceId);
+    this.tell(deviceId, { type: 'camera_move', pan, tilt, zoom });
+    if (pan === 0 && tilt === 0 && zoom === 0) return;
+    // Held buttons repeat every half second; if they stop, so does the camera.
+    const stop = setTimeout(() => {
+      this.cameraStops.delete(deviceId);
+      this.tell(deviceId, { type: 'camera_move', pan: 0, tilt: 0, zoom: 0 });
+    }, 2000);
+    stop.unref?.();
+    this.cameraStops.set(deviceId, stop);
+  }
+
+  private stopCameras() {
+    for (const [deviceId, timer] of this.cameraStops) {
+      clearTimeout(timer);
+      this.tell(deviceId, { type: 'camera_move', pan: 0, tilt: 0, zoom: 0 });
+    }
+    this.cameraStops.clear();
+  }
+
   dispose() {
+    this.stopCameras();
     this.disposed = true;
     this.abort?.abort();
     this.unsubscribe();
@@ -172,67 +252,93 @@ export class RoomRuntime implements PanelClient {
     this.listeners.clear();
   }
 
-  // ---- Combined rooms -------------------------------------------------------------------------
+  // ---- Room groups ----------------------------------------------------------------------------
 
-  /** What this room shows about being combinable. null: this room is not part of any combination. */
-  setCombination(info: PanelCombination | null) {
-    this.combination = info;
+  get isSuspended(): boolean {
+    return this.suspended;
+  }
+
+  /** The walls and joined rooms the Room linking menu shows. null: not in a room group. */
+  setLinking(info: PanelLinking | null) {
+    if (JSON.stringify(info) === JSON.stringify(this.linking)) return;
+    this.linking = info;
     this.notify();
   }
 
   /**
-   * Put this room under another's control (or release it with null). Releasing turns the room off,
-   * so splitting always leaves both rooms in a known state.
+   * Stop acting on the devices, because another room's program is running them (a combined room
+   * that includes this one). Anything in flight is abandoned and timers are cleared. Returns what
+   * the room was doing, to restore later.
    */
-  setSecondary(mode: { video: 'follow' | 'blank'; audio: 'follow' | 'blank' } | null) {
-    if (this.disposed) return;
-    const was = this.secondary;
-    this.secondary = mode;
-    this.followedActivity = null;
-    if (was && !mode && this.status !== 'off') void this.roomOff();
+  suspend(): ParkedState {
+    const parked: ParkedState = {
+      on: this.status === 'on' || this.status === 'starting',
+      primary: this.primary
+        ? { activityId: this.primary.activityId, sourceId: this.primary.sourceId }
+        : null,
+      overlays: [...this.overlays],
+    };
+    if (this.suspended || this.disposed) return parked;
+    this.suspended = true;
+    this.abort?.abort();
+    this.runId++;
+    this.clearIdle();
+    this.clearPrompt();
+    this.clearWarning();
+    this.stopTicker();
+    this.stopCameras();
     this.notify();
+    return parked;
   }
 
   /**
-   * Mirror the primary room. Video: run the primary's activity here (an activity with the same id,
-   * using the same source id if this room has it), or blank the displays. Audio: match its volume
-   * and mute, or keep this room's speakers muted.
+   * Take the devices back. What the room believed about itself is dropped, because someone else has
+   * been driving the devices: it starts from off, and the caller says what to do next
+   * (turnOff, turnOn or restore).
    */
-  follow(primary: PanelViewModel) {
-    const mode = this.secondary;
-    if (!mode || this.disposed) return;
-    const live = primary.status === 'on' || primary.status === 'starting';
-    const active = live
-      ? primary.activities.find((a) => a.active && a.kind !== 'room_off' && !a.overlay)
-      : undefined;
+  resume() {
+    if (!this.suspended || this.disposed) return;
+    this.suspended = false;
+    this.primary = null;
+    this.overlays.clear();
+    this.starting = null;
+    this.faultDevice = null;
+    this.faultText = null;
+    this.status = 'off';
+    this.adoptDeviceState();
+    this.notify();
+  }
 
-    if (!active || mode.video === 'blank') {
-      this.followedActivity = null;
-      if (this.status !== 'off' && this.status !== 'stopping') void this.roomOff();
-    } else {
-      const chosen = active.sources.find((s) => s.selected)?.id;
-      const key = `${active.id}:${chosen ?? ''}`;
-      const mine = this.activities.find((a) => a.id === active.id);
-      if (mine && key !== this.followedActivity) {
-        this.followedActivity = key;
-        const source = mine.sources.some((s) => s.id === chosen) ? chosen : undefined;
-        void this.startActivity(mine.id, source);
-      }
+  /** Run the On state (devices on, nothing chosen yet). */
+  turnOn(): Promise<void> {
+    const on = this.model.states.find((s) => s.kind === 'on');
+    if (!on || this.suspended || this.disposed) return Promise.resolve();
+    return this.runState(on.id);
+  }
+
+  /** Run Room Off even if the room thinks it is already off: the devices may not agree. */
+  turnOff(): Promise<void> {
+    if (this.suspended || this.disposed) return Promise.resolve();
+    return this.roomOff();
+  }
+
+  /** Bring back what a room was doing. A room that was off (or never ran) is turned off. */
+  async restore(state: ParkedState | undefined): Promise<void> {
+    if (!state || !state.on) return this.turnOff();
+    if (state.primary) {
+      await this.startActivity(state.primary.activityId, state.primary.sourceId);
+      for (const id of state.overlays) await this.startActivity(id);
+      return;
     }
-
-    if (mode.audio === 'follow') {
-      if (primary.volume.available && primary.volume.level !== this.volume)
-        this.setVolume(primary.volume.level);
-      if (primary.volume.available && primary.volume.muted !== this.muted)
-        void this.setMuted(primary.volume.muted);
-    } else if (!this.muted && this.volumeDevices.length > 0) void this.setMuted(true);
+    await this.turnOn();
+    for (const id of state.overlays) await this.startActivity(id);
   }
 
   // ---- Triggers -------------------------------------------------------------------------------
 
   /** Run what a trigger points at: an activity (with a source) or a state. Used by schedules, hooks and sensors. */
   fire(target: TriggerTarget): void {
-    if (this.disposed) return;
+    if (this.disposed || this.suspended) return;
     if (target.type === 'activity')
       return void this.startActivity(target.activityId, target.sourceId);
     void this.runState(target.stateId);
@@ -240,6 +346,7 @@ export class RoomRuntime implements PanelClient {
 
   /** Run one enabled trigger by id, whatever its kind (a calendar meeting starting, say). Returns whether it ran. */
   fireTrigger(triggerId: string): boolean {
+    if (this.suspended) return false;
     const t = this.model.triggers.find((x) => x.id === triggerId && x.enabled);
     if (!t) return false;
     this.fire(t.run);
@@ -248,6 +355,7 @@ export class RoomRuntime implements PanelClient {
 
   /** An external call (webhook) by name. Returns how many triggers ran. */
   fireHook(hookName: string): number {
+    if (this.suspended) return 0;
     const hooks = this.model.triggers.filter(
       (t) => t.type === 'webhook' && t.enabled && t.hookName === hookName,
     );
@@ -469,6 +577,19 @@ export class RoomRuntime implements PanelClient {
     );
   }
 
+  // ---- Quick actions --------------------------------------------------------------------------
+
+  /** One button acts on every device that supports it. State comes back through device feedback. */
+  private async runQuickAction(id: string, active?: boolean) {
+    const action = this.quickActions.find((a) => a.id === id);
+    if (!action) return;
+    const on = active ?? !quickActionActive(action, (d) => this.bus.getState(d));
+    await Promise.allSettled(
+      action.devices.map((d) => this.bus.send(d, quickActionCommand(action.id, on))),
+    );
+    this.notify();
+  }
+
   // ---- Feedback, walk-in behaviour ------------------------------------------------------------
 
   private presence(sourceDeviceId: string): boolean | null {
@@ -498,7 +619,7 @@ export class RoomRuntime implements PanelClient {
   }
 
   private onDeviceEvent(event: DeviceEvent) {
-    if (this.disposed) return;
+    if (this.disposed || this.suspended) return;
     if (this.volumeDevices.includes(event.deviceId) && !this.volumeInFlight) {
       if (event.state.volume !== undefined) {
         this.volume = event.state.volume;
@@ -720,12 +841,8 @@ export class RoomRuntime implements PanelClient {
     else if (this.status === 'on')
       message = { text: { key: 'ready', params: {} }, tone: 'success' };
     else message = { text: { key: 'room_off', params: {} }, tone: 'info' };
-    if (this.secondary && this.combination)
-      message = {
-        text: { key: 'combined_secondary', params: { room: this.combination.rooms[0] ?? '' } },
-        tone: 'info',
-      };
 
+    const functions = functionsView(this.functions, this.bus);
     const promptSource = this.prompt
       ? activitySources(
           this.model,
@@ -743,6 +860,17 @@ export class RoomRuntime implements PanelClient {
         muted: this.muted,
         feedback: this.volumeFeedback,
       },
+      ...(this.quickActions.length > 0
+        ? {
+            quickActions: this.quickActions.map((a) => ({
+              id: a.id,
+              label: QUICK_ACTIONS[a.id].label,
+              icon: QUICK_ACTIONS[a.id].icon,
+              kind: QUICK_ACTIONS[a.id].kind,
+              active: quickActionActive(a, (d) => this.bus.getState(d)),
+            })),
+          }
+        : {}),
       ui: this.model.settings.panel,
       message,
       prompt: this.prompt
@@ -762,7 +890,8 @@ export class RoomRuntime implements PanelClient {
               secondsLeft: this.secondsLeft(this.warningDeadline) ?? 0,
             }
           : null,
-      ...(this.combination ? { combination: this.combination } : {}),
+      ...(this.linking ? { linking: this.linking } : {}),
+      ...(functions ? { functions } : {}),
     };
   }
 }

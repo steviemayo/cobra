@@ -5,9 +5,16 @@ import { after } from 'next/server';
 import { writeAudit } from '../audit';
 import { mspFromRoute, mspRoute } from '@kestrel/model';
 import { routeForNewTicket } from '../msp';
+import { assigneeLabel, assigneesFor, findAssignee } from '../ticket-assignees';
 import { SITE_SCOPED, roomIdsInScope, ticketVisible } from '../site-scope';
 import { notifyStaff } from '../ticket-notify';
-import { STAFF_LABEL, TicketError, escalateTicket, visibleComments } from '../tickets';
+import {
+  STAFF_LABEL,
+  TicketError,
+  escalateTicket,
+  slaForTicket,
+  visibleComments,
+} from '../tickets';
 import { orgProcedure, requireRole, router } from '../trpc';
 
 const TEAM = ['owner', 'dev', 'support'] as const;
@@ -99,6 +106,20 @@ export const ticketRouter = router({
         select: { id: true, name: true },
       });
       const roomName = new Map(rooms.map((r) => [r.id, r.name]));
+      // Targets are for the people working the requests, not for customer viewers.
+      const showSla = ctx.role !== 'customer_viewer';
+      const answers =
+        showSla && rows.length
+          ? await db.ticketComment.findMany({
+              where: {
+                orgId: ctx.orgId,
+                ticketId: { in: rows.map((r) => r.id) },
+                visibility: 'public',
+              },
+              orderBy: { createdAt: 'asc' },
+            })
+          : [];
+      const now = new Date();
       return rows.map((t) => ({
         id: t.id,
         title: t.title,
@@ -111,6 +132,13 @@ export const ticketRouter = router({
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
         mine: t.createdBy === ctx.user.id,
+        sla: showSla
+          ? slaForTicket(
+              t,
+              answers.filter((c) => c.ticketId === t.id),
+              now,
+            )
+          : null,
       }));
     }),
 
@@ -129,12 +157,7 @@ export const ticketRouter = router({
             select: { id: true, name: true },
           })
         : null;
-      const assignee = t.assignedTo
-        ? await db.member.findFirst({
-            where: { orgId: ctx.orgId, userId: t.assignedTo },
-            select: { email: true },
-          })
-        : null;
+      const assigneeName = t.assignedTo ? await assigneeLabel(db, ctx.orgId, t.assignedTo) : null;
       const providerId = mspFromRoute(t.routedTo);
       const provider = providerId
         ? await db.org.findFirst({ where: { id: providerId }, select: { name: true } })
@@ -156,7 +179,14 @@ export const ticketRouter = router({
         createdAt: t.createdAt,
         closedAt: t.closedAt,
         assignedTo: t.assignedTo,
-        assigneeEmail: assignee?.email ?? null,
+        assigneeEmail: assigneeName,
+        sla:
+          ctx.role === 'customer_viewer'
+            ? null
+            : slaForTicket(
+                t,
+                comments.filter((c) => c.visibility === 'public'),
+              ),
         // Internal notes are for the organisation's team and Kestrel staff, not its customer viewers.
         // Kestrel staff are shown by role, never by name.
         comments: visibleComments(comments, ctx.role).map((c) => ({
@@ -327,6 +357,16 @@ export const ticketRouter = router({
       return { ok: true };
     }),
 
+  // Who this request can be assigned to: the team, and people from a connected service provider.
+  assignees: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, ticketId }))
+    .query(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev', 'support']);
+      const t = await find(ctx, input.ticketId);
+      return assigneesFor(db, ctx.orgId, t);
+    }),
+
   update: orgProcedure
     .meta(SITE_SCOPED)
     .input(
@@ -349,11 +389,12 @@ export const ticketRouter = router({
         input.assignedTo === undefined;
       if (!ownClose) requireRole(ctx.role, ['owner', 'dev', 'support']);
       if (input.assignedTo) {
-        const m = await db.member.findFirst({
-          where: { orgId: ctx.orgId, userId: input.assignedTo },
-        });
-        if (!m || m.role === 'customer_viewer')
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Assign tickets to support staff' });
+        // Someone on the organisation's team, or from a service provider that looks after it.
+        if (!(await findAssignee(db, ctx.orgId, t, input.assignedTo)))
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Assign tickets to support staff, or to people from your service provider',
+          });
       }
       const closing = input.status === 'resolved' || input.status === 'closed';
       await db.ticket.update({

@@ -1,12 +1,17 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
+import { TransitionAction } from '@kestrel/model';
 import { writeAudit } from '../audit';
+import { deployGroup, planGroupDeploy } from '../group-deploy';
+import { readOrgBranding } from '../panel-settings';
+import { SigningNotConfigured, loadSigningKey } from '../signing';
 import {
   GroupError,
   deleteGroup,
   groupProblems,
   loadGroup,
+  loadGroupSimulation,
   saveGroup,
   syncCombinedRooms,
 } from '../room-groups';
@@ -25,6 +30,8 @@ const Body = z.object({
         id: z.string().uuid().optional(),
         name: z.string().trim().min(1).max(80),
         roomIds: z.array(z.string().uuid()).min(2).max(20),
+        onOpen: TransitionAction.optional(),
+        onClose: TransitionAction.optional(),
       }),
     )
     .max(100),
@@ -63,6 +70,13 @@ export const roomGroupRouter = router({
     const view = await loadGroup(db, ctx.orgId, input.groupId);
     if (!view) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room group not found' });
     return view;
+  }),
+
+  // The group and each room's current design, for the browser simulator.
+  simulation: orgProcedure.input(z.object({ orgId, groupId })).query(async ({ ctx, input }) => {
+    const sim = await loadGroupSimulation(db, ctx.orgId, input.groupId);
+    if (!sim) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room group not found' });
+    return sim;
   }),
 
   // Check a layout without saving it, so the editor can show problems and what it would make.
@@ -110,6 +124,69 @@ export const roomGroupRouter = router({
         return asTrpc(e);
       }
     }),
+
+  // What deploying the whole group would do, room by room, or what stops it. Changes nothing.
+  deployPreview: orgProcedure.input(z.object({ orgId, groupId })).query(async ({ ctx, input }) => {
+    try {
+      return (await planGroupDeploy(db, ctx.orgId, input.groupId)).plan;
+    } catch (e) {
+      return asTrpc(e);
+    }
+  }),
+
+  // Publish (where the design changed) and deploy every room and combined room of the group.
+  deploy: orgProcedure.input(z.object({ orgId, groupId })).mutation(async ({ ctx, input }) => {
+    requireRole(ctx.role, ['owner', 'dev']);
+    let key;
+    try {
+      key = loadSigningKey();
+    } catch (e) {
+      if (e instanceof SigningNotConfigured)
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: e.message });
+      throw e;
+    }
+    const org = await db.org.findFirst({ where: { id: ctx.orgId }, select: { branding: true } });
+    try {
+      const results = await deployGroup(db, ctx.orgId, input.groupId, {
+        key,
+        orgBranding: readOrgBranding(org?.branding),
+        userId: ctx.user.id,
+      });
+      // The same records as deploying each room by hand, plus one for the group.
+      for (const r of results) {
+        if (r.published)
+          await writeAudit({
+            orgId: ctx.orgId,
+            actorId: ctx.user.id,
+            action: 'release.publish',
+            target: r.roomId,
+            meta: { room: r.name, number: r.number },
+          });
+        if (r.deploymentId)
+          await writeAudit({
+            orgId: ctx.orgId,
+            actorId: ctx.user.id,
+            action: 'deployment.create',
+            target: r.deploymentId,
+            meta: { room: r.name, number: r.number },
+          });
+      }
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'group.deploy',
+        target: input.groupId,
+        meta: {
+          rooms: results.length,
+          deployed: results.filter((r) => r.deployed).length,
+          published: results.filter((r) => r.published).length,
+        },
+      });
+      return { results };
+    } catch (e) {
+      return asTrpc(e);
+    }
+  }),
 
   delete: orgProcedure.input(z.object({ orgId, groupId })).mutation(async ({ ctx, input }) => {
     requireRole(ctx.role, ['owner', 'dev']);

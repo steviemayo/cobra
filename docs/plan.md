@@ -20,7 +20,7 @@
 
 ## Phase 1 — Room Modelling (portal)
 
-- `packages/model` schemas: Device, Port, Connection, Group, State, Action, Activity, Trigger, RoomCombination
+- `packages/model` schemas: Device, Port, Connection, Group, State, Action, Activity, Trigger
 - Catalog of device categories + Room Types (Meeting, Training) + starter templates
 - Authoring UI: add devices, define ports/connections, groups, states, activities (list + graph view)
 - Validator: unconnected ports, illegal routes, missing capabilities, missing drivers
@@ -68,7 +68,7 @@
 ## Phase 7 — Expansion
 
 - Triggers: schedule, calendar (Graph/Google), occupancy, webhook/API
-- Combined rooms behaviour (first version built; **redesign planned**: define combinations when a room group is created, see `docs/panel-ui-requirements.md`)
+- Combined rooms behaviour (room groups built: `docs/room-groups.md`; the first primary/secondary version is removed)
 - Marketplace (publish/buy templates), driver SDK + dev subscription
 - Gateway self-update channels, Windows installer, QR-to-phone control
 - Additional drivers (conference systems API control, cameras, env, mechanical)
@@ -367,3 +367,213 @@ I have never opened these while signed in. Use a test org and click through, and
 - Pick the **first vendors** for matrix, DSP, display and camera drivers beyond NVX/Q-SYS.
 - Check the **domain**: is `kestrel` available? Point it at Vercel (Settings > Domains) and update `NEXT_PUBLIC_APP_URL` and the Supabase URLs (step 4).
 - Create a separate **`kestrel-prod`** Supabase project and a **Vercel Pro** plan before real customers.
+
+---
+
+## Next build steps (after the panel redesign, room groups, staff portal and providers)
+
+Written 2026-09-26. Everything above this line is set-up and verification for what was built in phases 0 to 7. This section is what to build next.
+
+**Status at the end of 2026-09-26:** B, C, D (part 1), E, F, G, H, I, J and K are built and merged to `dev` (each step below says what was and was not done; every decision made along the way is in `docs/decisions.md`). What is left:
+
+- **A**: the browser pass. Yours: nothing built this round has been clicked through signed in, or run on real hardware
+- **Before the release PR `dev` to `main`**: apply the two migrations added this round with `pnpm --filter @kestrel/db exec prisma migrate deploy` (`20260926120000_divider_actions`, `20260926140000_org_retention`). They were not applied by the build. Then set `STAFF_TICKET_EMAIL` (and `RESEND_API_KEY`, `ALERT_FROM_EMAIL` once the sending domain exists) if you want email
+- **D part 2**: after `main` is live, a migration dropping the `RoomCombination` table
+- **L**: needs your decision on who pays (the provider, the customer, or per customer)
+- **M**: WSS push needs a host that can hold connections (Vercel functions cannot), Stripe Connect needs a Stripe account and payout rules, third-party drivers and sandboxed hooks each need a security design first
+- Left out on purpose in F: camera auto-tracking and a separate recorder page. Left out in K: notifications as a target nears, per-organisation targets, business hours
+
+### How to start any of these (read first, in this order)
+
+1. `CLAUDE.md` (project rules; note the panel and combined-rooms lines)
+2. `docs/phase-4-preread.md` (status, working agreements, known limitations)
+3. The pre-read listed under the step you are doing (each step lists its own)
+4. `docs/staff-portal-and-msp.md` for anything about staff, providers, tickets or licences (its "Build status" says what exists)
+5. `docs/panel-ui-requirements.md` for anything on the room panel
+6. `docs/room-groups.md` for anything on combined rooms
+
+Working rules that apply to all of them:
+
+- Branch from `dev` (`feat/...`), PR to `dev`, merge when CI is green, then a release PR `dev` to `main`. Conventional commits. Never commit `.env*`
+- **Migrations are additive first.** Previews and production share one database (`kestrel-dev`), so a release must never drop or rename something the running production code still reads. Add, deploy, then remove in a later release. Generate SQL offline with `prisma migrate diff --from-schema <old> --to-schema <new> --script`, apply with `prisma migrate deploy`
+- Check before finishing: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and for web changes `pnpm --filter @kestrel/web build`. For access, staff or provider changes also run `apps/web/scripts/e2e-staff-msp.mts` (70 checks against the dev database; see its header)
+- Only format the files you changed (`prettier --write <files>`), never a whole folder
+- Anything reachable by a customer goes through `orgProcedure` and filters by `ctx.orgId`. Anything a site-limited provider may reach must declare `.meta(SITE_SCOPED)` and apply `ctx.siteScope`
+
+### Order
+
+| # | Step | Size | Needs from you |
+|---|---|---|---|
+| A | Browser pass of the new screens (below) | small | you, with an authenticator app and two accounts |
+| B | Quick actions from drivers (Blank Screen, Privacy Mute) | medium | a display or projector that supports blank, to try |
+| C | Room groups: gateway runtime (R1 to R4) | large | **built** (decisions in `docs/decisions.md`) |
+| D | Remove the old combinations code and table (R5) | medium | code removal **built**; table drop waits for the release |
+| E | Audit retention and export | medium | **built** (default 12 months, see `docs/decisions.md`); apply migration `org_retention` |
+| F | Panel function pages (cameras, microphones, recorder, room controls) | large | **built** except tracking and a recorder page (`docs/decisions.md`, F-1 to F-9); try on real devices |
+| G | Org accent colour in the portal | small | **built** (`docs/decisions.md`, G-1 to G-4) |
+| H | Email notifications (tickets and alerts) | small | **built**, sends once Resend is set up (`docs/decisions.md`, H-1 to H-6) |
+| I | Staff user management and a staff audit viewer | small | **built** (`docs/decisions.md`, I-1 to I-6) |
+| J | Assign tickets to provider people | medium | **built** (`docs/decisions.md`, J-1 to J-6) |
+| K | SLAs and priority timers | medium | **built** early (`docs/decisions.md`, K-1 to K-7); confirm the default targets with a first customer |
+| L | Provider billing and white label | large | a business decision on who pays |
+| M | Earlier candidates: WSS push, Stripe Connect payouts, third-party drivers, sandboxed logic hooks | large each | see `docs/phase-4-preread.md` |
+
+Do A first: nothing from the last round has been clicked through while signed in. Then B and C are the highest value.
+
+---
+
+### A. Browser pass of what was just built (you)
+
+Not done. The logic is covered by unit tests and by `apps/web/scripts/e2e-staff-msp.mts`, which calls the router directly, so it does not cover sign-in, the second-factor page or the layouts.
+
+Pre-read: `docs/staff-portal-and-msp.md` (Build status), `docs/panel-ui-requirements.md` (Build status).
+
+Do, on the production or preview URL:
+
+1. Sign in, open `/staff`. The first time it sends you to `/staff/mfa`: scan the QR code with an authenticator app and enter the code. Working when: you land on **Organisations**
+2. Staff: open an organisation, add a note, adjust a licence (try **Extend trial 14 days**), then start a **view-only** session with a reason. Working when: the yellow banner counts down, changes are refused with a clear message, and **End session** returns you to `/staff/orgs`
+3. Providers: create a second account, create an organisation ticked **We are a managed service provider**. In a customer organisation open **Settings > Service providers**, paste the provider's code (shown on the provider's **Customers** page), invite it for one site only, accept as the provider. Working when: the provider sees only that site's rooms, gateways, monitoring and support requests, and anything else says access is limited to specific sites
+4. Tickets: raise a request about a room at that site (it should show "With service provider"), escalate one to Kestrel, then reply from `/staff/tickets`. Working when: the reply shows as **Kestrel support** and an internal note is hidden from a customer viewer
+5. Panel: open a room's **Simulate** page. Check the off screen (centred options, no bars), the top-nav pill, the Power confirmation, the volume overlay, and "Touch to begin" (set a timeout in the room's **Settings**). Then open it on a real 7" and 10" panel and note the size the browser reports (CSS pixel width), whether the glass blur is smooth (if not, add a lite mode), and touch target size
+6. Room groups: create a group, add two rooms with designs, add a wall, press **Update combined rooms**. Working when: a combined room appears in **Rooms** and opens in the designer with both rooms' devices
+
+Also (small, yours): set `STAFF_TICKET_WEBHOOK_URL` on Vercel if you want escalation notifications; delete merged branches on GitHub; keep `STAFF_REQUIRE_MFA` and `STAFF_HOST` unset in production.
+
+---
+
+### B. Quick actions from drivers
+
+Why: the panel's bottom bar and Quick Actions sheet are built and tested, but nothing supplies actions, so it is always empty. Blank Screen and Privacy Mute are the two that matter.
+
+Pre-read:
+- `docs/panel-ui-requirements.md` ("Quick actions (supplied by drivers)")
+- `docs/driver-sdk.md` ("Planned: quick actions")
+- `packages/model/src/room/common.ts` and `catalog.ts` (capabilities per device category)
+- `packages/model/src/runtime/panel.ts` (`PanelQuickAction`, the `quickaction.run` intent) and `packages/engine/src/runtime/runtime.ts` (`buildSnapshot`, `dispatch`; `quickaction.run` is accepted but ignored today)
+- `packages/drivers/src/real/pjlink.ts` (PJLink `AVMT` blank command), `declarative.ts` and `packages/model/src/driver-spec.ts`
+- `packages/panel-ui/src/BottomBar.tsx`
+
+Do: add a `blank` capability and a `blanked` feedback field; add `quickActions` to the driver format (standard ids `display.blank`, `mics.privacy_mute`); teach PJLink to blank; make the engine offer Blank only when the room has a display whose driver supports it, and Privacy Mute only with conferencing microphones and a conference system; handle `quickaction.run` (one button acts on every device that supports it); show state from feedback; add simulator device support; tests.
+
+Depends on: nothing. Done when: in the simulator a room with a PJLink display shows a working Blank Screen button, and a room without one shows none.
+
+**Status: built** (branch `feat/quick-actions`). Differences from the plan above: no model `blank` capability (support is declared by the driver, per the decision); driver format is `quickActions: [ids]` plus standard commands `blank.on`/`blank.off`, not the label/icon object first sketched. Not done: a failed action is silent; blank is not cleared when the source changes; the browser simulator does not see an org's custom drivers. Details: `docs/driver-sdk.md` (Quick actions), `docs/panel-ui-requirements.md` (Slice 2).
+
+### C. Room groups: gateway runtime
+
+**Status: built** in four pull requests (protocol and settings, gateway runtime, Link rooms menu, group deploy and simulator). The decisions asked below were answered by the user and are recorded with the ones made while building in `docs/decisions.md`. Still to do: apply the `divider_actions` migration; try it on a real gateway. The text below is the original brief.
+
+Why: the portal side is built (groups, walls, derived combined rooms). Nothing yet opens or closes a wall at runtime, so a combined room can be designed and deployed but never becomes live. This is the largest remaining piece.
+
+Pre-read (all of it, before writing code):
+- `docs/room-groups.md` (whole file, especially "Runtime")
+- `docs/diagrams.md` section 23 and `docs/phase-4-preread.md` ("Known limitations")
+- `packages/engine/src/groups/combinations.ts` (`enumerateCombinedRooms`, `liveCombinations`: already gives which combined rooms are live for a set of open walls)
+- The current implementation you will replace: `apps/gateway/src/combine.ts`, `room-host.ts`, `gateway.ts`; `packages/engine/src/runtime/runtime.ts` (`setCombination`, `setSecondary`, `follow`); `packages/model/src/gateway/protocol.ts` (`CombinationConfig`, `CombinationReport`); `packages/panel-ui/src/PanelApp.tsx` (`following` branch, `CombineBar`)
+- `apps/web/src/server/room-groups.ts` and `routers/room-group.ts` (what the cloud already knows)
+- `apps/gateway/src/room-host.ts` (each room gets its own device bus) and `packages/drivers/src/real/hybrid-bus.ts` (how drivers connect per room; a physical device must never be driven by two runtimes at once)
+
+Decide with the user before coding:
+1. How a wall's state is set: panel button, portal, sensor, or all three (proposed: panel and portal now, sensor later)
+2. Transition rules: opening (if any member room was on, does the combined room start on?) and closing (members go Off, or restore what they had?) (proposed: on opening start on if any member was on; on closing members go Off)
+3. Whether members of one group can be deployed together as one action (proposed: yes, one "deploy group" that deploys members then combined rooms)
+
+Sub-slices:
+- **R1 protocol and config**: send each gateway its groups (rooms, walls, the combined rooms and their members) in the config, report open walls in the heartbeat; keep the old fields tolerated for gateways in the field
+- **R2 gateway coordinator**: own the wall state (persist it, works offline), decide which combined rooms are live with `liveCombinations`, suspend member runtimes and start the combined runtime and back, with the transition rules
+- **R3 control and panels**: a `divider.set` control (panel intent and portal control), member panels mirror the live combined room's UI, the portal control page shows walls
+- **R4 group deployment and simulator**: deploy a group in one action; simulate walls opening and closing in the browser
+
+Depends on: nothing. Done when, in the simulator with fake devices: opening a wall makes the combined room run and suspends its members; closing reverses it; the state survives a gateway restart with no internet.
+
+### D. Remove the old combinations code and table
+
+**Status: part 1 built** (every reader and writer, the panel intent and bar, the protocol fields, the model schema and the tests are gone; the `RoomCombination` model stays in `schema.prisma` with a comment). **Part 2 is yours, after the release to `main` is live:** add a migration dropping the table (`DROP TABLE "RoomCombination"`), remove the model from `schema.prisma`, and check `grep -ri roomcombination` finds only migration history. The protocol version stays 1 (decision D-1 in `docs/decisions.md`). The text below is the original brief.
+
+Why: the first combined-rooms design was wrong and is being replaced (C). Its code and table are still there.
+
+Pre-read: `docs/room-groups.md` ("Data model", "Slices"), `apps/web/src/server/combinations.ts` and `control-service.ts` (`queueCombine`), `gateway-service.ts`, `packages/model/src/room/behaviour.ts` (`RoomCombination`), `packages/db/prisma/schema.prisma` (`RoomCombination`).
+
+Do, in two releases: (1) remove every reader and writer, the panel `combine.set` intent and bar, and the protocol fields (bump the protocol version, keep parsing old messages); deploy; (2) a follow-up migration dropping `RoomCombination`.
+
+Depends on: C deployed everywhere. Done when: `grep -ri roomcombination` finds only the migration history.
+
+### E. Audit retention and export
+
+**Status: built.** Nothing left to decide; the migration `org_retention` (one new table) still has to be applied. Until it is, only the daily audit clean-up reports an error (the rest of the retention job still runs) and the staff retention panel shows an error. The text below is the original brief.
+
+Decided in the staff plan review; not built.
+
+Pre-read: `docs/staff-portal-and-msp.md` ("Decisions from review" item 3 and "Still open"), `apps/web/src/server/audit.ts`, `routers/audit.ts`, the `AuditLog` and `StaffAudit` models, `apps/web/src/app/api/cron/retention` and `apps/web/vercel.json` (the daily cron), `docs/plan.md` step 5.
+
+Do: a per-organisation retention setting (12 months by default; billing and access-change events kept longer, staff can extend), purge in the daily retention job for both logs, CSV and JSON export of the activity log for owners and for staff (staff exports are themselves audited).
+
+Decide: the default period and which events are kept longer. Done when: old rows are purged by the cron and an owner can download their log.
+
+### F. Panel function pages
+
+**Status: built** (cameras, microphones, room controls). Left for later: camera tracking and a recorder page (F-2). Try it on real devices: a VISCA camera, a Shelly relay screen, a lighting processor. The text below is the original brief.
+
+Why: the panel shows Sources and Record only. The planned pages (cameras, microphones and audio, recorder, room controls) need model and engine data that does not exist yet.
+
+Pre-read: `docs/panel-ui-requirements.md` ("Screens", "Build status"), `packages/model/src/runtime/panel.ts`, `packages/engine/src/runtime/runtime.ts` (`buildSnapshot`), `packages/model/src/room/room-model.ts` (`userControls`), `packages/drivers/src/real/visca.ts` and the `camera_preset`, `lighting` capabilities, `packages/panel-ui/src/PanelApp.tsx`.
+
+Do: extend the panel view model with per-function data, engine intents for camera preset, pan/tilt/zoom and tracking, mic mute, lighting scenes; render the pages under the top nav only when the room has the capability. Done when: a training room with a PTZ camera and lights shows Cameras and Room Controls pages in the simulator.
+
+### G. Org accent colour in the portal
+
+**Status: built.** The text below is the original brief.
+
+Why: decided that one accent colour themes the portal and the panel, with the same contrast check. Today only the panel uses it.
+
+Pre-read: `packages/panel-ui/src/theme.ts` (`legibleAccent`), `apps/web/src/components/common/branding-fields.tsx`, `apps/web/src/server/panel-settings.ts` (`readOrgBranding`), `apps/web/src/app/globals.css` (colour tokens), `apps/web/src/components/shell/org-shell.tsx`.
+
+Do: apply the org's accent to the portal's primary tokens for that organisation, using `legibleAccent` in both themes; warn in the branding form when the chosen colour had to be adjusted. Done when: changing the accent changes the portal and the panel and never produces unreadable text.
+
+### H. Email notifications
+
+**Status: built.** It only sends once `RESEND_API_KEY` and `ALERT_FROM_EMAIL` are set (needs the sending domain, step 6), and staff get escalation emails when `STAFF_TICKET_EMAIL` is set. The text below is the original brief.
+
+Blocked on a domain and a verified Resend sender (step 6 above).
+
+Pre-read: `apps/web/src/server/ticket-notify.ts` (Teams and webhook today), `alerts.ts` (email channel already exists for incidents), `docs/staff-portal-and-msp.md` (tickets).
+
+Do: send ticket events (escalation, staff reply, status change, hand back) by email to the right people, with the same rules as Teams and webhook, and let staff and providers opt in. Done when: an escalation emails the configured staff address.
+
+### I. Staff user management and a staff audit viewer
+
+**Status: built.** The text below is the original brief.
+
+Why: staff are added only by `apps/web/scripts/add-staff.mts`, and `StaffAudit` has no viewer.
+
+Pre-read: `apps/web/src/server/staff.ts`, `scripts/add-staff.mts`, the `StaffUser` and `StaffAudit` models.
+
+Do: a `/staff/team` page (admin only) to add, change and remove staff by email, and a `/staff/audit` page to browse the trail with filters by staff member, organisation and action. Done when: an admin can add a support person without the script.
+
+### J. Assign tickets to provider people
+
+**Status: built.** The text below is the original brief.
+
+Pre-read: `apps/web/src/server/routers/ticket.ts` (the `update` procedure requires the assignee to be an organisation member), `apps/web/src/server/msp.ts` (`mspAccess`), the `Ticket.assignedTo` column.
+
+Do: allow an assignee who reaches the organisation through an active provider connection (needs an assignee reference that is not only a `Member`), show them by name and provider, and keep it working after a connection ends (assignee cleared). Done when: a provider can assign a customer's ticket to one of its own people.
+
+### K. SLAs and priority timers
+
+**Status: built** with fixed calendar-time targets and no stored data; per-organisation targets, business hours and notifications are not. The text below is the original brief.
+
+After the first customers. Pre-read: `docs/staff-portal-and-msp.md`, `apps/web/src/server/tickets.ts`. Do: response and resolution targets per priority, a "due" column in the staff and provider queues, and a warning as a ticket nears its target.
+
+### L. Provider billing and white label
+
+Needs a business decision first: today the customer pays Kestrel directly and the provider pays nothing. Pre-read: `docs/staff-portal-and-msp.md` ("Decided": billing), `apps/web/src/server/stripe.ts`, `billing.ts`, `packages/model/src/billing.ts`. Options to decide: the provider pays for its customers' rooms (wholesale), per-customer choice, or provider-branded panels and portal.
+
+### M. Earlier candidates
+
+WSS push (removes the first-connect lag), Stripe Connect payouts for marketplace publishers, third-party driver marketplace, sandboxed custom-logic hooks. Pre-read for each: `docs/phase-4-preread.md` ("Known limitations", "Suggested next steps"), `docs/driver-sdk.md`, `docs/plan.md` (Key Architectural Bets).
+
+### Small fixes to fit in anywhere
+
+- One gateway test (`apps/gateway/src/panel-server.test.ts`, "greet the panel and stream the room state") failed once in a full run and passed twice on rerun: make it deterministic
+- `KESTREL_ADMIN_EMAILS` is gone from code; make sure it is deleted from Vercel
+- The old `docs/staff-portal-plan` branch on GitHub can be deleted

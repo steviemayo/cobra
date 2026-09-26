@@ -302,3 +302,43 @@ describe('QR links for phones', () => {
     expect(phone.link(ROOM)).toBeNull();
   });
 });
+
+describe('panels while walls are open', () => {
+  const OTHER = '33333333-3333-4333-8333-333333333332';
+  const otherRoom = () =>
+    signManifest(
+      {
+        manifestVersion: 1,
+        orgId: '11111111-1111-4111-8111-111111111111',
+        roomId: OTHER,
+        roomName: 'Boardroom + Annexe',
+        releaseId: '44444444-4444-4444-8444-444444444442',
+        releaseNumber: 1,
+        createdAt: new Date().toISOString(),
+        model: structuredClone(STARTER_TEMPLATES[0]!.model),
+        panel: { access: { mode: 'open', trustedIps: [] }, branding: {} },
+      },
+      { privateKeyPem: keys.privateKeyPem, keyId: 'k' },
+    );
+
+  it('follows the room that is now running its space, and sends intents to it', async () => {
+    await start();
+    host.load(otherRoom());
+    const p = new Panel();
+    await until(() => p.last?.roomName === 'Boardroom');
+
+    // A wall opens: the combined room now runs this panel's space.
+    host.setActiveResolver((id) => (id === ROOM ? OTHER : id));
+    host.notifyActiveChange();
+    await until(() => p.last?.roomName === 'Boardroom + Annexe');
+
+    p.send({ t: 'intent', intent: { type: 'activity.start', activityId: 'present', sourceId: 'laptop1' } });
+    await until(() => host.get(OTHER)!.runtime.getSnapshot().status === 'starting');
+    expect(host.get(ROOM)!.runtime.getSnapshot().status).toBe('off');
+
+    // And back again when it closes.
+    host.setActiveResolver((id) => id);
+    host.notifyActiveChange();
+    await until(() => p.last?.roomName === 'Boardroom');
+  });
+});

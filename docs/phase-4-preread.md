@@ -8,7 +8,7 @@
 - Git flow: `feat/*`/`fix/*` from `dev` → PR to `dev` → **user merges** → PR `dev` → `main` (user merges). Never commit to `main`/`dev` directly. Trailer: `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`
 - Never push/PR/merge unasked. Never commit `.env*`. Multiple sessions have worked in this repo — always check `git log`, branches, `gh pr list` before assuming state
 
-## Status (as of 2026-09-25)
+## Status (as of 2026-09-26)
 
 | Phase | State |
 |---|---|
@@ -21,6 +21,7 @@
 | 5 Monitoring & support | Merged with 6 and 7 (`feat/phase-5-monitoring`): health, incidents, alerts (email/Teams/webhook/ITSM stub), allowlisted remote commands + audit, tickets, 90-day retention. Verified end-to-end in Docker + Chrome |
 | 6 Billing & customer portal | Merged (same PR): plans/entitlements (trial/basic/pro), Stripe checkout + webhooks, plan gating (never gates control), portal control, customer dashboard, org theme, language packs (es/fr/de) |
 | 7 Expansion | Merged (same PR): schedule/occupancy/webhook/calendar (M365, Google) triggers, combined rooms, marketplace (publish/review/buy), driver SDK (custom declarative drivers, Pro) + bundled library, serial/REST/VISCA drivers, DM-NVX + Q-SYS drivers, QR-to-phone control, gateway update channels + compose/Watchtower, Windows bundle + installer |
+| After phase 7 (merged to `dev` and `main`) | Panel UI redesign (`docs/panel-ui-requirements.md`), room groups in the portal (`docs/room-groups.md`; gateway runtime NOT built), staff portal: directory, licences, support sessions, ticket queue, fleet health, marketplace review (`docs/staff-portal-and-msp.md`), service providers (MSPs) incl. site-limited grants. Verified by unit tests, `next build` and `apps/web/scripts/e2e-staff-msp.mts` (70 checks); **not yet clicked through in a browser while signed in** |
 
 ### What is verified vs only unit-tested
 
@@ -81,5 +82,5 @@
 
 ## Suggested next steps (in order)
 
-1. Work through "Next steps by dev" at the bottom of `docs/plan.md` (secrets, Vercel env vars, migrations, scheduler, Stripe, real gateway and hardware, browser pass)
-2. Candidates after that: WSS push to remove the first-connect lag, Stripe Connect payouts, MSP/reseller tier, third-party driver marketplace, sandboxed custom-logic hooks
+1. Work through "Next steps by dev" in `docs/plan.md` (secrets, Vercel env vars, scheduler, Stripe, real gateway and hardware)
+2. Then "Next build steps" at the very end of `docs/plan.md`: a browser pass of the new screens, quick actions from drivers, the room groups gateway runtime, audit retention and export, panel function pages, and the rest. Each step lists its own pre-read

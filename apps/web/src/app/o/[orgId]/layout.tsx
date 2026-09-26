@@ -5,6 +5,7 @@ import { db } from '@kestrel/db';
 import { OrgShell } from '@/components/shell/org-shell';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { managedCustomers } from '@/server/msp';
+import { readOrgBranding } from '@/server/panel-settings';
 import { findStaff, mfaRequired } from '@/server/staff';
 import { activeSession } from '@/server/support-sessions';
 
@@ -72,6 +73,10 @@ export default async function OrgLayout({
     viewAs = { sessionId: session.id, mode: session.mode, endsAt: session.endsAt.toISOString() };
   }
 
+  // The organisation's accent colour also themes its portal.
+  const brand = await db.org.findFirst({ where: { id: orgId }, select: { branding: true } });
+  const accent = readOrgBranding(brand?.branding).accent ?? null;
+
   const store = await cookies();
   return (
     <OrgShell
@@ -80,6 +85,7 @@ export default async function OrgLayout({
       user={{ id: user.id, email: user.email ?? '' }}
       defaultOpen={store.get('sidebar_state')?.value !== 'false'}
       viewAs={viewAs}
+      accent={accent}
     >
       {children}
     </OrgShell>

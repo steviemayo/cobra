@@ -1,11 +1,20 @@
 import type { Prisma, PrismaClient } from '@kestrel/db';
-import { RoomModel, type RoomGroupSpec, type RoomType } from '@kestrel/model';
+import {
+  DEFAULT_ON_CLOSE,
+  DEFAULT_ON_OPEN,
+  RoomModel,
+  type GroupConfig,
+  TransitionAction,
+  type RoomGroupSpec,
+  type RoomType,
+} from '@kestrel/model';
 import {
   combinedKey,
   deriveCombinedModel,
   enumerateCombinedRooms,
   memberKey,
   validateGroupSpec,
+  validateRoomModel,
 } from '@kestrel/engine';
 
 // Room groups: rooms that can be physically joined by movable walls, and the combined rooms that
@@ -24,7 +33,13 @@ export interface GroupInput {
   /** The ordinary rooms in the group, in the order they should read in names. */
   roomIds: string[];
   /** Dividers keep their id when edited, so what is stored about them survives. */
-  dividers: { id?: string; name: string; roomIds: string[] }[];
+  dividers: {
+    id?: string;
+    name: string;
+    roomIds: string[];
+    onOpen?: TransitionAction;
+    onClose?: TransitionAction;
+  }[];
 }
 
 interface RoomRow {
@@ -115,11 +130,84 @@ export async function saveGroup(db: GroupDb, orgId: string, input: GroupInput): 
     if (d.id && existing.some((e) => e.id === d.id))
       await db.roomDivider.update({
         where: { id: d.id },
-        data: { name: d.name, roomIds: d.roomIds },
+        data: {
+          name: d.name,
+          roomIds: d.roomIds,
+          ...(d.onOpen ? { onOpen: d.onOpen } : {}),
+          ...(d.onClose ? { onClose: d.onClose } : {}),
+        },
       });
-    else await db.roomDivider.create({ data: { groupId, name: d.name, roomIds: d.roomIds } });
+    else
+      await db.roomDivider.create({
+        data: {
+          groupId,
+          name: d.name,
+          roomIds: d.roomIds,
+          onOpen: d.onOpen ?? DEFAULT_ON_OPEN,
+          onClose: d.onClose ?? DEFAULT_ON_CLOSE,
+        },
+      });
   }
   return groupId;
+}
+
+export interface SimulatedRoom {
+  id: string;
+  name: string;
+  kind: 'standard' | 'combined';
+  /** The design to run, or null with `problem` saying why it cannot be. */
+  model: RoomModel | null;
+  problem: string | null;
+}
+
+/**
+ * Everything the browser simulator needs to run a group: the group as a gateway would be given it,
+ * and each room's current design. A room with no design, or a design with errors, is listed with
+ * the reason and is not run.
+ */
+export async function loadGroupSimulation(
+  db: GroupDb,
+  orgId: string,
+  groupId: string,
+): Promise<{ name: string; config: GroupConfig; rooms: SimulatedRoom[] } | null> {
+  const view = await loadGroup(db, orgId, groupId);
+  if (!view) return null;
+  const combined = view.combined.filter((c) => c.roomId);
+  const config: GroupConfig = {
+    id: view.id,
+    name: view.name,
+    roomIds: view.rooms.map((r) => r.id),
+    dividers: view.dividers.map((d) => ({
+      id: d.id,
+      name: d.name,
+      roomIds: d.roomIds,
+      onOpen: d.onOpen,
+      onClose: d.onClose,
+    })),
+    combined: combined.map((c) => ({ roomId: c.roomId!, memberRoomIds: c.roomIds })),
+  };
+  const listed = [
+    ...view.rooms.map((r) => ({ id: r.id, name: r.name, kind: 'standard' as const })),
+    ...combined.map((c) => ({ id: c.roomId!, name: c.name, kind: 'combined' as const })),
+  ];
+  const rooms: SimulatedRoom[] = [];
+  for (const r of listed) {
+    const draft = await db.roomDraft.findFirst({ where: { roomId: r.id, orgId } });
+    const parsed = draft ? RoomModel.safeParse(draft.model) : null;
+    if (!parsed?.success) {
+      rooms.push({ ...r, model: null, problem: 'Has no design yet.' });
+      continue;
+    }
+    const errors = validateRoomModel(parsed.data).issues.filter((i) => i.severity === 'error');
+    rooms.push({
+      ...r,
+      model: errors.length ? null : parsed.data,
+      problem: errors.length
+        ? `${errors.length} design problem${errors.length === 1 ? '' : 's'}: ${errors[0]!.message}`
+        : null,
+    });
+  }
+  return { name: view.name, config, rooms };
 }
 
 export class GroupError extends Error {
@@ -145,7 +233,15 @@ export interface GroupView {
   name: string;
   siteId: string;
   rooms: { id: string; name: string; gatewayId: string | null }[];
-  dividers: { id: string; name: string; roomIds: string[] }[];
+  dividers: {
+    id: string;
+    name: string;
+    roomIds: string[];
+    onOpen: TransitionAction;
+    onClose: TransitionAction;
+    /** Last reported by the gateway. */
+    open: boolean;
+  }[];
   combined: CombinedView[];
   /** Combined rooms that exist but that the dividers no longer allow. */
   orphaned: { roomId: string; name: string; deployed: boolean }[];
@@ -196,7 +292,14 @@ export async function loadGroup(
     name: group.name,
     siteId: group.siteId,
     rooms: members.map((r) => ({ id: r.id, name: r.name, gatewayId: r.gatewayId })),
-    dividers: dividers.map((d) => ({ id: d.id, name: d.name, roomIds: d.roomIds })),
+    dividers: dividers.map((d) => ({
+      id: d.id,
+      name: d.name,
+      roomIds: d.roomIds,
+      onOpen: transition(d.onOpen, DEFAULT_ON_OPEN),
+      onClose: transition(d.onClose, DEFAULT_ON_CLOSE),
+      open: d.open === true,
+    })),
     combined: sets.map((s) => ({
       key: s.key,
       roomIds: s.roomIds,
@@ -208,6 +311,11 @@ export async function loadGroup(
     problems: [...new Set(problems)],
   };
 }
+
+const transition = (value: unknown, fallback: TransitionAction): TransitionAction => {
+  const parsed = TransitionAction.safeParse(value);
+  return parsed.success ? parsed.data : fallback;
+};
 
 const combinedName = (roomIds: string[], members: { id: string; name: string }[]) =>
   members

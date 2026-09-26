@@ -39,7 +39,7 @@ interface BuiltBus {
 export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger): BuiltBus {
   const model = signed.manifest.model;
   if (mode === 'all') {
-    const sim = createSimulation(model);
+    const sim = createSimulation(model, { customDrivers: signed.manifest.drivers });
     return { bus: sim, offline: () => [], close: () => sim.dispose() };
   }
   const real = new Map<string, DeviceDriver>();
@@ -51,7 +51,10 @@ export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger
     );
     if (driver) real.set(device.id, driver);
   }
-  const bus = new HybridBus(real, mode === 'missing' ? createSimulation(model) : null);
+  const bus = new HybridBus(
+    real,
+    mode === 'missing' ? createSimulation(model, { customDrivers: signed.manifest.drivers }) : null,
+  );
   bus.start();
   return { bus, offline: () => bus.offline(), close: () => bus.close() };
 }
@@ -63,7 +66,9 @@ export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger
 export class RoomHost {
   private readonly rooms = new Map<string, LoadedRoom>();
   private readonly reloadListeners = new Set<(roomId: string) => void>();
-  private combineListener: ((roomId: string, combined: boolean) => void) | null = null;
+  private dividerListener: ((dividerId: string, open: boolean) => void) | null = null;
+  private resolveActive: (roomId: string) => string = (roomId) => roomId;
+  private readonly activeListeners = new Set<() => void>();
 
   constructor(
     private readonly mode: SimulateMode,
@@ -89,9 +94,31 @@ export class RoomHost {
     return () => this.reloadListeners.delete(listener);
   }
 
-  /** Set by the combine coordinator: a room's panel asked to join or split its combination. */
-  onCombineRequest(listener: (roomId: string, combined: boolean) => void) {
-    this.combineListener = listener;
+  /** Set by the group coordinator: a panel asked to open or close a movable wall. */
+  onDividerRequest(listener: (dividerId: string, open: boolean) => void) {
+    this.dividerListener = listener;
+  }
+
+  /**
+   * The room that is really running a panel's room right now. Usually the room itself; while a wall
+   * is open it is the combined room that includes it. Set by the group coordinator.
+   */
+  setActiveResolver(resolve: (roomId: string) => string) {
+    this.resolveActive = resolve;
+  }
+
+  active(roomId: string): LoadedRoom | undefined {
+    return this.rooms.get(this.resolveActive(roomId)) ?? this.rooms.get(roomId);
+  }
+
+  /** Called when which room runs a panel's room may have changed, so panels can follow it. */
+  onActiveChange(listener: () => void): () => void {
+    this.activeListeners.add(listener);
+    return () => this.activeListeners.delete(listener);
+  }
+
+  notifyActiveChange() {
+    for (const l of this.activeListeners) l();
   }
 
   /** Build a room and start connecting to its devices without replacing the one that is running. */
@@ -102,7 +129,7 @@ export class RoomHost {
       model: manifest.model,
       roomName: manifest.roomName,
       bus: built.bus,
-      onCombine: (combined) => this.combineListener?.(manifest.roomId, combined),
+      onDivider: (dividerId, open) => this.dividerListener?.(dividerId, open),
     });
     const scheduler = new TriggerScheduler(manifest.model, { fire: (t) => runtime.fire(t.run) });
     const room: LoadedRoom = {

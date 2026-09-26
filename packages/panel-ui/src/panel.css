@@ -652,6 +652,100 @@
   align-self: flex-end;
 }
 
+/* Camera, microphone and room control pages */
+.kp-fn-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8em;
+  margin-top: 1em;
+}
+.kp-fn-card h3 {
+  margin: 0;
+  font-size: 1.15em;
+  font-weight: 500;
+}
+.kp-tile-wide {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 0.8em;
+  text-align: left;
+}
+.kp-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 5.5em);
+  gap: 0.6em;
+}
+.kp-pad-mid {
+  display: grid;
+  place-items: center;
+  color: var(--kp-muted);
+}
+.kp-hold {
+  display: grid;
+  place-items: center;
+  min-height: 5.5em;
+  border: 1px solid var(--kp-glass-line, var(--kp-line));
+  border-radius: 1em;
+  background: var(--kp-glass, var(--kp-surface));
+  color: inherit;
+  font-size: 1em;
+  touch-action: none;
+  user-select: none;
+}
+.kp-hold svg {
+  font-size: 2em;
+}
+.kp-hold:active {
+  background: var(--kp-accent);
+  color: var(--kp-accent-text);
+}
+
+/* Room linking: the movable walls next to this room */
+.kp-app .kp-link {
+  color: inherit;
+}
+.kp-walls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kp-wall {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 1em;
+  padding: 0.9em 1.1em;
+  border: 1px solid var(--kp-glass-line);
+  border-radius: 1em;
+  background: var(--kp-glass);
+}
+.kp-wall[data-open] {
+  border-color: var(--kp-accent);
+}
+.kp-wall-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15em;
+  min-width: 0;
+}
+.kp-wall-hint {
+  color: var(--kp-warn, var(--kp-muted));
+  font-size: 0.9em;
+}
+.kp-wall-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  color: var(--kp-muted);
+}
+.kp-wall .kp-btn {
+  min-height: 3.4em;
+  min-width: 6em;
+}
+
 /* Touch to begin */
 .kp-idle {
   position: absolute;

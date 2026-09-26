@@ -1,4 +1,10 @@
-import type { DeviceBus, DeviceCommand, DeviceEvent, DeviceState } from '@kestrel/model';
+import type {
+  DeviceBus,
+  DeviceCommand,
+  DeviceEvent,
+  DeviceState,
+  QuickActionId,
+} from '@kestrel/model';
 import type { Simulation } from '../sim/simulation';
 import type { DeviceDriver } from './types';
 
@@ -21,6 +27,12 @@ export class HybridBus implements DeviceBus {
 
   getState(deviceId: string): DeviceState | undefined {
     return this.real.get(deviceId)?.getState() ?? this.sim?.getState(deviceId);
+  }
+
+  quickActions(deviceId: string): QuickActionId[] {
+    const driver = this.real.get(deviceId);
+    if (driver) return driver.quickActions?.() ?? [];
+    return this.sim?.quickActions(deviceId) ?? [];
   }
 
   subscribe(listener: (event: DeviceEvent) => void): () => void {

@@ -47,6 +47,12 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
   host.onReload((roomId) => {
     for (const s of sockets.get(roomId) ?? []) s.close(1012, 'room reloaded');
   });
+  // When walls move, a panel follows the room that is now running its space. Each open panel
+  // registers a function here that checks and re-binds.
+  const followers = new Set<() => void>();
+  host.onActiveChange(() => {
+    for (const follow of followers) follow();
+  });
 
   const dir = resolve(opts.panelDir);
   const built = existsSync(resolve(dir, 'index.html'));
@@ -97,10 +103,25 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
     if (!set) sockets.set(roomId, (set = new Set()));
     set.add(socket);
 
+    // The room actually running this panel's space: itself, or a combined room while walls are open.
+    let shown = host.active(roomId) ?? room;
+    let follow: (() => void) | null = null;
+
     const startStreaming = () => {
-      const push = () => send({ t: 'snapshot', vm: room.runtime.getSnapshot() });
-      unsubscribe = room.runtime.subscribe(push);
-      push();
+      const push = () => send({ t: 'snapshot', vm: shown.runtime.getSnapshot() });
+      const bind = () => {
+        unsubscribe?.();
+        unsubscribe = shown.runtime.subscribe(push);
+        push();
+      };
+      bind();
+      follow = () => {
+        const now = host.active(roomId);
+        if (!now || now === shown) return;
+        shown = now;
+        bind();
+      };
+      followers.add(follow);
       const sendQr = () => {
         const link = opts.phone?.link(roomId);
         if (link) send({ t: 'qr', ...link });
@@ -152,11 +173,12 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
         intents = 0;
       }
       if (++intents > MAX_INTENTS_PER_SECOND) return; // a runaway panel; ignore the flood
-      room.runtime.dispatch(msg.data.intent);
+      shown.runtime.dispatch(msg.data.intent);
     });
 
     socket.on('close', () => {
       unsubscribe?.();
+      if (follow) followers.delete(follow);
       if (qrTimer) clearInterval(qrTimer);
       sockets.get(roomId)?.delete(socket);
     });

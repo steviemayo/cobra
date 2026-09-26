@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { hasStaffRole } from '@kestrel/model';
+import { SlaBadge } from '@/components/common/sla-badge';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { Button } from '@/components/ui/button';
@@ -98,6 +99,12 @@ export function StaffTicket({ ticketId }: { ticketId: string }) {
         description={`${t.orgName} · ${TICKET_STATUS_LABEL[t.status]} · ${PRIORITY_LABEL[t.priority]} priority${t.roomName ? ` · ${t.roomName}` : ''}`}
         actions={back}
       />
+      {withKestrel && (
+        <p className="text-sm">
+          <span className="text-muted-foreground">Target: </span>
+          <SlaBadge sla={t.sla} className="text-sm" />
+        </p>
+      )}
       {!withKestrel && (
         <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
           This ticket is with the organisation’s own team, so it can be read here but not worked.

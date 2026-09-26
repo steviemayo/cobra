@@ -1,10 +1,12 @@
 // A tiny in-memory stand-in for the parts of Prisma the services use, so they can be tested
-// without a database. Supports equality, not / in / lte conditions, orderBy and createMany.
+// without a database. Supports equality, not / in / lte conditions, orderBy, aggregate (_max) and createMany.
 export type Row = Record<string, unknown>;
 
 type Cond = {
   not?: unknown;
   in?: unknown[];
+  notIn?: unknown[];
+  startsWith?: string;
   lte?: Date | number;
   lt?: Date | number;
   gte?: Date | number;
@@ -13,6 +15,11 @@ type Cond = {
 
 export function matches(row: Row, where: Row = {}): boolean {
   return Object.entries(where).every(([k, cond]) => {
+    // Logical operators: NOT (none may match), OR (any must match), AND (all must match).
+    if (k === 'NOT')
+      return ([] as Row[]).concat(cond as Row | Row[]).every((w) => !matches(row, w));
+    if (k === 'OR') return (cond as Row[]).some((w) => matches(row, w));
+    if (k === 'AND') return ([] as Row[]).concat(cond as Row | Row[]).every((w) => matches(row, w));
     const v = row[k];
     // Prisma always has a column; a row built without one means null.
     if (cond === null) return v === null || v === undefined;
@@ -20,6 +27,8 @@ export function matches(row: Row, where: Row = {}): boolean {
       const c = cond as Cond;
       if ('not' in c) return v !== c.not;
       if ('in' in c) return c.in!.includes(v);
+      if ('notIn' in c) return !c.notIn!.includes(v);
+      if ('startsWith' in c) return typeof v === 'string' && v.startsWith(c.startsWith!);
       const t = v instanceof Date ? v.getTime() : typeof v === 'number' ? v : NaN;
       const at = (x: Date | number) => new Date(x).getTime();
       if ('lte' in c || 'lt' in c || 'gte' in c || 'gt' in c)
@@ -57,6 +66,15 @@ export function table(rows: Row[], uniqueOn?: string[]) {
       return take ? hit.slice(0, take) : hit;
     },
     count: async ({ where }: { where?: Row } = {}) => rows.filter((r) => matches(r, where)).length,
+    aggregate: async ({ where, _max }: { where?: Row; _max: Record<string, true> }) => {
+      const hit = rows.filter((r) => matches(r, where));
+      const max: Record<string, unknown> = {};
+      for (const key of Object.keys(_max))
+        max[key] = hit.length
+          ? hit.map((r) => r[key] as number).reduce((a, b) => (b > a ? b : a))
+          : null;
+      return { _max: max };
+    },
     delete: async ({ where }: { where: Row }) => {
       const i = rows.findIndex((r) => matches(r, where));
       return rows.splice(i, 1)[0]!;

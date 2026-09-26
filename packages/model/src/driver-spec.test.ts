@@ -67,6 +67,24 @@ describe('checking a driver', () => {
     expect(!noSlash.ok && noSlash.problems.join()).toContain('must start with /');
   });
 
+  it('a quick action needs the commands that carry it out', () => {
+    const blank = { ...projector(), quickActions: ['display.blank'] };
+    const missing = checkDriverSpec(blank);
+    expect(!missing.ok && missing.problems.join()).toContain('needs the command “blank.on”');
+    const ok = checkDriverSpec({
+      ...blank,
+      commands: { ...projector().commands, 'blank.on': { send: 'BLANK 1' }, 'blank.off': { send: 'BLANK 0' } },
+      feedback: { poll: [{ action: { send: 'BLANK?' } }], patterns: [{ match: '^BLANK=1$', set: 'blanked', value: 'on' }] },
+    });
+    expect(ok.ok).toBe(true);
+    expect(DriverSpec.safeParse({ ...projector(), quickActions: ['display.explode'] }).success).toBe(false);
+  });
+
+  it('leaves quickActions out of a driver that does not use them, so its signed hash is unchanged', () => {
+    const r = checkDriverSpec(projector());
+    expect(r.ok && 'quickActions' in r.spec).toBe(false);
+  });
+
   it('refuses unknown fields, so typos do not silently do nothing', () => {
     expect(DriverSpec.safeParse({ ...projector(), extra: 1 }).success).toBe(false);
   });

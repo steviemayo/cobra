@@ -1,6 +1,6 @@
 # Room groups and combined rooms (redesign)
 
-Status: design draft. Replaces the original "room combinations" feature (primary/secondary rooms with follow/blank), which was incorrect and is being removed. Decisions come from the panel UI planning session (see `docs/panel-ui-requirements.md`, Room Linking).
+Status: built (see the runtime and slices sections). Replaces the original "room combinations" feature (primary/secondary rooms with follow/blank), which was incorrect and has been removed. Decisions come from the panel UI planning session (see `docs/panel-ui-requirements.md`, Room Linking).
 
 ## Terms
 
@@ -37,13 +37,21 @@ For a combined room over member rooms R1..Rn:
 - The combined Off / On states run every member's Off / On actions
 - Cross-room routing cannot be guessed. The validator flags unconnected sources; the dev adds the links (e.g. through the shared network video matrix). Until then the combined room will not validate for deployment
 
-## Runtime (next slice, not built)
+## Runtime (built: gateway `groups.ts`, engine `suspend`/`resume`)
 
 - The gateway owns the configuration (which dividers are open); it survives restarts and works with no cloud
 - When the dividers make a component live, that combined room's program runs and its member rooms are suspended (they must not both drive the same devices). When the divider closes, the combined room stops and the members resume
 - Transition rules per group (dev sets defaults): opening: if any member was on, the combined room starts on; closing: members go Off, or restore what they had
 - Panels: every member's panel shows the live combined room's UI (mirrored), so people in any of the joined rooms can control it
-- Divider state comes from a panel action, the portal, or a sensor (later)
+- Divider state comes from a panel action (Room linking menu), the portal, or a sensor (later)
+
+How it works (see `docs/decisions.md`, C-1 to C-14):
+
+- The cloud sends each gateway its groups (`ConfigResponse.groups`); the gateway reports open walls in the heartbeat (`dividers`)
+- Each wall has an **open** and a **close** setting (off, on, follow, restore), set in the group editor. They apply to every new space the change creates
+- `GroupCoordinator` (`apps/gateway/src/groups.ts`) owns which walls are open (saved locally, works offline), works out which rooms run with `liveCombinations`, suspends the rooms a live combined room stands for, then resumes and starts the new spaces
+- A panel follows the room running its space (`RoomHost.active`); intents, remote `room_off` and portal control go to that room
+- Not built: sensors, disconnecting a suspended room's devices, persisting "restore" across restarts
 
 ## Data model
 
@@ -55,7 +63,10 @@ For a combined room over member rooms R1..Rn:
 
 ## Slices (status)
 
-Slice 1 and 2 are built. The migration `room_groups` is additive and has been applied to `kestrel-dev`.
+Slices 1 and 2 are built (migration `room_groups` applied to `kestrel-dev`). Slice 3 is built: runtime, protocol and per-wall settings (the migration `divider_actions` still has to be applied), the Link rooms menu, group deploy, and the browser group simulator. Slice 4: the old feature's code is removed; dropping the `RoomCombination` table is a follow-up migration once production runs this version (step D in `docs/plan.md`).
+
+- **Deploy group** (group editor): checks every room and combined room first (design valid, gateway assigned, combined rooms created), then publishes a release only where the design changed and deploys all of them, members first. Any problem stops the whole thing and is listed. Code: `apps/web/src/server/group-deploy.ts`
+- **Simulate** (group editor): runs every room of the group in the browser against simulated equipment with the same `GroupController` as the gateway (`packages/engine/src/groups/controller.ts`); a panel stands in a chosen room and follows the room that is running its space
 
 1. Pure logic with tests: divider validation, combined-room enumeration, program derivation (`packages/model`, `packages/engine`)
 2. Database (additive migration) and portal: create groups and dividers, list derived rooms, create combined rooms; remove the old combinations page, router and panel banner

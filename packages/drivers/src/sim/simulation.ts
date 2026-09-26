@@ -5,9 +5,12 @@ import {
   type DeviceCommand,
   type DeviceEvent,
   type DeviceState,
+  type PinnedDriver,
+  type QuickActionId,
   type RoomModel,
 } from '@kestrel/model';
 import { buildGraph, splitPortKey, portKey, type Graph } from '@kestrel/engine';
+import { driverQuickActions } from '../quick-actions';
 
 export interface SimLatency {
   displayOn: number;
@@ -33,6 +36,8 @@ export interface SimulationOptions {
   /** Multiplies every delay. 0 = instant, 1 = realistic, 0.25 = fast demo. */
   latencyScale?: number;
   latency?: Partial<SimLatency>;
+  /** Custom drivers pinned into the release, so their quick actions show in the simulation too. */
+  customDrivers?: Record<string, PinnedDriver>;
 }
 
 export interface DeviceFault {
@@ -50,6 +55,7 @@ const ALWAYS_ON_SOURCES = new Set([
   'conference_system',
   ...CAMERAS,
 ]);
+const MICS = new Set(['reinforcement_mic', 'voice_capture_mic']);
 const ENVIRONMENT = new Set(['lighting', 'hvac', 'blinds', 'lifter', 'screen']);
 
 /**
@@ -68,11 +74,13 @@ export class Simulation implements DeviceBus {
   private readonly latency: SimLatency;
   private scale: number;
   private flowing = new Set<string>();
+  private readonly customDrivers: Record<string, PinnedDriver>;
 
   constructor(model: RoomModel, opts: SimulationOptions = {}) {
     this.graph = buildGraph(model);
     this.latency = { ...DEFAULT_LATENCY, ...opts.latency };
     this.scale = opts.latencyScale ?? 1;
+    this.customDrivers = opts.customDrivers ?? {};
     for (const d of model.devices) {
       this.devices.set(d.id, d);
       this.states.set(d.id, this.initialState(d));
@@ -91,6 +99,11 @@ export class Simulation implements DeviceBus {
   subscribe(listener: (event: DeviceEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  quickActions(deviceId: string): QuickActionId[] {
+    // Same as the real drivers: what the device's driver declares, not what the category could do.
+    return driverQuickActions(this.devices.get(deviceId)?.control, this.customDrivers);
   }
 
   async send(deviceId: string, command: DeviceCommand): Promise<void> {
@@ -166,6 +179,12 @@ export class Simulation implements DeviceBus {
       case 'video_destination':
         s.power = 'off';
         s.selectedInput = null;
+        s.blanked = false;
+        break;
+      case 'conference_system':
+      case 'reinforcement_mic':
+      case 'voice_capture_mic':
+        s.muted = false;
         break;
       case 'video_matrix':
         for (const p of d.ports) if (p.direction === 'out') s.routes[p.id] = null;
@@ -233,6 +252,7 @@ export class Simulation implements DeviceBus {
           await this.delay(this.latency.displayOff);
           state.power = 'off';
           state.selectedInput = null;
+          state.blanked = false;
         }
         break;
       }
@@ -255,14 +275,31 @@ export class Simulation implements DeviceBus {
         state.routes[c.outputPortId] = c.inputPortId;
         break;
       }
+      case 'blank': {
+        if (cat !== 'video_destination') return this.unsupported(d, c);
+        if (state.power !== 'on') throw new Error(`${d.name} isn't on yet`);
+        await this.delay(this.latency.generic);
+        state.blanked = c.on;
+        break;
+      }
       case 'mute':
       case 'volume':
       case 'preset': {
-        if (cat !== 'audio_matrix') return this.unsupported(d, c);
+        // A conference system also mutes (Privacy Mute), and so does a microphone.
+        if (
+          cat !== 'audio_matrix' &&
+          !(c.type === 'mute' && (cat === 'conference_system' || MICS.has(cat)))
+        )
+          return this.unsupported(d, c);
         await this.delay(this.latency.dsp);
         if (c.type === 'mute') state.muted = c.muted;
         else if (c.type === 'volume') state.volume = c.level;
         else state.preset = c.name;
+        break;
+      }
+      case 'camera_move': {
+        if (!CAMERAS.has(cat)) return this.unsupported(d, c);
+        await this.delay(this.latency.generic);
         break;
       }
       case 'camera_preset': {

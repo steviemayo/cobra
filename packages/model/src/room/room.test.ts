@@ -4,7 +4,6 @@ import {
   DEVICE_CATALOG,
   DeviceCategory,
   ROOM_TYPES,
-  RoomCombination,
   RoomModel,
   STARTER_TEMPLATES,
   Trigger,
@@ -94,21 +93,6 @@ describe('Trigger', () => {
     for (const [i, c] of cases.entries()) {
       expect(Trigger.safeParse({ id: `t${i}`, name: 'x', run, ...c }).success, c.type).toBe(true);
     }
-  });
-});
-
-describe('RoomCombination', () => {
-  it('defaults secondary behaviour to follow and revert to off', () => {
-    const c = RoomCombination.parse({
-      id: 'c',
-      name: 'Big room',
-      primaryRoomId: 'r1',
-      secondaryRoomIds: ['r2'],
-    });
-    expect(c.secondaryVideo).toBe('follow');
-    expect(c.secondaryAudio).toBe('follow');
-    expect(c.onUncombine).toBe('off');
-    expect(RoomCombination.safeParse({ ...c, secondaryRoomIds: [] }).success).toBe(false);
   });
 });
 
