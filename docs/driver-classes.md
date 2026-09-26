@@ -1,6 +1,6 @@
 # Driver classes (proposal, for review before building)
 
-Status: **slices 1 and 2 built** (decisions in `docs/decisions.md`, "Driver classes"); the rest is plan. Written 2026-09-26. Extends `docs/driver-sdk.md` (which describes today's driver format). Once agreed, decisions move to `docs/decisions.md` and the driver SDK doc is updated as each slice lands.
+Status: **slices 1, 2 and 3 built** (decisions in `docs/decisions.md`, "Driver classes"); the rest is plan. Written 2026-09-26. Extends `docs/driver-sdk.md` (which describes today's driver format). Once agreed, decisions move to `docs/decisions.md` and the driver SDK doc is updated as each slice lands.
 
 ## Why
 
