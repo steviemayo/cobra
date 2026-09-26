@@ -6,7 +6,9 @@ import {
   Activity,
   AlertTriangle,
   BellRing,
+  BookOpen,
   Building2,
+  Cpu,
   DoorOpen,
   LayoutDashboard,
   LayoutTemplate,
@@ -93,6 +95,16 @@ export function CommandMenu({ children }: { children: React.ReactNode }) {
               {canEdit && (
                 <CommandItem onSelect={() => go('/templates')}>
                   <LayoutTemplate /> Templates
+                </CommandItem>
+              )}
+              {canEdit && (
+                <CommandItem onSelect={() => go('/drivers')}>
+                  <Cpu /> Custom drivers
+                </CommandItem>
+              )}
+              {canEdit && (
+                <CommandItem onSelect={() => go('/drivers/guide')}>
+                  <BookOpen /> Custom driver how-to guide
                 </CommandItem>
               )}
               <CommandItem onSelect={() => go('/gateways')}>
