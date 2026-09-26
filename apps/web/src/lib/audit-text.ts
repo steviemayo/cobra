@@ -70,6 +70,8 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return meta.kind === 'rollback'
         ? `rolled “${s(meta.room)}” back to release ${s(meta.number)}`
         : `deployed release ${s(meta.number)} to “${s(meta.room)}”`;
+    case 'deployment.bulk':
+      return `${meta.mode === 'rollback' ? 'rolled back' : 'deployed'} ${s(meta.sent)} of ${s(meta.chosen)} chosen rooms (${s(meta.skipped)} already running or on their way, ${s(meta.blocked)} could not go)`;
     case 'deployment.schedule':
       return `scheduled release ${s(meta.number)} for “${s(meta.room)}”`;
     case 'deployment.cancel':
