@@ -4,6 +4,7 @@ import {
   TicketError,
   escalateTicket,
   handBack,
+  slaForTicket,
   staffComment,
   staffQueue,
   staffTicket,
@@ -308,5 +309,100 @@ describe('who sees which comments', () => {
     expect(t.assignedToMe).toBe(true);
     expect(STAFF_LABEL).toBe('Kestrel support');
     expect(await staffTicket(w.db, 'missing', STAFF)).toBeNull();
+  });
+});
+
+describe('targets on tickets', () => {
+  const HOUR = 3_600_000;
+  const at = (hoursAgo: number, now: Date) => new Date(now.getTime() - hoursAgo * HOUR);
+  const base = (now: Date, extra: Record<string, unknown> = {}) => ({
+    priority: 'urgent',
+    createdAt: at(10, now),
+    escalatedAt: null as Date | null,
+    closedAt: null as Date | null,
+    createdBy: 'cust',
+    routedTo: 'org',
+    ...extra,
+  });
+  const reply = (when: Date, over: Record<string, unknown> = {}) => ({
+    authorId: 'someone',
+    fromStaff: false,
+    visibility: 'public',
+    createdAt: when,
+    ...over,
+  });
+
+  it('a ticket with the organisation runs from when it was raised, and any team reply answers it', () => {
+    const now = new Date('2026-09-26T12:00:00Z');
+    const t = base(now);
+    expect(slaForTicket(t, [], now).response.state).toBe('overdue');
+    const answered = slaForTicket(t, [reply(at(9.5, now))], now);
+    expect(answered.response.state).toBe('met');
+    expect(answered.next?.kind).toBe('resolution');
+    // The person who raised it talking does not count as an answer.
+    expect(slaForTicket(t, [reply(at(9, now), { authorId: 'cust' })], now).response.state).toBe(
+      'overdue',
+    );
+  });
+
+  it('a ticket with Kestrel runs from the escalation, and only a Kestrel reply answers it', () => {
+    const now = new Date('2026-09-26T12:00:00Z');
+    const t = base(now, { routedTo: 'kestrel', escalatedAt: at(0.8, now) });
+    // Escalated 48 minutes ago: an urgent reply is due within the hour, with 12 minutes left.
+    expect(slaForTicket(t, [], now).response.state).toBe('due_soon');
+    expect(slaForTicket({ ...t, escalatedAt: at(0.3, now) }, [], now).response.state).toBe('ok');
+    // The organisation's own earlier reply does not stop Kestrel's clock.
+    expect(slaForTicket(t, [reply(at(5, now))], now).response.doneAt).toBeNull();
+    const kestrel = slaForTicket(
+      t,
+      [reply(at(0.2, now), { fromStaff: true, authorId: 'staff' })],
+      now,
+    );
+    expect(kestrel.response.state).toBe('met');
+  });
+
+  it('a resolved ticket is done', () => {
+    const now = new Date('2026-09-26T12:00:00Z');
+    const s = slaForTicket(base(now, { closedAt: at(8, now) }), [], now);
+    expect(s.next).toBeNull();
+  });
+
+  it('puts what is overdue ahead of what is not, within a priority, in the staff queue', async () => {
+    const w = world();
+    const now = new Date('2026-09-26T12:00:00Z');
+    w.ticket.rows.length = 0;
+    const kestrelTicket = (id: string, escalatedHoursAgo: number) => ({
+      id,
+      orgId: ORG,
+      title: id,
+      body: 'x',
+      status: 'open',
+      priority: 'urgent',
+      routedTo: 'kestrel',
+      roomId: null,
+      createdBy: 'cust',
+      createdByEmail: 'sam@acme.test',
+      createdAt: at(escalatedHoursAgo + 1, now),
+      updatedAt: now,
+      closedAt: null,
+      escalatedAt: at(escalatedHoursAgo, now),
+      staffAssignee: null,
+    });
+    // Older, but Kestrel has already replied: its resolution is coming up, nothing is late.
+    w.ticket.rows.push(kestrelTicket('answered', 3), kestrelTicket('waiting', 2));
+    w.ticketComment.rows.push({
+      id: 'c1',
+      ticketId: 'answered',
+      orgId: ORG,
+      authorId: 'staff',
+      fromStaff: true,
+      visibility: 'public',
+      createdAt: at(2.9, now),
+    });
+    const q = await staffQueue(w.db, {}, now);
+    expect(q.map((r) => [r.id, r.sla.next?.clock.state])).toEqual([
+      ['waiting', 'overdue'],
+      ['answered', 'due_soon'],
+    ]);
   });
 });

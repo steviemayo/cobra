@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@kestrel/db';
-import type { OrgRole } from '@kestrel/model';
+import { firstResponseAt, ticketSla, type OrgRole, type TicketSla } from '@kestrel/model';
 import { recordStaffAudit, type StaffDb } from './staff';
 
 // Support tickets and who they are with. A ticket starts with the organisation's own team. Anyone
@@ -22,6 +22,38 @@ export type TicketPriority = (typeof PRIORITIES)[number];
 export const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 
 export type CommentVisibility = 'public' | 'internal';
+
+/**
+ * Where a ticket stands against its response and resolution targets. With Kestrel the clock runs
+ * from the escalation and only a Kestrel reply answers it; otherwise it runs from when the ticket
+ * was raised (for a ticket sent to a provider that is an approximation) and any reply from someone
+ * other than the person who raised it answers it.
+ */
+export function slaForTicket(
+  t: {
+    priority: string;
+    createdAt: Date;
+    escalatedAt: Date | null;
+    closedAt: Date | null;
+    createdBy: string | null;
+    routedTo: string;
+  },
+  comments: { authorId: string | null; fromStaff: boolean; visibility: string; createdAt: Date }[],
+  now = new Date(),
+): TicketSla {
+  const withKestrel = t.routedTo === ROUTED_KESTREL;
+  const startedAt = withKestrel ? (t.escalatedAt ?? t.createdAt) : t.createdAt;
+  const respondedAt = firstResponseAt(
+    t,
+    withKestrel ? comments.filter((c) => c.fromStaff) : comments,
+    withKestrel ? startedAt : null,
+  );
+  return ticketSla({ priority: t.priority, startedAt, respondedAt, closedAt: t.closedAt, now });
+}
+
+/** Overdue first, then due soon, then the rest: used to order queues within a priority. */
+export const slaUrgency = (sla: TicketSla): number =>
+  sla.next?.clock.state === 'overdue' ? 0 : sla.next?.clock.state === 'due_soon' ? 1 : 2;
 
 /** What the organisation's people see as the author of a comment: staff are "Kestrel support", by role not name. */
 export const STAFF_LABEL = 'Kestrel support';
@@ -161,6 +193,8 @@ export interface QueueRow {
   assignee: string | null;
   /** Who has to answer next: Kestrel (the customer spoke last) or the organisation. */
   awaiting: 'kestrel' | 'org';
+  /** Against Kestrel's response and resolution targets, from the escalation. */
+  sla: TicketSla;
 }
 
 export interface QueueFilter {
@@ -171,7 +205,11 @@ export interface QueueFilter {
 }
 
 /** Tickets with Kestrel across every organisation: most urgent first, then longest waiting. */
-export async function staffQueue(db: TicketDb, filter: QueueFilter = {}): Promise<QueueRow[]> {
+export async function staffQueue(
+  db: TicketDb,
+  filter: QueueFilter = {},
+  now = new Date(),
+): Promise<QueueRow[]> {
   const status = filter.status ?? 'active';
   const rows = await db.ticket.findMany({
     where: {
@@ -212,10 +250,16 @@ export async function staffQueue(db: TicketDb, filter: QueueFilter = {}): Promis
       updatedAt: t.updatedAt,
       assignee: t.staffAssignee ? (email.get(t.staffAssignee) ?? 'Staff') : null,
       awaiting: lastPublic.get(t.id)?.fromStaff ? 'org' : 'kestrel',
+      sla: slaForTicket(
+        t,
+        comments.filter((c) => c.ticketId === t.id),
+        now,
+      ),
     }))
     .sort(
       (a, b) =>
         (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) ||
+        slaUrgency(a.sla) - slaUrgency(b.sla) ||
         (a.escalatedAt ?? a.createdAt).getTime() - (b.escalatedAt ?? b.createdAt).getTime(),
     );
 }
@@ -235,6 +279,7 @@ export interface StaffTicketView {
   escalatedAt: Date | null;
   assignee: string | null;
   assignedToMe: boolean;
+  sla: TicketSla;
   comments: {
     id: string;
     body: string;
@@ -275,6 +320,7 @@ export async function staffTicket(
     escalatedAt: t.escalatedAt,
     assignee: t.staffAssignee ? (email.get(t.staffAssignee) ?? 'Staff') : null,
     assignedToMe: t.staffAssignee === viewerId,
+    sla: slaForTicket(t, comments),
     comments: comments.map((c) => ({
       id: c.id,
       body: c.body,

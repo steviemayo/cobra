@@ -3,6 +3,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { LifeBuoy } from 'lucide-react';
+import { SlaBadge } from '@/components/common/sla-badge';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -94,6 +95,7 @@ export function StaffTickets() {
                 <th className="px-3 py-2 font-medium">Organisation</th>
                 <th className="px-3 py-2 font-medium">Priority</th>
                 <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Target</th>
                 <th className="px-3 py-2 font-medium">Waiting on</th>
                 <th className="px-3 py-2 font-medium">Assigned</th>
                 <th className="px-3 py-2 font-medium">Escalated</th>
@@ -116,6 +118,9 @@ export function StaffTickets() {
                     {PRIORITY_LABEL[t.priority]}
                   </td>
                   <td className="px-3 py-2">{TICKET_STATUS_LABEL[t.status]}</td>
+                  <td className="px-3 py-2">
+                    <SlaBadge sla={t.sla} />
+                  </td>
                   <td className="px-3 py-2">
                     {t.awaiting === 'kestrel' ? (
                       <span className="text-warning">Kestrel</span>

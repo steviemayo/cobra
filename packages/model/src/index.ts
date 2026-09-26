@@ -6,3 +6,4 @@ export * from './billing';
 export * from './driver-spec';
 export * from './staff';
 export * from './msp';
+export * from './sla';

@@ -405,7 +405,7 @@ Working rules that apply to all of them:
 | H | Email notifications (tickets and alerts) | small | **built**, sends once Resend is set up (`docs/decisions.md`, H-1 to H-6) |
 | I | Staff user management and a staff audit viewer | small | **built** (`docs/decisions.md`, I-1 to I-6) |
 | J | Assign tickets to provider people | medium | **built** (`docs/decisions.md`, J-1 to J-6) |
-| K | SLAs and priority timers | medium | after first customers |
+| K | SLAs and priority timers | medium | **built** early (`docs/decisions.md`, K-1 to K-7); confirm the default targets with a first customer |
 | L | Provider billing and white label | large | a business decision on who pays |
 | M | Earlier candidates: WSS push, Stripe Connect payouts, third-party drivers, sandboxed logic hooks | large each | see `docs/phase-4-preread.md` |
 
@@ -550,6 +550,8 @@ Pre-read: `apps/web/src/server/routers/ticket.ts` (the `update` procedure requir
 Do: allow an assignee who reaches the organisation through an active provider connection (needs an assignee reference that is not only a `Member`), show them by name and provider, and keep it working after a connection ends (assignee cleared). Done when: a provider can assign a customer's ticket to one of its own people.
 
 ### K. SLAs and priority timers
+
+**Status: built** with fixed calendar-time targets and no stored data; per-organisation targets, business hours and notifications are not. The text below is the original brief.
 
 After the first customers. Pre-read: `docs/staff-portal-and-msp.md`, `apps/web/src/server/tickets.ts`. Do: response and resolution targets per priority, a "due" column in the staff and provider queues, and a warning as a ticket nears its target.
 
