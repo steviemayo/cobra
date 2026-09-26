@@ -232,7 +232,7 @@ describe('Biamp Tesira driver', () => {
 
   it('reads points into state, ignoring the echoed lines', async () => {
     const { d } = await start();
-    await until(() => d.getState().points.vol !== undefined && d.getState().points.mute !== undefined);
+    await until(() => ['vol', 'mute', 'spaced'].every((id) => d.getState().points[id] !== undefined));
     // -10 dB over -60..0 is 83.
     expect(d.getState()).toMatchObject({ volume: 83, muted: false });
     expect(d.getState().points.spaced).toBe(50);
