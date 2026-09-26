@@ -1,8 +1,15 @@
 'use client';
 import { useState } from 'react';
-import type { Action, ActionType, RoomModel } from '@kestrel/model';
+import { DisplayKey, type Action, type ActionType, type RoomModel } from '@kestrel/model';
 import { ACTION_TYPES, actionTargets, devicesWith, newAction } from '@/lib/editor/ops';
 import { Select, TextInput, dangerBtnCls, ghostBtnCls, inputCls } from './ui';
+
+/** A dev-listed app's name, or its id when it is not in the display's list. */
+function appName(model: RoomModel, deviceId: string, appId: string): string {
+  const apps = model.devices.find((d) => d.id === deviceId)?.settings.apps;
+  const hit = Array.isArray(apps) ? (apps as { id?: unknown; name?: unknown }[]).find((x) => x?.id === appId) : undefined;
+  return typeof hit?.name === 'string' ? hit.name : appId;
+}
 
 export function describeAction(model: RoomModel, a: Action): string {
   const name = (id: string) => model.devices.find((d) => d.id === id)?.name ?? id;
@@ -22,6 +29,10 @@ export function describeAction(model: RoomModel, a: Action): string {
       return `${name(a.deviceId)}: ${a.command}`;
     case 'env_scene':
       return `${name(a.deviceId)}: scene ${a.scene}`;
+    case 'launch_app':
+      return `${name(a.deviceId)}: launch ${appName(model, a.deviceId, a.appId)}`;
+    case 'press_key':
+      return `${name(a.deviceId)}: press ${a.key}`;
     case 'run_state':
       return `Run state ${model.states.find((s) => s.id === a.stateId)?.name ?? a.stateId}`;
   }
@@ -258,6 +269,39 @@ function ActionFields({
           <TextInput
             value={a.command}
             onChange={(v) => edit((x) => x.type === 'device_command' && (x.command = v))}
+          />
+        </>
+      );
+    case 'launch_app': {
+      const apps = (model.devices.find((d) => d.id === a.deviceId)?.settings.apps as { id?: string; name?: string }[] | undefined) ?? [];
+      return (
+        <>
+          <span className="text-muted-foreground">Launch app</span>
+          {deviceSelect(a.deviceId, actionTargets(model, 'launch_app'), (id) =>
+            edit((x) => 'deviceId' in x && (x.deviceId = id)),
+          )}
+          <TextInput
+            list={`apps-${a.id}`}
+            value={a.appId}
+            onChange={(v) => edit((x) => x.type === 'launch_app' && (x.appId = v))}
+          />
+          <datalist id={`apps-${a.id}`}>
+            {apps.flatMap((p) => (typeof p?.id === 'string' ? [<option key={p.id} value={p.id}>{p.name}</option>] : []))}
+          </datalist>
+        </>
+      );
+    }
+    case 'press_key':
+      return (
+        <>
+          <span className="text-muted-foreground">Press key</span>
+          {deviceSelect(a.deviceId, actionTargets(model, 'press_key'), (id) =>
+            edit((x) => 'deviceId' in x && (x.deviceId = id)),
+          )}
+          <Select
+            value={a.key}
+            options={DisplayKey.options.map((k) => ({ value: k, label: k }))}
+            onChange={(v) => edit((x) => x.type === 'press_key' && (x.key = v))}
           />
         </>
       );

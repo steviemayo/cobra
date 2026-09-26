@@ -6,7 +6,7 @@ import { RoomModel, SignedManifest } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { createDeployment } from '../deployment-service';
 import { readOrgBranding } from '../panel-settings';
-import { setupProblem } from '../deploy-check';
+import { gatewayTooOld, setupProblem } from '../deploy-check';
 import { checkPublishable, createRelease } from '../release-service';
 import { SigningNotConfigured, loadSigningKey } from '../signing';
 import { orgProcedure, requireRole, router } from '../trpc';
@@ -101,6 +101,8 @@ export const releaseRouter = router({
       // Deploying means running on real devices, so their addresses must be in first.
       const setup = input.deploy && room.gatewayId ? setupProblem(checked.model, checked.bindings, checked.drivers) : null;
       if (setup) throw new TRPCError({ code: 'BAD_REQUEST', message: setup });
+      const tooOld = input.deploy && room.gatewayId ? await gatewayTooOld(db, ctx.orgId, room.gatewayId, checked.model) : null;
+      if (tooOld) throw new TRPCError({ code: 'BAD_REQUEST', message: tooOld });
 
       let key;
       try {

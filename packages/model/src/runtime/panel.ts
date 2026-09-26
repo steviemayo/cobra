@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { LocalId } from '../room/common';
+import { DisplayKey, LocalId } from '../room/common';
 import { ActivityKind } from '../room/behaviour';
 import { PanelSettings } from '../room/room-model';
 
@@ -44,6 +44,10 @@ export const PanelIntent = z.discriminatedUnion('type', [
     tilt: z.number().int().min(-1).max(1),
     zoom: z.number().int().min(-1).max(1),
   }),
+  /** Press a remote key on a smart display. Sent again every half second while an arrow is held. */
+  z.object({ type: z.literal('display.key'), deviceId: LocalId, key: DisplayKey }),
+  /** Launch an app on a smart display. Ids come from `functions.displays`. */
+  z.object({ type: z.literal('display.app'), deviceId: LocalId, appId: z.string().min(1).max(200) }),
   /** Mute or unmute one microphone. */
   z.object({ type: z.literal('mic.mute'), deviceId: LocalId, muted: z.boolean() }),
   /** Recall a lighting scene. */
@@ -157,12 +161,27 @@ export const PanelMover = z.object({
 });
 export type PanelMover = z.infer<typeof PanelMover>;
 
+/** A smart display and what its driver lets a person do to it. */
+export const PanelDisplay = z.object({
+  id: LocalId,
+  name: z.string(),
+  /** Arrows, OK, Back, Home and Menu. */
+  keys: z.boolean(),
+  /** Play, pause, stop, forward and rewind. */
+  media: z.boolean(),
+  apps: z.array(z.object({ id: z.string(), name: z.string() })),
+  /** The app last launched, if known. */
+  activeApp: z.string().nullable(),
+});
+export type PanelDisplay = z.infer<typeof PanelDisplay>;
+
 /** The pages behind the top nav. A page is offered only if the room has the equipment and enables it. */
 export const PanelFunctions = z.object({
   cameras: z.array(PanelCamera),
   microphones: z.array(PanelMic),
   lights: z.array(PanelLight),
   movers: z.array(PanelMover),
+  displays: z.array(PanelDisplay).default([]),
 });
 export type PanelFunctions = z.infer<typeof PanelFunctions>;
 

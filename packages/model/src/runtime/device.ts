@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { LocalId } from '../room/common';
+import { DisplayKey, LocalId } from '../room/common';
 import type { QuickActionId } from './quick-actions';
 
 // The vocabulary the engine speaks to drivers (real or simulated). Drivers translate to protocol.
@@ -27,6 +27,10 @@ export const DeviceCommand = z.discriminatedUnion('type', [
   }),
   /** Displays: blank the picture (or bring it back) without powering off. */
   z.object({ type: z.literal('blank'), on: z.boolean() }),
+  /** Displays: press a remote key. */
+  z.object({ type: z.literal('key'), key: DisplayKey }),
+  /** Displays: launch an app by its id from the device's app list. */
+  z.object({ type: z.literal('launch_app'), appId: z.string().min(1).max(200) }),
   z.object({
     type: z.literal('command'),
     name: z.string().min(1),
@@ -53,6 +57,8 @@ export const DeviceState = z.object({
   /** Displays: is the picture blanked (shutter, AV mute). */
   blanked: z.boolean().optional(),
   recording: z.boolean().optional(),
+  /** Smart displays: the id of the app last launched. */
+  activeApp: z.string().optional(),
   /** Occupancy sensors: is anyone in the room. */
   occupied: z.boolean().optional(),
   /** Input port -> is a signal present. Only devices with signal_detect report this. */
@@ -73,6 +79,8 @@ export interface DeviceBus {
   subscribe(listener: (event: DeviceEvent) => void): () => void;
   /** The quick actions this device's driver supports. Absent means none. */
   quickActions?(deviceId: string): QuickActionId[];
+  /** The optional features of this device's driver class that its driver supports (see driver-classes). Absent means none. */
+  features?(deviceId: string): string[];
 }
 
 export const defaultDeviceState = (): DeviceState => ({ online: true, routes: {}, signal: {} });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RoomModel, type Device } from '@kestrel/model';
-import { checkDeployable, setupProblem, type DeployCheckDb } from './deploy-check';
+import { checkDeployable, gatewayTooOld, setupProblem, type DeployCheckDb } from './deploy-check';
 import { table } from './test-db';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
@@ -84,5 +84,44 @@ describe('checkDeployable', () => {
   it('refuses a release from another room or organisation', async () => {
     const res = await checkDeployable(world().db, { ...input, orgId: '11111111-1111-4111-8111-111111111112' });
     expect(res).toEqual({ ok: false, message: 'That release does not exist' });
+  });
+});
+
+describe('gateway too old', () => {
+  const pressKey = (id = 'proj') => ({
+    ...proj,
+    id,
+    settings: { host: '10.0.0.9' },
+  });
+  const withAction = (): Device[] => [pressKey()];
+  const modelNeeding = () =>
+    RoomModel.parse({
+      roomType: 'meeting',
+      devices: withAction(),
+      activities: [
+        {
+          id: 'present',
+          name: 'Present',
+          kind: 'present',
+          actions: [{ id: 'a1', type: 'press_key', deviceId: 'proj', key: 'home' }],
+        },
+      ],
+    });
+
+  it('blocks a release that presses keys or launches apps on a gateway that cannot', async () => {
+    const w = world({ features: ['bindings'] });
+    (w.db.release as unknown as { rows: { manifest: { manifest: { model: unknown } } }[] }).rows[0]!.manifest.manifest.model = modelNeeding();
+    const res = await checkDeployable(w.db, input);
+    expect(!res.ok && res.message).toMatch(/too old/);
+  });
+
+  it('allows it once the gateway says it can', async () => {
+    const w = world({ features: ['bindings', 'display-extras'] });
+    (w.db.release as unknown as { rows: { manifest: { manifest: { model: unknown } } }[] }).rows[0]!.manifest.manifest.model = modelNeeding();
+    expect(await checkDeployable(w.db, input)).toEqual({ ok: true });
+  });
+
+  it('does not ask an ordinary room for anything', async () => {
+    expect(await gatewayTooOld(world().db, ORG, GW, room([proj]))).toBeNull();
   });
 });

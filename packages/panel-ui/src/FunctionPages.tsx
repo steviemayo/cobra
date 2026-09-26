@@ -1,8 +1,10 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import type {
+  DisplayKey,
   MoverAction,
   PanelCamera,
   PanelClient,
+  PanelDisplay,
   PanelFunctions,
   PanelLight,
   PanelMic,
@@ -14,7 +16,7 @@ import type { TextKey, Translate } from './i18n';
 /** How often a held button repeats its move. The room stops the camera if the repeats stop. */
 const REPEAT_MS = 500;
 
-export type PageId = 'cameras' | 'microphones' | 'controls';
+export type PageId = 'cameras' | 'microphones' | 'controls' | 'display';
 
 /** The pages this room offers behind the top nav. */
 export function functionPages(f: PanelFunctions | undefined): PageId[] {
@@ -23,6 +25,7 @@ export function functionPages(f: PanelFunctions | undefined): PageId[] {
   if (f.cameras.length > 0) pages.push('cameras');
   if (f.microphones.length > 0) pages.push('microphones');
   if (f.lights.length > 0 || f.movers.length > 0) pages.push('controls');
+  if ((f.displays ?? []).length > 0) pages.push('display');
   return pages;
 }
 
@@ -30,6 +33,7 @@ export const PAGE_ICON: Record<PageId, string> = {
   cameras: 'camera',
   microphones: 'mic',
   controls: 'controls',
+  display: 'present',
 };
 
 type Dispatch = PanelClient['dispatch'];
@@ -144,6 +148,97 @@ function CameraCard({
   );
 }
 
+const KEY_ICON: Partial<Record<DisplayKey, string>> = {
+  up: 'arrow-up',
+  down: 'arrow-down',
+  left: 'arrow-left',
+  right: 'arrow-right',
+};
+const KEY_LABEL: Record<DisplayKey, TextKey> = {
+  up: 'cam.up',
+  down: 'cam.down',
+  left: 'cam.left',
+  right: 'cam.right',
+  ok: 'key.ok',
+  back: 'key.back',
+  home: 'key.home',
+  menu: 'key.menu',
+  play: 'key.play',
+  pause: 'key.pause',
+  stop: 'key.stop',
+  forward: 'key.forward',
+  rewind: 'key.rewind',
+};
+
+function DisplayCard({
+  display,
+  showName,
+  t,
+  dispatch,
+}: {
+  display: PanelDisplay;
+  /** More than one display: say which one this is. */
+  showName: boolean;
+  t: Translate;
+  dispatch: Dispatch;
+}) {
+  const press = (key: DisplayKey) => () => dispatch({ type: 'display.key', deviceId: display.id, key });
+  const tap = (key: DisplayKey) => (
+    <button key={key} type="button" className="kp-tile" onClick={press(key)}>
+      <span className="kp-tile-title">{t(KEY_LABEL[key])}</span>
+    </button>
+  );
+  const arrow = (key: DisplayKey) => (
+    <HoldButton key={key} label={t(KEY_LABEL[key])} icon={KEY_ICON[key]!} onHold={press(key)} onEnd={() => undefined} />
+  );
+  return (
+    <section className="kp-fn-card" aria-label={display.name}>
+      {showName && <h3>{display.name}</h3>}
+      {display.apps.length > 0 && (
+        <>
+          <p className="kp-muted">{t('display.apps')}</p>
+          <div className="kp-tiles">
+            {display.apps.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                className="kp-tile"
+                aria-pressed={display.activeApp === a.id}
+                onClick={() => dispatch({ type: 'display.app', deviceId: display.id, appId: a.id })}
+              >
+                <span className="kp-tile-title">{a.name}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {display.keys && (
+        <>
+          <p className="kp-muted">{t('display.keys')}</p>
+          <div className="kp-pad" role="group" aria-label={t('display.keys')}>
+            <span />
+            {arrow('up')}
+            <span />
+            {arrow('left')}
+            {tap('ok')}
+            {arrow('right')}
+            {tap('back')}
+            {arrow('down')}
+            {tap('home')}
+          </div>
+          <div className="kp-tiles">{tap('menu')}</div>
+        </>
+      )}
+      {display.media && (
+        <>
+          <p className="kp-muted">{t('display.media')}</p>
+          <div className="kp-tiles">{(['rewind', 'play', 'pause', 'stop', 'forward'] as DisplayKey[]).map(tap)}</div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function MicRow({ mic, t, dispatch }: { mic: PanelMic; t: Translate; dispatch: Dispatch }) {
   const muted = mic.muted === true;
   return (
@@ -248,6 +343,15 @@ export function FunctionPage({
             <MicRow key={m.id} mic={m} t={t} dispatch={dispatch} />
           ))}
         </div>
+      </section>
+    );
+  if (page === 'display')
+    return (
+      <section className="kp-activity" aria-label={t('fn.display')}>
+        <h2>{t('fn.display')}</h2>
+        {(functions.displays ?? []).map((d) => (
+          <DisplayCard key={d.id} display={d} showName={(functions.displays ?? []).length > 1} t={t} dispatch={dispatch} />
+        ))}
       </section>
     );
   return (

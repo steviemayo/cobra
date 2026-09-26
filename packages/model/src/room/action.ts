@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { LocalId } from './common';
+import { DisplayKey, LocalId } from './common';
 
 const base = {
   id: LocalId,
@@ -40,6 +40,10 @@ export const Action = z.discriminatedUnion('type', [
     args: z.record(z.string(), z.unknown()).default({}),
   }),
   z.object({ ...base, type: z.literal('env_scene'), deviceId: LocalId, scene: z.string().min(1) }),
+  /** Press a remote key on a display (for example Home, to leave an app). */
+  z.object({ ...base, type: z.literal('press_key'), deviceId: LocalId, key: DisplayKey }),
+  /** Launch an app on a smart display, by an id from the device's app list. */
+  z.object({ ...base, type: z.literal('launch_app'), deviceId: LocalId, appId: z.string().min(1).max(200) }),
   z.object({ ...base, type: z.literal('run_state'), stateId: LocalId }),
 ]);
 export type Action = z.infer<typeof Action>;

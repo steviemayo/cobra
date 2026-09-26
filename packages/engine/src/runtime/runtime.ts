@@ -16,7 +16,7 @@ import { executePlan } from '../plan/execute';
 import { activitySources, planActivity, planState, planStopOverlay, type Plan } from '../plan/plan';
 import { buildGraph, deviceCapabilities, type Graph } from '../validate/graph';
 import { availableActivities, detectorsFor, type SignalDetector } from './activities';
-import { functionSets, functionsView, type FunctionSets } from './functions';
+import { functionSets, functionsView, isMediaKey, keysFor, type FunctionSets } from './functions';
 import {
   quickActionActive,
   quickActionCommand,
@@ -194,6 +194,20 @@ export class RoomRuntime implements PanelClient {
         if (this.functions.microphones.some((d) => d.id === intent.deviceId))
           this.tell(intent.deviceId, { type: 'mute', muted: intent.muted });
         return;
+      case 'display.key': {
+        const display = this.functions.displays.find((d) => d.device.id === intent.deviceId);
+        const { keys, media } = keysFor(this.bus.features?.(intent.deviceId) ?? []);
+        if (display && (isMediaKey(intent.key) ? media : keys))
+          this.tell(display.device.id, { type: 'key', key: intent.key });
+        return;
+      }
+      case 'display.app': {
+        const display = this.functions.displays.find((d) => d.device.id === intent.deviceId);
+        const listed = display?.apps.some((a) => a.id === intent.appId);
+        if (display && listed && this.bus.features?.(intent.deviceId)?.includes('apps'))
+          this.tell(display.device.id, { type: 'launch_app', appId: intent.appId });
+        return;
+      }
       case 'scene.set': {
         const light = this.functions.lights.find((l) => l.device.id === intent.deviceId);
         if (light?.scenes.includes(intent.scene))

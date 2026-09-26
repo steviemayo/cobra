@@ -61,6 +61,20 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     categories: ['conference_system'],
     example: { host: '<codec IP>', credentials: '<base64 of user:password>' },
   },
+  'lib:sony-bravia': {
+    name: 'Sony BRAVIA professional display',
+    description:
+      'Sony BRAVIA professional displays: power, input, volume, remote keys, media keys and apps, over REST and IRCC-IP. Turn on IP control on the display and set a pre-shared key.',
+    class: 'display',
+    features: ['remote_keys', 'media_keys', 'apps', 'builtin_audio'],
+    settings: [
+      { key: 'host', label: 'Display address', scope: 'binding', required: true },
+      { key: 'psk', label: 'Pre-shared key', scope: 'secret', required: true },
+      { key: 'apps', label: 'Apps to offer (list of id and name)', scope: 'design' },
+    ],
+    categories: ['display', 'video_destination'],
+    example: { host: '<display IP>', psk: '<pre-shared key>', apps: [{ id: '<app uri>', name: 'Netflix' }] },
+  },
   'lib:shelly-relay': {
     name: 'Shelly relay (screens and lifters)',
     description:

@@ -80,6 +80,10 @@ function commandFor(action: Extract<Action, { deviceId: string }>): DeviceComman
       return { type: 'camera_preset', name: action.preset };
     case 'env_scene':
       return { type: 'scene', name: action.scene };
+    case 'press_key':
+      return { type: 'key', key: action.key };
+    case 'launch_app':
+      return { type: 'launch_app', appId: action.appId };
     case 'device_command':
       return action.command === 'record'
         ? { type: 'record', on: action.args.on !== false }
@@ -116,10 +120,10 @@ function expandActions(b: Builder, ctx: Ctx, actions: Action[], visiting: Set<st
   }
 }
 
-// A display must be powered before it can take an input.
+// A display must be powered before it can take an input, launch an app or press a key.
 function addImplicitDependencies(b: Builder) {
   for (const step of b.steps) {
-    if (step.command.type !== 'select_input') continue;
+    if (!['select_input', 'launch_app', 'key'].includes(step.command.type)) continue;
     for (const other of b.steps)
       if (
         other.deviceId === step.deviceId &&

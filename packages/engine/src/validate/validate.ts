@@ -273,6 +273,10 @@ function checkActions(
       );
     if (a.type === 'env_scene' && !['lighting', 'hvac', 'blinds'].includes(d.category))
       c.error('capability_missing', `${owner}: ${d.name} is not an environmental device`, ref);
+    if ((a.type === 'press_key' || a.type === 'launch_app') && !['display', 'video_destination'].includes(d.category))
+      c.error('capability_missing', `${owner}: ${d.name} is not a display`, ref);
+    if ((a.type === 'press_key' || a.type === 'launch_app') && !d.control)
+      c.error('capability_missing', `${owner}: ${d.name} has no driver, so it cannot ${a.type === 'press_key' ? 'press keys' : 'launch apps'}`, ref);
     if (a.type === 'device_command' && !DEVICE_CATALOG[d.category].controllable)
       c.error('capability_missing', `${owner}: ${d.name} cannot receive commands`, ref);
   }

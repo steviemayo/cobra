@@ -49,8 +49,10 @@ export const RoomSettings = z.object({
       blinds: z.boolean().default(false),
       camera: z.boolean().default(false),
       microphones: z.boolean().default(false),
+      /** The Display page: remote keys, media keys and apps of a smart display. */
+      display: z.boolean().default(false),
     })
-    .default({ lights: false, blinds: false, camera: false, microphones: false }),
+    .default({ lights: false, blinds: false, camera: false, microphones: false, display: false }),
   /** How the generated panel looks and behaves. */
   panel: PanelSettings.default(() => PanelSettings.parse({})),
 });

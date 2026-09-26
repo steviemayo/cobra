@@ -1,4 +1,4 @@
-import type { DeviceBus, Device, MoverAction, PanelFunctions, RoomModel } from '@kestrel/model';
+import { MEDIA_KEYS, NAVIGATION_KEYS, type DeviceBus, type Device, type DisplayKey, type MoverAction, type PanelFunctions, type RoomModel } from '@kestrel/model';
 
 // The pages behind the panel's top nav: cameras, microphones, lighting and blinds/screens. A page
 // is offered only when the room enables it (Extra controls in the room's settings) and has
@@ -9,6 +9,8 @@ export interface FunctionSets {
   microphones: Device[];
   lights: { device: Device; scenes: string[] }[];
   movers: { device: Device; kind: 'blinds' | 'screen' | 'lifter'; actions: MoverAction[] }[];
+  /** Smart displays. What each offers depends on its driver, which only the bus knows. */
+  displays: { device: Device; apps: { id: string; name: string }[] }[];
 }
 
 const MOVER_ACTIONS: Record<'blinds' | 'screen' | 'lifter', MoverAction[]> = {
@@ -42,13 +44,39 @@ function usedNames(
   });
 }
 
+/** The apps a dev listed for a display: `settings.apps` as `{ id, name }` entries. */
+function appsIn(value: unknown): { id: string; name: string }[] {
+  if (!Array.isArray(value)) return [];
+  const out: { id: string; name: string }[] = [];
+  for (const v of value) {
+    const id = v && typeof v === 'object' ? (v as { id?: unknown }).id : undefined;
+    const name = v && typeof v === 'object' ? (v as { name?: unknown }).name : undefined;
+    if (typeof id === 'string' && id && !out.some((o) => o.id === id))
+      out.push({ id, name: typeof name === 'string' && name.trim() ? name.trim() : id });
+  }
+  return out.slice(0, 24);
+}
+
+/** Which keys a display's driver lets people press, from the features it declares. */
+export function keysFor(features: string[]): { keys: boolean; media: boolean } {
+  return { keys: features.includes('remote_keys'), media: features.includes('media_keys') };
+}
+
+export const isNavigationKey = (k: DisplayKey) => NAVIGATION_KEYS.includes(k);
+export const isMediaKey = (k: DisplayKey) => MEDIA_KEYS.includes(k);
+
 const unique = (names: string[]) =>
   [...new Set(names.map((n) => n.trim()).filter(Boolean))].slice(0, 24);
 
 export function functionSets(model: RoomModel): FunctionSets {
   const { userControls } = model.settings;
   const driven = (d: Device) => !!d.control;
-  const sets: FunctionSets = { cameras: [], microphones: [], lights: [], movers: [] };
+  const sets: FunctionSets = { cameras: [], microphones: [], lights: [], movers: [], displays: [] };
+
+  if (userControls.display)
+    for (const d of model.devices)
+      if ((d.category === 'display' || d.category === 'video_destination') && driven(d))
+        sets.displays.push({ device: d, apps: appsIn(d.settings.apps) });
 
   if (userControls.camera)
     for (const d of model.devices) {
@@ -121,8 +149,29 @@ export function functionsView(sets: FunctionSets, bus: DeviceBus): PanelFunction
       kind,
       actions,
     })),
+    displays: [],
   };
+  view.displays = sets.displays.flatMap(({ device, apps }) => {
+    const features = bus.features?.(device.id) ?? [];
+    const { keys, media } = keysFor(features);
+    const offered = features.includes('apps') ? apps : [];
+    if (!keys && !media && offered.length === 0) return [];
+    return [
+      {
+        id: device.id,
+        name: device.name,
+        keys,
+        media,
+        apps: offered,
+        activeApp: bus.getState(device.id)?.activeApp ?? null,
+      },
+    ];
+  });
   const any =
-    view.cameras.length + view.microphones.length + view.lights.length + view.movers.length;
+    view.cameras.length +
+    view.microphones.length +
+    view.lights.length +
+    view.movers.length +
+    view.displays.length;
   return any > 0 ? view : undefined;
 }
