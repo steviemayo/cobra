@@ -267,6 +267,68 @@ export async function absorbInline(
   return { model: kept, version, conflicts };
 }
 
+// ---- Many devices at once (bulk create) ----------------------------------------------------------
+
+/** A room's stored addresses and shared-login choices, without opening any sealed login. */
+export async function readPlainBindings(
+  db: BindingsDb,
+  roomId: string,
+): Promise<{ values: DeviceValues; credentialSets: Record<string, string> }> {
+  const row = await db.roomBinding.findFirst({ where: { roomId } });
+  const credentialSets: Record<string, string> = {};
+  if (row && isObject(row.credentialSets))
+    for (const [id, v] of Object.entries(row.credentialSets)) if (typeof v === 'string') credentialSets[id] = v;
+  return { values: row ? asDeviceValues(row.values) : {}, credentialSets };
+}
+
+/** What setting these would change. A blank value never clears anything: it means "leave it". */
+export function bindingChanges(
+  current: { values: DeviceValues; credentialSets: Record<string, string> },
+  incoming: { values: DeviceValues; credentialSets?: Record<string, string> },
+): { values: DeviceValues; credentialSets: Record<string, string> } {
+  const values: DeviceValues = {};
+  for (const [id, fields] of Object.entries(incoming.values))
+    for (const [k, v] of Object.entries(fields))
+      if (!blank(v) && JSON.stringify(current.values[id]?.[k]) !== JSON.stringify(v)) (values[id] ??= {})[k] = v;
+  const credentialSets: Record<string, string> = {};
+  for (const [id, setId] of Object.entries(incoming.credentialSets ?? {}))
+    if (current.credentialSets[id] !== setId) credentialSets[id] = setId;
+  return { values, credentialSets };
+}
+
+/**
+ * Set addresses (and shared-login choices) for many devices of one room in a single change, so the
+ * room gets one new version. Values are written as they are: the caller must already have checked
+ * they are addresses. Nothing to change writes nothing.
+ */
+export async function setRoomBindings(
+  db: BindingsDb,
+  input: {
+    orgId: string;
+    roomId: string;
+    userId: string | null;
+    values: DeviceValues;
+    credentialSets?: Record<string, string>;
+  },
+  key = secretsKey(),
+): Promise<{ version: number | undefined; changed: boolean }> {
+  const plain = await readPlainBindings(db, input.roomId);
+  const change = bindingChanges(plain, input);
+  if (Object.keys(change.values).length === 0 && Object.keys(change.credentialSets).length === 0)
+    return { version: (await db.roomBinding.findFirst({ where: { roomId: input.roomId } }))?.version, changed: false };
+  const current = await read(db, input.roomId, key);
+  const next = emptyNext();
+  if (current) {
+    next.values = structuredClone(current.values);
+    next.secrets = structuredClone(current.secrets);
+    next.credentialSets = { ...current.credentialSets };
+  }
+  for (const [id, fields] of Object.entries(change.values)) next.values[id] = { ...next.values[id], ...fields };
+  Object.assign(next.credentialSets, change.credentialSets);
+  const version = await write(db, { orgId: input.orgId, roomId: input.roomId, userId: input.userId, key }, next, current);
+  return { version, changed: true };
+}
+
 // ---- What a browser sees -------------------------------------------------------------------------
 
 export interface SlotView extends BindingSlot {

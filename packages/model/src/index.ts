@@ -4,6 +4,7 @@ export * from './runtime';
 export * from './gateway';
 export * from './billing';
 export * from './bindings';
+export * from './bulk';
 export * from './driver-spec';
 export * from './staff';
 export * from './msp';
