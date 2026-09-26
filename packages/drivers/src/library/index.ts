@@ -164,6 +164,62 @@ const raw: unknown[] = [
     },
   },
   bravia(),
+  {
+    // LG signage and professional displays over their RS-232C protocol on the network port (TCP 9761).
+    // Checked against LG's RS-232C external control reference: a command is `<c1><c2> <set id> <data>`
+    // ended by CR, and the answer is `<c2> <set id> OK<data>x`, ended by "x". Volume is two hex digits
+    // (00 to 64 is 0 to 100). Input codes 90 and 91 are HDMI 1 and 2 (DTV); other inputs are not offered.
+    id: 'lg-signage',
+    class: 'display',
+    features: ['blank', 'builtin_audio'],
+    name: 'LG signage display',
+    description:
+      'LG signage and professional displays over the network port (TCP 9761). Turn on network control on the display. "Set ID" is the display Set ID (01 unless changed). Ports in1 and in2 select HDMI 1 and HDMI 2.',
+    transport: { type: 'tcp', port: 9761, terminator: '\r', replyTerminator: 'x', keepOpen: true, timeoutMs: 2000 },
+    settings: [{ key: 'setId', label: 'Set ID', type: 'string', scope: 'binding', default: '01' }],
+    quickActions: ['display.blank'],
+    commands: {
+      'power.on': { send: 'ka {setting.setId} 01' },
+      'power.off': { send: 'ka {setting.setId} 00' },
+      select_input: { send: 'xb {setting.setId} {inputHex}' },
+      volume: { send: 'kf {setting.setId} {levelHex}' },
+      'mute.on': { send: 'ke {setting.setId} 00' },
+      'mute.off': { send: 'ke {setting.setId} 01' },
+      'blank.on': { send: 'kd {setting.setId} 01' },
+      'blank.off': { send: 'kd {setting.setId} 00' },
+    },
+    volumeScale: { min: 0, max: 100 },
+    feedback: {
+      poll: [
+        { action: { send: 'ka {setting.setId} FF' }, everyMs: 10000 },
+        { action: { send: 'ke {setting.setId} FF' }, everyMs: 10000 },
+        { action: { send: 'kd {setting.setId} FF' }, everyMs: 10000 },
+      ],
+      patterns: [
+        { match: '^\\s*a \\d+ OK01\\s*$', set: 'power', value: 'on' },
+        { match: '^\\s*a \\d+ OK00\\s*$', set: 'power', value: 'off' },
+        { match: '^\\s*e \\d+ OK00\\s*$', set: 'muted', value: 'on' },
+        { match: '^\\s*e \\d+ OK01\\s*$', set: 'muted', value: 'off' },
+        { match: '^\\s*d \\d+ OK01\\s*$', set: 'blanked', value: 'on' },
+        { match: '^\\s*d \\d+ OK00\\s*$', set: 'blanked', value: 'off' },
+      ],
+    },
+  },
+  {
+    // Kramer matrix switchers over Protocol 3000 (TCP 5000, commands ended by CR). `#ROUTE layer,dest,src`
+    // is answered `~nn@ROUTE layer,dest,src`; layer 1 is video. Checked against Kramer's Protocol 3000
+    // reference.
+    id: 'kramer-p3000',
+    class: 'video_switching',
+    features: ['route'],
+    name: 'Kramer matrix switcher (Protocol 3000)',
+    description: 'Kramer matrix switchers over Protocol 3000 on TCP port 5000. Routes video (layer 1) from an input to an output.',
+    transport: { type: 'tcp', port: 5000, terminator: '\r', keepOpen: true, timeoutMs: 3000 },
+    commands: {
+      route: { send: '#ROUTE 1,{outputNumber},{inputNumber}', expect: '@ROUTE\\s+\\d+,' },
+    },
+    feedback: { poll: [{ action: { send: '#ROUTE? 1,1' }, everyMs: 10000 }], patterns: [] },
+  },
 ];
 
 export const LIBRARY: Record<string, DriverSpec> = {};

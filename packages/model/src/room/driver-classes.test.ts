@@ -113,14 +113,40 @@ describe('driver specs with a class', () => {
     transport: { type: 'tcp', port: 1515 },
     commands: { 'power.on': { send: 'PWR ON' } },
   };
+  const displayCommands = {
+    'power.on': { send: 'PWR ON' },
+    'power.off': { send: 'PWR OFF' },
+    select_input: { send: 'SRC {inputNumber}' },
+    'blank.on': { send: 'BLK ON' },
+    'blank.off': { send: 'BLK OFF' },
+  };
   it('accepts a class and its features, and a scope on a setting', () => {
     const r = checkDriverSpec({
       ...base,
+      commands: displayCommands,
       class: 'display',
       features: ['blank'],
       settings: [{ key: 'pin', label: 'PIN', type: 'string', scope: 'secret' }],
     });
     expect(r.ok).toBe(true);
+  });
+  it('holds a driver to the contract of its class: the commands the class needs, and the ones each feature needs', () => {
+    const missingClass = checkDriverSpec({ ...base, class: 'display' });
+    expect(!missingClass.ok && missingClass.problems).toEqual([
+      'A Display driver needs the command “power.off”',
+      'A Display driver needs the command “select_input”',
+    ]);
+    const { 'blank.off': _off, ...noOff } = displayCommands;
+    void _off;
+    const missingFeature = checkDriverSpec({ ...base, commands: noOff, class: 'display', features: ['blank', 'apps'] });
+    expect(!missingFeature.ok && missingFeature.problems).toEqual([
+      'The Display feature “blank” needs the command “blank.off”',
+      'The Display feature “apps” needs the command “app.launch”',
+    ]);
+  });
+  it('leaves a class with no contract, and a driver with no class, alone', () => {
+    expect(checkDriverSpec({ ...base, class: 'sensor' }).ok).toBe(true);
+    expect(checkDriverSpec(base).ok).toBe(true);
   });
   it('rejects a feature the class does not have', () => {
     const r = checkDriverSpec({ ...base, class: 'projector', features: ['apps'] });
