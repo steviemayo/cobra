@@ -1,61 +1,20 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Cpu, Plus, Trash2 } from 'lucide-react';
+import { BookOpen, Cpu, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  DriverSpec,
-  commandValues,
-  escapeLine,
-  escapePath,
-  renderTemplate,
-  resolveSettings,
-} from '@kestrel/model';
+import Link from 'next/link';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
-import { useOrg } from '@/components/shell/org-context';
-import { Button } from '@/components/ui/button';
+import { orgPath, useOrg } from '@/components/shell/org-context';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
+import { STARTER, preview } from '@/lib/driver-example';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
-
-const STARTER = {
-  id: 'my-projector',
-  name: 'My projector',
-  description: 'Text commands over TCP.',
-  transport: { type: 'tcp', port: 4352, terminator: '\r\n', timeoutMs: 2000 },
-  settings: [{ key: 'password', label: 'Password', type: 'secret' }],
-  commands: {
-    'power.on': { send: 'PWR ON', expect: '^OK' },
-    'power.off': { send: 'PWR OFF', expect: '^OK' },
-    volume: { send: 'VOL {level}' },
-    select_input: { send: 'SRC {inputNumber}' },
-  },
-  volumeScale: { min: 0, max: 30 },
-  feedback: {
-    poll: [{ action: { send: 'STATUS?' }, everyMs: 5000 }],
-    patterns: [{ match: '^POWER=(ON|OFF)', set: 'power', value: '$1' }],
-  },
-};
-
-/** What each command would send, with sample values, so a driver can be checked without a device. */
-function preview(raw: unknown): { key: string; text: string }[] {
-  const parsed = DriverSpec.safeParse(raw);
-  if (!parsed.success) return [];
-  const spec = parsed.data;
-  const settings = resolveSettings(spec, { host: '10.0.0.5', password: '••••' }).values;
-  const sample = commandValues(spec, settings, { level: 50, input: 'in2', output: 'out1', name: 'Movie' });
-  return Object.entries(spec.commands).map(([key, a]) => ({
-    key,
-    text:
-      spec.transport.type === 'tcp'
-        ? renderTemplate(a.send ?? '', sample, escapeLine)
-        : `${a.method ?? (a.body ? 'POST' : 'GET')} ${renderTemplate(a.path ?? '', sample, escapePath)}${a.body ? `  ${renderTemplate(a.body, sample, escapeLine)}` : ''}`,
-  }));
-}
 
 export function DriversView() {
   const trpc = useTRPC();
@@ -116,9 +75,14 @@ export function DriversView() {
         title="Custom drivers"
         description="Teach Kestrel to talk to a device it doesn’t know. A driver is a description of the device’s commands, not code, so it can only ever talk to that device."
         actions={
-          <Button size="sm" onClick={() => setSelected('new')}>
-            <Plus data-icon="inline-start" /> New driver
-          </Button>
+          <>
+            <Link href={orgPath(orgId, '/drivers/guide')} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              <BookOpen data-icon="inline-start" /> How-to guide
+            </Link>
+            <Button size="sm" onClick={() => setSelected('new')}>
+              <Plus data-icon="inline-start" /> New driver
+            </Button>
+          </>
         }
       />
       <div className="grid gap-6 lg:grid-cols-[16rem_1fr]">
