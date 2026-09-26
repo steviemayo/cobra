@@ -1,5 +1,6 @@
 import {
   defaultDeviceState,
+  isVideoDestination,
   type Device,
   type DeviceBus,
   type DeviceCommand,
@@ -177,6 +178,8 @@ export class Simulation implements DeviceBus {
     const s = defaultDeviceState();
     switch (d.category) {
       case 'video_destination':
+      case 'display':
+      case 'projector':
         s.power = 'off';
         s.selectedInput = null;
         s.blanked = false;
@@ -210,7 +213,7 @@ export class Simulation implements DeviceBus {
   }
 
   private reportsSignal(d: Device) {
-    return d.category === 'video_matrix' || d.category === 'video_destination';
+    return d.category === 'video_matrix' || isVideoDestination(d.category);
   }
 
   private delay(ms: number): Promise<void> {
@@ -240,7 +243,7 @@ export class Simulation implements DeviceBus {
     const cat = d.category;
     switch (c.type) {
       case 'power': {
-        if (cat !== 'video_destination') return this.unsupported(d, c);
+        if (!isVideoDestination(cat)) return this.unsupported(d, c);
         if (c.on && state.power !== 'on') {
           state.power = 'warming';
           this.emit(d.id);
@@ -257,7 +260,7 @@ export class Simulation implements DeviceBus {
         break;
       }
       case 'select_input': {
-        if (cat !== 'video_destination') return this.unsupported(d, c);
+        if (!isVideoDestination(cat)) return this.unsupported(d, c);
         if (!d.ports.some((p) => p.id === c.portId && p.direction === 'in'))
           throw new Error(`${d.name} has no input ${c.portId}`);
         if (state.power !== 'on') throw new Error(`${d.name} isn't on yet`);
@@ -276,7 +279,7 @@ export class Simulation implements DeviceBus {
         break;
       }
       case 'blank': {
-        if (cat !== 'video_destination') return this.unsupported(d, c);
+        if (!isVideoDestination(cat)) return this.unsupported(d, c);
         if (state.power !== 'on') throw new Error(`${d.name} isn't on yet`);
         await this.delay(this.latency.generic);
         state.blanked = c.on;

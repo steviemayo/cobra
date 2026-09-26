@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoomRuntime } from '@kestrel/engine';
-import { STARTER_TEMPLATES, type RoomModel } from '@kestrel/model';
+import { STARTER_TEMPLATES, isVideoDestination, type RoomModel } from '@kestrel/model';
 import { createSimulation, type Simulation } from './sim/simulation';
 
 const meeting = (): RoomModel => structuredClone(STARTER_TEMPLATES[0]!.model);
@@ -26,7 +26,7 @@ afterEach(() => {
 const withBlankableDisplays = meeting;
 const bare = (): RoomModel => {
   const m = meeting();
-  for (const d of m.devices) if (d.category === 'video_destination') d.control = undefined;
+  for (const d of m.devices) if (isVideoDestination(d.category)) d.control = undefined;
   return m;
 };
 const withConferencing = (mic = true, base: () => RoomModel = bare) => {

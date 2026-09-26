@@ -14,6 +14,8 @@ export const DeviceCategory = z.enum([
   'video_matrix',
   'audio_matrix',
   'video_destination',
+  'display',
+  'projector',
   'audio_destination',
   'conference_output',
   'recorder',
@@ -25,6 +27,21 @@ export const DeviceCategory = z.enum([
   'occupancy_sensor',
 ]);
 export type DeviceCategory = z.infer<typeof DeviceCategory>;
+
+/**
+ * Categories kept only so rooms designed before the display/projector split still load.
+ * `video_destination` reads as a display until someone edits the device. New devices never get one.
+ */
+export const LEGACY_CATEGORIES: readonly DeviceCategory[] = ['video_destination'];
+
+/** Every category that shows a picture: what the engine treats as "a display". */
+export const VIDEO_DESTINATION_CATEGORIES: readonly DeviceCategory[] = [
+  'video_destination',
+  'display',
+  'projector',
+];
+export const isVideoDestination = (category: DeviceCategory): boolean =>
+  VIDEO_DESTINATION_CATEGORIES.includes(category);
 
 export interface PortTemplate {
   id: string;
@@ -139,7 +156,21 @@ export const DEVICE_CATALOG: Record<DeviceCategory, CategoryInfo> = {
     defaultPorts: [],
   },
   video_destination: {
-    label: 'Display / projector',
+    label: 'Display / projector (older rooms)',
+    section: 'destination',
+    capabilities: ['video_sink', 'audio_sink', 'power', 'signal_detect'],
+    controllable: true,
+    defaultPorts: [inp('in', 'Input', 'av')],
+  },
+  display: {
+    label: 'Display',
+    section: 'destination',
+    capabilities: ['video_sink', 'audio_sink', 'power', 'signal_detect'],
+    controllable: true,
+    defaultPorts: [inp('in', 'Input', 'av')],
+  },
+  projector: {
+    label: 'Projector',
     section: 'destination',
     capabilities: ['video_sink', 'audio_sink', 'power', 'signal_detect'],
     controllable: true,

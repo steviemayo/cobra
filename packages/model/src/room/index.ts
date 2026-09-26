@@ -1,5 +1,6 @@
 export * from './common';
 export * from './catalog';
+export * from './driver-classes';
 export * from './device';
 export * from './action';
 export * from './behaviour';
