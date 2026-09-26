@@ -9,6 +9,7 @@ import {
   Building2,
   ChevronRight,
   Cpu,
+  KeyRound,
   Link2,
   DoorOpen,
   LayoutDashboard,
@@ -248,6 +249,9 @@ export function AppSidebar() {
                   )}
                   {canEdit && !scoped && (
                     <NavItem href={`${base}/drivers`} icon={Cpu} label="Custom drivers" />
+                  )}
+                  {canEdit && !scoped && (
+                    <NavItem href={`${base}/credentials`} icon={KeyRound} label="Shared logins" />
                   )}
                   {canSupport && (
                     <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />

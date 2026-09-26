@@ -465,3 +465,136 @@ describe('staged deployments', () => {
     expect(store.keysWithPrefix('deployment:')).toHaveLength(0);
   });
 });
+
+describe('bindings', () => {
+  const servers: Server[] = [];
+  afterEach(() => servers.splice(0).forEach((x) => x.close()));
+
+  const listening = () =>
+    new Promise<number>((resolve) => {
+      const server = createServer((socket) => socket.on('error', () => undefined));
+      servers.push(server);
+      server.listen(0, '127.0.0.1', () => resolve((server.address() as { port: number }).port));
+    });
+  /** The starter room whose DSP is a real TCP device with its address left out of the design. */
+  const design = (): RoomModel => {
+    const m = model();
+    for (const d of m.devices) delete d.control;
+    const dsp = m.devices.find((d) => d.id === 'dsp')!;
+    dsp.control = { kind: 'generic', protocol: 'tcp' };
+    dsp.settings = { timeoutMs: 200, commands: {} };
+    return m;
+  };
+  const dspAt = (port: number) => ({ dsp: { host: '127.0.0.1', port } });
+  const reportFor = () => cloud.heartbeats.at(-1)?.rooms.find((r) => r.roomId === ROOM);
+
+  it('says it can fetch bindings', async () => {
+    const { gateway } = boot();
+    await gateway.tick();
+    expect(cloud.heartbeats.at(-1)!.features).toContain('bindings');
+  });
+
+  it('runs a release that keeps its addresses apart by fetching them', async () => {
+    cloud.assign(ROOM, design(), { external: true });
+    cloud.setBindings(ROOM, dspAt(await listening()));
+    const { gateway, host } = boot({ healthTimeoutMs: 1000 }, cloud.url, 'missing');
+    await gateway.tick();
+    expect(host.ids()).toEqual([ROOM]);
+    expect(host.get(ROOM)!.bindings?.version).toBe(1);
+    await gateway.tick();
+    expect(reportFor()).toMatchObject({ bindingsVersion: 1, deployment: { stage: 'active' } });
+  });
+
+  it('refuses a release that needs bindings the cloud does not have', async () => {
+    cloud.assign(ROOM, design(), { external: true });
+    const { gateway, host } = boot();
+    await gateway.tick();
+    expect(host.ids()).toEqual([]);
+    await gateway.tick();
+    expect(reportFor()!.deployment).toMatchObject({ stage: 'failed' });
+    expect(reportFor()!.error).toMatch(/no addresses/);
+  });
+
+  it('refuses bindings that were changed after signing', async () => {
+    cloud.assign(ROOM, design(), { external: true });
+    cloud.setBindings(ROOM, dspAt(1), { tamper: true });
+    const { gateway, host } = boot();
+    await gateway.tick();
+    expect(host.ids()).toEqual([]);
+    await gateway.tick();
+    expect(reportFor()!.error).toMatch(/signature check.*hash_mismatch/);
+  });
+
+  it('applies a changed address with no new release, keeping the old one if the new one is dead', async () => {
+    const first = await listening();
+    cloud.assign(ROOM, design(), { external: true });
+    cloud.setBindings(ROOM, dspAt(first));
+    const { gateway, host } = boot({ healthTimeoutMs: 500 }, cloud.url, 'missing');
+    await gateway.tick();
+    const v1 = host.get(ROOM)!.runtime;
+    const fetched = cloud.manifestFetches.length;
+
+    const dead = await listening();
+    servers.pop()!.close();
+    cloud.setBindings(ROOM, dspAt(dead));
+    await gateway.tick();
+    expect(host.get(ROOM)!.runtime).toBe(v1);
+    expect(host.get(ROOM)!.bindings?.version).toBe(1);
+    await gateway.tick();
+    expect(reportFor()!.error).toMatch(/New addresses rejected: could not reach DSP/);
+
+    const second = await listening();
+    cloud.setBindings(ROOM, dspAt(second));
+    await gateway.tick();
+    expect(host.get(ROOM)!.runtime).not.toBe(v1);
+    expect(host.get(ROOM)!.bindings?.version).toBe(3);
+    expect(cloud.manifestFetches).toHaveLength(fetched); // no new release was needed
+    await gateway.tick();
+    expect(reportFor()!.error).toBeUndefined();
+  });
+
+  it('boots from the cache with the saved bindings while the cloud is unreachable', async () => {
+    cloud.assign(ROOM, design(), { external: true });
+    cloud.setBindings(ROOM, dspAt(await listening()));
+    const first = boot({ healthTimeoutMs: 1000 }, cloud.url, 'missing');
+    await first.gateway.tick();
+    first.gateway.stop();
+    first.host.shutdown();
+    first.store.close();
+    running.length = 0;
+
+    const second = boot({ enrollToken: undefined }, 'http://127.0.0.1:9', 'missing');
+    second.gateway.start();
+    expect(second.host.ids()).toEqual([ROOM]);
+    expect(second.host.get(ROOM)!.bindings?.version).toBe(1);
+  });
+
+  it('does not start a cached release that needs bindings when the saved copy was edited on disk', async () => {
+    cloud.assign(ROOM, design(), { external: true });
+    cloud.setBindings(ROOM, dspAt(await listening()));
+    const first = boot({ healthTimeoutMs: 1000 }, cloud.url, 'missing');
+    await first.gateway.tick();
+    const raw = first.store.getJson<{ payload: { devices: Record<string, unknown> } }>(`bindings:${ROOM}`)!;
+    raw.payload.devices = { dsp: { host: '6.6.6.6' } };
+    first.store.setJson(`bindings:${ROOM}`, raw);
+    first.gateway.stop();
+    first.host.shutdown();
+    first.store.close();
+    running.length = 0;
+
+    const second = boot({ enrollToken: undefined }, 'http://127.0.0.1:9', 'missing');
+    second.gateway.start();
+    expect(second.host.ids()).toEqual([]);
+  });
+
+  it('forgets a rooms bindings when the room is unassigned', async () => {
+    cloud.assign(ROOM, design(), { external: true });
+    cloud.setBindings(ROOM, dspAt(await listening()));
+    const { gateway, store } = boot({ healthTimeoutMs: 1000 }, cloud.url, 'missing');
+    await gateway.tick();
+    expect(store.get(`bindings:${ROOM}`)).not.toBeNull();
+    cloud.unassign(ROOM);
+    await gateway.tick();
+    expect(store.get(`bindings:${ROOM}`)).toBeNull();
+  });
+});

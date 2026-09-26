@@ -75,7 +75,7 @@ function execute(host: RoomHost, cmd: GatewayCommand, facts: GatewayFacts): Comm
       };
     }
     case 'restart_room': {
-      host.load(room.signed);
+      host.load(room.signed, room.bindings);
       return { id: '', ok: true, output: { restarted: room.signed.manifest.roomName } };
     }
     case 'room_off': {

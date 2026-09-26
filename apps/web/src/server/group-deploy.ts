@@ -1,4 +1,5 @@
 import type { PanelBranding } from '@kestrel/model';
+import { setupProblem } from './deploy-check';
 import { createDeployment, type DeploymentDb } from './deployment-service';
 import {
   checkPublishable,
@@ -94,6 +95,11 @@ export async function planGroupDeploy(
     const current = !!latest && latest.draftRevision === checked.draft.revision;
     const running =
       current && room.desiredReleaseId === latest.id && room.reportedReleaseId === latest.id;
+    const setup = running ? null : setupProblem(checked.model, checked.bindings, checked.drivers);
+    if (setup) {
+      problems.push(`${room.name}: ${setup}`);
+      continue;
+    }
     work.push({
       step: {
         roomId: room.id,

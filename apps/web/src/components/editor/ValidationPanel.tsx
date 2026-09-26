@@ -9,7 +9,8 @@ export type TabId =
   | 'states'
   | 'activities'
   | 'triggers'
-  | 'settings';
+  | 'settings'
+  | 'setup';
 
 export function tabForRef(ref: IssueRef): TabId {
   switch (ref.kind) {

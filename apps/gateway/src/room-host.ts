@@ -1,8 +1,10 @@
 import { RoomRuntime, TriggerScheduler } from '@kestrel/engine';
 import { createSimulation } from '@kestrel/drivers';
 import { HybridBus, createDriver, type DeviceDriver } from '@kestrel/drivers/real';
+import { applyBindings } from '@kestrel/model';
 import type {
   DeviceBus,
+  DeviceValues,
   PanelAccess,
   PanelBranding,
   RoomReport,
@@ -22,6 +24,8 @@ export interface LoadedRoom {
   bus: DeviceBus;
   access: PanelAccess;
   branding: PanelBranding;
+  /** The addresses and logins this room runs with, when its release keeps them apart. */
+  bindings?: RoomBindings;
   /** Ids of this room's real devices that are unreachable right now. */
   offline(): string[];
   /** Starts anything that acts on its own (schedules). Called when the room goes live, not while staged. */
@@ -33,6 +37,19 @@ interface BuiltBus {
   bus: DeviceBus;
   offline(): string[];
   close(): void;
+}
+
+/** What a room's addresses and logins are, as verified by the gateway. */
+export interface RoomBindings {
+  version: number;
+  devices: DeviceValues;
+}
+
+/** The manifest with the room's bindings laid over each device's settings. What actually runs. */
+export function withBindings(signed: SignedManifest, bindings?: RoomBindings): SignedManifest {
+  if (!bindings) return signed;
+  const { manifest } = signed;
+  return { ...signed, manifest: { ...manifest, model: applyBindings(manifest.model, bindings.devices) } };
 }
 
 /** Real drivers where the room configures them; simulated devices fill the gaps if allowed. */
@@ -122,11 +139,13 @@ export class RoomHost {
   }
 
   /** Build a room and start connecting to its devices without replacing the one that is running. */
-  stage(signed: SignedManifest): LoadedRoom {
+  stage(signed: SignedManifest, bindings?: RoomBindings): LoadedRoom {
     const { manifest } = signed;
-    const built = buildBus(signed, this.mode, this.log);
+    // `signed` stays as verified (its hash is what is reported); the merged copy is what runs.
+    const running = withBindings(signed, bindings);
+    const built = buildBus(running, this.mode, this.log);
     const runtime = new RoomRuntime({
-      model: manifest.model,
+      model: running.manifest.model,
       roomName: manifest.roomName,
       bus: built.bus,
       onDivider: (dividerId, open) => this.dividerListener?.(dividerId, open),
@@ -136,6 +155,7 @@ export class RoomHost {
       roomId: manifest.roomId,
       releaseId: manifest.releaseId,
       signed,
+      ...(bindings ? { bindings } : {}),
       runtime,
       bus: built.bus,
       access: manifest.panel.access,
@@ -181,8 +201,8 @@ export class RoomHost {
     return room;
   }
 
-  load(signed: SignedManifest): LoadedRoom {
-    return this.activate(this.stage(signed));
+  load(signed: SignedManifest, bindings?: RoomBindings): LoadedRoom {
+    return this.activate(this.stage(signed, bindings));
   }
 
   unload(roomId: string, notify = true) {
@@ -200,6 +220,7 @@ export class RoomHost {
       releaseId: r.releaseId,
       manifestHash: r.signed.hash,
       status: r.runtime.getSnapshot().status,
+      ...(r.bindings ? { bindingsVersion: r.bindings.version } : {}),
       devices: r.signed.manifest.model.devices.map((d) => ({
         deviceId: d.id,
         name: d.name,

@@ -220,6 +220,7 @@ const BINDING_KEYS = new Set([
   'mac',
   'username',
   'user',
+  'path',
 ]);
 const SECRET_KEYS = new Set([
   'password',
@@ -230,6 +231,7 @@ const SECRET_KEYS = new Set([
   'secret',
   'psk',
   'pin',
+  'headers',
 ]);
 
 /** The scope of a setting: the one it declares, else secret for a secret type or a well-known name, binding for an address, else design. */
