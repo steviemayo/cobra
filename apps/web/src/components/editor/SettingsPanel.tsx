@@ -153,7 +153,7 @@ export function SettingsPanel({ model, update, issues }: PanelProps) {
       </Label>
       <div className="space-y-1">
         <div className="text-xs text-muted-foreground">Extra controls shown to users</div>
-        {(['lights', 'blinds', 'camera', 'microphones'] as const).map((k) => (
+        {(['lights', 'blinds', 'camera', 'microphones', 'display'] as const).map((k) => (
           <label key={k} className="flex items-center gap-2 text-sm capitalize">
             <input
               type="checkbox"

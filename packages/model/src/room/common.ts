@@ -7,6 +7,26 @@ export const LocalId = z
   .regex(/^[A-Za-z0-9_-]+$/, 'letters, numbers, - and _ only');
 export type LocalId = z.infer<typeof LocalId>;
 
+/** A remote-control key a display can be sent: navigation, then media. Which a display takes depends on its driver's features. */
+export const DisplayKey = z.enum([
+  'up',
+  'down',
+  'left',
+  'right',
+  'ok',
+  'back',
+  'home',
+  'menu',
+  'play',
+  'pause',
+  'stop',
+  'forward',
+  'rewind',
+]);
+export type DisplayKey = z.infer<typeof DisplayKey>;
+export const NAVIGATION_KEYS: DisplayKey[] = ['up', 'down', 'left', 'right', 'ok', 'back', 'home', 'menu'];
+export const MEDIA_KEYS: DisplayKey[] = ['play', 'pause', 'stop', 'forward', 'rewind'];
+
 export const SignalKind = z.enum(['video', 'audio', 'av']);
 export type SignalKind = z.infer<typeof SignalKind>;
 

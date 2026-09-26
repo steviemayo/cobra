@@ -167,5 +167,16 @@ export const SignedBindings = z.object({
 export type SignedBindings = z.infer<typeof SignedBindings>;
 
 /** Names of what a gateway can do beyond the basics, sent in its heartbeat. */
-export const GATEWAY_FEATURES = ['bindings'] as const;
+export const GATEWAY_FEATURES = ['bindings', 'display-extras'] as const;
 export type GatewayFeature = (typeof GATEWAY_FEATURES)[number];
+
+/**
+ * What a gateway must be able to do to run this room, beyond the basics. A release that needs
+ * something must not go to a gateway that has not said it can (an older one would fail to read it).
+ */
+export function gatewayNeeds(model: RoomModel): GatewayFeature[] {
+  const actions = [...model.activities.flatMap((a) => a.actions), ...model.states.flatMap((s) => s.actions)];
+  const needs: GatewayFeature[] = [];
+  if (actions.some((a) => a.type === 'press_key' || a.type === 'launch_app')) needs.push('display-extras');
+  return needs;
+}

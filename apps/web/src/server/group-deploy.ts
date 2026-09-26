@@ -1,5 +1,5 @@
 import type { PanelBranding } from '@kestrel/model';
-import { setupProblem } from './deploy-check';
+import { gatewayTooOld, setupProblem } from './deploy-check';
 import { createDeployment, type DeploymentDb } from './deployment-service';
 import {
   checkPublishable,
@@ -98,6 +98,11 @@ export async function planGroupDeploy(
     const setup = running ? null : setupProblem(checked.model, checked.bindings, checked.drivers);
     if (setup) {
       problems.push(`${room.name}: ${setup}`);
+      continue;
+    }
+    const tooOld = running || !room.gatewayId ? null : await gatewayTooOld(db, orgId, room.gatewayId, checked.model);
+    if (tooOld) {
+      problems.push(`${room.name}: ${tooOld}`);
       continue;
     }
     work.push({

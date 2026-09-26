@@ -8,6 +8,8 @@ export interface DeviceDriver {
   getState(): DeviceState;
   /** The panel quick actions this device supports. Absent means none. */
   quickActions?(): QuickActionId[];
+  /** The optional features of its class this driver supports. Absent means none. */
+  features?(): string[];
   /** Called with a fresh snapshot whenever feedback changes. */
   onChange(listener: (state: DeviceState) => void): () => void;
   /** Start any background polling / connections. */

@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@kestrel/db';
-import { missingBindings, type CustomDrivers, type DeviceValues, type RoomModel } from '@kestrel/model';
+import { gatewayNeeds, missingBindings, type CustomDrivers, type DeviceValues, type RoomModel } from '@kestrel/model';
 import { resolveBindings, type BindingsDb } from './bindings';
 
 // Whether a release can go to a room's gateway right now: the gateway must be able to run it, and
@@ -20,6 +20,20 @@ export function setupProblem(
   const first = missing[0]!;
   const more = missing.length > 1 ? ` (and ${missing.length - 1} more)` : '';
   return `Needs setup: ${first.deviceName} needs its ${first.label.toLowerCase()}${more}. Fill it in under the room’s devices.`;
+}
+
+/** A sentence when this room's design needs something its gateway has not said it can do, else null. */
+export async function gatewayTooOld(
+  db: Pick<PrismaClient, 'gateway'>,
+  orgId: string,
+  gatewayId: string,
+  model: RoomModel,
+): Promise<string | null> {
+  const needs = gatewayNeeds(model);
+  if (needs.length === 0) return null;
+  const gateway = await db.gateway.findFirst({ where: { id: gatewayId, orgId } });
+  if (needs.every((n) => gateway?.features?.includes(n))) return null;
+  return 'This design uses display keys or apps, which this room’s gateway is too old to run. Update the gateway first.';
 }
 
 export async function checkDeployable(
@@ -45,6 +59,9 @@ export async function checkDeployable(
           'This gateway needs updating before it can run this room, because the room’s addresses are kept separately. Update the gateway, or publish the room again.',
       };
   }
+
+  const tooOld = await gatewayTooOld(db, input.orgId, input.gatewayId, manifest.model);
+  if (tooOld) return { ok: false, message: tooOld };
 
   const resolved = await resolveBindings(db, input.orgId, input.roomId);
   const problem = setupProblem(manifest.model, resolved?.devices ?? {}, manifest.drivers ?? {});

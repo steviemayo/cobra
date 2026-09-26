@@ -68,6 +68,10 @@ export class DeclarativeDriver extends BaseDriver {
     return fromSetting ?? this.spec.transport.port ?? (this.http?.https ? 443 : this.http ? 80 : 23);
   }
 
+  override features(): string[] {
+    return [...(this.spec.features ?? [])];
+  }
+
   /** The quick actions the driver declares. Others are refused by the room, not offered. */
   override quickActions(): QuickActionId[] {
     return [...new Set(this.spec.quickActions ?? [])];
@@ -302,13 +306,14 @@ export class DeclarativeDriver extends BaseDriver {
 
   // ---- HTTP -----------------------------------------------------------------------------------
 
-  private async httpCall(action: Pick<DriverAction, 'method' | 'path' | 'body' | 'expect'>, allowAny = false, values: Values = {}): Promise<string> {
+  private async httpCall(action: Pick<DriverAction, 'method' | 'path' | 'body' | 'expect' | 'headers'>, allowAny = false, values: Values = {}): Promise<string> {
     const h = this.http!;
     const path = renderTemplate(action.path ?? '/', values, escapePath).replace(/^(?!\/)/, '/');
     const jsonBody = (action.body ?? '').trimStart().startsWith('{') || (action.body ?? '').trimStart().startsWith('[');
     const body = action.body === undefined ? undefined : renderTemplate(action.body, values, jsonBody ? escapeJson : escapeLine);
     const headers: Record<string, string> = {};
-    for (const [k, v] of Object.entries(h.headers)) headers[k] = renderTemplate(v, this.baseValues(), escapeLine);
+    for (const [k, v] of Object.entries({ ...h.headers, ...action.headers }))
+      headers[k] = renderTemplate(v, this.baseValues(), escapeLine);
     if (body !== undefined && !Object.keys(headers).some((k) => k.toLowerCase() === 'content-type'))
       headers['content-type'] = jsonBody ? 'application/json' : 'text/plain';
     const url = `${h.https ? 'https' : 'http'}://${this.host}:${this.port}${path}`;
@@ -401,6 +406,14 @@ export class DeclarativeDriver extends BaseDriver {
         return this.run(`record.${command.on ? 'on' : 'off'}`, v({}), () =>
           this.update((s) => {
             s.recording = command.on;
+          }),
+        );
+      case 'key':
+        return this.run(`key.${command.key}`, v({}), () => undefined);
+      case 'launch_app':
+        return this.run('app.launch', v({ appId: command.appId }), () =>
+          this.update((s) => {
+            s.activeApp = command.appId;
           }),
         );
       case 'command':

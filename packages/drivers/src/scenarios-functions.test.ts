@@ -28,6 +28,7 @@ const equipped = (
     blinds: false,
     camera: false,
     microphones: false,
+    display: false,
     ...controls,
   };
   m.devices.push(

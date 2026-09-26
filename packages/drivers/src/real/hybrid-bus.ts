@@ -35,6 +35,12 @@ export class HybridBus implements DeviceBus {
     return this.sim?.quickActions(deviceId) ?? [];
   }
 
+  features(deviceId: string): string[] {
+    const driver = this.real.get(deviceId);
+    if (driver) return driver.features?.() ?? [];
+    return this.sim?.features(deviceId) ?? [];
+  }
+
   subscribe(listener: (event: DeviceEvent) => void): () => void {
     const offs: (() => void)[] = [];
     if (this.sim)

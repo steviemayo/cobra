@@ -11,7 +11,7 @@ import {
   type RoomModel,
 } from '@kestrel/model';
 import { buildGraph, splitPortKey, portKey, type Graph } from '@kestrel/engine';
-import { driverQuickActions } from '../quick-actions';
+import { driverFeatures, driverQuickActions } from '../quick-actions';
 
 export interface SimLatency {
   displayOn: number;
@@ -105,6 +105,10 @@ export class Simulation implements DeviceBus {
   quickActions(deviceId: string): QuickActionId[] {
     // Same as the real drivers: what the device's driver declares, not what the category could do.
     return driverQuickActions(this.devices.get(deviceId)?.control, this.customDrivers);
+  }
+
+  features(deviceId: string): string[] {
+    return driverFeatures(this.devices.get(deviceId)?.control, this.customDrivers);
   }
 
   async send(deviceId: string, command: DeviceCommand): Promise<void> {
@@ -321,6 +325,19 @@ export class Simulation implements DeviceBus {
         if (!ENVIRONMENT.has(cat)) return this.unsupported(d, c);
         await this.delay(this.latency.generic * 3);
         state.preset = c.name;
+        break;
+      }
+      case 'key': {
+        if (!isVideoDestination(cat)) return this.unsupported(d, c);
+        if (state.power !== 'on') throw new Error(`${d.name} isn't on yet`);
+        await this.delay(this.latency.generic);
+        break;
+      }
+      case 'launch_app': {
+        if (!isVideoDestination(cat)) return this.unsupported(d, c);
+        if (state.power !== 'on') throw new Error(`${d.name} isn't on yet`);
+        await this.delay(this.latency.generic * 3);
+        state.activeApp = c.appId;
         break;
       }
       case 'command': {
