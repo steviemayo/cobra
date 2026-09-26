@@ -1,4 +1,11 @@
-import type { Action, Activity, Device, DeviceCommand, RoomModel } from '@kestrel/model';
+import {
+  isVideoDestination,
+  type Action,
+  type Activity,
+  type Device,
+  type DeviceCommand,
+  type RoomModel,
+} from '@kestrel/model';
 import { buildGraph, findRoute, type Graph } from '../validate/graph';
 
 export interface PlanStep {
@@ -55,7 +62,7 @@ function routeSteps(
   for (const hop of path.hops)
     b.add(hop.deviceId, { type: 'route', inputPortId: hop.inPortId, outputPortId: hop.outPortId });
   const dest = ctx.graph.devices.get(dst.deviceId);
-  if (dest?.category === 'video_destination')
+  if (dest && isVideoDestination(dest.category))
     b.add(dst.deviceId, { type: 'select_input', portId: path.destinationPortId });
 }
 

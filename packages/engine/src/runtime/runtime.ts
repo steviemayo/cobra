@@ -1,6 +1,7 @@
 import {
   PanelIntent,
   QUICK_ACTIONS,
+  isVideoDestination,
   type Activity,
   type DeviceBus,
   type DeviceEvent,
@@ -612,7 +613,7 @@ export class RoomRuntime implements PanelClient {
     if (this.status === 'off' && !this.primary) {
       const anyOn = this.model.devices.some((d) => {
         const p = this.bus.getState(d.id)?.power;
-        return d.category === 'video_destination' && (p === 'on' || p === 'warming');
+        return isVideoDestination(d.category) && (p === 'on' || p === 'warming');
       });
       if (anyOn) this.status = 'on';
     }

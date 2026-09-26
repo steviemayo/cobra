@@ -4,6 +4,7 @@ import {
   BUILT_IN_DRIVERS,
   DEVICE_CATALOG,
   DeviceCategory,
+  LEGACY_CATEGORIES,
   GenericProtocol,
   PortDirection,
   SignalKind,
@@ -28,10 +29,12 @@ import {
 } from './ui';
 
 const BUILT_IN_HINTS = Object.keys(BUILT_IN_DRIVERS);
-const categoryOptions = DeviceCategory.options.map((c) => ({
-  value: c,
-  label: DEVICE_CATALOG[c].label,
-}));
+const categoryOptions = DeviceCategory.options
+  .filter((c) => !LEGACY_CATEGORIES.includes(c))
+  .map((c) => ({
+    value: c,
+    label: DEVICE_CATALOG[c].label,
+  }));
 const signalOptions = SignalKind.options.map((s) => ({ value: s, label: s.toUpperCase() }));
 const directionOptions = PortDirection.options.map((d) => ({
   value: d,

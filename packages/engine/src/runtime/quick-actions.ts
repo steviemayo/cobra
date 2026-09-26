@@ -1,9 +1,11 @@
-import type {
-  DeviceBus,
-  DeviceCommand,
-  DeviceState,
-  QuickActionId,
-  RoomModel,
+import {
+  isVideoDestination,
+  type DeviceBus,
+  type DeviceCategory,
+  type DeviceCommand,
+  type DeviceState,
+  type QuickActionId,
+  type RoomModel,
 } from '@kestrel/model';
 
 /** A quick action this room offers, and the devices it acts on. */
@@ -19,16 +21,16 @@ export interface RoomQuickAction {
  * The same action on several devices is one button acting on all of them.
  */
 export function roomQuickActions(model: RoomModel, bus: DeviceBus): RoomQuickAction[] {
-  const supporting = (category: string, id: QuickActionId) =>
+  const supporting = (match: (category: DeviceCategory) => boolean, id: QuickActionId) =>
     model.devices
-      .filter((d) => d.category === category && bus.quickActions?.(d.id).includes(id))
+      .filter((d) => match(d.category) && bus.quickActions?.(d.id).includes(id))
       .map((d) => d.id);
 
   const offered: RoomQuickAction[] = [];
-  const displays = supporting('video_destination', 'display.blank');
+  const displays = supporting(isVideoDestination, 'display.blank');
   if (displays.length > 0) offered.push({ id: 'display.blank', devices: displays });
 
-  const conferencing = supporting('conference_system', 'mics.privacy_mute');
+  const conferencing = supporting((c) => c === 'conference_system', 'mics.privacy_mute');
   const hasMics = model.devices.some((d) => d.category === 'voice_capture_mic');
   if (hasMics && conferencing.length > 0)
     offered.push({ id: 'mics.privacy_mute', devices: conferencing });

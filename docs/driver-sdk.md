@@ -44,6 +44,16 @@ Custom drivers need the **Pro** plan. Kestrel ships built-in drivers for PJLink,
 - **`volumeScale`**: maps the room's 0-100 to the device's range, and back when reading feedback.
 - **`feedback`**: `poll` actions run on a timer; `patterns` are regular expressions tried on every line (TCP) or reply body (HTTP). `set` is one of `power`, `muted`, `volume`, `input`, `preset`, `blanked`, `online`; `value` is a literal (`on`, `off`, `true`, `false`) or `$1` for the first group.
 
+## Class, features and setting scope
+
+Plan: `docs/driver-classes.md`. Built so far: the fields, their checks, and the class table.
+
+- **`class`** (optional): the kind of device the driver is for: `projector`, `display`, `video_switching`, `avoip_switching`, `point_based`, `camera`, `conference_system`, `reinforcement_mic`, `conferencing_mic`, `recorder`, `presentation_source`, `environmental`, `relay`, `sensor`, `infrastructure`
+- **`features`** (optional): the optional parts of that class this driver supports (a display: `remote_keys`, `apps`; a projector: `lens`, `light_source_hours`). Checked against the class when the driver is saved. Features need a class
+- **Setting `scope`** (optional, per setting): `design` (what the room is: component names, preset names), `binding` (where this room's device is: address, port) or `secret` (logins and keys). Left out, it is worked out from the type and the name: `secret` type or a name like `password` is secret, `host` and `port` are binding, the rest is design
+- A driver that leaves `class`, `features` and `scope` out is unchanged, and so is its hash
+- Screens are now two device categories, `display` and `projector`. Rooms saved with the older `video_destination` still load and behave as before
+
 ## Quick actions
 
 A driver declares which panel quick actions its device supports, so the panel only offers what the room can actually do.

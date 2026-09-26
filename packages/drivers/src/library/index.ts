@@ -7,6 +7,8 @@ import { checkDriverSpec, type DriverSpec } from '@kestrel/model';
 const raw: unknown[] = [
   {
     id: 'extron-sis',
+    class: 'video_switching',
+    features: ['route'],
     name: 'Extron matrix switcher (SIS)',
     description: 'Extron matrix switchers over Telnet (port 23). Ties one input to one output.',
     transport: { type: 'tcp', port: 23, terminator: '\r\n', keepOpen: true },
@@ -21,6 +23,8 @@ const raw: unknown[] = [
   },
   {
     id: 'cisco-roomos',
+    class: 'conference_system',
+    features: ['standby', 'mic_mute', 'volume', 'hangup'],
     name: 'Cisco RoomOS video conferencing',
     description:
       'Cisco Room and Board devices over their HTTP API (/putxml). Set "credentials" to the base64 of "username:password".',
@@ -51,6 +55,8 @@ const raw: unknown[] = [
   },
   {
     id: 'shelly-relay',
+    class: 'relay',
+    features: ['up_down', 'on_off'],
     name: 'Shelly relay (screens and lifters)',
     description:
       'Motorised screens and lifters driven through a Shelly relay (Gen 1 HTTP API): channel 0 lowers, channel 1 raises, for "seconds" seconds.',
@@ -69,6 +75,8 @@ const raw: unknown[] = [
   },
   {
     id: 'lutron-lip',
+    class: 'environmental',
+    features: ['scene', 'zone_level'],
     name: 'Lutron lighting (Integration Protocol)',
     description:
       'Lutron processors over the Integration Protocol (Telnet, port 23) with integration access enabled without a login. Scenes press a keypad button.',
