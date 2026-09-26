@@ -22,6 +22,7 @@ const SECTION_LABEL: Record<string, string> = {
   sites: 'Sites',
   rooms: 'Rooms',
   templates: 'Templates',
+  drivers: 'Custom drivers',
   gateways: 'Gateways',
   deployments: 'Deployments',
   team: 'Team',
@@ -68,7 +69,8 @@ export function Breadcrumbs() {
     crumbs.push({ label: room?.name ?? 'Room', href: tab ? `${base}/rooms/${id}` : undefined });
     if (tab) crumbs.push({ label: ROOM_TAB_LABEL[tab] ?? tab });
   }
-  if (section === 'settings' && id) crumbs.push({ label: id === 'activity' ? 'Activity log' : id });
+  if (section === 'drivers' && id === 'guide') crumbs.push({ label: 'How-to guide' });
+  if (section === 'settings' && id)crumbs.push({ label: id === 'activity' ? 'Activity log' : id });
 
   return (
     <Breadcrumb className="min-w-0">
