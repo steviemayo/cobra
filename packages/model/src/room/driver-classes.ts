@@ -203,20 +203,79 @@ export function classesForCategory(category: DeviceCategory): DriverClass[] {
   return DriverClass.options.filter((c) => DRIVER_CLASSES[c].categories.includes(category));
 }
 
+/**
+ * What a declarative driver must be able to do to belong to a class, and to declare a feature of it
+ * (the class contract: docs/driver-classes.md, "every vendor driver must pass"). Command names are
+ * the driver format's. A driver that claims a class or feature without them would be offered in a
+ * room and then fail the first time it is used.
+ */
+export const CLASS_CONTRACT: Partial<
+  Record<DriverClass, { commands: string[]; features: Record<string, string[]> }>
+> = {
+  projector: {
+    commands: ['power.on', 'power.off', 'select_input'],
+    features: { blank: ['blank.on', 'blank.off'], builtin_audio: ['volume'] },
+  },
+  display: {
+    commands: ['power.on', 'power.off', 'select_input'],
+    features: {
+      blank: ['blank.on', 'blank.off'],
+      builtin_audio: ['volume'],
+      remote_keys: ['key.up', 'key.down', 'key.left', 'key.right', 'key.ok', 'key.back'],
+      media_keys: ['key.play', 'key.pause', 'key.stop'],
+      apps: ['app.launch'],
+    },
+  },
+  video_switching: { commands: ['route'], features: { output_mute: ['command.output_mute'] } },
+  camera: { commands: [], features: { preset: ['camera_preset'], standby: ['power.on', 'power.off'] } },
+  conference_system: {
+    commands: [],
+    features: {
+      standby: ['power.on', 'power.off'],
+      mic_mute: ['mute.on', 'mute.off'],
+      volume: ['volume'],
+      hangup: ['command.hangup'],
+      dial: ['command.dial'],
+    },
+  },
+  reinforcement_mic: { commands: [], features: { mute: ['mute.on', 'mute.off'], volume: ['volume'] } },
+  conferencing_mic: { commands: [], features: { privacy_mute: ['mute.on', 'mute.off'] } },
+  recorder: { commands: [], features: { start_stop: ['record.on', 'record.off'] } },
+  environmental: { commands: [], features: { scene: ['scene'] } },
+  relay: { commands: [], features: { up_down: ['command.up', 'command.down'], on_off: ['power.on', 'power.off'] } },
+};
+
 /** Problems with a driver's declared class and features, as plain sentences. Empty when fine. */
 export function classProblems(
   driverClass: DriverClass | undefined,
   features: readonly string[] | undefined,
+  /** The commands the driver defines. Given, the class contract is checked too. */
+  commands?: readonly string[],
 ): string[] {
-  if (!features || features.length === 0) return [];
-  if (!driverClass) return ['Features can only be declared by a driver that names its class'];
-  const known = DRIVER_CLASSES[driverClass].features;
-  return [...new Set(features)]
-    .filter((f) => !(f in known))
-    .map(
-      (f) =>
-        `“${f}” is not a feature of the ${DRIVER_CLASSES[driverClass].label} class (use ${Object.keys(known).join(', ')})`,
+  const problems: string[] = [];
+  if (features && features.length > 0) {
+    if (!driverClass) return ['Features can only be declared by a driver that names its class'];
+    const known = DRIVER_CLASSES[driverClass].features;
+    problems.push(
+      ...[...new Set(features)]
+        .filter((f) => !(f in known))
+        .map(
+          (f) =>
+            `“${f}” is not a feature of the ${DRIVER_CLASSES[driverClass].label} class (use ${Object.keys(known).join(', ')})`,
+        ),
     );
+  }
+  const contract = driverClass ? CLASS_CONTRACT[driverClass] : undefined;
+  if (driverClass && contract && commands) {
+    const have = new Set(commands);
+    const label = DRIVER_CLASSES[driverClass].label;
+    for (const c of contract.commands)
+      if (!have.has(c)) problems.push(`A ${label} driver needs the command “${c}”`);
+    for (const f of new Set(features ?? []))
+      for (const c of contract.features[f] ?? [])
+        if (!have.has(c)) problems.push(`The ${label} feature “${f}” needs the command “${c}”`);
+  }
+  return problems;
 }
 
 // ---- What a setting is for ----------------------------------------------------------------------

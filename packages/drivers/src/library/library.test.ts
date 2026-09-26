@@ -42,7 +42,7 @@ const httpServer = async (handler: http.RequestListener) => {
 
 describe('bundled drivers', () => {
   it('are all valid driver specs', () => {
-    expect(Object.keys(LIBRARY).sort()).toEqual(['lib:cisco-roomos', 'lib:extron-sis', 'lib:lutron-lip', 'lib:shelly-relay', 'lib:sony-bravia']);
+    expect(Object.keys(LIBRARY).sort()).toEqual(['lib:cisco-roomos', 'lib:extron-sis', 'lib:kramer-p3000', 'lib:lg-signage', 'lib:lutron-lip', 'lib:shelly-relay', 'lib:sony-bravia']);
     for (const spec of Object.values(LIBRARY)) expect(checkDriverSpec(spec).ok, spec.id).toBe(true);
   });
 

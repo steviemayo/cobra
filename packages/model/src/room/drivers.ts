@@ -118,6 +118,27 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     categories: ['display', 'video_destination'],
     example: { host: '<display IP>', psk: '<pre-shared key>', apps: [{ id: '<app uri>', name: 'Netflix' }] },
   },
+  'lib:lg-signage': {
+    name: 'LG signage display',
+    description: 'LG signage and professional displays: power, HDMI 1 and 2, volume, mute and screen blank, over the network port. Turn on network control on the display.',
+    class: 'display',
+    features: ['blank', 'builtin_audio'],
+    settings: [
+      { key: 'host', label: 'Display address', scope: 'binding', required: true },
+      { key: 'setId', label: 'Set ID', scope: 'binding' },
+    ],
+    categories: ['display', 'video_destination'],
+    example: { host: '<display IP>', setId: '01' },
+  },
+  'lib:kramer-p3000': {
+    name: 'Kramer matrix switcher (Protocol 3000)',
+    description: 'Kramer matrix switchers over Protocol 3000 (TCP 5000). Routing ties an input to an output.',
+    class: 'video_switching',
+    features: ['route'],
+    settings: [{ key: 'host', label: 'Switcher address', scope: 'binding', required: true }],
+    categories: ['video_matrix'],
+    example: { host: '<switcher IP>' },
+  },
   'lib:shelly-relay': {
     name: 'Shelly relay (screens and lifters)',
     description:

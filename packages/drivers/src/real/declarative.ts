@@ -196,6 +196,8 @@ export class DeclarativeDriver extends BaseDriver {
       this.update((s) => {
         s.online = true;
       });
+      // Say what the device is doing now, without waiting for the first interval.
+      for (const p of this.spec.feedback.poll) void this.poll(p.action);
     });
     socket.on('data', (chunk: string) => this.onData(chunk));
     socket.on('error', () => undefined);
@@ -228,7 +230,7 @@ export class DeclarativeDriver extends BaseDriver {
   private onData(chunk: string) {
     this.buffer += chunk;
     if (this.buffer.length > MAX_REPLY_BYTES) this.buffer = this.buffer.slice(-MAX_REPLY_BYTES);
-    const term = this.tcp?.terminator ?? '\r\n';
+    const term = this.tcp?.replyTerminator ?? this.tcp?.terminator ?? '\r\n';
     let i: number;
     while ((i = this.buffer.indexOf(term)) >= 0) {
       const line = this.buffer.slice(0, i);
@@ -292,12 +294,13 @@ export class DeclarativeDriver extends BaseDriver {
       });
       socket.on('data', (chunk: string) => {
         buffer = (buffer + chunk).slice(-MAX_REPLY_BYTES);
-        for (const line of buffer.split(t.terminator)) if (line) this.readText(line);
-        const lines = buffer.split(t.terminator);
-        if (expect ? lines.some((l) => expect.test(l)) : this.patterns.length > 0 && buffer.includes(t.terminator)) finish();
+        const replyEnd = t.replyTerminator ?? t.terminator;
+        for (const line of buffer.split(replyEnd)) if (line) this.readText(line);
+        const lines = buffer.split(replyEnd);
+        if (expect ? lines.some((l) => expect.test(l)) : this.patterns.length > 0 && buffer.includes(replyEnd)) finish();
       });
       socket.on('close', () => {
-        if (expect && !buffer.split(t.terminator).some((l) => expect.test(l)))
+        if (expect && !buffer.split(t.replyTerminator ?? t.terminator).some((l) => expect.test(l)))
           finish(new Error(`${this.device.name} sent an unexpected reply`));
         else finish();
       });
