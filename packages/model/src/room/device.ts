@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DeviceCategory } from './catalog';
 import { Capability, LocalId, PortDirection, PortRef, SignalKind } from './common';
+import { ControlPoint } from './points';
 
 export const Port = z.object({
   id: LocalId,
@@ -57,6 +58,8 @@ export const Device = z.object({
   settings: z.record(z.string(), z.unknown()).default({}),
   /** Only for reinforcement microphones (see MicSettings). */
   mic: MicSettings.optional(),
+  /** Only for point-based devices (a DSP): the things inside it that Kestrel controls. */
+  points: z.array(ControlPoint).max(200).optional(),
 });
 export type Device = z.infer<typeof Device>;
 

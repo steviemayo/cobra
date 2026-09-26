@@ -167,7 +167,7 @@ export const SignedBindings = z.object({
 export type SignedBindings = z.infer<typeof SignedBindings>;
 
 /** Names of what a gateway can do beyond the basics, sent in its heartbeat. */
-export const GATEWAY_FEATURES = ['bindings', 'display-extras'] as const;
+export const GATEWAY_FEATURES = ['bindings', 'display-extras', 'control-points'] as const;
 export type GatewayFeature = (typeof GATEWAY_FEATURES)[number];
 
 /**
@@ -178,5 +178,6 @@ export function gatewayNeeds(model: RoomModel): GatewayFeature[] {
   const actions = [...model.activities.flatMap((a) => a.actions), ...model.states.flatMap((s) => s.actions)];
   const needs: GatewayFeature[] = [];
   if (actions.some((a) => a.type === 'press_key' || a.type === 'launch_app')) needs.push('display-extras');
+  if (model.devices.some((d) => (d.points?.length ?? 0) > 0)) needs.push('control-points');
   return needs;
 }

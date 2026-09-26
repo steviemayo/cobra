@@ -352,7 +352,7 @@ export class Gateway {
       for (const cmd of this.inbox.splice(0)) {
         let result: CommandResult;
         try {
-          result = runCommand(this.host, cmd, {
+          result = await runCommand(this.host, cmd, {
             version: this.cfg.version,
             uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
             bufferedEvents: this.store.unsentCount(),

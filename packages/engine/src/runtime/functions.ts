@@ -1,3 +1,4 @@
+import { micCanVolume, micReported, micTarget, type MicTarget } from './mics';
 import { MEDIA_KEYS, NAVIGATION_KEYS, type DeviceBus, type Device, type DisplayKey, type MoverAction, type PanelFunctions, type RoomModel } from '@kestrel/model';
 
 // The pages behind the panel's top nav: cameras, microphones, lighting and blinds/screens. A page
@@ -7,7 +8,7 @@ import { MEDIA_KEYS, NAVIGATION_KEYS, type DeviceBus, type Device, type DisplayK
 export interface FunctionSets {
   cameras: { device: Device; presets: string[] }[];
   /** Reinforcement microphones a person can control, in the order the panel shows them. */
-  microphones: { device: Device; label: string }[];
+  microphones: { device: Device; label: string; target: MicTarget }[];
   lights: { device: Device; scenes: string[] }[];
   movers: { device: Device; kind: 'blinds' | 'screen' | 'lifter'; actions: MoverAction[] }[];
   /** Smart displays. What each offers depends on its driver, which only the bus knows. */
@@ -96,10 +97,13 @@ export function functionSets(model: RoomModel): FunctionSets {
   // up. Conferencing microphones have a fixed level and only take part in Privacy Mute.
   if (userControls.microphones)
     sets.microphones = model.devices
-      .filter((d) => d.category === 'reinforcement_mic' && driven(d) && !d.mic?.hidden)
-      .map((device, index) => ({ device, label: device.mic?.label ?? device.name, index }))
+      .filter((d) => d.category === 'reinforcement_mic' && !d.mic?.hidden)
+      .flatMap((device, index) => {
+        const target = micTarget(model, device);
+        return target ? [{ device, label: device.mic?.label ?? device.name, index, target }] : [];
+      })
       .sort((a, b) => (a.device.mic?.order ?? 1000) - (b.device.mic?.order ?? 1000) || a.index - b.index)
-      .map(({ device, label }) => ({ device, label }));
+      .map(({ device, label, target }) => ({ device, label, target }));
 
   if (userControls.lights)
     for (const d of model.devices) {
@@ -137,15 +141,15 @@ export function functionsView(sets: FunctionSets, bus: DeviceBus): PanelFunction
       activePreset: bus.getState(device.id)?.preset ?? null,
       canMove: true,
     })),
-    microphones: sets.microphones.map(({ device, label }) => {
-      const state = bus.getState(device.id);
-      const canVolume = (bus.features?.(device.id) ?? []).includes('volume');
+    microphones: sets.microphones.map(({ device, label, target }) => {
+      const reported = micReported(bus, target);
+      const canVolume = micCanVolume(bus, device, target);
       return {
         id: device.id,
         name: label,
-        muted: state?.muted ?? null,
+        muted: reported.muted,
         canVolume,
-        volume: canVolume ? (state?.volume ?? null) : null,
+        volume: canVolume ? reported.volume : null,
       };
     }),
     lights: sets.lights.map(({ device, scenes }) => ({

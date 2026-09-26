@@ -1,5 +1,6 @@
 import type { DeviceCategory } from './catalog';
 import type { DriverClass, SettingScope } from './driver-classes';
+import type { PointForms } from './points';
 
 // The drivers that ship with Kestrel: what they are for, and settings to start from. The device
 // editor offers these; the drivers themselves live in @kestrel/drivers.
@@ -20,9 +21,21 @@ export interface DriverInfo {
   categories: DeviceCategory[];
   /** Every setting the driver reads. */
   settings: DriverSettingInfo[];
+  /** For a point-based driver: the address form of each kind of control point it supports. */
+  points?: PointForms;
   /** A complete settings object to start from. Values in <angle brackets> must be replaced. */
   example: Record<string, unknown>;
 }
+
+/** A Q-SYS control is a named control on a named component. */
+const QSYS_CONTROL = [
+  { key: 'component', label: 'Component name' },
+  { key: 'control', label: 'Control name' },
+];
+const TESIRA_CHANNEL = [
+  { key: 'tag', label: 'Instance tag' },
+  { key: 'index', label: 'Channel' },
+];
 
 export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   'visca-ip': {
@@ -39,6 +52,28 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     ],
     categories: ['ptz_camera', 'conf_camera', 'autoframing_camera', 'fixed_camera'],
     example: { host: '<camera IP>', presets: { Wide: 0, Podium: 1 } },
+  },
+  'biamp-tesira': {
+    name: 'Biamp Tesira DSP',
+    description:
+      'Biamp Tesira over the Tesira Text Protocol (Telnet). Add the DSP, then add the levels, mutes and crosspoints to control as control points, each by instance tag and channel. Presets are recalled by name.',
+    class: 'point_based',
+    features: ['level', 'mute', 'crosspoint', 'preset'],
+    settings: [
+      { key: 'host', label: 'Tesira address', scope: 'binding', required: true },
+      { key: 'port', label: 'Port', scope: 'binding' },
+    ],
+    points: {
+      level: TESIRA_CHANNEL,
+      mute: TESIRA_CHANNEL,
+      crosspoint: [
+        { key: 'tag', label: 'Instance tag' },
+        { key: 'input', label: 'Input' },
+        { key: 'output', label: 'Output' },
+      ],
+    },
+    categories: ['audio_matrix'],
+    example: { host: '<Tesira IP>' },
   },
   'lib:extron-sis': {
     name: 'Extron matrix switcher (SIS)',
@@ -137,6 +172,13 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
       { key: 'minDb', label: 'Level at 0 on the panel (dB)', scope: 'design' },
       { key: 'maxDb', label: 'Level at 100 on the panel (dB)', scope: 'design' },
     ],
+    points: {
+      level: QSYS_CONTROL,
+      mute: QSYS_CONTROL,
+      select: QSYS_CONTROL,
+      meter: QSYS_CONTROL,
+      generic: QSYS_CONTROL,
+    },
     categories: ['audio_matrix'],
     example: {
       host: '<Core IP>',

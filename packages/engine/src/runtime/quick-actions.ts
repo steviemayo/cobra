@@ -12,6 +12,8 @@ import {
 export interface RoomQuickAction {
   id: QuickActionId;
   devices: string[];
+  /** Control points of a DSP that do the same (a conferencing microphone privacy mute), by device and point id. */
+  points?: { deviceId: string; pointId: string }[];
 }
 
 /**
@@ -36,8 +38,17 @@ export function roomQuickActions(model: RoomModel, bus: DeviceBus): RoomQuickAct
   const conferencing = supporting((c) => c === 'conference_system', 'mics.privacy_mute');
   const mics = model.devices.filter((d) => d.category === 'voice_capture_mic');
   const muting = mics.filter((d) => bus.features?.(d.id)?.includes('privacy_mute')).map((d) => d.id);
-  if (muting.length > 0 || (mics.length > 0 && conferencing.length > 0))
-    offered.push({ id: 'mics.privacy_mute', devices: [...muting, ...conferencing] });
+  const points = model.devices.flatMap((dsp) =>
+    (dsp.points ?? [])
+      .filter((p) => p.role === 'mic_privacy_mute' && p.targetId && mics.some((m) => m.id === p.targetId))
+      .map((p) => ({ deviceId: dsp.id, pointId: p.id })),
+  );
+  if (muting.length > 0 || points.length > 0 || (mics.length > 0 && conferencing.length > 0))
+    offered.push({
+      id: 'mics.privacy_mute',
+      devices: [...muting, ...conferencing],
+      ...(points.length > 0 ? { points } : {}),
+    });
   return offered;
 }
 
@@ -45,13 +56,14 @@ export function quickActionCommand(id: QuickActionId, on: boolean): DeviceComman
   return id === 'display.blank' ? { type: 'blank', on } : { type: 'mute', muted: on };
 }
 
-/** On only when every device it acts on says so; a device that reports nothing counts as off. */
+/** On only when every device and point it acts on says so; one that reports nothing counts as off. */
 export function quickActionActive(
   action: RoomQuickAction,
   stateOf: (deviceId: string) => DeviceState | undefined,
 ): boolean {
-  return action.devices.every((id) => {
+  const devices = action.devices.every((id) => {
     const s = stateOf(id);
     return action.id === 'display.blank' ? s?.blanked === true : s?.muted === true;
   });
+  return devices && (action.points ?? []).every((p) => stateOf(p.deviceId)?.points[p.pointId] === true);
 }
