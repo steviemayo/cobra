@@ -9,12 +9,14 @@ import { canAddRoom, getEntitlements } from '../billing';
 import { checkDeployable } from '../deploy-check';
 import { sharedGatewayProblem } from '../site-devices';
 import { createDeployment } from '../deployment-service';
+import { DuplicateRoomError, duplicateRoom } from '../duplicate-room';
 import { effectiveStatus } from '../gateway-service';
 import { PanelInput, applyPanelInput, publicPanel, readPanel } from '../panel-settings';
 import { summariseDraft } from '../room-summary';
 import { syncQuantity } from '../stripe';
 import { SITE_SCOPED, siteFilter } from '../site-scope';
 import { orgProcedure, requireRole, router } from '../trpc';
+import { designOnly } from './room-model-helpers';
 
 const orgId = z.string().uuid();
 const roomId = z.string().uuid();
@@ -172,6 +174,67 @@ export const roomRouter = router({
         ),
       );
       return room;
+    }),
+
+  // A new room at the same site with this room's design and gateway. Addresses are not copied;
+  // the shared logins chosen are.
+  duplicate: orgProcedure
+    .input(z.object({ orgId, roomId, name }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const source = await findRoom(ctx.orgId, input.roomId);
+      if (source.kind === 'combined')
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'A combined room is made from its room group and cannot be copied.',
+        });
+      const draft = await db.roomDraft.findFirst({ where: { roomId: source.id, orgId: ctx.orgId } });
+      if (!draft) throw new TRPCError({ code: 'BAD_REQUEST', message: 'This room has no design to copy yet' });
+      const entitlements = await getEntitlements(db, ctx.orgId);
+      if (
+        !canAddRoom(
+          entitlements,
+          await db.room.count({ where: { orgId: ctx.orgId, kind: { not: 'combined' } } }),
+        )
+      )
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `Your plan includes ${entitlements.maxRooms} rooms. Subscribe to add more.`,
+        });
+      const model = await designOnly(ctx.orgId, RoomModel.parse(draft.model));
+      let copy;
+      try {
+        copy = await db.$transaction((tx) =>
+          duplicateRoom(tx as unknown as Parameters<typeof duplicateRoom>[0], {
+            orgId: ctx.orgId,
+            source: {
+              id: source.id,
+              siteId: source.siteId,
+              type: source.type,
+              gatewayId: source.gatewayId,
+            },
+            name: input.name,
+            model,
+            userId: ctx.user.id,
+          }),
+        );
+      } catch (e) {
+        if (e instanceof DuplicateRoomError) throw new TRPCError({ code: 'CONFLICT', message: e.message });
+        throw e;
+      }
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'room.duplicate',
+        target: copy.id,
+        meta: { name: copy.name, from: source.name },
+      });
+      after(() =>
+        syncQuantity(db, ctx.orgId).catch((e) =>
+          console.error('[billing] quantity sync failed', e),
+        ),
+      );
+      return copy;
     }),
 
   update: orgProcedure

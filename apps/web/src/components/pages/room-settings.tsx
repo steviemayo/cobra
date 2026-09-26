@@ -27,6 +27,7 @@ export function RoomSettings({ roomId }: { roomId: string }) {
   const [name, setName] = useState<string | null>(null);
   const [siteId, setSiteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [copyName, setCopyName] = useState<string | null>(null);
 
   const update = useMutation(
     trpc.room.update.mutationOptions({
@@ -36,6 +37,16 @@ export function RoomSettings({ roomId }: { roomId: string }) {
         setName(null);
         setSiteId(null);
       },
+    }),
+  );
+  const duplicate = useMutation(
+    trpc.room.duplicate.mutationOptions({
+      onSuccess: async (copy) => {
+        await invalidate();
+        toast.success(`Created “${copy.name}”. Fill in its device addresses next.`);
+        router.push(orgPath(orgId, `/rooms/${copy.id}/devices`));
+      },
+      onError: (e) => toast.error(e.message),
     }),
   );
   const del = useMutation(
@@ -60,6 +71,7 @@ export function RoomSettings({ roomId }: { roomId: string }) {
     );
 
   const nameValue = name ?? room.name;
+  const copyNameValue = copyName ?? `${room.name} copy`;
   const siteValue = siteId ?? room.siteId;
   const dirty = nameValue.trim() !== room.name || siteValue !== room.siteId;
 
@@ -112,6 +124,36 @@ export function RoomSettings({ roomId }: { roomId: string }) {
       <GatewaySetting roomId={roomId} />
       <PanelSettings roomId={roomId} />
       <HookSettings roomId={roomId} />
+
+      {room.kind !== 'combined' && (
+        <form
+          className="space-y-3 rounded-lg border p-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            duplicate.mutate({ orgId, roomId, name: copyNameValue.trim() });
+          }}
+        >
+          <div>
+            <h2 className="text-sm font-medium">Duplicate room</h2>
+            <p className="text-sm text-muted-foreground">
+              Makes a new room at this site with the same design and gateway. Each device in the new room
+              needs its own address, so those are left to fill in.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Input
+              aria-label="Name of the new room"
+              required
+              value={copyNameValue}
+              onChange={(e) => setCopyName(e.target.value)}
+            />
+            <Button type="submit" variant="outline" disabled={duplicate.isPending || !copyNameValue.trim()}>
+              {duplicate.isPending && <Spinner />}
+              Duplicate
+            </Button>
+          </div>
+        </form>
+      )}
 
       <section className="space-y-3 rounded-lg border border-destructive/30 p-4">
         <div>
