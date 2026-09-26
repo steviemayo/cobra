@@ -70,7 +70,10 @@ jobs:
           $tag = "gateway-$channel"
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
-            $flags = if ($channel -eq 'beta') { @('--prerelease') } else { @() }
+            # Built with += so it stays an array: `$x = if (...) { @('--prerelease') }` unrolls to a plain
+            # string, and splatting a string passes one character at a time (gh read "-" as a file to upload).
+            $flags = @()
+            if ($channel -eq 'beta') { $flags += '--prerelease' }
             gh release create $tag --title "Gateway ($channel)" --notes "Rolling $channel build of the Kestrel gateway for Windows." --target '${{ github.sha }}' @flags
           }
           # VERSION goes last: the update task reads it first, so it must never point at a missing bundle.
