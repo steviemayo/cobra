@@ -32,7 +32,10 @@ function world(opts: { features?: string[]; external?: boolean; devices?: Device
   const gateway = table([{ id: GW, orgId: ORG, features: opts.features ?? [] }]);
   const roomBinding = table([]);
   const credentialSet = table([]);
-  const db = { release, gateway, roomBinding, credentialSet } as unknown as DeployCheckDb;
+  const siteDevice = table([]);
+  const rooms = table([{ id: ROOM, orgId: ORG, siteId: 'site-1', gatewayId: GW }]);
+  const roomDraft = table([]);
+  const db = { release, gateway, roomBinding, credentialSet, siteDevice, room: rooms, roomDraft } as unknown as DeployCheckDb;
   return { db, roomBinding };
 }
 const input = { orgId: ORG, roomId: ROOM, gatewayId: GW, releaseId: REL };

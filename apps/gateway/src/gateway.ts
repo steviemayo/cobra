@@ -168,7 +168,11 @@ export class Gateway {
     const result = verifyBindings(raw, keys);
     if (!result.ok || result.signed.payload.roomId !== roomId || result.signed.payload.orgId !== orgId)
       return null;
-    return { version: result.signed.payload.version, devices: result.signed.payload.devices as RoomBindings['devices'] };
+    return {
+      version: result.signed.payload.version,
+      devices: result.signed.payload.devices as RoomBindings['devices'],
+      ...(result.signed.payload.sharedDevices ? { sharedDevices: result.signed.payload.sharedDevices } : {}),
+    };
   }
 
   /**
@@ -195,7 +199,15 @@ export class Gateway {
       return { ok: false, retry: false, problem: 'addresses are for a different room' };
     if (assigned.bindingsVersion && payload.version < assigned.bindingsVersion)
       return { ok: false, retry: true, problem: 'addresses are older than the cloud asked for' };
-    return { ok: true, raw, bindings: { version: payload.version, devices: payload.devices as RoomBindings['devices'] } };
+    return {
+      ok: true,
+      raw,
+      bindings: {
+        version: payload.version,
+        devices: payload.devices as RoomBindings['devices'],
+        ...(payload.sharedDevices ? { sharedDevices: payload.sharedDevices } : {}),
+      },
+    };
   }
 
   // ---- Control loop ---------------------------------------------------------------------------

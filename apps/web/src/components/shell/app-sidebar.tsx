@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Cpu,
   KeyRound,
+  Server,
   Link2,
   DoorOpen,
   LayoutDashboard,
@@ -252,6 +253,9 @@ export function AppSidebar() {
                   )}
                   {canEdit && !scoped && (
                     <NavItem href={`${base}/credentials`} icon={KeyRound} label="Shared logins" />
+                  )}
+                  {canEdit && !scoped && (
+                    <NavItem href={`${base}/shared-devices`} icon={Server} label="Shared devices" />
                   )}
                   {canSupport && (
                     <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />

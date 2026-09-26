@@ -74,6 +74,7 @@ model Org {
   customDrivers       CustomDriver[]
   roomBindings        RoomBinding[]
   credentialSets      CredentialSet[]
+  siteDevices         SiteDevice[]
 }
 
 model Member {
@@ -97,10 +98,11 @@ model Site {
   timezone  String   @default("Australia/Sydney")
   createdAt DateTime @default(now())
 
-  org      Org         @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  gateways Gateway[]
-  rooms    Room[]
-  groups   RoomGroup[]
+  org         Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  gateways    Gateway[]
+  rooms       Room[]
+  groups      RoomGroup[]
+  siteDevices SiteDevice[]
 
   @@index([orgId])
 }
@@ -200,6 +202,40 @@ model RoomBinding {
   org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
+  @@index([orgId])
+}
+
+// One physical device known to a site, used by any number of rooms (a matrix or DSP serving two rooms,
+// a shared codec). Rooms refer to it from their design; its address and login live here once. See
+// docs/driver-classes.md, "Shared devices".
+model SiteDevice {
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @db.Uuid
+  siteId          String   @db.Uuid
+  name            String
+  /// The device category, so a room that uses it can be checked without asking the device.
+  category        String
+  /// How it is controlled: { kind: "driver", driverId } or { kind: "generic", protocol }.
+  control         Json
+  /// Design settings every room shares (not addresses or logins).
+  settings        Json     @default("{}")
+  /// Addresses, like RoomBinding.values but for this one device: setting key -> value.
+  values          Json     @default("{}")
+  /// Logins sealed with KESTREL_SECRETS_KEY: setting key -> value. Never sent to a browser.
+  sealed          String?
+  credentialSetId String?  @db.Uuid
+  /// A device that can serve only one room at a time (a codec, a recorder): a room in use holds it.
+  exclusive       Boolean  @default(false)
+  /// Goes up on every change to its address or login, so every room that uses it gets new bindings.
+  version         Int      @default(1)
+  updatedBy       String?  @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, name])
   @@index([orgId])
 }
 
@@ -328,6 +364,8 @@ model Release {
   hash          String
   /// Which revision of the draft this release froze, to tell when the design has moved on since.
   draftRevision Int?
+  /// The shared site devices this release uses, so a gateway's bindings version can be worked out without opening the manifest.
+  siteDeviceIds String[] @default([])
   createdBy     String?  @db.Uuid
   createdAt     DateTime @default(now())
 

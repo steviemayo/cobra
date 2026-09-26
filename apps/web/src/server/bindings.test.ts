@@ -44,7 +44,8 @@ const room = (devices: Device[]) => RoomModel.parse({ roomType: 'meeting', devic
 function world() {
   const roomBinding = table([]);
   const credentialSet = table([]);
-  return { db: { roomBinding, credentialSet } as unknown as BindingsDb, roomBinding, credentialSet };
+  const siteDevice = table([]);
+  return { db: { roomBinding, credentialSet, siteDevice } as unknown as BindingsDb, roomBinding, credentialSet, siteDevice };
 }
 const base = { orgId: ORG, roomId: ROOM, userId: 'u1' };
 
@@ -107,6 +108,7 @@ describe('what a gateway gets', () => {
     expect(await resolveBindings(w.db, ORG, ROOM, KEY)).toEqual({
       version: 1,
       devices: { dsp: { username: 'admin', password: 'setpw', host: '10.0.0.5' } },
+      sharedDevices: {},
     });
     // The device's own login wins over the shared one.
     await saveDeviceBinding(w.db, { ...base, device: dsp, set: { password: 'own' } }, KEY);

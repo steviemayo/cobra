@@ -45,7 +45,7 @@ export class FakeCloud {
   readonly telemetry: TelemetryEvent[] = [];
   readonly manifestFetches: string[] = [];
   readonly bindingsFetches: string[] = [];
-  private bindings = new Map<string, { version: number; devices: DeviceValues; tamper?: boolean }>();
+  private bindings = new Map<string, { version: number; devices: DeviceValues; tamper?: boolean; shared?: Record<string, { siteDeviceId: string; exclusive: boolean }> }>();
   private assignments = new Map<string, Assignment>();
   private version = 1;
   private server: Server | null = null;
@@ -117,7 +117,11 @@ export class FakeCloud {
   }
 
   /** Set a room's addresses and logins. Each call is a new version, as in the cloud. */
-  setBindings(roomId: string, devices: DeviceValues, opts: { tamper?: boolean } = {}) {
+  setBindings(
+    roomId: string,
+    devices: DeviceValues,
+    opts: { tamper?: boolean; shared?: Record<string, { siteDeviceId: string; exclusive: boolean }> } = {},
+  ) {
     const version = (this.bindings.get(roomId)?.version ?? 0) + 1;
     this.bindings.set(roomId, { version, devices, ...opts });
     const a = this.assignments.get(roomId);
@@ -226,7 +230,7 @@ export class FakeCloud {
       if (!found) return this.json(res, 404, { error: 'This room has no bindings' });
       this.bindingsFetches.push(b[1]!);
       const signed = signBindings(
-        { orgId: ORG_ID, roomId: b[1]!, version: found.version, devices: found.devices },
+        { orgId: ORG_ID, roomId: b[1]!, version: found.version, devices: found.devices, ...(found.shared ? { sharedDevices: found.shared } : {}) },
         { privateKeyPem: this.keys.privateKeyPem, keyId: this.keyId },
       );
       const wire = JSON.parse(JSON.stringify(signed)) as { payload: { devices: DeviceValues } };

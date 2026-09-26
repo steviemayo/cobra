@@ -63,6 +63,7 @@ export function DevicesPanel({ model, update, issues, roomId }: PanelProps & { r
   const [category, setCategory] = useState<DeviceCategory>('video_source');
   return (
     <div className="space-y-4">
+      <SharedPicker model={model} update={update} roomId={roomId} />
       <div className="flex flex-wrap items-center gap-2">
         <Select value={category} options={categoryOptions} onChange={setCategory} />
         <button className={btnCls} onClick={() => update((m) => void addDevice(m, category))}>
@@ -77,6 +78,46 @@ export function DevicesPanel({ model, update, issues, roomId }: PanelProps & { r
       {model.devices.map((d) => (
         <DeviceCard key={d.id} model={model} roomId={roomId} device={d} update={update} issues={issuesForDevice(issues, d.id)} />
       ))}
+    </div>
+  );
+}
+
+/** Add this room's slice of a shared device from the room's site. */
+function SharedPicker({ model, update, roomId }: { model: PanelProps['model']; update: PanelProps['update']; roomId?: string }) {
+  const trpc = useTRPC();
+  const { orgId } = useOrg();
+  const room = useQuery({ ...trpc.room.get.queryOptions({ orgId, roomId: roomId ?? '' }), enabled: !!roomId });
+  const siteId = room.data?.siteId;
+  const shared = useQuery({ ...trpc.siteDevice.list.queryOptions({ orgId, ...(siteId ? { siteId } : {}) }), enabled: !!siteId });
+  const [pick, setPick] = useState('');
+  const used = new Set(model.devices.flatMap((d) => (d.siteDeviceId ? [d.siteDeviceId] : [])));
+  const options = (shared.data ?? []).filter((s) => !used.has(s.id));
+  if (options.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2">
+      <span className="text-xs text-muted-foreground">Use a shared device from this site</span>
+      <Select
+        value={pick || options[0]!.id}
+        options={options.map((s) => ({ value: s.id, label: s.name }))}
+        onChange={setPick}
+      />
+      <button
+        type="button"
+        className={btnCls}
+        onClick={() => {
+          const s = options.find((o) => o.id === (pick || options[0]!.id));
+          if (!s) return;
+          update((m) => {
+            const device = addDevice(m, s.category as DeviceCategory, s.name);
+            device.siteDeviceId = s.id;
+            const control = s.control as Device['control'];
+            if (control) device.control = control;
+          });
+          setPick('');
+        }}
+      >
+        Add
+      </button>
     </div>
   );
 }
@@ -192,6 +233,21 @@ function DeviceCard({
                 })
               }
             />
+            {d.siteDeviceId && (
+              <TextInput
+                value={p.maps ?? ''}
+                placeholder="Port on the shared device"
+                title="Which port of the shared device this room port stands for. Left empty, the ids are the same."
+                onChange={(v) =>
+                  edit((dev) => {
+                    const port = dev.ports.find((x) => x.id === p.id);
+                    if (!port) return;
+                    if (v.trim() === '') delete port.maps;
+                    else port.maps = v.trim();
+                  })
+                }
+              />
+            )}
             <Select
               value={p.direction}
               options={directionOptions}

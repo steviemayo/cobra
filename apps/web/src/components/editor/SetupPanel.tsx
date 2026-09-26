@@ -122,6 +122,16 @@ function DeviceSetup({
   const status = result.data?.status;
   const testing = !!testId && !(status === 'succeeded' || status === 'failed');
 
+  if (device.sharedFrom)
+    return (
+      <Card>
+        <div className="text-sm font-medium">{device.name}</div>
+        <p className="text-xs text-muted-foreground">
+          This device is shared. Its address and login are kept on the shared device “{device.sharedFrom}”, under Shared devices.
+        </p>
+      </Card>
+    );
+
   return (
     <Card>
       <div className="flex flex-wrap items-center gap-2">

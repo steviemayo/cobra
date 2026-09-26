@@ -66,6 +66,7 @@ async function world({ gateway = GW as string | null } = {}) {
   const customDriverVersion = table([]);
   const roomBinding = table([]);
   const credentialSet = table([]);
+  const siteDevice = table([]);
   const gateways = table([{ id: GW, orgId: ORG, features: [] }]);
   let seq = 0;
   for (const t of [rooms, roomGroup, roomDivider, roomDraft, deployment]) {
@@ -91,6 +92,7 @@ async function world({ gateway = GW as string | null } = {}) {
     customDriverVersion,
     roomBinding,
     credentialSet,
+    siteDevice,
     gateway: gateways,
   } as unknown as GroupDeployDb;
 

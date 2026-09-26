@@ -154,6 +154,10 @@ export const BindingsPayload = z.object({
   /** Goes up whenever anything in the room's bindings changes, including a credential set it uses. */
   version: z.number().int().min(1),
   devices: z.record(z.string(), z.record(z.string(), z.unknown())),
+  /** Devices of this room that are a slice of a shared site device, by device id. Absent when there are none. */
+  sharedDevices: z
+    .record(z.string(), z.object({ siteDeviceId: z.string().uuid(), exclusive: z.boolean() }))
+    .optional(),
 });
 export type BindingsPayload = z.infer<typeof BindingsPayload>;
 
@@ -167,7 +171,7 @@ export const SignedBindings = z.object({
 export type SignedBindings = z.infer<typeof SignedBindings>;
 
 /** Names of what a gateway can do beyond the basics, sent in its heartbeat. */
-export const GATEWAY_FEATURES = ['bindings', 'display-extras', 'control-points'] as const;
+export const GATEWAY_FEATURES = ['bindings', 'display-extras', 'control-points', 'shared-devices'] as const;
 export type GatewayFeature = (typeof GATEWAY_FEATURES)[number];
 
 /**
@@ -179,5 +183,6 @@ export function gatewayNeeds(model: RoomModel): GatewayFeature[] {
   const needs: GatewayFeature[] = [];
   if (actions.some((a) => a.type === 'press_key' || a.type === 'launch_app')) needs.push('display-extras');
   if (model.devices.some((d) => (d.points?.length ?? 0) > 0)) needs.push('control-points');
+  if (model.devices.some((d) => d.siteDeviceId)) needs.push('shared-devices');
   return needs;
 }

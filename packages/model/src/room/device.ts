@@ -8,6 +8,11 @@ export const Port = z.object({
   name: z.string().min(1).max(80),
   direction: PortDirection,
   signal: SignalKind,
+  /**
+   * On a shared device: the port of the physical device this room port stands for ("this room uses
+   * matrix outputs 3 and 4"). Left out, the ids are the same on both.
+   */
+  maps: z.string().min(1).max(64).optional(),
 });
 export type Port = z.infer<typeof Port>;
 
@@ -60,6 +65,8 @@ export const Device = z.object({
   mic: MicSettings.optional(),
   /** Only for point-based devices (a DSP): the things inside it that Kestrel controls. */
   points: z.array(ControlPoint).max(200).optional(),
+  /** This device is a room slice of a shared site device (see the Shared devices page). Its address and login come from there. */
+  siteDeviceId: z.string().uuid().optional(),
 });
 export type Device = z.infer<typeof Device>;
 

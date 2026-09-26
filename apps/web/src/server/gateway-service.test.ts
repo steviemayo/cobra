@@ -118,6 +118,7 @@ function world() {
   const roomDivider = table([]);
   const roomBinding = table([]);
   const credentialSet = table([]);
+  const siteDevice = table([]);
   const db = {
     gateway,
     room,
@@ -139,6 +140,7 @@ function world() {
     roomDivider,
     roomBinding,
     credentialSet,
+    siteDevice,
   } as unknown as Db;
   return {
     db,
@@ -162,6 +164,7 @@ function world() {
     roomDivider,
     roomBinding,
     credentialSet,
+    siteDevice,
   };
 }
 

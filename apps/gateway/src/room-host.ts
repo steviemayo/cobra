@@ -12,6 +12,7 @@ import type {
   TelemetryEvent,
 } from '@kestrel/model';
 import type { Logger } from './log';
+import { SharedDevices } from './shared-devices';
 
 export type SimulateMode = 'off' | 'all' | 'missing';
 
@@ -43,6 +44,8 @@ interface BuiltBus {
 export interface RoomBindings {
   version: number;
   devices: DeviceValues;
+  /** Devices that are a slice of a shared site device, by device id. */
+  sharedDevices?: Record<string, { siteDeviceId: string; exclusive: boolean }>;
 }
 
 /** The manifest with the room's bindings laid over each device's settings. What actually runs. */
@@ -53,19 +56,37 @@ export function withBindings(signed: SignedManifest, bindings?: RoomBindings): S
 }
 
 /** Real drivers where the room configures them; simulated devices fill the gaps if allowed. */
-export function buildBus(signed: SignedManifest, mode: SimulateMode, log: Logger): BuiltBus {
+export function buildBus(
+  signed: SignedManifest,
+  mode: SimulateMode,
+  log: Logger,
+  /** Shared site devices: one connection for every room that uses one. Absent: each room has its own. */
+  sharing?: { shared: SharedDevices; devices: NonNullable<RoomBindings['sharedDevices']> },
+): BuiltBus {
   const model = signed.manifest.model;
   if (mode === 'all') {
     const sim = createSimulation(model, { customDrivers: signed.manifest.drivers });
     return { bus: sim, offline: () => [], close: () => sim.dispose() };
   }
   const real = new Map<string, DeviceDriver>();
-  for (const device of model.devices) {
-    const driver = createDriver(
+  const make = (device: typeof model.devices[number]) =>
+    createDriver(
       device,
       { log: (l, m, x) => log(l, m, { device: device.name, ...x }) },
       signed.manifest.drivers,
     );
+  for (const device of model.devices) {
+    const shared = sharing?.devices[device.id];
+    const driver = shared
+      ? sharing!.shared.attach({
+          siteDeviceId: shared.siteDeviceId,
+          exclusive: shared.exclusive,
+          roomId: signed.manifest.roomId,
+          roomName: signed.manifest.roomName,
+          device,
+          build: make,
+        })
+      : make(device);
     if (driver) real.set(device.id, driver);
   }
   const bus = new HybridBus(
@@ -86,12 +107,16 @@ export class RoomHost {
   private dividerListener: ((dividerId: string, open: boolean) => void) | null = null;
   private resolveActive: (roomId: string) => string = (roomId) => roomId;
   private readonly activeListeners = new Set<() => void>();
+  /** One connection per shared site device, whatever number of rooms use it. */
+  readonly shared: SharedDevices;
 
   constructor(
     private readonly mode: SimulateMode,
     private readonly log: Logger,
     private readonly emit: (event: TelemetryEvent) => void,
-  ) {}
+  ) {
+    this.shared = new SharedDevices(log);
+  }
 
   get(roomId: string): LoadedRoom | undefined {
     return this.rooms.get(roomId);
@@ -143,7 +168,11 @@ export class RoomHost {
     const { manifest } = signed;
     // `signed` stays as verified (its hash is what is reported); the merged copy is what runs.
     const running = withBindings(signed, bindings);
-    const built = buildBus(running, this.mode, this.log);
+    const sharing =
+      bindings?.sharedDevices && Object.keys(bindings.sharedDevices).length > 0
+        ? { shared: this.shared, devices: bindings.sharedDevices }
+        : undefined;
+    const built = buildBus(running, this.mode, this.log, sharing);
     const runtime = new RoomRuntime({
       model: running.manifest.model,
       roomName: manifest.roomName,
@@ -209,6 +238,7 @@ export class RoomHost {
     const room = this.rooms.get(roomId);
     if (!room) return;
     room.close();
+    this.shared.release(roomId);
     this.rooms.delete(roomId);
     this.log('info', 'Room unloaded', { roomId });
     if (notify) this.notify(roomId);
@@ -271,6 +301,9 @@ export class RoomHost {
       const vm = room.runtime.getSnapshot();
       if (vm.status !== status) {
         status = vm.status;
+        // A device that serves one room at a time is held while the room is on.
+        if (status === 'starting' || status === 'on') this.shared.acquire(room.roomId, room.signed.manifest.roomName);
+        else if (status === 'off') this.shared.release(room.roomId);
         this.emit({ at: at(), type: 'room.status', roomId: room.roomId, data: { status } });
         if (status === 'fault')
           this.emit({
