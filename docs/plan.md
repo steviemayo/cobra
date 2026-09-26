@@ -372,7 +372,16 @@ I have never opened these while signed in. Use a test org and click through, and
 
 ## Next build steps (after the panel redesign, room groups, staff portal and providers)
 
-Written 2026-09-26. Everything above this line is set-up and verification for what was built in phases 0 to 7. This section is what to build next. Nothing here has been started unless it says so.
+Written 2026-09-26. Everything above this line is set-up and verification for what was built in phases 0 to 7. This section is what to build next.
+
+**Status at the end of 2026-09-26:** B, C, D (part 1), E, F, G, H, I, J and K are built and merged to `dev` (each step below says what was and was not done; every decision made along the way is in `docs/decisions.md`). What is left:
+
+- **A**: the browser pass. Yours: nothing built this round has been clicked through signed in, or run on real hardware
+- **Before the release PR `dev` to `main`**: apply the two migrations added this round with `pnpm --filter @kestrel/db exec prisma migrate deploy` (`20260926120000_divider_actions`, `20260926140000_org_retention`). They were not applied by the build. Then set `STAFF_TICKET_EMAIL` (and `RESEND_API_KEY`, `ALERT_FROM_EMAIL` once the sending domain exists) if you want email
+- **D part 2**: after `main` is live, a migration dropping the `RoomCombination` table
+- **L**: needs your decision on who pays (the provider, the customer, or per customer)
+- **M**: WSS push needs a host that can hold connections (Vercel functions cannot), Stripe Connect needs a Stripe account and payout rules, third-party drivers and sandboxed hooks each need a security design first
+- Left out on purpose in F: camera auto-tracking and a separate recorder page. Left out in K: notifications as a target nears, per-organisation targets, business hours
 
 ### How to start any of these (read first, in this order)
 
