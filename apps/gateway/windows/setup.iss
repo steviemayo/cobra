@@ -59,7 +59,7 @@ begin
   ConnectPage.Add('Enrolment token (optional):', False);
   ConnectPage.Values[0] := '{#CloudUrlDefault}';
 
-  ModePage := CreateInputOptionWizardPage(ConnectPage.ID,
+  ModePage := CreateInputOptionPage(ConnectPage.ID,
     'How should it run?', 'Choose how the gateway starts and keeps running',
     'Either way it restarts on its own if it stops, and keeps running until you stop it.',
     True, False);
