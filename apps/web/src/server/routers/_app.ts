@@ -21,6 +21,7 @@ import { memberRouter } from './member';
 import { monitoringRouter } from './monitoring';
 import { orgRouter } from './org';
 import { releaseRouter } from './release';
+import { reportRouter } from './report';
 import { roomRouter } from './room';
 import { siteRouter } from './site';
 import { templateRouter } from './template';
@@ -55,5 +56,6 @@ export const appRouter = router({
   bulk: bulkRouter,
   siteDevice: siteDeviceRouter,
   usage: usageRouter,
+  report: reportRouter,
 });
 export type AppRouter = typeof appRouter;

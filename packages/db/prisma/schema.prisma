@@ -45,6 +45,7 @@ model Org {
   rooms               Room[]
   audit               AuditLog[]
   retention           OrgRetention?
+  reportSchedule      ReportSchedule?
   drafts              RoomDraft[]
   draftVersions       RoomDraftVersion[]
   templates           Template[]
@@ -264,6 +265,21 @@ model OrgRetention {
   auditDays Int      @default(365)
   updatedBy String?  @db.Uuid
   updatedAt DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// A monthly usage and reliability report emailed to these addresses on the first days of each month.
+// No row means no schedule. `lastSentMonth` ("2026-09") stops a month being sent twice.
+model ReportSchedule {
+  orgId         String   @id @db.Uuid
+  enabled       Boolean  @default(true)
+  recipients    String[] @default([])
+  /// IANA time zone the month is read in.
+  timezone      String   @default("UTC")
+  lastSentMonth String?
+  updatedBy     String?  @db.Uuid
+  updatedAt     DateTime @updatedAt
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
