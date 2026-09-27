@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import Stripe from 'stripe';
 import { db } from '@kestrel/db';
 import { PAID_PLANS } from '@kestrel/model';
 import { writeAudit } from '../audit';
@@ -20,6 +21,11 @@ function asTrpc(e: unknown): never {
     throw new TRPCError({ code: 'PRECONDITION_FAILED', message: e.message });
   if (e instanceof TRPCError) throw e;
   console.error('[billing]', e);
+  // Stripe's own error messages are written to be shown to a user (e.g. "No such price: ..."),
+  // unlike a raw exception, so they're safe to pass through instead of a generic fallback.
+  if (e instanceof Stripe.errors.StripeError) {
+    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Stripe: ${e.message}` });
+  }
   throw new TRPCError({
     code: 'INTERNAL_SERVER_ERROR',
     message: 'Stripe could not complete that. Try again shortly',
