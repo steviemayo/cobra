@@ -17,6 +17,8 @@ export const commandRouter = router({
         roomId: z.string().uuid(),
         type: z.enum(COMMAND_TYPES),
         deviceId: z.string().max(100).optional(),
+        /** For finding devices: one network the gateway is on, like 192.168.1. */
+        subnet: z.string().max(20).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -25,7 +27,10 @@ export const commandRouter = router({
         orgId: ctx.orgId,
         roomId: input.roomId,
         type: input.type,
-        args: input.deviceId ? { deviceId: input.deviceId } : {},
+        args: {
+          ...(input.deviceId ? { deviceId: input.deviceId } : {}),
+          ...(input.subnet ? { subnet: input.subnet } : {}),
+        },
         requestedBy: ctx.user.id,
       });
       if (!res.ok) throw new TRPCError({ code: 'BAD_REQUEST', message: res.error });

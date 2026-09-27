@@ -1,12 +1,13 @@
 'use client';
 import Link from 'next/link';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Cpu } from 'lucide-react';
+import { Cpu, Search } from 'lucide-react';
 import { DEVICE_CATALOG, type Device } from '@kestrel/model';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer } from '@/components/common/page-header';
 import { orgPath, useOrg } from '@/components/shell/org-context';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -17,6 +18,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useTRPC } from '@/trpc/client';
+import { DiscoverDevicesDialog } from './device-discovery';
+import { useRoom } from './room-shell';
 
 function controlLabel(d: Device): string {
   if (!d.control) return DEVICE_CATALOG[d.category].controllable ? 'Not set' : 'None needed';
@@ -27,12 +30,23 @@ function controlLabel(d: Device): string {
 
 export function RoomDevices({ roomId }: { roomId: string }) {
   const trpc = useTRPC();
-  const { orgId } = useOrg();
+  const { orgId, canSupport } = useOrg();
+  const { room } = useRoom(roomId);
+  const [finding, setFinding] = useState(false);
   const draft = useQuery({ ...trpc.draft.get.queryOptions({ orgId, roomId }), staleTime: 0 });
   const designHref = orgPath(orgId, `/rooms/${roomId}/design`);
 
   return (
     <PageContainer className="pt-5">
+      {canSupport && (
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {!room?.gateway && <span className="text-xs text-muted-foreground">Choose a gateway in settings to look for devices.</span>}
+          <Button variant="outline" size="sm" disabled={!room?.gateway || room.gateway.status !== 'online'} onClick={() => setFinding(true)}>
+            <Search /> Find devices on the network
+          </Button>
+        </div>
+      )}
+      <DiscoverDevicesDialog roomId={roomId} open={finding} onOpenChange={setFinding} />
       {draft.isPending ? (
         <Skeleton className="h-40 w-full" />
       ) : !draft.data || draft.data.model.devices.length === 0 ? (

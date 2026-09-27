@@ -1,5 +1,6 @@
 import { hostname } from 'node:os';
 import { PointAddress, PointType, type CommandResult, type GatewayCommand } from '@kestrel/model';
+import { discoverDevices } from './discovery';
 import type { RoomHost } from './room-host';
 
 export interface GatewayFacts {
@@ -61,6 +62,15 @@ async function execute(host: RoomHost, cmd: GatewayCommand, facts: GatewayFacts)
           gateway: { ...facts, hostname: hostname(), node: process.version },
         },
       };
+    }
+    case 'discover_devices': {
+      // Looks at the gateway's own private networks and reports what answers. Reads only.
+      const subnet = cmd.args.subnet;
+      if (subnet && !/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(subnet)) return fail('That is not a network address');
+      const found = await discoverDevices(subnet ? { subnets: [subnet] } : {});
+      if (found.subnets.length === 0)
+        return fail(subnet ? 'The gateway is not on that network' : 'The gateway is not on a private network it can look at', { ...found });
+      return { id: '', ok: true, output: { ...found } };
     }
     case 'test_device': {
       const device = model.devices.find((d) => d.id === cmd.args.deviceId);
