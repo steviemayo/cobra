@@ -1,5 +1,6 @@
 import { router } from '../trpc';
 import { alertRouter } from './alert';
+import { apikeyRouter } from './apikey';
 import { auditRouter } from './audit';
 import { billingRouter } from './billing';
 import { bindingRouter } from './binding';
@@ -55,6 +56,7 @@ export const appRouter = router({
   binding: bindingRouter,
   bulk: bulkRouter,
   siteDevice: siteDeviceRouter,
+  apikey: apikeyRouter,
   usage: usageRouter,
   report: reportRouter,
 });

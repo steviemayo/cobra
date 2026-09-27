@@ -156,6 +156,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `added alert channel “${s(meta.name)}” (${s(meta.type)})`;
     case 'alert_channel.update':
       return `changed alert channel “${s(meta.name)}”`;
+    case 'apikey.create':
+      return `made an API key called “${s(meta.name)}” (${s(meta.prefix)})`;
+    case 'apikey.revoke':
+      return 'revoked an API key';
     case 'alert_channel.rules':
       return `changed the timing of the alert channel “${s(meta.name)}”: ${s(meta.rules)}`;
     case 'alert_channel.delete':
