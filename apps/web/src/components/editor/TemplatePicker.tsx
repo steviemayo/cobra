@@ -2,17 +2,21 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import type { RoomType } from '@kestrel/model';
 import { useTRPC } from '@/trpc/client';
+import { MonitoredNotice } from './MonitoredNotice';
 import { btnCls, ghostBtnCls } from './ui';
 
 export function TemplatePicker({
   orgId,
   roomId,
   roomType,
+  monitoredOnly = false,
   onCreated,
 }: {
   orgId: string;
   roomId: string;
   roomType: RoomType;
+  /** The plan has no control: no templates (they carry routing and activities), just a list of devices. */
+  monitoredOnly?: boolean;
   onCreated: () => void;
 }) {
   const trpc = useTRPC();
@@ -22,6 +26,23 @@ export function TemplatePicker({
   const start = (templateId?: string) => init.mutate({ orgId, roomId, templateId });
   const starters = templates.data?.starters.filter((t) => t.roomType === roomType) ?? [];
   const own = templates.data?.org.filter((t) => t.roomType === roomType) ?? [];
+
+  if (monitoredOnly)
+    return (
+      <div className="space-y-4">
+        <MonitoredNotice />
+        <div>
+          <h2 className="text-lg font-medium">Add the devices to watch</h2>
+          <p className="text-sm text-muted-foreground">
+            Start with an empty list, then add each device and its address.
+          </p>
+        </div>
+        {init.error && <p className="text-sm text-destructive">{init.error.message}</p>}
+        <button className={btnCls} disabled={init.isPending} onClick={() => start()}>
+          Start with a list of devices
+        </button>
+      </div>
+    );
 
   return (
     <div className="space-y-6">

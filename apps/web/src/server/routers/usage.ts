@@ -7,7 +7,7 @@ import { loadUsageReport, validTimeZone } from '../usage-analytics';
 
 // Usage and occupancy reports, from the telemetry the gateways send. Part of monitoring.
 export const usageRouter = router({
-  report: featureProcedure('monitoring')
+  report: featureProcedure('analytics')
     .meta(SITE_SCOPED)
     .input(
       z.object({

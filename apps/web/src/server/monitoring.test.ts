@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { RoomReport } from '@kestrel/model';
 import {
   DEVICE_GRACE_MS,
@@ -35,6 +35,7 @@ function world() {
     { id: 'b1', orgId: ORG, plan: 'pro', status: 'active', trialEndsAt: T0 },
   ]);
   const org = table([{ id: ORG, createdAt: T0 }]);
+  const orgLicenseOverride = table([]);
   const db = {
     room,
     deviceStatus,
@@ -43,8 +44,18 @@ function world() {
     remoteCommand,
     orgBilling,
     org,
+    orgLicenseOverride,
   } as unknown as MonitoringDb;
-  return { db, room, deviceStatus, incident, gateway, remoteCommand, orgBilling };
+  return {
+    db,
+    room,
+    deviceStatus,
+    incident,
+    gateway,
+    remoteCommand,
+    orgBilling,
+    orgLicenseOverride,
+  };
 }
 
 const report = (
@@ -73,12 +84,129 @@ describe('device status and incidents', () => {
     expect(w.incident.rows).toHaveLength(0);
   });
 
+  it('stores whatever the driver reported back, and keeps it when a later heartbeat leaves it out', async () => {
+    const w = world();
+    await recordReports(
+      w.db,
+      { id: GW, orgId: ORG },
+      [
+        report({
+          devices: [
+            { deviceId: 'dsp', name: 'DSP', online: true, feedback: { power: 'on', muted: false } },
+          ],
+        }),
+      ],
+      T0,
+    );
+    expect(w.deviceStatus.rows[0]).toMatchObject({ feedback: { power: 'on', muted: false } });
+    // Same reading again: no pointless write.
+    const update = vi.spyOn(w.deviceStatus, 'update');
+    await recordReports(
+      w.db,
+      { id: GW, orgId: ORG },
+      [
+        report({
+          devices: [
+            { deviceId: 'dsp', name: 'DSP', online: true, feedback: { power: 'on', muted: false } },
+          ],
+        }),
+      ],
+      at(1000),
+    );
+    expect(update).not.toHaveBeenCalled();
+    // A heartbeat that says nothing about it (a momentary hiccup) keeps the last known reading.
+    await recordReports(
+      w.db,
+      { id: GW, orgId: ORG },
+      [report({ devices: [{ deviceId: 'dsp', name: 'DSP', online: true }] })],
+      at(2000),
+    );
+    expect(w.deviceStatus.rows[0]).toMatchObject({ feedback: { power: 'on', muted: false } });
+    // A changed reading is written.
+    await recordReports(
+      w.db,
+      { id: GW, orgId: ORG },
+      [
+        report({
+          devices: [{ deviceId: 'dsp', name: 'DSP', online: true, feedback: { power: 'off' } }],
+        }),
+      ],
+      at(3000),
+    );
+    expect(w.deviceStatus.rows[0]).toMatchObject({ feedback: { power: 'off' } });
+  });
+
+  describe('watched points', () => {
+    const gw = { id: GW, orgId: ORG };
+    const watched = (ok: boolean, over: object = {}) => ({
+      pointId: 'mut',
+      name: 'Mic mute',
+      ok,
+      ...(ok ? {} : { message: 'Mic mute is on, expected off' }),
+      severity: 'critical' as const,
+      ...over,
+    });
+    const withWatch = (w: ReturnType<typeof watched>[] | undefined, online = true) =>
+      report({
+        devices: [
+          { deviceId: 'dsp', name: 'DSP', online, ...(w ? { watched: w } : {}) },
+          { deviceId: 'display', name: 'Display', online: true },
+        ],
+      });
+
+    it('raises an incident with the severity of the watch, and resolves it when the value is fine again', async () => {
+      const w = world();
+      const jobs = await recordReports(w.db, gw, [withWatch([watched(false)])], T0);
+      expect(jobs).toEqual([{ incidentId: expect.any(String), event: 'opened' }]);
+      expect(w.incident.rows[0]).toMatchObject({
+        kind: 'point_alert',
+        subject: `${ROOM}:dsp:mut`,
+        severity: 'critical',
+        title: 'DSP: Mic mute',
+        status: 'open',
+      });
+      expect(w.incident.rows[0]!.detail).toContain('Mic mute is on, expected off');
+      // Still wrong: the same incident, no second alert.
+      expect(await recordReports(w.db, gw, [withWatch([watched(false)])], at(1000))).toEqual([]);
+      expect(w.incident.rows).toHaveLength(1);
+      const back = await recordReports(w.db, gw, [withWatch([watched(true)])], at(2000));
+      expect(back[0]!.event).toBe('resolved');
+      expect(w.incident.rows[0]!.status).toBe('resolved');
+    });
+
+    it('closes the incident when the watch is taken off the point', async () => {
+      const w = world();
+      await recordReports(w.db, gw, [withWatch([watched(false)])], T0);
+      const jobs = await recordReports(w.db, gw, [withWatch(undefined)], at(1000));
+      expect(jobs[0]!.event).toBe('resolved');
+    });
+
+    it('leaves the incident open while the device is offline, because nothing can be read', async () => {
+      const w = world();
+      await recordReports(w.db, gw, [withWatch([watched(false)])], T0);
+      expect(await recordReports(w.db, gw, [withWatch(undefined, false)], at(1000))).toEqual([]);
+      expect(w.incident.rows[0]!.status).toBe('open');
+    });
+
+    it('never alerts for a staging room', async () => {
+      const w = world();
+      w.room.rows.find((r) => r.id === ROOM)!.kind = 'staging';
+      expect(await recordReports(w.db, gw, [withWatch([watched(false)])], T0)).toEqual([]);
+      expect(w.incident.rows).toHaveLength(0);
+    });
+  });
+
   it('watches a staging room but never raises an incident or an alert for it', async () => {
     const w = world();
     w.room.rows.find((r) => r.id === ROOM)!.kind = 'staging';
     const gw = { id: GW, orgId: ORG };
     await recordReports(w.db, gw, [report({ devices: offline() })], T0);
-    const jobs = await recordReports(w.db, gw, [report({ status: 'fault', error: 'boom', devices: offline() })], at(DEVICE_GRACE_MS));
+    const jobs = await recordReports(
+      w.db,
+      gw,
+      [report({ status: 'fault', error: 'boom', devices: offline() })],
+      at(DEVICE_GRACE_MS),
+    );
     expect(jobs).toEqual([]);
     expect(w.incident.rows).toHaveLength(0);
     // Its devices are still tracked, so the room page can show them.
@@ -289,10 +417,17 @@ describe('sweep', () => {
     expect(back[0]!.event).toBe('resolved');
   });
 
-  it('leaves organisations without monitoring alone', async () => {
+  it('leaves organisations alone when staff have switched monitoring off', async () => {
     const w = world();
     w.gateway.rows.push(gwRow());
-    w.orgBilling.rows[0]!.plan = 'basic';
+    w.orgLicenseOverride.rows.push({
+      id: 'o1',
+      orgId: ORG,
+      monitoring: false,
+      revokedAt: null,
+      expiresAt: null,
+      createdAt: T0,
+    });
     expect(await sweep(w.db, at(60 * 60_000))).toEqual([]);
     expect(w.incident.rows).toHaveLength(0);
   });

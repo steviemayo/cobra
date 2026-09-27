@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { DoorOpen, MoreHorizontal, PencilRuler, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useBilling } from '@/components/common/plan-gate';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { NavTabs } from '@/components/common/nav-tabs';
@@ -36,6 +37,8 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
   const router = useRouter();
   const pathname = usePathname();
   const { orgId, canEdit, canSupport } = useOrg();
+  // Without control (Basic, an ended trial) the simulator and control tabs stay visible but locked.
+  const control = useBilling().data?.entitlements.control ?? true;
   const { room, isPending } = useRoom(roomId);
   const onDesign = pathname.endsWith('/design') || pathname.endsWith('/simulate');
   const shellWidth = onDesign ? 'max-w-none' : 'max-w-6xl';
@@ -153,13 +156,13 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
               ? [
                   { label: 'Overview', href: base, exact: true },
                   { label: 'Design', href: `${base}/design` },
-                  { label: 'Simulate', href: `${base}/simulate` },
+                  { label: 'Simulate', href: `${base}/simulate`, locked: !control },
                   { label: 'Devices', href: `${base}/devices` },
                   { label: 'Deployments', href: `${base}/deployments` },
                   { label: 'Commissioning', href: `${base}/commissioning` },
                 ]
               : []),
-            { label: 'Control', href: `${base}/control` },
+            { label: 'Control', href: `${base}/control`, locked: !control },
             { label: 'Monitoring', href: `${base}/monitoring` },
             ...(canEdit ? [{ label: 'Settings', href: `${base}/settings` }] : []),
           ]}

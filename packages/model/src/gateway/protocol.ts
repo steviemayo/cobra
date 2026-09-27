@@ -5,6 +5,7 @@ import { TransitionAction } from '../room/groups';
 import { RoomModel } from '../room/room-model';
 import { Meetings, RoomMeetings } from '../schedule';
 import { PanelIntent, PanelViewModel, RoomStatus } from '../runtime/panel';
+import { PowerState } from '../runtime/device';
 
 // Gateway <-> cloud protocol, version 1. The gateway only ever makes outbound HTTPS requests.
 export const PROTOCOL_VERSION = 1;
@@ -182,6 +183,52 @@ export const CommandResult = z.object({
 });
 export type CommandResult = z.infer<typeof CommandResult>;
 
+/**
+ * Whatever a device's own driver reports back, whether or not the room has control: power state,
+ * the input it is on, mute, volume and so on. A field the driver has no answer for is left out, and
+ * a device that answers nothing at all gets no `feedback` on its report.
+ */
+export const DeviceFeedback = z.object({
+  power: PowerState.optional(),
+  /** For a destination device: the name of the port it is currently on. */
+  input: z.string().max(80).optional(),
+  muted: z.boolean().optional(),
+  /** 0 to 100. */
+  volume: z.number().min(0).max(100).optional(),
+  /** Displays: is the picture blanked. */
+  blanked: z.boolean().optional(),
+  recording: z.boolean().optional(),
+  occupied: z.boolean().optional(),
+  /** AVoIP decoders: is it receiving the stream it was pointed at. */
+  streamConnected: z.boolean().optional(),
+  activeApp: z.string().max(200).optional(),
+});
+export type DeviceFeedback = z.infer<typeof DeviceFeedback>;
+/** The fields of `DeviceFeedback`, for code that walks them generically (change detection, history). */
+export const DEVICE_FEEDBACK_FIELDS = [
+  'power',
+  'input',
+  'muted',
+  'volume',
+  'blanked',
+  'recording',
+  'occupied',
+  'streamConnected',
+  'activeApp',
+] as const satisfies readonly (keyof DeviceFeedback)[];
+export type DeviceFeedbackField = (typeof DEVICE_FEEDBACK_FIELDS)[number];
+
+/** One watched control point and whether its reading is in bounds. Points with no reading yet are left out. */
+export const WatchedPoint = z.object({
+  pointId: z.string().min(1).max(100),
+  name: z.string().max(200),
+  ok: z.boolean(),
+  /** In plain words, when it is not ok. */
+  message: z.string().max(300).optional(),
+  severity: z.enum(['info', 'warning', 'critical']).default('warning'),
+});
+export type WatchedPoint = z.infer<typeof WatchedPoint>;
+
 export const DeviceReport = z.object({
   deviceId: z.string().min(1).max(100),
   name: z.string().max(200),
@@ -190,6 +237,10 @@ export const DeviceReport = z.object({
   driver: z.string().max(100).optional(),
   /** The firmware version the device reported, if its driver can ask. */
   firmware: z.string().max(100).optional(),
+  /** The points this device is watched on. Absent when none are. */
+  watched: z.array(WatchedPoint).max(100).optional(),
+  /** Whatever the driver reports back, control or not. Absent when it has nothing to say. */
+  feedback: DeviceFeedback.optional(),
 });
 export type DeviceReport = z.infer<typeof DeviceReport>;
 
@@ -269,6 +320,11 @@ export const HeartbeatResponse = z.object({
   watch: z.array(z.string().uuid()).default([]),
   /** Something is waiting for this gateway (a webhook): poll once now to collect it. */
   pollNow: z.boolean().default(false),
+  /**
+   * Whether the organisation's plan includes control. When false the gateway keeps watching devices
+   * but refuses every command, by every route. An older cloud that never sends it means control.
+   */
+  control: z.boolean().default(true),
   /** The release channel this gateway follows, and the newest version on it, when the cloud knows. */
   update: z
     .object({ channel: z.enum(['stable', 'beta']), latest: z.string().max(50).nullable() })
@@ -355,6 +411,8 @@ export const TelemetryEvent = z.object({
     'device.fault',
     'device.offline',
     'device.online',
+    /** A feedback field changed (see DeviceFeedback): logged for history and usage reports, control or not. */
+    'device.feedback',
     'command.finished',
     'gateway.started',
     'manifest.rejected',

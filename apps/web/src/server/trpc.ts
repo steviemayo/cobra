@@ -150,6 +150,9 @@ export const featureProcedure = (feature: Feature) =>
     return next();
   });
 
+/** An org procedure for anything that deploys or controls a room: Pro, and a running trial. */
+export const controlProcedure = featureProcedure('control');
+
 /**
  * Kestrel staff, signed in but with no second factor check yet. Used by the staff shell to decide
  * where to send someone. Not scoped to an organisation. Anyone else gets FORBIDDEN.

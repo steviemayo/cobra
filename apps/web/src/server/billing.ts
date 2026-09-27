@@ -74,6 +74,13 @@ export function planRequired(feature: Feature): string {
   return `${PLAN_REQUIRED}:${feature}`;
 }
 
+/** What to tell someone who cannot add a room: an ended trial adds none, a limit says what it is. */
+export function roomLimitMessage(e: Entitlements): string {
+  return e.maxRooms === 0
+    ? 'Your trial has ended, so no new rooms can be added. Subscribe to add more.'
+    : `Your plan includes ${e.maxRooms} rooms. Subscribe to add more.`;
+}
+
 /** Whether another room may be added, given how many the organisation has. */
 export function canAddRoom(e: Entitlements, currentRooms: number): boolean {
   return e.maxRooms === null || currentRooms < e.maxRooms;

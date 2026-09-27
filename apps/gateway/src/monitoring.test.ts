@@ -160,6 +160,88 @@ describe('device monitoring', () => {
     projector.close();
   });
 
+  it('reports what the driver knows back (power, input, ...) whether or not the room has control', async () => {
+    const projector = class2Projector('3.1.0');
+    const port = await listen(projector);
+    const model = modelWithProjector(port);
+    cloud.assign(ROOM, model);
+    const { gateway, host } = boot();
+    gateway.start();
+    await until(() => host.ids().includes(ROOM));
+    await until(
+      () =>
+        host.reports()[0]!.devices.find((d) => d.deviceId === 'display1')?.feedback !== undefined,
+    );
+    // Off, with the shutter reported as not down: this projector is never asked to change anything.
+    expect(host.reports()[0]!.devices.find((d) => d.deviceId === 'display1')?.feedback).toEqual({
+      power: 'off',
+      blanked: false,
+    });
+    await gateway.tick();
+    expect(
+      cloud.heartbeats.at(-1)!.rooms[0]!.devices.find((d) => d.deviceId === 'display1')?.feedback,
+    ).toEqual({ power: 'off', blanked: false });
+    // Withholding control (Basic, an ended trial) does not stop this: feedback is a read, not a command.
+    host.setControl(false);
+    await gateway.tick();
+    expect(
+      cloud.heartbeats.at(-1)!.rooms[0]!.devices.find((d) => d.deviceId === 'display1')?.feedback,
+    ).toEqual({ power: 'off', blanked: false });
+    projector.close();
+  });
+
+  it('reports how each watched point reads, and leaves out points nobody watches', async () => {
+    const m = structuredClone(STARTER_TEMPLATES[0]!.model);
+    for (const d of m.devices) delete d.control;
+    const dsp = m.devices.find((d) => d.id === 'dsp')!;
+    dsp.points = [
+      {
+        id: 'mut',
+        name: 'Mic mute',
+        type: 'mute',
+        address: {},
+        watch: { expect: false, severity: 'critical' },
+      },
+      {
+        id: 'lvl',
+        name: 'Level',
+        type: 'level',
+        address: {},
+        watch: { min: 20, severity: 'warning' },
+      },
+      { id: 'plain', name: 'Not watched', type: 'mute', address: {} },
+    ];
+    cloud.assign(ROOM, m);
+    const { gateway, host } = boot();
+    gateway.start();
+    await until(() => host.ids().includes(ROOM));
+    const bus = host.get(ROOM)!.bus;
+    const watched = () => host.reports()[0]!.devices.find((d) => d.deviceId === 'dsp')?.watched;
+
+    await bus.send('dsp', { type: 'point', pointId: 'mut', value: true });
+    await bus.send('dsp', { type: 'point', pointId: 'plain', value: true });
+    expect(watched()).toEqual([
+      {
+        pointId: 'mut',
+        name: 'Mic mute',
+        ok: false,
+        message: 'Mic mute is on, expected off',
+        severity: 'critical',
+      },
+      { pointId: 'lvl', name: 'Level', ok: true, severity: 'warning' },
+    ]);
+
+    await bus.send('dsp', { type: 'point', pointId: 'mut', value: false });
+    expect(watched()).toEqual([
+      { pointId: 'mut', name: 'Mic mute', ok: true, severity: 'critical' },
+      { pointId: 'lvl', name: 'Level', ok: true, severity: 'warning' },
+    ]);
+    await gateway.tick();
+    expect(
+      cloud.heartbeats.at(-1)!.rooms[0]!.devices.find((d) => d.deviceId === 'dsp')?.watched,
+    ).toHaveLength(2);
+  });
+
   it('reports a device that stops answering, sends an event with when it happened, and then a recovery', async () => {
     const port = await listen(device!);
     cloud.assign(ROOM, modelWithDsp(port));

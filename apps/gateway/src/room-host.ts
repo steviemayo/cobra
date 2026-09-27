@@ -6,12 +6,22 @@ import {
   createDriver,
   type DeviceDriver,
 } from '@kestrel/drivers/real';
-import { applyBindings } from '@kestrel/model';
+import {
+  DEVICE_FEEDBACK_FIELDS,
+  applyBindings,
+  checkWatch,
+  type DeviceFeedback,
+  type DeviceFeedbackField,
+} from '@kestrel/model';
 import type {
   DeviceBus,
+  DeviceCommand,
+  DeviceEvent,
+  DeviceState,
   DeviceValues,
   PanelAccess,
   PanelBranding,
+  Port,
   RoomReport,
   SignedManifest,
   TelemetryEvent,
@@ -19,6 +29,46 @@ import type {
 import type { Logger } from './log';
 import { occupancyTracker } from './occupancy';
 import { SharedDevices } from './shared-devices';
+
+/** Why a command was refused when the plan does not include control. */
+export const CONTROL_NOT_LICENSED = 'Control is not included in this organisation’s plan';
+
+/**
+ * A room's bus with every command refused while control is off. Feedback, health and reads still
+ * flow, so the room keeps being watched. Every route that acts on a device (panel, portal, trigger,
+ * schedule, webhook) ends in `send`, so this is the one place that has to hold.
+ */
+export class ControlGate implements DeviceBus {
+  readonly readPoint?: DeviceBus['readPoint'];
+
+  constructor(
+    private readonly inner: DeviceBus,
+    private readonly allowed: () => boolean,
+  ) {
+    this.readPoint = inner.readPoint?.bind(inner);
+  }
+
+  send(deviceId: string, command: DeviceCommand): Promise<void> {
+    if (!this.allowed()) return Promise.reject(new Error(CONTROL_NOT_LICENSED));
+    return this.inner.send(deviceId, command);
+  }
+
+  getState(deviceId: string): DeviceState | undefined {
+    return this.inner.getState(deviceId);
+  }
+
+  subscribe(listener: (event: DeviceEvent) => void): () => void {
+    return this.inner.subscribe(listener);
+  }
+
+  quickActions(deviceId: string) {
+    return this.inner.quickActions?.(deviceId) ?? [];
+  }
+
+  features(deviceId: string) {
+    return this.inner.features?.(deviceId) ?? [];
+  }
+}
 
 export type SimulateMode = 'off' | 'all' | 'missing';
 
@@ -62,6 +112,42 @@ export function withBindings(signed: SignedManifest, bindings?: RoomBindings): S
     ...signed,
     manifest: { ...manifest, model: applyBindings(manifest.model, bindings.devices) },
   };
+}
+
+/**
+ * Which feedback fields changed between two readings, and their new values. Compares only the
+ * fields `DeviceFeedback` knows about, in a fixed order, so callers get a stable, small diff rather
+ * than every field the object happens to carry.
+ */
+export function feedbackChanges(
+  prev: DeviceFeedback,
+  next: DeviceFeedback,
+): [DeviceFeedbackField, DeviceFeedback[DeviceFeedbackField]][] {
+  return DEVICE_FEEDBACK_FIELDS.flatMap((field) =>
+    next[field] !== undefined && next[field] !== prev[field] ? [[field, next[field]] as const] : [],
+  );
+}
+
+/**
+ * Whatever the driver reports back for one device, in the shape the cloud stores: an input's port
+ * id resolved to its name, and every other field carried over as is. Control or not, since none of
+ * this is a command — it is what `reports()` sends up alongside `online`.
+ */
+export function deviceFeedback(state: DeviceState | undefined, ports: Port[]): DeviceFeedback {
+  const feedback: DeviceFeedback = {};
+  if (state?.power) feedback.power = state.power;
+  if (state?.selectedInput) {
+    const port = ports.find((p) => p.id === state.selectedInput);
+    if (port) feedback.input = port.name;
+  }
+  if (state?.muted !== undefined) feedback.muted = state.muted;
+  if (state?.volume !== undefined) feedback.volume = state.volume;
+  if (state?.blanked !== undefined) feedback.blanked = state.blanked;
+  if (state?.recording !== undefined) feedback.recording = state.recording;
+  if (state?.occupied !== undefined) feedback.occupied = state.occupied;
+  if (state?.streamConnected !== undefined) feedback.streamConnected = state.streamConnected;
+  if (state?.activeApp !== undefined) feedback.activeApp = state.activeApp;
+  return feedback;
 }
 
 /** Real drivers where the room configures them; simulated devices fill the gaps if allowed. */
@@ -120,6 +206,7 @@ export class RoomHost {
   private readonly activeListeners = new Set<() => void>();
   /** One connection per shared site device, whatever number of rooms use it. */
   readonly shared: SharedDevices;
+  private controlOn = true;
 
   constructor(
     private readonly mode: SimulateMode,
@@ -127,6 +214,17 @@ export class RoomHost {
     private readonly emit: (event: TelemetryEvent) => void,
   ) {
     this.shared = new SharedDevices(log);
+  }
+
+  /** Whether commands are accepted. The cloud says so on every heartbeat, from the organisation's plan. */
+  get control(): boolean {
+    return this.controlOn;
+  }
+
+  setControl(on: boolean) {
+    if (on === this.controlOn) return;
+    this.controlOn = on;
+    this.log('info', on ? 'Control switched on' : 'Control switched off: commands are refused');
   }
 
   get(roomId: string): LoadedRoom | undefined {
@@ -187,7 +285,7 @@ export class RoomHost {
     const runtime = new RoomRuntime({
       model: running.manifest.model,
       roomName: manifest.roomName,
-      bus: built.bus,
+      bus: new ControlGate(built.bus, () => this.controlOn),
       onDivider: (dividerId, open) => this.dividerListener?.(dividerId, open),
     });
     const scheduler = new TriggerScheduler(manifest.model, { fire: (t) => runtime.fire(t.run) });
@@ -270,12 +368,34 @@ export class RoomHost {
             : d.control?.kind === 'generic'
               ? d.control.protocol
               : undefined;
+        // Watched points that have been read. A device that is offline has no reading worth judging.
+        const watched =
+          (state?.online ?? true)
+            ? (d.points ?? []).flatMap((p) => {
+                const value = p.watch ? state?.points[p.id] : undefined;
+                if (!p.watch || value === undefined) return [];
+                const result = checkWatch(p.name, p.watch, value);
+                return [
+                  {
+                    pointId: p.id,
+                    name: p.name,
+                    ok: result.ok,
+                    ...(result.ok ? {} : { message: result.message }),
+                    severity: p.watch.severity,
+                  },
+                ];
+              })
+            : [];
+        // Everything the driver reports back, monitored room or not: this never touches control.
+        const feedback = deviceFeedback(state, d.ports);
         return {
           deviceId: d.id,
           name: d.name,
           online: state?.online ?? true,
           ...(driver && { driver }),
           ...(state?.firmware && { firmware: state.firmware }),
+          ...(watched.length > 0 && { watched }),
+          ...(Object.keys(feedback).length > 0 && { feedback }),
         };
       }),
     }));
@@ -300,18 +420,44 @@ export class RoomHost {
         .map((a) => a.id),
     );
     // Tell the cloud when a device drops off or comes back, with the time it happened.
+    const devices = new Map(room.signed.manifest.model.devices.map((d) => [d.id, d]));
     const names = new Map(room.signed.manifest.model.devices.map((d) => [d.id, d.name]));
     const reachable = new Map<string, boolean>(
       [...names.keys()].map((id) => [id, room.bus.getState(id)?.online ?? true]),
     );
+    // The device's own feedback (power, input, ...), so history and usage reports can be built from
+    // it later — logged the same way whether or not the room has control, since this is a read.
+    const lastFeedback = new Map<string, DeviceFeedback>(
+      [...devices].map(([id, d]) => [id, deviceFeedback(room.bus.getState(id), d.ports)]),
+    );
     // Whether anyone is in the room, for the cloud's usage reports.
     const occupancy = occupancyTracker((occupied, deviceId) =>
-      this.emit({ at: at(), type: 'room.occupancy', roomId: room.roomId, data: { occupied, deviceId } }),
+      this.emit({
+        at: at(),
+        type: 'room.occupancy',
+        roomId: room.roomId,
+        data: { occupied, deviceId },
+      }),
     );
     for (const id of names.keys()) occupancy(id, room.bus.getState(id)?.occupied);
     const stopDevices = room.bus.subscribe(({ deviceId, state }) => {
-      if (names.has(deviceId)) occupancy(deviceId, state.occupied);
-      if (!names.has(deviceId) || reachable.get(deviceId) === state.online) return;
+      const device = devices.get(deviceId);
+      if (!device) return;
+      occupancy(deviceId, state.occupied);
+      // Only while the device answers: it cannot be on an input it isn't there to report.
+      if (state.online) {
+        const feedback = deviceFeedback(state, device.ports);
+        const changes = feedbackChanges(lastFeedback.get(deviceId) ?? {}, feedback);
+        lastFeedback.set(deviceId, feedback);
+        for (const [field, value] of changes)
+          this.emit({
+            at: at(),
+            type: 'device.feedback',
+            roomId: room.roomId,
+            data: { deviceId, name: device.name, field, value },
+          });
+      }
+      if (reachable.get(deviceId) === state.online) return;
       reachable.set(deviceId, state.online);
       this.emit({
         at: at(),

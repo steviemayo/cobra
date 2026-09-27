@@ -45,8 +45,8 @@ export function RequireFeature({
             <>
               {ended
                 ? e.plan === 'lapsed'
-                  ? 'Your subscription has ended, so this has been switched off. Your rooms keep running.'
-                  : 'Your trial has ended, so this has been switched off. Your rooms keep running.'
+                  ? 'Your subscription has ended, so this has been switched off. Your rooms are still monitored.'
+                  : 'Your free trial is over, so this is switched off. Your rooms are still monitored.'
                 : `It’s included in ${plan}.`}{' '}
               {isOwner ? `Choose ${plan} to switch it back on.` : 'Ask an owner to upgrade.'}
             </>
@@ -78,10 +78,10 @@ export function TrialBanner() {
     <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-warning/10 px-4 py-2 text-sm">
       <span>
         {ending
-          ? `Your trial ends in ${e.trialDaysLeft} ${e.trialDaysLeft === 1 ? 'day' : 'days'}. After that, monitoring switches off; your rooms keep running.`
+          ? `Your trial ends in ${e.trialDaysLeft} ${e.trialDaysLeft === 1 ? 'day' : 'days'}. After that, control, alerts and reports switch off; your rooms are still monitored.`
           : e.plan === 'lapsed'
-            ? 'Your subscription has ended. Monitoring is off; your rooms keep running.'
-            : 'Your trial has ended. Monitoring is off; your rooms keep running.'}
+            ? 'Your subscription has ended. You are on Basic: control is off; your rooms are still monitored.'
+            : 'Your trial has ended. Control, alerts and reports are off; your rooms are still monitored.'}
       </span>
       {isOwner && (
         <Link

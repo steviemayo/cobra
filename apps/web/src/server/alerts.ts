@@ -3,7 +3,9 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { z } from 'zod';
 import type { PrismaClient } from '@kestrel/db';
+import { alertChannelAllowed } from '@kestrel/model';
 import { ChannelRules, dueNow, hasRules } from './alert-rules';
+import { getEntitlements, type EntitlementDb } from './billing';
 import { SEVERITY_RANK, type AlertJob, type Severity } from './monitoring';
 
 export type AlertDb = Pick<PrismaClient, 'alertChannel' | 'alertDelivery' | 'incident' | 'room'>;
@@ -118,8 +120,19 @@ export interface Senders {
   fetch: typeof fetch;
   resolve: Lookup;
   env: Record<string, string | undefined>;
+  /** Whether the organisation's plan lets this kind of channel send. Absent means anything goes. */
+  allowed?: (db: AlertDb, orgId: string, type: string) => Promise<boolean>;
 }
-const realSenders = (): Senders => ({ fetch, resolve: resolveAll, env: process.env });
+const realSenders = (): Senders => ({
+  fetch,
+  resolve: resolveAll,
+  env: process.env,
+  // The real client carries the billing tables; AlertDb only names the ones alerts need.
+  allowed: async (db, orgId, type) =>
+    alertChannelAllowed(await getEntitlements(db as unknown as EntitlementDb, orgId), type),
+});
+
+export const CHANNEL_NOT_IN_PLAN = 'Your plan does not include this kind of alert channel';
 
 const headline = (m: AlertMessage) =>
   m.event === 'resolved'
@@ -127,8 +140,8 @@ const headline = (m: AlertMessage) =>
     : m.event === 'reminder'
       ? `Reminder, still open: ${m.incident.title}`
       : m.event === 'test'
-      ? `Test alert: ${m.incident.title}`
-      : m.incident.title;
+        ? `Test alert: ${m.incident.title}`
+        : m.incident.title;
 
 async function post(
   s: Senders,
@@ -290,6 +303,10 @@ export async function deliverToChannel(
       return { status: 'suppressed' };
     }
   }
+  if (s.allowed && !(await s.allowed(db, channel.orgId, channel.type))) {
+    await record('skipped', CHANNEL_NOT_IN_PLAN);
+    return { status: 'skipped', error: CHANNEL_NOT_IN_PLAN };
+  }
   const config = parseChannel(channel);
   if (!config) {
     await record('failed', 'This channel’s settings are invalid');
@@ -320,7 +337,9 @@ export function portalLink(
 
 /** A channel's timing rules, if it has any. */
 export function channelRules(ch: { config: unknown }): ChannelRules | null {
-  const parsed = ChannelRules.optional().safeParse((ch.config as { rules?: unknown } | null)?.rules);
+  const parsed = ChannelRules.optional().safeParse(
+    (ch.config as { rules?: unknown } | null)?.rules,
+  );
   return parsed.success && hasRules(parsed.data) ? parsed.data : null;
 }
 
@@ -336,7 +355,10 @@ async function buildMessage(
   let room: string | null = null;
   if (incident.roomId) {
     if (!roomNames.has(incident.roomId))
-      roomNames.set(incident.roomId, (await db.room.findFirst({ where: { id: incident.roomId } }))?.name ?? null);
+      roomNames.set(
+        incident.roomId,
+        (await db.room.findFirst({ where: { id: incident.roomId } }))?.name ?? null,
+      );
     room = roomNames.get(incident.roomId) ?? null;
   }
   return {
@@ -390,7 +412,12 @@ export async function deliverAlerts(
         if (rules && job.event === 'resolved') {
           // Only say it is fixed to a channel that was told about it.
           const told = await db.alertDelivery.count({
-            where: { channelId: ch.id, incidentId: incident.id, status: 'sent', event: { in: ['opened', 'reminder'] } },
+            where: {
+              channelId: ch.id,
+              incidentId: incident.id,
+              status: 'sent',
+              event: { in: ['opened', 'reminder'] },
+            },
           });
           if (told === 0) continue;
         }
@@ -430,7 +457,11 @@ export async function deliverDue(
       if (ch.orgId !== incident.orgId || !reaches(incident, ch)) continue;
       try {
         const history = await db.alertDelivery.findMany({
-          where: { channelId: ch.id, incidentId: incident.id, event: { in: ['opened', 'reminder'] } },
+          where: {
+            channelId: ch.id,
+            incidentId: incident.id,
+            event: { in: ['opened', 'reminder'] },
+          },
         });
         const failed = history.filter((d) => d.status !== 'sent');
         const lastTry = failed.length ? Math.max(...failed.map((d) => d.at.getTime())) : 0;
@@ -439,7 +470,9 @@ export async function deliverDue(
           rules,
           openedAt: incident.openedAt,
           acknowledged: incident.acknowledgedAt !== null,
-          sent: history.filter((d) => d.status === 'sent').map((d) => ({ event: d.event, at: d.at })),
+          sent: history
+            .filter((d) => d.status === 'sent')
+            .map((d) => ({ event: d.event, at: d.at })),
           now,
         });
         if (!due) continue;

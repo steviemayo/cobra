@@ -10,3 +10,4 @@ export * from './staff';
 export * from './msp';
 export * from './sla';
 export * from './schedule';
+export * from './signup';

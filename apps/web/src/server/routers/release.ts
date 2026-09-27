@@ -129,7 +129,8 @@ export const releaseRouter = router({
     }),
 
   // Freeze the current design as an immutable, signed release. With `deploy` it also starts running
-  // on the room's gateway straight away; otherwise it waits to be deployed.
+  // on the room's gateway straight away; otherwise it waits to be deployed. Open to every plan: a
+  // monitored room reaches its gateway this way too, and the gateway refuses commands without control.
   publish: orgProcedure
     .input(z.object({ orgId, roomId, deploy: z.boolean().default(false) }))
     .mutation(async ({ ctx, input }) => {

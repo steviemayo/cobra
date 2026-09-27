@@ -233,8 +233,10 @@ export async function heartbeat(
   await promoteDue(db, gw.id, now);
   const list = await assignments(db, gw.id);
 
-  // Monitoring is a plan feature: without it the gateway keeps running rooms, but nothing is analysed.
-  const monitored = (await getEntitlements(db, gw.orgId, now)).monitoring;
+  // Monitoring can be forced off by staff: the gateway keeps running rooms, but nothing is analysed.
+  // Control is a plan feature: without it the gateway watches devices but refuses every command.
+  const entitlements = await getEntitlements(db, gw.orgId, now);
+  const monitored = entitlements.monitoring;
   const jobs = monitored ? await recordReports(db, gw, parsed.data.rooms, now) : [];
   await recordDividers(db, gw, parsed.data.dividers);
   await applyCommandResults(db, gw.id, parsed.data.commandResults, now);
@@ -252,6 +254,7 @@ export async function heartbeat(
       commands,
       watch: await watchedRooms(db, gw.id, now),
       pollNow: await hasWaitingIntents(db, gw.id, now),
+      control: entitlements.control,
       update: { channel: gw.channel, latest: latestVersions()[gw.channel] },
       // Only a gateway that says it shows bookings is sent them; an older one has no use for them.
       schedules: parsed.data.features.includes('schedule')

@@ -2,10 +2,19 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, LifeBuoy, PlayCircle, Power, RotateCw, Search, Stethoscope } from 'lucide-react';
+import {
+  ChevronRight,
+  LifeBuoy,
+  PlayCircle,
+  Power,
+  RotateCw,
+  Search,
+  Stethoscope,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
+import { useBilling } from '@/components/common/plan-gate';
 import {
   HealthPill,
   INCIDENT_KIND_LABEL,
@@ -18,7 +27,7 @@ import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
-import { COMMAND_INFO, type CommandType } from '@kestrel/model';
+import { COMMAND_INFO, type CommandType, type DeviceFeedback } from '@kestrel/model';
 import { timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
@@ -26,6 +35,64 @@ import type { RouterOutputs } from '@/trpc/types';
 import { NewTicketDialog } from './tickets';
 
 type Command = RouterOutputs['command']['list'][number];
+
+// Whatever the device's own driver reports back, in a few plain words. Works whether or not the
+// room has control: this is read-only feedback, never a sign that anything can be changed here.
+function feedbackChips(f: DeviceFeedback | null | undefined): string[] {
+  if (!f) return [];
+  const chips: string[] = [];
+  if (f.power) chips.push(f.power === 'on' ? 'On' : f.power === 'off' ? 'Off' : f.power);
+  if (f.input) chips.push(f.input);
+  if (f.muted) chips.push('Muted');
+  if (f.volume !== undefined) chips.push(`Vol ${f.volume}`);
+  if (f.blanked) chips.push('Blanked');
+  if (f.recording) chips.push('Recording');
+  if (f.occupied) chips.push('Occupied');
+  if (f.streamConnected !== undefined)
+    chips.push(f.streamConnected ? 'Stream connected' : 'Stream not connected');
+  if (f.activeApp) chips.push(f.activeApp);
+  return chips;
+}
+
+function minutesLabel(m: number): string {
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  return rest ? `${h}h ${rest}m` : `${h}h`;
+}
+
+/**
+ * How long a feedback field held each value over the last 30 days, from the changes Kestrel has
+ * logged — the same feedback whether the room has control or not. Says nothing while there is
+ * nothing yet to show, rather than an empty "Last 30 days:".
+ */
+function DeviceHistoryLine({
+  orgId,
+  roomId,
+  deviceId,
+  field,
+}: {
+  orgId: string;
+  roomId: string;
+  deviceId: string;
+  field: 'power' | 'input' | 'online';
+}) {
+  const trpc = useTRPC();
+  const history = useQuery({
+    ...trpc.monitoring.deviceHistory.queryOptions({ orgId, roomId, deviceId, field, days: 30 }),
+    staleTime: 5 * 60_000,
+  });
+  const durations = history.data?.durations ?? [];
+  if (durations.length === 0) return null;
+  // "online" reuses the on/off wording durationsByValue gives any boolean; say what it means here.
+  const show = (v: string) => (field === 'online' ? (v === 'on' ? 'Online' : 'Offline') : v);
+  return (
+    <span className="text-xs text-muted-foreground">
+      Last 30 days: {durations.map((d) => `${show(d.value)} ${minutesLabel(d.minutes)}`).join(', ')}
+      {history.data?.truncated && ' (partial)'}
+    </span>
+  );
+}
 
 function Section({
   title,
@@ -168,6 +235,8 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
       q.state.data?.some((c) => c.status === 'pending' || c.status === 'sent') ? 2_000 : 15_000,
   });
 
+  // Ended trial: analytics is off, so no history query gets sent.
+  const analytics = useBilling().data?.entitlements.analytics ?? true;
   const room = overview.data?.rooms.find((r) => r.id === roomId);
   const run = useMutation(
     trpc.command.request.mutationOptions({
@@ -219,30 +288,73 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
         ) : (
           <ul className="divide-y">
             {d.devices.map((dev) => (
-              <li
-                key={dev.deviceId}
-                className="flex items-center justify-between gap-3 px-4 py-2.5"
-              >
-                <span className="inline-flex items-center gap-2.5 text-sm">
-                  <OnlineDot online={dev.online} />
-                  <span className="font-medium">{dev.name}</span>
-                  {dev.firmware && (
-                    <span className="text-xs text-muted-foreground">Firmware {dev.firmware}</span>
-                  )}
-                </span>
-                <span className="flex items-center gap-3 text-sm text-muted-foreground">
-                  {dev.online ? 'Online' : 'Offline'} since {timeAgo(dev.since)}
-                  {canSupport && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={run.isPending || noGateway}
-                      onClick={() => send('test_device', dev.deviceId)}
+              <li key={dev.deviceId} className="flex flex-col gap-1.5 px-4 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="inline-flex items-center gap-2.5 text-sm">
+                    <OnlineDot online={dev.online} />
+                    <span className="font-medium">{dev.name}</span>
+                    {dev.firmware && (
+                      <span className="text-xs text-muted-foreground">Firmware {dev.firmware}</span>
+                    )}
+                  </span>
+                  <span className="flex items-center gap-3 text-sm text-muted-foreground">
+                    {dev.online ? 'Online' : 'Offline'} since {timeAgo(dev.since)}
+                    {canSupport && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={run.isPending || noGateway}
+                        onClick={() => send('test_device', dev.deviceId)}
+                      >
+                        Test
+                      </Button>
+                    )}
+                  </span>
+                </div>
+                {feedbackChips(dev.feedback).length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pl-6">
+                    {feedbackChips(dev.feedback).map((chip) => (
+                      <span
+                        key={chip}
+                        className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+                      >
+                        {chip}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {analytics && (
+                  <div className="flex flex-col gap-0.5 pl-6">
+                    <DeviceHistoryLine
+                      orgId={orgId}
+                      roomId={roomId}
+                      deviceId={dev.deviceId}
+                      field="online"
+                    />
+                    {dev.feedback?.power !== undefined && (
+                      <DeviceHistoryLine
+                        orgId={orgId}
+                        roomId={roomId}
+                        deviceId={dev.deviceId}
+                        field="power"
+                      />
+                    )}
+                    {dev.feedback?.input !== undefined && (
+                      <DeviceHistoryLine
+                        orgId={orgId}
+                        roomId={roomId}
+                        deviceId={dev.deviceId}
+                        field="input"
+                      />
+                    )}
+                    <Link
+                      href={`${orgPath(orgId, `/rooms/${roomId}/monitoring/history`)}?device=${dev.deviceId}&name=${encodeURIComponent(dev.name)}&field=${dev.feedback?.power !== undefined ? 'power' : dev.feedback?.input !== undefined ? 'input' : 'online'}`}
+                      className="self-start text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
                     >
-                      Test
-                    </Button>
-                  )}
-                </span>
+                      Chart this device’s history →
+                    </Link>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

@@ -112,6 +112,7 @@ function world() {
     { id: 'b1', orgId: ORG, plan: 'pro', status: 'active', trialEndsAt: new Date() },
   ]);
   const org = table([{ id: ORG, createdAt: new Date() }]);
+  const orgLicenseOverride = table([]);
   const controlSession = table([]);
   const controlIntent = table([]);
   const roomGroup = table([]);
@@ -135,6 +136,7 @@ function world() {
     alertDelivery,
     orgBilling,
     org,
+    orgLicenseOverride,
     controlSession,
     controlIntent,
     roomGroup,
@@ -161,6 +163,7 @@ function world() {
     alertDelivery,
     orgBilling,
     org,
+    orgLicenseOverride,
     controlSession,
     controlIntent,
     roomGroup,
@@ -694,32 +697,52 @@ describe('plan gating over the heartbeat', () => {
     devices: [{ deviceId: 'dsp', name: 'DSP', online: false }],
   };
 
-  it('stops analysing reports when the plan has no monitoring, but keeps the gateway working', async () => {
+  it('keeps watching on Basic, but tells the gateway to refuse commands', async () => {
     const w = world();
     Object.assign(w.orgBilling.rows[0]!, { plan: 'basic' });
     const gw = w.gateway.rows[0]! as never;
     const res = await heartbeat(w.db, gw, hb([offlineReport as never]), keys);
     expect(res.status).toBe(200);
-    expect(w.incident.rows).toHaveLength(0);
-    expect(w.deviceStatus.rows).toHaveLength(0);
-    // Control carries on: the reported state is still stored and deployments still flow.
-    expect(w.room.rows[0]!.reportedStatus).toBe('fault');
-    expect(ConfigResponse.parse((await config(w.db, gw, keys)).body).rooms).toHaveLength(1);
+    expect(w.incident.rows.length).toBeGreaterThan(0);
+    expect(w.deviceStatus.rows.length).toBeGreaterThan(0);
+    expect((res.body as { control: boolean }).control).toBe(false);
   });
 
-  it('cuts monitoring off when a trial runs out, and back on when they subscribe', async () => {
+  it('tells the gateway control is on for Pro, and off again once a trial runs out', async () => {
     const w = world();
+    const gw = w.gateway.rows[0]! as never;
+    expect(((await heartbeat(w.db, gw, hb([]), keys)).body as { control: boolean }).control).toBe(
+      true,
+    );
     Object.assign(w.orgBilling.rows[0]!, {
       plan: 'trial',
       status: 'none',
       trialEndsAt: new Date(Date.now() - 1000),
     });
-    const gw = w.gateway.rows[0]! as never;
-    await heartbeat(w.db, gw, hb([offlineReport as never]), keys);
-    expect(w.incident.rows).toHaveLength(0);
-    Object.assign(w.orgBilling.rows[0]!, { plan: 'pro', status: 'active' });
-    await heartbeat(w.db, gw, hb([offlineReport as never]), keys);
+    const res = await heartbeat(w.db, gw, hb([offlineReport as never]), keys);
+    expect((res.body as { control: boolean }).control).toBe(false);
+    // Still monitored after the trial: the room is watched, just not controlled.
     expect(w.incident.rows.length).toBeGreaterThan(0);
+  });
+
+  it('stops analysing reports only when staff switch monitoring off, and the gateway keeps working', async () => {
+    const w = world();
+    w.orgLicenseOverride.rows.push({
+      id: 'o1',
+      orgId: ORG,
+      monitoring: false,
+      revokedAt: null,
+      expiresAt: null,
+      createdAt: new Date(),
+    });
+    const gw = w.gateway.rows[0]! as never;
+    const res = await heartbeat(w.db, gw, hb([offlineReport as never]), keys);
+    expect(res.status).toBe(200);
+    expect(w.incident.rows).toHaveLength(0);
+    expect(w.deviceStatus.rows).toHaveLength(0);
+    // The reported state is still stored and deployments still flow.
+    expect(w.room.rows[0]!.reportedStatus).toBe('fault');
+    expect(ConfigResponse.parse((await config(w.db, gw, keys)).body).rooms).toHaveLength(1);
   });
 });
 

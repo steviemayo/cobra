@@ -2,16 +2,31 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
+import { DEVICE_FEEDBACK_FIELDS, DeviceFeedback } from '@kestrel/model';
 import { deliverAlerts } from '../alerts';
 import { writeAudit } from '../audit';
+import { deviceFeedbackDailyHistory, deviceFeedbackHistory } from '../device-feedback-history';
 import { firmwareReport } from '../firmware-report';
 import { maybeSweep } from '../monitoring';
 import { orgOverview } from '../monitoring-queries';
 import { SITE_SCOPED, siteFilter, type SiteScope } from '../site-scope';
 import { featureProcedure, requireRole, router } from '../trpc';
+import { validTimeZone } from '../usage-analytics';
 
 const orgId = z.string().uuid();
 const monitoringProcedure = featureProcedure('monitoring');
+// A history is a report, like Usage: the same plan gate as usage.report and reports.list.
+const analyticsProcedure = featureProcedure('analytics');
+// "online" is the reachability history every device already has, alongside its feedback fields.
+const historyField = z.enum([...DEVICE_FEEDBACK_FIELDS, 'online']);
+const historyDays = z.union([z.literal(7), z.literal(30), z.literal(90)]).default(30);
+
+/** The room a history query is about, scoped the same way `room` and `deviceHistory` already are. */
+async function assertScopedRoom(orgId: string, roomId: string, scope: SiteScope) {
+  const room = await db.room.findFirst({ where: { id: roomId, orgId, ...siteFilter(scope) } });
+  if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
+  return room;
+}
 
 /**
  * For a site-limited provider: which incidents it may see, as a Prisma OR list (an incident is
@@ -73,10 +88,71 @@ export const monitoringRouter = router({
           since: d.since,
           driver: d.driver ?? null,
           firmware: d.firmware ?? null,
+          // Stored loosely (Json); parsed here so an old row from before this field existed, or
+          // anything unexpected, can't reach the page as something the UI doesn't understand.
+          feedback: DeviceFeedback.safeParse(d.feedback ?? {}).data ?? null,
         })),
         incidents,
         events: events.map((e) => ({ ...e, data: (e.data ?? {}) as Record<string, unknown> })),
       };
+    }),
+
+  // How long one device's feedback field held each value, over the last `days` (default 30, capped
+  // at the 90-day telemetry reach). Works for any device that reports the field, control or not.
+  deviceHistory: analyticsProcedure
+    .meta(SITE_SCOPED)
+    .input(
+      z.object({
+        orgId,
+        roomId: z.string().uuid(),
+        deviceId: z.string().min(1),
+        field: historyField,
+        days: historyDays,
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const room = await assertScopedRoom(ctx.orgId, input.roomId, ctx.siteScope);
+      const to = new Date();
+      const from = new Date(to.getTime() - input.days * 86_400_000);
+      return deviceFeedbackHistory(db, {
+        orgId: ctx.orgId,
+        roomId: room.id,
+        deviceId: input.deviceId,
+        field: input.field,
+        from,
+        to,
+      });
+    }),
+
+  // The same history, split into the viewer's local calendar days, for the history chart.
+  deviceHistoryDaily: analyticsProcedure
+    .meta(SITE_SCOPED)
+    .input(
+      z.object({
+        orgId,
+        roomId: z.string().uuid(),
+        deviceId: z.string().min(1),
+        field: historyField,
+        days: historyDays,
+        /** The viewer's time zone, so the bars line up with their own days. */
+        tz: z.string().max(64).default('UTC'),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      if (!validTimeZone(input.tz))
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unknown time zone' });
+      const room = await assertScopedRoom(ctx.orgId, input.roomId, ctx.siteScope);
+      const to = new Date();
+      const from = new Date(to.getTime() - input.days * 86_400_000);
+      return deviceFeedbackDailyHistory(db, {
+        orgId: ctx.orgId,
+        roomId: room.id,
+        deviceId: input.deviceId,
+        field: input.field,
+        from,
+        to,
+        tz: input.tz,
+      });
     }),
 
   // The firmware each device reports, across the estate. Read only.

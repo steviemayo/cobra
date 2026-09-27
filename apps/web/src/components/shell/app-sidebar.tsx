@@ -1,5 +1,6 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -17,6 +18,7 @@ import {
   LayoutDashboard,
   LayoutTemplate,
   LifeBuoy,
+  Lock,
   type LucideIcon,
   Plus,
   Rocket,
@@ -29,6 +31,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
+import { useBilling } from '@/components/common/plan-gate';
 import { StatusDot, roomHealth } from '@/components/common/status';
 import {
   Sidebar,
@@ -47,9 +50,11 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
   SidebarRail,
+  useSidebar,
 } from '@/components/ui/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useEstate } from '@/lib/use-estate';
+import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
 import { useDialogs } from './dialogs';
 import { OrgSwitcher } from './org-switcher';
@@ -68,12 +73,18 @@ function NavItem({
   label,
   exact,
   soon,
+  count,
+  locked,
 }: {
   href?: string;
   icon: LucideIcon;
   label: string;
   exact?: boolean;
   soon?: boolean;
+  /** A number to show beside the label (something waiting), when above zero. */
+  count?: number;
+  /** Not in the plan: still listed, with a lock. The page it opens says what to do. */
+  locked?: boolean;
 }) {
   const isActive = useActive();
   if (soon || !href)
@@ -90,12 +101,20 @@ function NavItem({
     <SidebarMenuItem>
       <SidebarMenuButton
         isActive={isActive(href, exact)}
-        tooltip={label}
+        tooltip={locked ? `${label} — not in your plan` : label}
         render={<Link href={href} />}
       >
         <Icon />
         <span>{label}</span>
       </SidebarMenuButton>
+      {locked && (
+        <SidebarMenuBadge aria-label="Not in your plan">
+          <Lock className="size-3" />
+        </SidebarMenuBadge>
+      )}
+      {!locked && !!count && (
+        <SidebarMenuBadge aria-label={`${count} waiting`}>{count}</SidebarMenuBadge>
+      )}
     </SidebarMenuItem>
   );
 }
@@ -203,6 +222,95 @@ function BrandMark() {
   );
 }
 
+interface NavEntry {
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  exact?: boolean;
+  count?: number;
+  locked?: boolean;
+}
+
+/**
+ * A collapsible group of links. The group holding the current page opens when you arrive, the
+ * choice to open or close one is remembered in this browser, and while the sidebar is collapsed to
+ * icons every group shows its icons.
+ */
+function NavGroup({
+  id,
+  label,
+  defaultOpen = false,
+  items,
+  action,
+  children,
+}: {
+  id: string;
+  label: string;
+  defaultOpen?: boolean;
+  items: NavEntry[];
+  /** A small button beside the heading, kept visible when the group is closed. */
+  action?: React.ReactNode;
+  /** Extra content above the links (the estate tree). */
+  children?: React.ReactNode;
+}) {
+  const isActive = useActive();
+  const { state, isMobile } = useSidebar();
+  const [manual, setManual] = useState<boolean | null>(null);
+  const holdsPage = items.some((i) => isActive(i.href, i.exact));
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`kestrel.nav.${id}`);
+      if (saved === 'open' || saved === 'closed') setManual(saved === 'open');
+    } catch {
+      // Storage can be blocked; the group just uses its default.
+    }
+  }, [id]);
+  // Arriving at a page inside a group you had closed opens it again.
+  useEffect(() => {
+    if (holdsPage) setManual((m) => (m === false ? true : m));
+  }, [holdsPage]);
+
+  if (items.length === 0 && !children) return null;
+  const iconsOnly = state === 'collapsed' && !isMobile;
+  const open = iconsOnly || (manual ?? (defaultOpen || holdsPage));
+  const toggle = () => {
+    setManual(!open);
+    try {
+      localStorage.setItem(`kestrel.nav.${id}`, open ? 'closed' : 'open');
+    } catch {
+      // Not remembered, which is fine.
+    }
+  };
+
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel
+        render={<button type="button" onClick={toggle} aria-expanded={open} />}
+        className="cursor-pointer justify-between hover:text-sidebar-foreground"
+      >
+        {label}
+        <ChevronRight
+          className={cn('size-3.5 transition-transform duration-200', open && 'rotate-90')}
+        />
+      </SidebarGroupLabel>
+      {action}
+      <AnimatedCollapse open={open}>
+        <SidebarGroupContent>
+          {children}
+          {items.length > 0 && (
+            <SidebarMenu>
+              {items.map((i) => (
+                <NavItem key={i.href} {...i} />
+              ))}
+            </SidebarMenu>
+          )}
+        </SidebarGroupContent>
+      </AnimatedCollapse>
+    </SidebarGroup>
+  );
+}
+
 export function AppSidebar() {
   const { orgId, org, canEdit, canSeeTeam, canSupport, isOwner } = useOrg();
   // A service provider has customers rather than an estate of its own.
@@ -210,9 +318,64 @@ export function AppSidebar() {
   // A provider limited to some sites only gets the site-aware areas.
   const scoped = !!org.scoped;
   const { openNewSite } = useDialogs();
+  const trpc = useTRPC();
+  // What the plan includes. Until it loads nothing is locked, so the menu does not flash.
+  const plan = useBilling().data?.entitlements;
+  const control = plan?.control ?? true;
+  const marketplace = plan?.marketplaceBuy ?? true;
+  const drivers = plan?.driverCreate ?? true;
+  // People from the company asking to join, waiting for an owner.
+  const joinRequests = useQuery({
+    ...trpc.joinRequest.count.queryOptions({ orgId }),
+    enabled: isOwner && !scoped,
+    refetchInterval: 60_000,
+  });
   const base = orgPath(orgId);
   const isActive = useActive();
   const settingsOpen = isActive(`${base}/settings`);
+
+  const entries = (list: (NavEntry | false)[]) => list.filter((e): e is NavEntry => !!e);
+  const full = !scoped;
+
+  const estateLinks = entries([
+    canSupport && { href: `${base}/sites`, icon: Building2, label: 'All sites' },
+    { href: `${base}/rooms`, icon: DoorOpen, label: 'All rooms' },
+  ]);
+  const monitor = entries([
+    { href: `${base}/monitoring`, icon: Activity, label: 'Monitoring' },
+    canSupport && { href: `${base}/incidents`, icon: AlertTriangle, label: 'Incidents' },
+    canSeeTeam && full && { href: `${base}/alerts`, icon: BellRing, label: 'Alerts' },
+    { href: `${base}/usage`, icon: BarChart3, label: 'Usage' },
+    full && { href: `${base}/reports`, icon: FileText, label: 'Reports' },
+  ]);
+  const design = entries([
+    canEdit &&
+      full && {
+        href: `${base}/templates`,
+        icon: LayoutTemplate,
+        label: 'Templates',
+        locked: !control,
+      },
+    canEdit &&
+      full && {
+        href: `${base}/marketplace`,
+        icon: Store,
+        label: 'Marketplace',
+        locked: !marketplace,
+      },
+    canSupport &&
+      full && { href: `${base}/groups`, icon: Link2, label: 'Room groups', locked: !control },
+  ]);
+  const devices = entries([
+    canSupport && { href: `${base}/gateways`, icon: Router, label: 'Gateways' },
+    canSupport && full && { href: `${base}/deployments`, icon: Rocket, label: 'Deployments' },
+    canEdit && full && { href: `${base}/shared-devices`, icon: Server, label: 'Shared devices' },
+    canEdit && full && { href: `${base}/credentials`, icon: KeyRound, label: 'Shared logins' },
+    canSupport && { href: `${base}/firmware`, icon: CircuitBoard, label: 'Firmware' },
+    canEdit &&
+      full && { href: `${base}/drivers`, icon: Cpu, label: 'Custom drivers', locked: !drivers },
+  ]);
+  const support = entries([{ href: `${base}/tickets`, icon: LifeBuoy, label: 'Support' }]);
 
   return (
     <Sidebar collapsible="icon">
@@ -233,77 +396,40 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
         ) : (
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {scoped ? (
-                  <NavItem href={`${base}/rooms`} icon={DoorOpen} label="Rooms" exact />
-                ) : (
-                  <NavItem href={base} icon={LayoutDashboard} label="Overview" exact />
-                )}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
-
-        {!isMsp && (
           <>
-            <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-              <SidebarGroupLabel>Estate</SidebarGroupLabel>
-              {canEdit && (
-                <SidebarGroupAction title="New site" onClick={openNewSite}>
-                  <Plus />
-                  <span className="sr-only">New site</span>
-                </SidebarGroupAction>
-              )}
-              <SidebarGroupContent>
-                <EstateTree />
-              </SidebarGroupContent>
-            </SidebarGroup>
+            {full && (
+              <SidebarGroup>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    <NavItem href={base} icon={LayoutDashboard} label="Overview" exact />
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            )}
 
-            <SidebarGroup>
-              <SidebarGroupLabel>Manage</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {canSupport && <NavItem href={`${base}/sites`} icon={Building2} label="Sites" />}
-                  <NavItem href={`${base}/rooms`} icon={DoorOpen} label="Rooms" />
-                  {canEdit && !scoped && (
-                    <NavItem href={`${base}/templates`} icon={LayoutTemplate} label="Templates" />
-                  )}
-                  {canEdit && !scoped && (
-                    <NavItem href={`${base}/marketplace`} icon={Store} label="Marketplace" />
-                  )}
-                  {canEdit && !scoped && (
-                    <NavItem href={`${base}/drivers`} icon={Cpu} label="Custom drivers" />
-                  )}
-                  {canEdit && !scoped && (
-                    <NavItem href={`${base}/credentials`} icon={KeyRound} label="Shared logins" />
-                  )}
-                  {canEdit && !scoped && (
-                    <NavItem href={`${base}/shared-devices`} icon={Server} label="Shared devices" />
-                  )}
-                  {canSupport && (
-                    <NavItem href={`${base}/gateways`} icon={Router} label="Gateways" />
-                  )}
-                  {canSupport && !scoped && (
-                    <NavItem href={`${base}/deployments`} icon={Rocket} label="Deployments" />
-                  )}
-                  {canSupport && !scoped && (
-                    <NavItem href={`${base}/groups`} icon={Link2} label="Room groups" />
-                  )}
-                  <NavItem href={`${base}/monitoring`} icon={Activity} label="Monitoring" />
-                  <NavItem href={`${base}/usage`} icon={BarChart3} label="Usage" />
-                  {!scoped && <NavItem href={`${base}/reports`} icon={FileText} label="Reports" />}
-                  {canSupport && (
-                    <NavItem href={`${base}/incidents`} icon={AlertTriangle} label="Incidents" />
-                  )}
-                  {canSupport && (
-                    <NavItem href={`${base}/firmware`} icon={CircuitBoard} label="Firmware" />
-                  )}
-                  <NavItem href={`${base}/tickets`} icon={LifeBuoy} label="Support" />
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
+            <NavGroup
+              id="estate"
+              label="Estate"
+              defaultOpen
+              items={estateLinks}
+              action={
+                canEdit && (
+                  <SidebarGroupAction title="New site" onClick={openNewSite} className="right-8">
+                    <Plus />
+                    <span className="sr-only">New site</span>
+                  </SidebarGroupAction>
+                )
+              }
+            >
+              {/* The tree is too wide for the icon rail; the links below it stay. */}
+              <div className="group-data-[collapsible=icon]:hidden">
+                <EstateTree />
+              </div>
+            </NavGroup>
+            <NavGroup id="monitor" label="Monitor" defaultOpen items={monitor} />
+            <NavGroup id="design" label="Design and deploy" items={design} />
+            <NavGroup id="devices" label="Devices and network" items={devices} />
+            <NavGroup id="support" label="Support" defaultOpen items={support} />
           </>
         )}
 
@@ -312,8 +438,12 @@ export function AppSidebar() {
             <SidebarGroupLabel>Organisation</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                <NavItem href={`${base}/team`} icon={Users} label="Team" />
-                <NavItem href={`${base}/alerts`} icon={BellRing} label="Alerts" />
+                <NavItem
+                  href={`${base}/team`}
+                  icon={Users}
+                  label="Team"
+                  count={joinRequests.data}
+                />
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={settingsOpen}

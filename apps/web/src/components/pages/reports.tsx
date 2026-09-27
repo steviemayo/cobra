@@ -23,6 +23,7 @@ const KIND: Record<string, string> = {
   gateway_offline: 'Gateway went quiet',
   room_fault: 'Room fault',
   deploy_failed: 'Deployment failed',
+  point_alert: 'Watched value out of bounds',
 };
 const date = (iso: string, tz: string) =>
   new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: tz });

@@ -78,6 +78,7 @@ model Org {
   roomBindings        RoomBinding[]
   credentialSets      CredentialSet[]
   siteDevices         SiteDevice[]
+  joinRequests        JoinRequest[]
 }
 
 model Member {
@@ -518,6 +519,8 @@ model DeviceStatus {
   firmware      String?
   /// When this firmware version was first seen on the device.
   firmwareSince DateTime?
+  /// Whatever the driver reports back (power, input, mute, ...), control or not. See DeviceFeedback.
+  feedback      Json?
   updatedAt     DateTime  @default(now()) @updatedAt
 
   org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -1016,4 +1019,40 @@ model CustomDriverVersion {
   driver CustomDriver @relation(fields: [driverId], references: [id], onDelete: Cascade)
 
   @@unique([driverId, version])
+}
+
+// Someone whose company already has an organisation on Kestrel asking its owners to add them. Only
+// people with a confirmed email at the same company domain as an owner can ask, so a stranger can
+// never ping an organisation by guessing its name.
+model JoinRequest {
+  id        String    @id @default(uuid()) @db.Uuid
+  orgId     String    @db.Uuid
+  userId    String    @db.Uuid
+  email     String
+  /// pending, approved, declined or cancelled.
+  status    String    @default("pending")
+  /// The role the owner gave when approving.
+  role      OrgRole?
+  createdAt DateTime  @default(now())
+  decidedBy String?   @db.Uuid
+  decidedAt DateTime?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([userId, createdAt])
+}
+
+// One free trial per person, per mailbox and per company domain, kept even if the organisation is
+// later deleted. The unique columns make two sign-ups racing for the same trial safe: the second
+// one's insert fails and it starts without a trial.
+model TrialClaim {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @db.Uuid
+  /// The address with +labels and Gmail dots removed.
+  emailKey  String?  @unique
+  /// The company domain, never a free mail provider.
+  domainKey String?  @unique
+  orgId     String?  @db.Uuid
+  createdAt DateTime @default(now())
 }

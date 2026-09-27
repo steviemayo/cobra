@@ -194,9 +194,10 @@ Two classes, because they are used by different people for different reasons. Bo
 - Features the class may declare: `standby`, `mic_mute`, `volume`, `dial`, `hangup`, `camera_control`, `content_share`, `call_state`, `registration_status`, `peripheral_health`. The panel's Privacy Mute already comes from `mic_mute`
 - Transport choice (HTTP, WebSocket or SSH) and which xAPI calls to use are decided when the driver is built, from Cisco's documentation
 
-## Monitoring-only mode (proposed, pending the tier decision)
+## Monitoring-only mode (tier swap decided 2026-09-27, not built; see `docs/decisions.md` TM-1..8)
 
-The user is considering swapping the tiers: **monitoring only** in the low or free tier, **control plus monitoring** in Pro, so an organisation with an existing AV installation can use Kestrel just to watch it. That is a big change to a rule in the code today (control is never switched off by billing, and monitoring is the Pro extra: `packages/model/src/billing.ts`). This section only records what it would mean for drivers and classes. Billing itself is **not** changed by this plan.
+The tiers are swapped: **monitoring only** in Basic (the cheaper tier), **control plus monitoring** in Pro, so an organisation with an existing AV installation can use Kestrel just to watch it. That is a big change to a rule in the code today (control is never switched off by billing, and monitoring is the Pro extra: `packages/model/src/billing.ts`). This section records what it means for drivers and classes. Billing itself is **not** changed by this plan.
+- **Watch points:** a control point on a device can be added to a monitored room as a read-only watch point (for example a Q-SYS named control). Kestrel records its changes, and alert rules can fire on a change, a threshold, an expected value that stops holding, or a fault or error value. The device being online is the minimum for every driver
 
 - **A monitored room is a light room:** devices with drivers and bindings, no ports, connections, activities or panel. No signed manifest or deploy is needed, just the device list, the bindings and the alert rules
 - **Every class needs a read-only mode.** Feedback and health always work; commands are refused. The refusal is enforced **in the gateway**, not only hidden in the portal, so a monitored room can never send a command by any route (panel, trigger, webhook, API)

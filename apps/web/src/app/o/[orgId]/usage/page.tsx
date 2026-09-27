@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: 'Usage' };
 
 export default function UsagePage() {
   return (
-    <RequireFeature feature="monitoring">
+    <RequireFeature feature="analytics">
       <UsageView />
     </RequireFeature>
   );

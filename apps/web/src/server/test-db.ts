@@ -1,5 +1,5 @@
 // A tiny in-memory stand-in for the parts of Prisma the services use, so they can be tested
-// without a database. Supports equality, not / in / lte conditions, orderBy, aggregate (_max) and createMany.
+// without a database. Supports equality, not / in / contains / endsWith / lte conditions, orderBy, aggregate (_max) and createMany.
 export type Row = Record<string, unknown>;
 
 type Cond = {
@@ -7,6 +7,9 @@ type Cond = {
   in?: unknown[];
   notIn?: unknown[];
   startsWith?: string;
+  endsWith?: string;
+  contains?: string;
+  mode?: 'insensitive';
   lte?: Date | number;
   lt?: Date | number;
   gte?: Date | number;
@@ -29,6 +32,14 @@ export function matches(row: Row, where: Row = {}): boolean {
       if ('in' in c) return c.in!.includes(v);
       if ('notIn' in c) return !c.notIn!.includes(v);
       if ('startsWith' in c) return typeof v === 'string' && v.startsWith(c.startsWith!);
+      if ('endsWith' in c || 'contains' in c) {
+        if (typeof v !== 'string') return false;
+        const fold = (x: string) => (c.mode === 'insensitive' ? x.toLowerCase() : x);
+        return (
+          (!('endsWith' in c) || fold(v).endsWith(fold(c.endsWith!))) &&
+          (!('contains' in c) || fold(v).includes(fold(c.contains!)))
+        );
+      }
       const t = v instanceof Date ? v.getTime() : typeof v === 'number' ? v : NaN;
       const at = (x: Date | number) => new Date(x).getTime();
       if ('lte' in c || 'lt' in c || 'gte' in c || 'gt' in c)

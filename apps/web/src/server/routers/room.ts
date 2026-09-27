@@ -5,7 +5,7 @@ import { db } from '@kestrel/db';
 import { generateSecret, hashSecret } from '@kestrel/crypto';
 import { RoomModel, RoomType } from '@kestrel/model';
 import { writeAudit } from '../audit';
-import { canAddRoom, getEntitlements } from '../billing';
+import { canAddRoom, getEntitlements, roomLimitMessage } from '../billing';
 import { checkDeployable } from '../deploy-check';
 import { sharedGatewayProblem } from '../site-devices';
 import { createDeployment } from '../deployment-service';
@@ -157,7 +157,7 @@ export const roomRouter = router({
       )
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: `Your plan includes ${entitlements.maxRooms} rooms. Subscribe to add more.`,
+          message: roomLimitMessage(entitlements),
         });
       const room = await db.room.create({
         data: { orgId: ctx.orgId, siteId: site.id, name: input.name, type: input.type },
@@ -205,7 +205,7 @@ export const roomRouter = router({
       )
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: `Your plan includes ${entitlements.maxRooms} rooms. Subscribe to add more.`,
+          message: roomLimitMessage(entitlements),
         });
       const model = await designOnly(ctx.orgId, RoomModel.parse(draft.model));
       let copy;
