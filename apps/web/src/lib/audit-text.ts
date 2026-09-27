@@ -6,6 +6,12 @@ const role = (v: unknown) => ROLE_LABEL[s(v) as keyof typeof ROLE_LABEL] ?? s(v)
 // Human wording for audit log rows: "<actor> <this text>".
 export function describeAudit(action: string, meta: Record<string, unknown>): string {
   switch (action) {
+    case 'member.join_request':
+      return `asked to join this organisation (${s(meta.email)})`;
+    case 'member.join_approve':
+      return `approved ${s(meta.email)} joining as ${role(meta.role)}`;
+    case 'member.join_decline':
+      return `declined ${s(meta.email)}’s request to join`;
     case 'msp.invite':
       return `invited ${s(meta.msp)} to look after this organisation (${s(meta.role)} access)`;
     case 'msp.invited':

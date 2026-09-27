@@ -18,6 +18,7 @@ import { draftRouter } from './draft';
 import { driverRouter } from './driver';
 import { gatewayRouter } from './gateway';
 import { inviteRouter } from './invite';
+import { joinRequestRouter } from './join-request';
 import { marketplaceRouter } from './marketplace';
 import { memberRouter } from './member';
 import { monitoringRouter } from './monitoring';
@@ -38,6 +39,7 @@ export const appRouter = router({
   template: templateRouter,
   member: memberRouter,
   invite: inviteRouter,
+  joinRequest: joinRequestRouter,
   audit: auditRouter,
   gateway: gatewayRouter,
   release: releaseRouter,

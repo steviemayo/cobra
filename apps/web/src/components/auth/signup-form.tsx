@@ -7,11 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { PROVIDER_NEXT } from '@/lib/auth-redirect';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 import { AuthFormFrame, FormError } from './auth-form-frame';
 import { PasswordInput } from './password-input';
 
-export function SignupForm({ next }: { next: string }) {
+export function SignupForm({ next, provider }: { next: string; provider: boolean }) {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,7 +20,9 @@ export function SignupForm({ next }: { next: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
-  const q = next === '/' ? '' : `?next=${encodeURIComponent(next)}`;
+  // The provider link's own destination is not something to carry to sign-in, or to treat as an invite.
+  const plain = next === '/' || next === PROVIDER_NEXT;
+  const q = plain ? '' : `?next=${encodeURIComponent(next)}`;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -64,7 +67,14 @@ export function SignupForm({ next }: { next: string }) {
     );
 
   return (
-    <AuthFormFrame title="Create your account" description="Start modelling rooms in minutes.">
+    <AuthFormFrame
+      title="Create your account"
+      description={
+        provider
+          ? 'Look after your customers’ AV systems from one place.'
+          : 'Start modelling rooms in minutes.'
+      }
+    >
       <form onSubmit={submit} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="email">Work email</Label>
@@ -106,6 +116,17 @@ export function SignupForm({ next }: { next: string }) {
           Create account
         </Button>
       </form>
+      {plain && (
+        <p className="text-sm text-muted-foreground">
+          {provider ? 'Managing rooms for your own organisation? ' : 'Are you a service provider? '}
+          <Link
+            href={provider ? '/signup' : '/signup?as=provider'}
+            className="font-medium text-foreground underline-offset-4 hover:underline"
+          >
+            {provider ? 'Sign up here' : 'Sign up as one'}
+          </Link>
+        </p>
+      )}
       <p className="text-sm text-muted-foreground">
         Already have an account?{' '}
         <Link

@@ -2,6 +2,13 @@ import { z } from 'zod';
 import { db } from '@kestrel/db';
 import { TRIAL_DAYS } from '@kestrel/model';
 import { writeAudit } from '../audit';
+import {
+  attachTrialClaim,
+  claimTrial,
+  findSimilar,
+  personOf,
+  releaseTrialClaim,
+} from '../org-signup';
 import { OrgBranding, readOrgBranding } from '../panel-settings';
 import { setStaffAccessBlocked } from '../support-sessions';
 import { authedProcedure, orgProcedure, requireRole, router } from '../trpc';
@@ -25,27 +32,47 @@ export const orgRouter = router({
     }));
   }),
 
+  // Before creating: organisations that might already be theirs (colleagues' organisations by
+  // company domain, or a similar name). Never blocks; the person decides.
+  checkDuplicate: authedProcedure
+    .input(z.object({ name, kind: z.enum(['customer', 'msp']) }))
+    .query(({ ctx, input }) => findSimilar(db, { ...input, person: personOf(ctx.user) })),
+
+  // Each person and company domain gets one free trial for a customer organisation. Later ones
+  // start with the trial already used (control only, five rooms) and can upgrade any time. A
+  // service provider has no rooms of its own, so it never uses a trial up.
   create: authedProcedure
     .input(z.object({ name, kind: z.enum(['customer', 'msp']).default('customer') }))
     .mutation(async ({ ctx, input }) => {
-      const org = await db.org.create({
-        data: {
-          name: input.name,
-          kind: input.kind,
-          billing: { create: { trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86_400_000) } },
-          members: {
-            create: { userId: ctx.user.id, email: ctx.user.email?.toLowerCase(), role: 'owner' },
+      const person = personOf(ctx.user);
+      const claimed = input.kind === 'customer' && (await claimTrial(db, person));
+      const trial = input.kind === 'msp' || claimed ? 'granted' : 'used';
+      const trialEndsAt = new Date(Date.now() + (trial === 'granted' ? TRIAL_DAYS * 86_400_000 : 0));
+      let org;
+      try {
+        org = await db.org.create({
+          data: {
+            name: input.name,
+            kind: input.kind,
+            billing: { create: { trialEndsAt } },
+            members: {
+              create: { userId: ctx.user.id, email: ctx.user.email?.toLowerCase(), role: 'owner' },
+            },
           },
-        },
-      });
+        });
+      } catch (e) {
+        if (claimed) await releaseTrialClaim(db, ctx.user.id);
+        throw e;
+      }
+      if (claimed) await attachTrialClaim(db, ctx.user.id, org.id);
       await writeAudit({
         orgId: org.id,
         actorId: ctx.user.id,
         action: 'org.create',
         target: org.id,
-        meta: { name: org.name },
+        meta: { name: org.name, kind: org.kind, trial },
       });
-      return org;
+      return { ...org, trial };
     }),
 
   // The default look of every room's panel. Rooms follow it unless they set their own.

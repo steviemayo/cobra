@@ -51,6 +51,13 @@ export function TeamView() {
   const { orgId, isOwner } = useOrg();
   const members = useQuery(trpc.member.list.queryOptions({ orgId }));
   const invites = useQuery({ ...trpc.invite.list.queryOptions({ orgId }), enabled: isOwner });
+  const requests = useQuery({
+    ...trpc.joinRequest.list.queryOptions({ orgId }),
+    enabled: isOwner,
+    refetchInterval: 60_000,
+  });
+  // The role each waiting request will get if approved. Lowest by default: the owner chooses.
+  const [roles, setRoles] = useState<Record<string, OrgRole>>({});
   const [inviting, setInviting] = useState(false);
   const [removing, setRemoving] = useState<Member | null>(null);
 
@@ -58,6 +65,8 @@ export function TeamView() {
     Promise.all([
       qc.invalidateQueries({ queryKey: trpc.member.list.queryKey() }),
       qc.invalidateQueries({ queryKey: trpc.invite.list.queryKey() }),
+      qc.invalidateQueries({ queryKey: trpc.joinRequest.list.queryKey() }),
+      qc.invalidateQueries({ queryKey: trpc.joinRequest.count.queryKey() }),
       qc.invalidateQueries({ queryKey: trpc.audit.list.queryKey() }),
     ]);
 
@@ -75,6 +84,24 @@ export function TeamView() {
       onSuccess: async () => {
         await refresh();
         toast.success('Removed from the organisation');
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const approve = useMutation(
+    trpc.joinRequest.approve.mutationOptions({
+      onSuccess: async () => {
+        await refresh();
+        toast.success('Added to the team');
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const decline = useMutation(
+    trpc.joinRequest.decline.mutationOptions({
+      onSuccess: async () => {
+        await refresh();
+        toast.success('Request declined');
       },
       onError: (e) => toast.error(e.message),
     }),
@@ -165,6 +192,62 @@ export function TeamView() {
           </div>
         )}
       </section>
+
+      {isOwner && !!requests.data?.length && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium">Requests to join</h2>
+          <p className="text-sm text-muted-foreground">
+            These people have an email address at the same company as one of your owners and asked
+            to be added. Choose what they can do, or decline.
+          </p>
+          <div className="overflow-hidden rounded-lg border">
+            <Table>
+              <TableBody>
+                {requests.data.map((r) => {
+                  const role = roles[r.id] ?? 'customer_viewer';
+                  return (
+                    <TableRow key={r.id}>
+                      <TableCell className="font-medium">
+                        {r.email}
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          asked {timeAgo(r.createdAt)}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <SimpleSelect
+                          size="sm"
+                          value={role}
+                          options={roleOptions}
+                          onValueChange={(v) => setRoles((s) => ({ ...s, [r.id]: v }))}
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            disabled={approve.isPending}
+                            onClick={() => approve.mutate({ orgId, requestId: r.id, role })}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={decline.isPending}
+                            onClick={() => decline.mutate({ orgId, requestId: r.id })}
+                          >
+                            Decline
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </section>
+      )}
 
       {isOwner && (
         <section className="space-y-3">

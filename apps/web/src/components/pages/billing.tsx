@@ -90,7 +90,7 @@ export function BillingView() {
           {e.plan === 'trial' &&
             `Your trial ends in ${plural(e.trialDaysLeft ?? 0, 'day')}. It includes monitoring and up to ${e.maxRooms} rooms.`}
           {e.plan === 'trial_expired' &&
-            'Your trial has ended. Rooms keep running and can be deployed, but monitoring is off.'}
+            'Your free trial is over (or was already used by you or your company). Rooms keep running and can be deployed, but monitoring is off.'}
           {e.plan === 'lapsed' &&
             'Your subscription has ended. Rooms keep running and can be deployed, but monitoring is off.'}
           {paid &&
