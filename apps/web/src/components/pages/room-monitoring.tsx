@@ -347,6 +347,12 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
                         field="input"
                       />
                     )}
+                    <Link
+                      href={`${orgPath(orgId, `/rooms/${roomId}/monitoring/history`)}?device=${dev.deviceId}&name=${encodeURIComponent(dev.name)}&field=${dev.feedback?.power !== undefined ? 'power' : dev.feedback?.input !== undefined ? 'input' : 'online'}`}
+                      className="self-start text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                    >
+                      Chart this device’s history →
+                    </Link>
                   </div>
                 )}
               </li>
