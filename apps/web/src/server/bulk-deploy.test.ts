@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { generateKeyPair } from '@kestrel/crypto';
-import { STARTER_TEMPLATES, slotsFor } from '@kestrel/model';
+import { STARTER_TEMPLATES, slotsFor, type RoomModel } from '@kestrel/model';
 import {
   BulkDeployError,
   MAX_BULK_DEPLOY_ROOMS,
@@ -64,6 +64,8 @@ function world() {
   );
   const release = table([]);
   const deployment = table([]);
+  const customDriver = table([]);
+  const customDriverVersion = table([]);
   let seq = 0;
   for (const t of [rooms, roomDraft, deployment, release]) {
     const create = t.create;
@@ -84,8 +86,8 @@ function world() {
     release,
     deployment,
     deploymentEvent: table([]),
-    customDriver: table([]),
-    customDriverVersion: table([]),
+    customDriver,
+    customDriverVersion,
     roomBinding: table([]),
     credentialSet: table([]),
     siteDevice: table([]),
@@ -96,7 +98,7 @@ function world() {
     for (const r of rooms.rows) if (r.desiredReleaseId) r.reportedReleaseId = r.desiredReleaseId;
     for (const d of deployment.rows) if (d.status === 'pending') d.status = 'active';
   };
-  return { db, rooms, roomDraft, release, deployment, settle };
+  return { db, rooms, roomDraft, release, deployment, settle, customDriver, customDriverVersion };
 }
 
 describe('planning a bulk deploy', () => {
@@ -231,5 +233,55 @@ describe('rolling back in bulk', () => {
     const w = world();
     const { plan } = await planBulkDeploy(w.db, ORG, [C], 'rollback');
     expect(plan.blocked.map((b) => b.message)).toEqual(['Nothing has been deployed to this room yet.']);
+  });
+});
+
+describe('a driver that has been updated', () => {
+  const spec = (version: number, send = 'PWR ON') => ({
+    id: 'acme-amp',
+    name: 'Acme amp',
+    version,
+    transport: { type: 'tcp', port: 4001 },
+    commands: { 'power.on': { send }, 'power.off': { send: 'PWR OFF' } },
+  });
+
+  function withCustomDriver() {
+    const w = world();
+    w.customDriver.rows.push({ id: 'cd1', orgId: ORG, slug: 'acme-amp', name: 'Acme amp', latestVersion: 1 });
+    w.customDriverVersion.rows.push({ driverId: 'cd1', version: 1, spec: spec(1) });
+    // The projector-free way: the DSP uses the custom driver, with its address typed in.
+    for (const d of w.roomDraft.rows) {
+      const model = d.model as RoomModel;
+      const dsp = model.devices.find((x) => x.id === 'dsp')!;
+      dsp.control = { kind: 'driver', driverId: 'custom:acme-amp' };
+      dsp.settings = { ...dsp.settings, host: '10.0.0.5', port: 4001 };
+    }
+    return w;
+  }
+
+  it('gets a new release when deployed, though the design has not changed', async () => {
+    const w = withCustomDriver();
+    await deployBulk(w.db, ORG, [A], 'deploy', ctx);
+    w.settle();
+    expect((await planBulkDeploy(w.db, ORG, [A], 'deploy')).plan.steps[0]).toMatchObject({ action: 'up_to_date', number: 1 });
+
+    // The driver is improved: version 2.
+    w.customDriverVersion.rows.push({ driverId: 'cd1', version: 2, spec: spec(2, 'ON') });
+    w.customDriver.rows[0]!.latestVersion = 2;
+    const { plan } = await planBulkDeploy(w.db, ORG, [A], 'deploy');
+    expect(plan.steps[0]).toMatchObject({ action: 'publish_and_deploy', number: 2 });
+
+    const out = await deployBulk(w.db, ORG, [A], 'deploy', ctx);
+    expect(out.results[0]).toMatchObject({ number: 2, published: true });
+    const pinned = (w.release.rows.find((r) => r.number === 2)!.manifest as { manifest: { drivers: Record<string, { spec: { version: number } }> } }).manifest.drivers;
+    expect(pinned['custom:acme-amp']!.spec.version).toBe(2);
+  });
+
+  it('leaves a room alone whose driver has not changed', async () => {
+    const w = withCustomDriver();
+    await deployBulk(w.db, ORG, [A, B], 'deploy', ctx);
+    w.settle();
+    const { plan } = await planBulkDeploy(w.db, ORG, [A, B], 'deploy');
+    expect(plan.steps.map((s) => s.action)).toEqual(['up_to_date', 'up_to_date']);
   });
 });
