@@ -7,6 +7,7 @@ import { writeAudit } from '../audit';
 import { createDeployment } from '../deployment-service';
 import { orgPanelBranding } from '../provider-brand';
 import { gatewayTooOld, setupProblem } from '../deploy-check';
+import { ReleaseRestoreError, restoreReleaseDesign } from '../release-restore';
 import { checkPublishable, createRelease } from '../release-service';
 import { SigningNotConfigured, loadSigningKey } from '../signing';
 import { orgProcedure, requireRole, router } from '../trpc';
@@ -24,6 +25,14 @@ export const releaseRouter = router({
       take: 50,
       select: { id: true, number: true, hash: true, createdAt: true, createdBy: true },
     });
+    const userIds = [...new Set(releases.flatMap((r) => (r.createdBy ? [r.createdBy] : [])))];
+    const members = userIds.length
+      ? await db.member.findMany({
+          where: { orgId: ctx.orgId, userId: { in: userIds } },
+          select: { userId: true, email: true },
+        })
+      : [];
+    const email = new Map(members.map((m) => [m.userId, m.email]));
     return {
       desiredReleaseId: room.desiredReleaseId,
       reportedReleaseId: room.reportedReleaseId,
@@ -31,7 +40,7 @@ export const releaseRouter = router({
       reportedError: room.reportedError,
       reportedAt: room.reportedAt,
       hasGateway: !!room.gatewayId,
-      releases,
+      releases: releases.map((r) => ({ ...r, createdByEmail: r.createdBy ? (email.get(r.createdBy) ?? null) : null })),
     };
   }),
 
@@ -87,6 +96,36 @@ export const releaseRouter = router({
         changes,
         summary: summariseChanges(changes),
       };
+    }),
+
+  // Put the working design back to what an earlier release froze. Publishes and deploys nothing; the
+  // design as it was is kept as a saved version first, so this can be undone.
+  restoreDesign: orgProcedure
+    .input(z.object({ orgId, roomId, releaseId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const room = await assertRoom(ctx.orgId, input.roomId);
+      try {
+        const result = await restoreReleaseDesign(db, {
+          orgId: ctx.orgId,
+          roomId: room.id,
+          roomType: room.type,
+          releaseId: input.releaseId,
+          userId: ctx.user.id,
+        });
+        if (result.changed)
+          await writeAudit({
+            orgId: ctx.orgId,
+            actorId: ctx.user.id,
+            action: 'release.restore_design',
+            target: input.releaseId,
+            meta: { room: room.name },
+          });
+        return result;
+      } catch (e) {
+        if (e instanceof ReleaseRestoreError) throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
+        throw e;
+      }
     }),
 
   // Freeze the current design as an immutable, signed release. With `deploy` it also starts running

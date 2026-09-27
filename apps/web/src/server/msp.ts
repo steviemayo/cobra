@@ -12,6 +12,7 @@ import {
 import { effectiveStatus } from './gateway-status';
 import { clearStaleAssignees } from './ticket-assignees';
 import { slaForTicket, slaUrgency } from './tickets';
+import { isBilledRoom } from './room-kinds';
 
 // Managed service providers. An MSP is an organisation of kind "msp"; a customer's owner invites
 // it, the MSP's owner accepts, and either side can end it. While it is active, the MSP's people
@@ -437,7 +438,7 @@ export async function managedOverview(
         name: name.get(g.customerOrgId) ?? 'Unknown organisation',
         role: g.role,
         limitedToSites: g.siteIds.length,
-        rooms: ownRooms.filter((r) => r.kind !== 'combined').length,
+        rooms: ownRooms.filter(isBilledRoom).length,
         gateways: gw.length,
         gatewaysOnline: gw.filter((x) => effectiveStatus(x, now.getTime()) === 'online').length,
         openIncidents: incidents.filter(

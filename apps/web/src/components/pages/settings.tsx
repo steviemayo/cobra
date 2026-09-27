@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ActivityFeed } from '@/components/common/activity-feed';
+import { ApiKeysSetting } from '@/components/common/api-keys-setting';
 import { AuditExportButtons } from '@/components/common/audit-export-buttons';
 import {
   BrandingFields,
@@ -76,6 +77,7 @@ export function GeneralSettings() {
       </form>
       <OrgBrandingForm />
       <CalendarSettings />
+      <ApiKeysSetting />
       {org.kind !== 'msp' && <ServiceProvidersSetting />}
       <StaffAccessSetting />
     </PageContainer>
@@ -217,6 +219,12 @@ function CalendarSettings() {
           Connect Microsoft 365 or Google so a room can start itself when a meeting begins in its
           calendar. Add a calendar trigger to the room’s design and give it the room’s calendar
           address.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          The same calendar is shown on the room’s panel: what is on now (title, organiser, start
+          and end), when the room is next free, or when the next meeting is. Kestrel only reads
+          calendars. Meetings marked private or confidential show as “Private meeting”, with no
+          title or organiser.
         </p>
       </div>
       {!info.data.available && (

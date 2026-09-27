@@ -26,10 +26,12 @@ function world() {
     { id: 'd1', roomId: ROOM, deviceId: 'dsp', name: 'DSP', online: true },
   ]);
   const auditLog = table([]);
+  const gateway = table([{ id: GW, orgId: ORG, features: ['bindings', 'discovery'] }]);
   return {
-    db: { room, remoteCommand, deviceStatus, auditLog } as unknown as CommandDb,
+    db: { room, remoteCommand, deviceStatus, auditLog, gateway } as unknown as CommandDb,
     remoteCommand,
     auditLog,
+    gateway,
   };
 }
 const ask = (w: ReturnType<typeof world>, over = {}) =>
@@ -80,6 +82,28 @@ describe('requesting commands', () => {
       (await ask(w, { type: 'test_device', args: { deviceId: 'dsp', extra: 'x; reboot' } })).ok,
     ).toBe(true);
     expect(w.remoteCommand.rows[0]!.args).toEqual({ deviceId: 'dsp' });
+  });
+
+  it('queues a scan of the network, optionally of one network, and refuses a bad address', async () => {
+    const w = world();
+    expect((await ask(w, { type: 'discover_devices' })).ok).toBe(true);
+    expect(w.remoteCommand.rows[0]).toMatchObject({ type: 'discover_devices', args: {} });
+    expect((await ask(w, { type: 'discover_devices', args: { subnet: '192.168.1' } })).ok).toBe(true);
+    expect(w.remoteCommand.rows[1]!.args).toEqual({ subnet: '192.168.1' });
+    for (const subnet of ['192.168.1.0/24', 'x', '1.2.3.4', '10.0', '../etc'])
+      expect(await ask(w, { type: 'discover_devices', args: { subnet } })).toEqual({ ok: false, error: 'That is not a network address' });
+    expect(w.remoteCommand.rows).toHaveLength(2);
+  });
+
+  it('only sends a scan to a gateway that says it can run one', async () => {
+    const w = world();
+    w.gateway.rows[0]!.features = ['bindings'];
+    expect(await ask(w, { type: 'discover_devices' })).toEqual({ ok: false, error: 'This gateway needs updating before it can look for devices.' });
+    w.gateway.rows[0]!.features = [];
+    expect((await ask(w, { type: 'discover_devices' })).ok).toBe(false);
+    expect(w.remoteCommand.rows).toHaveLength(0);
+    // Other commands are not affected.
+    expect((await ask(w, { type: 'diagnostics' })).ok).toBe(true);
   });
 
   it('limits how fast commands can be sent to one room', async () => {

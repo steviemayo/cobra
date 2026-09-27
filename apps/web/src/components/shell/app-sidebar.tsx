@@ -24,6 +24,8 @@ import {
   Store,
   Users,
   Handshake,
+  BarChart3,
+  FileText,
 } from 'lucide-react';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
 import { StatusDot, roomHealth } from '@/components/common/status';
@@ -289,6 +291,8 @@ export function AppSidebar() {
                     <NavItem href={`${base}/groups`} icon={Link2} label="Room groups" />
                   )}
                   <NavItem href={`${base}/monitoring`} icon={Activity} label="Monitoring" />
+                  <NavItem href={`${base}/usage`} icon={BarChart3} label="Usage" />
+                  {!scoped && <NavItem href={`${base}/reports`} icon={FileText} label="Reports" />}
                   {canSupport && (
                     <NavItem href={`${base}/incidents`} icon={AlertTriangle} label="Incidents" />
                   )}

@@ -98,6 +98,14 @@ describe('duplicating a room', () => {
     expect(JSON.stringify(made.values ?? {})).not.toContain('10.0.0.5');
   });
 
+  it('can make a staging room, which is marked so it is not billed', async () => {
+    const w = world();
+    const copy = await duplicateRoom(w.db, w.input('Boardroom (staging)', { kind: 'staging' }));
+    expect(w.room.rows.find((r) => r.id === copy.id)!.kind).toBe('staging');
+    const normal = await duplicateRoom(w.db, w.input('Boardroom 2'));
+    expect(w.room.rows.find((r) => r.id === normal.id)!.kind).toBeUndefined();
+  });
+
   it('writes no bindings when the original has no shared logins', async () => {
     const w = world();
     const copy = await duplicateRoom(w.db, w.input('Boardroom 2'));
