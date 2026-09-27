@@ -46,6 +46,8 @@ model Org {
   audit               AuditLog[]
   retention           OrgRetention?
   commissioningRuns   CommissioningRun[]
+  apiKeys             ApiKey[]
+  reportSchedule      ReportSchedule?
   drafts              RoomDraft[]
   draftVersions       RoomDraftVersion[]
   templates           Template[]
@@ -294,6 +296,41 @@ model CommissioningRun {
 
   @@index([roomId, startedAt])
   @@index([orgId])
+}
+
+// A key an organisation's own systems use to read its data through the public API (/api/v1). Only
+// a hash of the secret is kept: the key is shown once, when it is made.
+model ApiKey {
+  id         String    @id @default(uuid()) @db.Uuid
+  orgId      String    @db.Uuid
+  name       String
+  /// The first characters of the key: recognised in a list, and how a request finds its key.
+  prefix     String    @unique
+  secretHash String
+  createdBy  String?   @db.Uuid
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+// A monthly usage and reliability report emailed to these addresses on the first days of each month.
+// No row means no schedule. `lastSentMonth` ("2026-09") stops a month being sent twice.
+model ReportSchedule {
+  orgId         String   @id @db.Uuid
+  enabled       Boolean  @default(true)
+  recipients    String[] @default([])
+  /// IANA time zone the month is read in.
+  timezone      String   @default("UTC")
+  lastSentMonth String?
+  updatedBy     String?  @db.Uuid
+  updatedAt     DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
 
 model AuditLog {

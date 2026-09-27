@@ -50,6 +50,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `created room “${s(meta.name)}” in ${s(meta.site)}`;
     case 'room.duplicate':
       return `copied room “${s(meta.from)}” to a new room “${s(meta.name)}”`;
+    case 'room.staging_copy':
+      return `made a staging copy of room “${s(meta.from)}” called “${s(meta.name)}”`;
+    case 'room.staging_promote':
+      return `promoted the design of staging room “${s(meta.staging)}” into “${s(meta.room)}”`;
     case 'room.update':
       return `updated room “${s(meta.name)}”${meta.site ? ` (now in ${s(meta.site)})` : ''}`;
     case 'room.delete':
@@ -68,6 +72,8 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return 'left the organisation';
     case 'release.publish':
       return `published release ${s(meta.number)} of “${s(meta.room)}”`;
+    case 'release.restore_design':
+      return `put the design of “${s(meta.room)}” back to an earlier release`;
     case 'deployment.create':
       return meta.kind === 'rollback'
         ? `rolled “${s(meta.room)}” back to release ${s(meta.number)}`
@@ -122,6 +128,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `${meta.combined ? 'joined' : 'split'} “${s(meta.name)}”`;
     case 'group.deploy':
       return `deployed a room group (${s(meta.deployed)} of ${s(meta.rooms)} rooms sent, ${s(meta.published)} new releases)`;
+    case 'report.schedule':
+      return meta.enabled
+        ? `set the monthly report to be emailed to ${s(meta.recipients)} ${meta.recipients === 1 ? 'address' : 'addresses'}`
+        : 'turned off the monthly report email';
     case 'org.retention':
       return `set how long the activity log is kept to ${s(meta.days)} days: “${s(meta.reason)}”`;
     case 'audit.export':
@@ -150,6 +160,12 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `started a commissioning check of “${s(meta.room)}”`;
     case 'commissioning.signoff':
       return `signed off the commissioning check of “${s(meta.room)}” (${s(meta.pass)} passed, ${s(meta.fail)} failed, ${s(meta.skip)} skipped)`;
+    case 'apikey.create':
+      return `made an API key called “${s(meta.name)}” (${s(meta.prefix)})`;
+    case 'apikey.revoke':
+      return 'revoked an API key';
+    case 'alert_channel.rules':
+      return `changed the timing of the alert channel “${s(meta.name)}”: ${s(meta.rules)}`;
     case 'alert_channel.delete':
       return `removed alert channel “${s(meta.name)}”`;
     case 'ticket.create':
