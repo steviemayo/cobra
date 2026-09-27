@@ -4,7 +4,7 @@ import { db } from '@kestrel/db';
 import { TransitionAction } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { deployGroup, planGroupDeploy } from '../group-deploy';
-import { readOrgBranding } from '../panel-settings';
+import { orgPanelBranding } from '../provider-brand';
 import { SigningNotConfigured, loadSigningKey } from '../signing';
 import {
   GroupError,
@@ -149,7 +149,7 @@ export const roomGroupRouter = router({
     try {
       const results = await deployGroup(db, ctx.orgId, input.groupId, {
         key,
-        orgBranding: readOrgBranding(org?.branding),
+        orgBranding: await orgPanelBranding(db, ctx.orgId, org?.branding),
         userId: ctx.user.id,
       });
       // The same records as deploying each room by hand, plus one for the group.

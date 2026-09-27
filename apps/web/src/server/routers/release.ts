@@ -5,7 +5,7 @@ import { diffRoomModels, summariseChanges } from '@kestrel/engine';
 import { RoomModel, SignedManifest } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { createDeployment } from '../deployment-service';
-import { readOrgBranding } from '../panel-settings';
+import { orgPanelBranding } from '../provider-brand';
 import { gatewayTooOld, setupProblem } from '../deploy-check';
 import { ReleaseRestoreError, restoreReleaseDesign } from '../release-restore';
 import { checkPublishable, createRelease } from '../release-service';
@@ -161,7 +161,7 @@ export const releaseRouter = router({
         room,
         checked,
         key,
-        orgBranding: readOrgBranding(orgRow?.branding),
+        orgBranding: await orgPanelBranding(db, ctx.orgId, orgRow?.branding),
         userId: ctx.user.id,
       });
       await writeAudit({

@@ -810,12 +810,24 @@ model MspGrant {
   respondedAt    DateTime?
   endedAt        DateTime?
   endedBy        String?   @db.Uuid
+  /// The customer's owner chose to show this provider's name, logo and colour in its portal and on its panels.
+  useBrand       Boolean   @default(false)
 
   msp      Org @relation("MspSide", fields: [mspOrgId], references: [id], onDelete: Cascade)
   customer Org @relation("CustomerSide", fields: [customerOrgId], references: [id], onDelete: Cascade)
 
   @@index([customerOrgId, status])
   @@index([mspOrgId, status])
+}
+
+// How a service provider presents itself to customers that choose it (white label). No relations,
+// like RoomSchedule: it is only ever read by the provider's organisation id.
+model ProviderBrand {
+  mspOrgId  String   @id @db.Uuid
+  name      String
+  logoUrl   String?
+  accent    String?
+  updatedAt DateTime @updatedAt
 }
 
 // Kestrel staff: people who may use the /staff portal across every organisation. Separate from

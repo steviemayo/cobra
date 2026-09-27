@@ -174,6 +174,8 @@ export interface CustomerGrantView {
   status: string;
   /** Names of the sites it is limited to. Empty: the whole organisation. */
   siteNames: string[];
+  /** The owner chose to show this provider's name, logo and colour. */
+  useBrand: boolean;
   createdAt: Date;
 }
 
@@ -197,6 +199,7 @@ export async function grantsForCustomer(
     role: g.role,
     status: g.status,
     siteNames: g.siteIds.map((id) => siteName.get(id) ?? 'Unknown site'),
+    useBrand: !!g.useBrand,
     createdAt: g.createdAt,
   }));
 }

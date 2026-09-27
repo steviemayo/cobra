@@ -13,12 +13,20 @@ import {
   providerCode,
   respondToInvite,
 } from '../msp';
+import {
+  BrandError,
+  BrandInput,
+  getProviderBrand,
+  saveProviderBrand,
+  setUseBrand,
+} from '../provider-brand';
 import { orgProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
 
 function asTrpc(e: unknown): never {
-  if (e instanceof MspError) throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
+  if (e instanceof MspError || e instanceof BrandError)
+    throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
   throw e;
 }
 
@@ -33,8 +41,53 @@ export const mspRouter = router({
   // ---- From a customer: who looks after us -------------------------------------------------
   providers: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
     requireRole(ctx.role, ['owner']);
-    return grantsForCustomer(db, ctx.orgId);
+    const grants = await grantsForCustomer(db, ctx.orgId);
+    const brands = await db.providerBrand.findMany({
+      where: { mspOrgId: { in: grants.map((g) => g.mspOrgId) } },
+    });
+    const has = new Set(brands.map((b) => b.mspOrgId));
+    return grants.map((g) => ({ ...g, hasBrand: has.has(g.mspOrgId) }));
   }),
+
+  // Show a connected provider's name, logo and colour in this organisation's portal and on its panels.
+  useBrand: orgProcedure
+    .input(z.object({ orgId, grantId: z.string().uuid(), on: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      try {
+        await setUseBrand(db, {
+          customerOrgId: ctx.orgId,
+          grantId: input.grantId,
+          on: input.on,
+          actorId: ctx.user.id,
+        });
+        return { ok: true };
+      } catch (e) {
+        return asTrpc(e);
+      }
+    }),
+
+  // ---- From a provider: how we present ourselves ---------------------------------------------
+  brand: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
+    await assertProvider(ctx.orgId);
+    return getProviderBrand(db, ctx.orgId);
+  }),
+
+  setBrand: orgProcedure
+    .input(z.object({ orgId, brand: BrandInput }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      await assertProvider(ctx.orgId);
+      try {
+        return await saveProviderBrand(db, {
+          mspOrgId: ctx.orgId,
+          input: input.brand,
+          actorId: ctx.user.id,
+        });
+      } catch (e) {
+        return asTrpc(e);
+      }
+    }),
 
   invite: orgProcedure
     .input(

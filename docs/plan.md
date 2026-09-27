@@ -569,7 +569,7 @@ After the first customers. Pre-read: `docs/staff-portal-and-msp.md`, `apps/web/s
 
 ### L. Provider billing and white label
 
-Needs a business decision first: today the customer pays Kestrel directly and the provider pays nothing. Pre-read: `docs/staff-portal-and-msp.md` ("Decided": billing), `apps/web/src/server/stripe.ts`, `billing.ts`, `packages/model/src/billing.ts`. Options to decide: the provider pays for its customers' rooms (wholesale), per-customer choice, or provider-branded panels and portal.
+**Decided 2026-09-27: the customer always pays Kestrel directly; no wholesale billing. White label (look only) is built, see AA.** The text below is the original brief. Needs a business decision first: today the customer pays Kestrel directly and the provider pays nothing. Pre-read: `docs/staff-portal-and-msp.md` ("Decided": billing), `apps/web/src/server/stripe.ts`, `billing.ts`, `packages/model/src/billing.ts`. Options to decide: the provider pays for its customers' rooms (wholesale), per-customer choice, or provider-branded panels and portal.
 
 ### M. Earlier candidates
 
@@ -631,7 +631,7 @@ Candidates from the MVP-to-launch review. Only usage and occupancy analytics was
 - **X. Public API and outbound webhooks.** API keys per organisation; an event stream for building systems, ITSM and chat tools.
 - **Y. Mobile tech app and commissioning checklist.** Guided per-room test (each source, mic, camera) with a saved pass/fail record and sign-off.
 - **Z. Staging rooms.** Try a program on a real gateway without touching production rooms.
-- **AA. White label for service providers.** Custom domain and branding. Same business decision as L.
+- **AA. White label for service providers. Built (name, logo, colour).** A provider sets its brand on its home page; a customer's owner chooses per connection to show it in their portal and, as a fallback, on their panels. **The customer always pays Kestrel directly** (decided 2026-09-27; the wholesale option in L is dropped). Needs migration `20260927140000_provider_brand`. `docs/white-label.md`. Not built: custom domains, branded sign-in and emails.
 - **AB. SSO (SAML/OIDC).** Enterprise requirement.
 
 ### Small fixes to fit in anywhere
