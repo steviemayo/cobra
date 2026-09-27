@@ -3,6 +3,7 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { z } from 'zod';
 import type { PrismaClient } from '@kestrel/db';
+import { ChannelRules, dueNow, hasRules } from './alert-rules';
 import { SEVERITY_RANK, type AlertJob, type Severity } from './monitoring';
 
 export type AlertDb = Pick<PrismaClient, 'alertChannel' | 'alertDelivery' | 'incident' | 'room'>;
@@ -10,25 +11,30 @@ export type AlertDb = Pick<PrismaClient, 'alertChannel' | 'alertDelivery' | 'inc
 export const CHANNEL_TYPES = ['email', 'teams', 'webhook', 'itsm'] as const;
 export type ChannelType = (typeof CHANNEL_TYPES)[number];
 
+// Every channel may carry timing rules (see alert-rules.ts); without them it alerts at once, always.
+const rules = { rules: ChannelRules.optional() };
+
 export const ChannelConfig = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('email'), to: z.array(z.string().email()).min(1).max(10) }),
-  z.object({ type: z.literal('teams'), url: z.string().url().max(2000) }),
+  z.object({ type: z.literal('email'), to: z.array(z.string().email()).min(1).max(10), ...rules }),
+  z.object({ type: z.literal('teams'), url: z.string().url().max(2000), ...rules }),
   z.object({
     type: z.literal('webhook'),
     url: z.string().url().max(2000),
     secret: z.string().min(8).max(200).optional(),
+    ...rules,
   }),
   // A placeholder for a service desk: sends the same payload as a webhook, tagged for ITSM tools.
   z.object({
     type: z.literal('itsm'),
     system: z.enum(['generic', 'servicenow', 'jira']).default('generic'),
     url: z.string().url().max(2000).optional(),
+    ...rules,
   }),
 ]);
 export type ChannelConfig = z.infer<typeof ChannelConfig>;
 
 export interface AlertMessage {
-  event: 'opened' | 'resolved' | 'test';
+  event: 'opened' | 'reminder' | 'resolved' | 'test';
   incident: {
     id: string;
     kind: string;
@@ -118,7 +124,9 @@ const realSenders = (): Senders => ({ fetch, resolve: resolveAll, env: process.e
 const headline = (m: AlertMessage) =>
   m.event === 'resolved'
     ? `Resolved: ${m.incident.title}`
-    : m.event === 'test'
+    : m.event === 'reminder'
+      ? `Reminder, still open: ${m.incident.title}`
+      : m.event === 'test'
       ? `Test alert: ${m.incident.title}`
       : m.incident.title;
 
@@ -310,6 +318,46 @@ export function portalLink(
   return base ? `${base}/o/${orgId}${path}` : null;
 }
 
+/** A channel's timing rules, if it has any. */
+export function channelRules(ch: { config: unknown }): ChannelRules | null {
+  const parsed = ChannelRules.optional().safeParse((ch.config as { rules?: unknown } | null)?.rules);
+  return parsed.success && hasRules(parsed.data) ? parsed.data : null;
+}
+
+type IncidentRow = NonNullable<Awaited<ReturnType<AlertDb['incident']['findFirst']>>>;
+
+async function buildMessage(
+  db: AlertDb,
+  incident: IncidentRow,
+  event: AlertMessage['event'],
+  env: Record<string, string | undefined>,
+  roomNames = new Map<string, string | null>(),
+): Promise<AlertMessage> {
+  let room: string | null = null;
+  if (incident.roomId) {
+    if (!roomNames.has(incident.roomId))
+      roomNames.set(incident.roomId, (await db.room.findFirst({ where: { id: incident.roomId } }))?.name ?? null);
+    room = roomNames.get(incident.roomId) ?? null;
+  }
+  return {
+    event,
+    incident: {
+      id: incident.id,
+      kind: incident.kind,
+      severity: incident.severity as Severity,
+      title: incident.title,
+      detail: incident.detail,
+      room,
+      openedAt: incident.openedAt.toISOString(),
+      resolvedAt: incident.resolvedAt?.toISOString() ?? null,
+    },
+    portalUrl: portalLink(incident.orgId, `/incidents`, env),
+  };
+}
+
+const reaches = (incident: { severity: string }, ch: { minSeverity: string }) =>
+  SEVERITY_RANK[incident.severity as Severity] >= SEVERITY_RANK[ch.minSeverity as Severity];
+
 /** Sends the alerts a monitoring pass produced. Run it after the response, never inside it. */
 export async function deliverAlerts(
   db: AlertDb,
@@ -321,35 +369,86 @@ export async function deliverAlerts(
     try {
       const incident = await db.incident.findFirst({ where: { id: job.incidentId } });
       if (!incident) continue;
-      const room = incident.roomId
-        ? await db.room.findFirst({ where: { id: incident.roomId } })
-        : null;
-      const msg: AlertMessage = {
-        event: job.event,
-        incident: {
-          id: incident.id,
-          kind: incident.kind,
-          severity: incident.severity as Severity,
-          title: incident.title,
-          detail: incident.detail,
-          room: room?.name ?? null,
-          openedAt: incident.openedAt.toISOString(),
-          resolvedAt: incident.resolvedAt?.toISOString() ?? null,
-        },
-        portalUrl: portalLink(incident.orgId, `/incidents`, s.env),
-      };
+      const msg = await buildMessage(db, incident, job.event, s.env);
       const channels = await db.alertChannel.findMany({
         where: { orgId: incident.orgId, enabled: true },
       });
       for (const ch of channels) {
-        if (
-          SEVERITY_RANK[incident.severity as Severity] < SEVERITY_RANK[ch.minSeverity as Severity]
-        )
-          continue;
+        if (!reaches(incident, ch)) continue;
+        const rules = channelRules(ch);
+        if (rules && job.event === 'opened') {
+          // A channel with timing rules may hold the alert back; the sweep sends it when it is due.
+          const due = dueNow({
+            rules,
+            openedAt: incident.openedAt,
+            acknowledged: incident.acknowledgedAt !== null,
+            sent: [],
+            now,
+          });
+          if (due !== 'opened') continue;
+        }
+        if (rules && job.event === 'resolved') {
+          // Only say it is fixed to a channel that was told about it.
+          const told = await db.alertDelivery.count({
+            where: { channelId: ch.id, incidentId: incident.id, status: 'sent', event: { in: ['opened', 'reminder'] } },
+          });
+          if (told === 0) continue;
+        }
         await deliverToChannel(db, ch, msg, incident.id, s, now);
       }
     } catch (e) {
       console.error('[alerts] delivery failed', e);
     }
   }
+}
+
+/** A failed send is tried again after this long, and given up on after this many attempts. */
+export const RETRY_AFTER_MS = 5 * 60_000;
+export const MAX_ATTEMPTS = 5;
+
+/**
+ * Sends what channels with timing rules are now due to send about incidents still open: alerts that
+ * were held for their hours or their delay, and reminders. Meant to run every minute or two.
+ */
+export async function deliverDue(
+  db: AlertDb,
+  s: Senders = realSenders(),
+  now = new Date(),
+): Promise<number> {
+  const withRules = (await db.alertChannel.findMany({ where: { enabled: true } })).flatMap((ch) => {
+    const rules = channelRules(ch);
+    return rules ? [{ ch, rules }] : [];
+  });
+  if (withRules.length === 0) return 0;
+  const incidents = await db.incident.findMany({
+    where: { orgId: { in: [...new Set(withRules.map((c) => c.ch.orgId))] }, status: 'open' },
+  });
+  const roomNames = new Map<string, string | null>();
+  let sent = 0;
+  for (const incident of incidents) {
+    for (const { ch, rules } of withRules) {
+      if (ch.orgId !== incident.orgId || !reaches(incident, ch)) continue;
+      try {
+        const history = await db.alertDelivery.findMany({
+          where: { channelId: ch.id, incidentId: incident.id, event: { in: ['opened', 'reminder'] } },
+        });
+        const failed = history.filter((d) => d.status !== 'sent');
+        const lastTry = failed.length ? Math.max(...failed.map((d) => d.at.getTime())) : 0;
+        if (failed.length >= MAX_ATTEMPTS || now.getTime() < lastTry + RETRY_AFTER_MS) continue;
+        const due = dueNow({
+          rules,
+          openedAt: incident.openedAt,
+          acknowledged: incident.acknowledgedAt !== null,
+          sent: history.filter((d) => d.status === 'sent').map((d) => ({ event: d.event, at: d.at })),
+          now,
+        });
+        if (!due) continue;
+        const msg = await buildMessage(db, incident, due, s.env, roomNames);
+        if ((await deliverToChannel(db, ch, msg, incident.id, s, now)).status === 'sent') sent++;
+      } catch (e) {
+        console.error('[alerts] due delivery failed', e);
+      }
+    }
+  }
+  return sent;
 }
