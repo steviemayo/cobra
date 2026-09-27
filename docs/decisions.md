@@ -150,6 +150,14 @@ Checked and confirmed: every `DeviceFeedback` field works in both scopes already
 - Shown on the room monitoring page as a line under each device: "Last 30 days: On 18h 20m, Off 5h 40m" for power, the same for input, and always for online/offline
 - **Not built:** a dedicated device history page or chart (this is one line per field, not a graph); a cap on how many devices show it (every device with feedback gets its own query — fine for the sizes tested, worth revisiting for a 50-room gateway); the read never uses Postgres JSON path filtering, so it fetches every `device.feedback` row for the room, up to 3000, and filters client-side — cheap while feedback changes stay rare, worth an index or a per-device query if that stops being true
 
+## Device history chart (TM-20, 2026-09-27)
+
+A dedicated page instead of the one-line summary alone, for the same `device.feedback`/`device.online`/`device.offline` history TM-19 started logging.
+
+- **TM-20** New route `/o/[orgId]/rooms/[roomId]/monitoring/history` (linked from each device on the room monitoring page, gated by `analytics` like Usage): a field picker (any `DeviceFeedback` field, or "online"), a 7/30/90 day range, a stacked bar per local calendar day (`monitoring.deviceHistoryDaily`, day-bucketed with `durationsByDay` reusing `usage-analytics.ts`'s `zonedDayStart`), a legend with totals and shares, and a table view of the exact per-day numbers
+- **Categorical chart palette added**: `--chart-1`..`--chart-8` in `globals.css` (light and dark), the dataviz skill's validated default 8-hue set (not derived from the org theme, since nothing categorical existed here yet). Values are assigned slots in a fixed order and never cycled; a 9th distinct value folds into "Other" (a muted grey, not a re-picked hue). Validated with the skill's script in both modes; every value is also named in text in the legend and the table, so colour is never the only cue
+- **Not built:** picking a device before the room; a shorter within-day granularity (the chart is one bar per day, not per hour); Postgres JSON-path filtering (unchanged from TM-19, this reads the same events)
+
 ## Driver classes (plan: `docs/driver-classes.md`)
 
 ### Slice 1: foundations (built, 2026-09-26)

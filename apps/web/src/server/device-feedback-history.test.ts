@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_FEEDBACK_EVENTS,
+  deviceFeedbackDailyHistory,
   deviceFeedbackHistory,
+  durationsByDay,
   durationsByValue,
   type DeviceFeedbackHistoryDb,
   type FeedbackChange,
@@ -141,5 +143,78 @@ describe('deviceFeedbackHistory', () => {
       { value: 'on', minutes: 20 },
       { value: 'off', minutes: 10 },
     ]);
+  });
+});
+
+describe('durationsByDay', () => {
+  it('splits a window into local calendar days, in order', () => {
+    const events: FeedbackChange[] = [
+      { at: new Date('2026-09-27T00:00:00Z'), value: 'on' },
+      { at: new Date('2026-09-28T06:00:00Z'), value: 'off' },
+    ];
+    const days = durationsByDay(
+      events,
+      new Date('2026-09-27T00:00:00Z'),
+      new Date('2026-09-29T00:00:00Z'),
+      'UTC',
+    );
+    expect(days.map((d) => d.date)).toEqual(['2026-09-27', '2026-09-28']);
+    expect(days[0]!.durations).toEqual([{ value: 'on', minutes: 1440 }]);
+    expect(days[1]!.durations).toEqual([
+      { value: 'off', minutes: 1080 },
+      { value: 'on', minutes: 360 },
+    ]);
+  });
+
+  it('uses the viewer’s time zone for day boundaries, not UTC', () => {
+    // Tokyo is UTC+9 with no daylight saving: its day starts 9 hours before UTC midnight.
+    const events: FeedbackChange[] = [{ at: new Date('2026-09-26T10:00:00Z'), value: 'on' }];
+    const days = durationsByDay(
+      events,
+      new Date('2026-09-26T15:00:00Z'),
+      new Date('2026-09-27T15:00:00Z'),
+      'Asia/Tokyo',
+    );
+    expect(days.map((d) => d.date)).toEqual(['2026-09-27']);
+    expect(days[0]!.durations).toEqual([{ value: 'on', minutes: 1440 }]);
+  });
+
+  it('is empty for a window that is not open', () => {
+    expect(durationsByDay([], new Date(0), new Date(0), 'UTC')).toEqual([]);
+  });
+});
+
+describe('deviceFeedbackDailyHistory', () => {
+  function world(rows: { at: Date; data: object; type?: string }[] = []) {
+    const gatewayEvent = table(
+      rows.map((r) => ({ orgId: ORG, roomId: ROOM, type: 'device.feedback', ...r })),
+    );
+    return { db: { gatewayEvent } as unknown as DeviceFeedbackHistoryDb };
+  }
+
+  it('reads the same events as deviceFeedbackHistory, split by day', async () => {
+    const w = world([
+      {
+        at: new Date('2026-09-27T01:00:00Z'),
+        data: { deviceId: 'dsp', field: 'input', value: 'HDMI 1' },
+      },
+      {
+        at: new Date('2026-09-28T01:00:00Z'),
+        data: { deviceId: 'dsp', field: 'input', value: 'HDMI 2' },
+      },
+    ]);
+    const { days, truncated } = await deviceFeedbackDailyHistory(w.db, {
+      orgId: ORG,
+      roomId: ROOM,
+      deviceId: 'dsp',
+      field: 'input',
+      from: new Date('2026-09-27T00:00:00Z'),
+      to: new Date('2026-09-29T00:00:00Z'),
+      tz: 'UTC',
+    });
+    expect(truncated).toBe(false);
+    expect(days.map((d) => d.date)).toEqual(['2026-09-27', '2026-09-28']);
+    expect(days[0]!.durations[0]).toMatchObject({ value: 'HDMI 1' });
+    expect(days[1]!.durations[0]).toMatchObject({ value: 'HDMI 2' });
   });
 });
