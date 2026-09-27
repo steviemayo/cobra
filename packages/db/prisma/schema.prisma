@@ -45,6 +45,7 @@ model Org {
   rooms               Room[]
   audit               AuditLog[]
   retention           OrgRetention?
+  apiKeys             ApiKey[]
   drafts              RoomDraft[]
   draftVersions       RoomDraftVersion[]
   templates           Template[]
@@ -266,6 +267,26 @@ model OrgRetention {
   updatedAt DateTime @updatedAt
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// A key an organisation's own systems use to read its data through the public API (/api/v1). Only
+// a hash of the secret is kept: the key is shown once, when it is made.
+model ApiKey {
+  id         String    @id @default(uuid()) @db.Uuid
+  orgId      String    @db.Uuid
+  name       String
+  /// The first characters of the key: recognised in a list, and how a request finds its key.
+  prefix     String    @unique
+  secretHash String
+  createdBy  String?   @db.Uuid
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
 }
 
 model AuditLog {
