@@ -351,14 +351,19 @@ export class Gateway {
   }
 
   private scheduleFast(ms: number) {
+    // One timer at a time: a heartbeat can ask for a poll while one is in flight, and an orphaned
+    // timer is one stop() can never clear.
+    if (this.fastTimer) clearTimeout(this.fastTimer);
     this.fastTimer = setTimeout(() => void this.fastTick(), ms);
   }
 
   /** One round trip: send the watched rooms' panel state up, run the intents that come back. */
   private async fastTick(): Promise<void> {
     this.fastTimer = null;
+    // Stopped first: the store may already be closed.
+    if (this.stopped) return;
     const credential = this.store.get(KEY_CREDENTIAL);
-    if (this.stopped || !credential || (this.watch.size === 0 && !this.pollOnce)) return;
+    if (!credential || (this.watch.size === 0 && !this.pollOnce)) return;
     this.pollOnce = false;
     let next = 1000;
     try {
