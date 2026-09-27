@@ -6,6 +6,7 @@ import { OrgShell } from '@/components/shell/org-shell';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { managedCustomers } from '@/server/msp';
 import { readOrgBranding } from '@/server/panel-settings';
+import { portalBrandFor } from '@/server/provider-brand';
 import { findStaff, mfaRequired } from '@/server/staff';
 import { activeSession } from '@/server/support-sessions';
 
@@ -75,7 +76,9 @@ export default async function OrgLayout({
 
   // The organisation's accent colour also themes its portal.
   const brand = await db.org.findFirst({ where: { id: orgId }, select: { branding: true } });
-  const accent = readOrgBranding(brand?.branding).accent ?? null;
+  // A service provider's name, logo and colour show instead when the owner chose them (white label).
+  const provider = await portalBrandFor(db, orgId);
+  const accent = readOrgBranding(brand?.branding).accent ?? provider?.accent ?? null;
 
   const store = await cookies();
   return (
@@ -86,6 +89,7 @@ export default async function OrgLayout({
       defaultOpen={store.get('sidebar_state')?.value !== 'false'}
       viewAs={viewAs}
       accent={accent}
+      brand={provider ? { name: provider.name, logoUrl: provider.logoUrl ?? null } : null}
     >
       {children}
     </OrgShell>

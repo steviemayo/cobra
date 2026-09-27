@@ -179,6 +179,27 @@ function EstateTree() {
   );
 }
 
+/**
+ * A service provider's name and logo at the top of the sidebar, when this portal wears their brand.
+ * Kestrel stays credited, quietly.
+ */
+function BrandMark() {
+  const { brand } = useOrg();
+  if (!brand) return null;
+  return (
+    <div className="flex items-center gap-2 px-2 pt-1 group-data-[collapsible=icon]:hidden">
+      {brand.logoUrl && (
+        // Any https image the provider chose, so a plain img rather than next/image.
+        <img src={brand.logoUrl} alt="" className="h-7 max-w-24 object-contain" />
+      )}
+      <div className="grid min-w-0 leading-tight">
+        <span className="truncate text-sm font-semibold">{brand.name}</span>
+        <span className="text-[10px] text-muted-foreground">Powered by Kestrel</span>
+      </div>
+    </div>
+  );
+}
+
 export function AppSidebar() {
   const { orgId, org, canEdit, canSeeTeam, canSupport, isOwner } = useOrg();
   // A service provider has customers rather than an estate of its own.
@@ -193,6 +214,7 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
+        <BrandMark />
         <OrgSwitcher />
       </SidebarHeader>
 

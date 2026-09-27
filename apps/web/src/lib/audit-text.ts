@@ -22,6 +22,12 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return meta.msp
         ? `ended the connection with ${s(meta.msp)}`
         : `ended the connection with ${s(meta.customer)}`;
+    case 'msp.brand':
+      return `updated the brand shown to customers (“${s(meta.name)}”)`;
+    case 'msp.brand_on':
+      return `chose to show ${s(meta.msp)}’s name, logo and colour in the portal and on panels`;
+    case 'msp.brand_off':
+      return `stopped showing ${s(meta.msp)}’s name, logo and colour`;
     case 'ticket.route':
       return `${meta.to === 'provider' ? 'sent' : 'took back'} support request “${s(meta.title)}”${meta.to === 'provider' ? ' to the service provider' : ' for your own team'}`;
     case 'staff.session.start':
