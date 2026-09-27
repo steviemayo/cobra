@@ -68,6 +68,8 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return 'left the organisation';
     case 'release.publish':
       return `published release ${s(meta.number)} of “${s(meta.room)}”`;
+    case 'release.restore_design':
+      return `put the design of “${s(meta.room)}” back to an earlier release`;
     case 'deployment.create':
       return meta.kind === 'rollback'
         ? `rolled “${s(meta.room)}” back to release ${s(meta.number)}`
