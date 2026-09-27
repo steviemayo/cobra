@@ -117,7 +117,14 @@ export type DeploymentReport = z.infer<typeof DeploymentReport>;
 // ---- Remote commands ---------------------------------------------------------------------------
 
 /** The only things support can ask a gateway to do. Anything else is refused on both ends. */
-export const COMMAND_TYPES = ['diagnostics', 'test_device', 'restart_room', 'room_off', 'verify_point'] as const;
+export const COMMAND_TYPES = [
+  'diagnostics',
+  'test_device',
+  'restart_room',
+  'room_off',
+  'verify_point',
+  'discover_devices',
+] as const;
 export const CommandType = z.enum(COMMAND_TYPES);
 export type CommandType = z.infer<typeof CommandType>;
 
@@ -144,6 +151,12 @@ export const COMMAND_INFO: Record<
     label: 'Check a control point',
     description: 'Read one control point of a DSP and report its value and range. Changes nothing.',
     needsDevice: true,
+  },
+  discover_devices: {
+    label: 'Find devices on the network',
+    description:
+      'Look for projectors, DSPs and other equipment on the gateway’s own network and report what answers. Only reads; changes nothing.',
+    needsDevice: false,
   },
   room_off: {
     label: 'Turn room off',

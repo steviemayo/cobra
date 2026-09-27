@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, LifeBuoy, PlayCircle, Power, RotateCw, Stethoscope } from 'lucide-react';
+import { ChevronRight, LifeBuoy, PlayCircle, Power, RotateCw, Search, Stethoscope } from 'lucide-react';
 import { toast } from 'sonner';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
@@ -78,6 +78,7 @@ const COMMAND_ICON: Record<CommandType, typeof Power> = {
   restart_room: RotateCw,
   room_off: Power,
   verify_point: Stethoscope,
+  discover_devices: Search,
 };
 
 const STATUS_LABEL: Record<string, string> = {

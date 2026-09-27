@@ -215,7 +215,14 @@ export const SignedBindings = z.object({
 export type SignedBindings = z.infer<typeof SignedBindings>;
 
 /** Names of what a gateway can do beyond the basics, sent in its heartbeat. */
-export const GATEWAY_FEATURES = ['bindings', 'display-extras', 'control-points', 'shared-devices', 'avoip'] as const;
+export const GATEWAY_FEATURES = [
+  'bindings',
+  'display-extras',
+  'control-points',
+  'shared-devices',
+  'avoip',
+  'discovery',
+] as const;
 export type GatewayFeature = (typeof GATEWAY_FEATURES)[number];
 
 /**
