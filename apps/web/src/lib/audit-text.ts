@@ -146,6 +146,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `added alert channel “${s(meta.name)}” (${s(meta.type)})`;
     case 'alert_channel.update':
       return `changed alert channel “${s(meta.name)}”`;
+    case 'commissioning.start':
+      return `started a commissioning check of “${s(meta.room)}”`;
+    case 'commissioning.signoff':
+      return `signed off the commissioning check of “${s(meta.room)}” (${s(meta.pass)} passed, ${s(meta.fail)} failed, ${s(meta.skip)} skipped)`;
     case 'alert_channel.delete':
       return `removed alert channel “${s(meta.name)}”`;
     case 'ticket.create':
