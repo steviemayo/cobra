@@ -611,28 +611,36 @@ From the MVP-to-launch review. Legal items need a lawyer; the rest are build or 
 - [ ] **LR-25 Load and soak test.** ~50 rooms per gateway; many gateways sending heartbeat and telemetry together.
 - [ ] **LR-26 SOC 2 or ISO 27001 groundwork.** Start collecting evidence early (Vanta or Drata). Essential Eight / IRAP only if targeting Australian government.
 
-### Post-launch roadmap (added 2026-09-26, none built)
+### Post-launch roadmap (added 2026-09-26; built 2026-09-27 in open PRs)
 
-Candidates from the MVP-to-launch review. Only usage and occupancy analytics was kept from the "big value adds"; predictive health, AI room design, the marketplace and simulator sharing were dropped (the marketplace stays under M as before). Order and sizing still to decide.
+Candidates from the MVP-to-launch review. Only usage and occupancy analytics was kept from the "big value adds"; predictive health, AI room design, the marketplace and simulator sharing were dropped (the marketplace stays under M as before). Each item below says what was built, in which PR, and what was left out. **Nothing here is merged yet, and none of it has had a browser pass or a real-hardware test.**
 
-**N. Usage and occupancy analytics.** Room utilisation, which activities people use, peak times, no-show bookings (once booking integration exists). Built on signals the gateway already reports (occupancy, signal detect, activity taps). Pre-read: `docs/phase-4-preread.md` (telemetry), `packages/model` (protocol messages), the retention job (90-day telemetry limit; aggregates may need to be kept longer).
+**Before merging: migrations, and merge order**
+
+- Three new tables, each in its own migration, none applied by the build. Apply after merging, with `pnpm --filter @kestrel/db exec prisma migrate deploy`: `20260927100000_report_schedule` (W, #64), `20260927110000_api_keys` (X, #67), `20260927120000_commissioning_runs` (Y, #68). Each only affects the feature that uses it
+- Stacked PRs: #64 (reports) is based on #63 (analytics); #66 (staging) is based on #61 (duplicate room); #70 (driver updates) is based on #60 (bulk deploy). Merge the base first, then retarget the second to `dev`
+- #63, #67 and #68 each add a relation line to `Org` in `schema.prisma`, next to each other, so expect a small merge conflict there; keep every line
+- Deploy the web app before updating gateways: #63 (analytics) adds a telemetry event type and #69 (discovery) adds a command type an older web app or gateway would refuse. #69 is also gated so the portal only sends it to a gateway that says it can run it
+- When #63 and #64 are merged, exclude staging rooms from their room queries (`kind: { not: 'staging' }`, see #66)
+
+**N. Usage and occupancy analytics. Built: #63.** A Usage page (monitoring feature): hours in use, share of business hours per room, sessions, hours by day, a day-and-hour heatmap in the viewer's time zone, activity mix, and plain-language insights. Gateways now report a room-level `room.occupancy` event. Not built: no-shows (needs U); business hours are fixed at Mon to Fri 8am to 6pm; reach is the 90-day telemetry retention.
 
 **Missing features**
 
-- **O. Bulk operations and staged rollouts.** Deploy, update or roll back many rooms or sites at once, with a canary room first, then the rest.
-- **P. Room cloning and site templates.** Copy a room; stamp out many identical rooms from one master.
-- **Q. Config diff and history.** What changed between releases, who changed it, one-click revert.
-- **R. Pre-deploy validation and dry run.** Warn before a release goes out if a room will break (for example the driver is missing on its gateway). Extends the engine validator.
-- **S. Device discovery.** The gateway scans its network for known device types and prefills the room model.
-- **T. Firmware and driver update management.** Track device firmware versions; flag out-of-date or vulnerable ones.
-- **U. Room booking integration.** Current and next meeting on the panel, auto-start, check-in, release no-shows. Goes beyond the existing calendar triggers.
-- **V. Notification and escalation rules.** On-call schedules, quiet hours, repeat alerts until acknowledged. Extends the alert channels.
-- **W. Reporting.** Monthly PDF or email per customer: uptime, usage, tickets. Depends on N.
-- **X. Public API and outbound webhooks.** API keys per organisation; an event stream for building systems, ITSM and chat tools.
-- **Y. Mobile tech app and commissioning checklist.** Guided per-room test (each source, mic, camera) with a saved pass/fail record and sign-off.
-- **Z. Staging rooms.** Try a program on a real gateway without touching production rooms.
-- **AA. White label for service providers.** Custom domain and branding. Same business decision as L.
-- **AB. SSO (SAML/OIDC).** Enterprise requirement.
+- **O. Bulk operations and staged rollouts. Built: #60** (with R). Choose rooms on the Deployments page, then deploy or roll back together, with a "send to one room first" canary. The canary is not gated automatically: a person opens the dialog again to send the rest (automatic gating needs a rollout table). No scheduling of a bulk deploy.
+- **P. Room cloning and site templates. Built: #61.** Duplicate room on the room settings page. Stamping many rooms from a master was already possible with Save as template plus the bulk sheet.
+- **Q. Config diff and history. Built: #62.** Each release opens to show what it changed, comparable with any other release, with who published it; "Restore this design" puts an old release's design back in the working draft (the current draft is saved first). The diff engine already existed.
+- **R. Pre-deploy validation and dry run. Built: #60** (with O). The bulk dialog previews every room and names any that cannot go, with the reason. Also #70: deploying now publishes a new release when a driver has a newer version.
+- **S. Device discovery. Built: #69.** "Find devices on the network" on the Devices page: the gateway looks at its own private /24 networks for well-known control ports and asks PJLink devices who they are; "Use this address" fills a device's address. Read-only. Not built: identifying non-PJLink devices beyond the port, other VLANs, other ports.
+- **T. Firmware and driver update management. Driver half built: #70.** The Deployments page flags rooms running an older version of the organisation's own drivers, and "Update these rooms" opens the bulk dialog for them. **Firmware tracking is not built:** it needs each driver to report a firmware version (device state, gateway report, driver format), somewhere to store it, and per-vendor driver work.
+- **U. Room booking integration. Not built.** Needs decisions first: what the panel shows of a meeting (titles can be private), whether Kestrel may write back to the calendar to release no-shows (it needs write permission, where calendar access today is read-only), and the panel layout. It also crosses the gateway protocol, the runtime view and the panel.
+- **V. Notification and escalation rules. Built: #65.** Per alert channel: only alert on chosen days and hours (overnight and time zones work), wait before alerting (skipped if acknowledged), repeat until acknowledged. An on-call rota is a channel per person. No migration (rules live in the channel config).
+- **W. Reporting. Built: #64.** A Reports page (a month's use, reliability, support; print or save as PDF), "Email me a copy", and an optional monthly email to a list. Text email only.
+- **X. Public API and outbound webhooks. Built: #67.** API keys (Settings) and read-only `GET /api/v1/rooms`, `/rooms/{id}`, `/incidents` (`docs/public-api.md`). Outbound events already exist as the Webhook alert channel. Not built: control from the API, usage and report data, events other than problems.
+- **Y. Mobile tech app and commissioning checklist. Built: #68.** A Commissioning tab per room: a checklist made from the design, Works/Problem/Skip on each item (made for a phone), sign-off, a record that never changes, printable. Not built: photos on failed items, and driving the room from the check screen.
+- **Z. Staging rooms. Built: #66.** A staging copy of a room (free, no alerts, badged) and Promote to a live room (into its draft, with the live draft saved first).
+- **AA. White label for service providers. Not built.** Blocked on the business decision in L (who pays: the customer, the provider wholesale, or per-customer choice), and a custom domain needs hosting and certificate work.
+- **AB. SSO (SAML/OIDC). Sign-in side built: #71.** "Sign in with single sign-on" on the login page and `docs/sso.md` for the per-company Supabase setup. **Not run end to end** (needs a real identity provider and a paid Supabase project). Not built: forcing SSO-only for a company, SCIM, and role mapping from provider groups.
 
 ### Small fixes to fit in anywhere
 
