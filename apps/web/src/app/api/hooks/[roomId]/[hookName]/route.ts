@@ -1,5 +1,6 @@
 import { db } from '@kestrel/db';
 import { secretMatches } from '@kestrel/crypto';
+import { getEntitlements } from '@/server/billing';
 import { queueHook } from '@/server/control-service';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,9 @@ export async function POST(
   });
   // Unknown rooms and wrong secrets look the same.
   if (!room?.hookSecretHash || !secretMatches(given, room.hookSecretHash)) return unauthorised();
+  // A webhook runs a room's actions, so it needs control. The gateway refuses it as well.
+  if (!(await getEntitlements(db, room.orgId)).control)
+    return Response.json({ error: 'Control is not included in this organisation’s plan.' }, { status: 402 });
   const res = await queueHook(db, { orgId: room.orgId, roomId: room.id, hookName });
   if (!res.ok)
     return Response.json(

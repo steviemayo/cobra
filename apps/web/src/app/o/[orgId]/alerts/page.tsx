@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: 'Alerts' };
 
 export default function AlertsPage() {
   return (
-    <RequireFeature feature="monitoring">
+    <RequireFeature feature="alerts">
       <AlertsView />
     </RequireFeature>
   );

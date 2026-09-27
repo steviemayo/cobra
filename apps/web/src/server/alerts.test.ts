@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  CHANNEL_NOT_IN_PLAN,
   MAX_ALERTS_PER_CHANNEL_HOUR,
   assertPublicUrl,
   deliverAlerts,
@@ -193,6 +194,26 @@ describe('delivery', () => {
       state: 'new',
       correlation_id: INC,
     });
+  });
+
+  it('skips a channel the plan does not allow, and never sends to it', async () => {
+    const w = world([
+      { type: 'email', config: { to: ['ops@example.com'] } },
+      { type: 'teams', config: { url: 'https://teams.example.com/x' } },
+    ]);
+    const { s, calls } = senders(200, {
+      RESEND_API_KEY: 'k',
+      ALERT_FROM_EMAIL: 'alerts@example.com',
+    });
+    // Basic: email only.
+    const basic = {
+      ...s,
+      allowed: async (_db: unknown, _org: string, type: string) => type === 'email',
+    };
+    await deliverAlerts(w.db, [{ incidentId: INC, event: 'opened' }], basic, T0);
+    expect(w.alertDelivery.rows.map((d) => d.status)).toEqual(['sent', 'skipped']);
+    expect(w.alertDelivery.rows[1]!.error).toBe(CHANNEL_NOT_IN_PLAN);
+    expect(calls.filter((c) => String(c.url).includes('teams.example.com'))).toHaveLength(0);
   });
 
   it('records failures, including destinations that refuse and destinations that are not allowed', async () => {

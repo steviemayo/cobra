@@ -9,6 +9,9 @@ import {
 import { applyBindings } from '@kestrel/model';
 import type {
   DeviceBus,
+  DeviceCommand,
+  DeviceEvent,
+  DeviceState,
   DeviceValues,
   PanelAccess,
   PanelBranding,
@@ -19,6 +22,46 @@ import type {
 import type { Logger } from './log';
 import { occupancyTracker } from './occupancy';
 import { SharedDevices } from './shared-devices';
+
+/** Why a command was refused when the plan does not include control. */
+export const CONTROL_NOT_LICENSED = 'Control is not included in this organisation’s plan';
+
+/**
+ * A room's bus with every command refused while control is off. Feedback, health and reads still
+ * flow, so the room keeps being watched. Every route that acts on a device (panel, portal, trigger,
+ * schedule, webhook) ends in `send`, so this is the one place that has to hold.
+ */
+export class ControlGate implements DeviceBus {
+  readonly readPoint?: DeviceBus['readPoint'];
+
+  constructor(
+    private readonly inner: DeviceBus,
+    private readonly allowed: () => boolean,
+  ) {
+    this.readPoint = inner.readPoint?.bind(inner);
+  }
+
+  send(deviceId: string, command: DeviceCommand): Promise<void> {
+    if (!this.allowed()) return Promise.reject(new Error(CONTROL_NOT_LICENSED));
+    return this.inner.send(deviceId, command);
+  }
+
+  getState(deviceId: string): DeviceState | undefined {
+    return this.inner.getState(deviceId);
+  }
+
+  subscribe(listener: (event: DeviceEvent) => void): () => void {
+    return this.inner.subscribe(listener);
+  }
+
+  quickActions(deviceId: string) {
+    return this.inner.quickActions?.(deviceId) ?? [];
+  }
+
+  features(deviceId: string) {
+    return this.inner.features?.(deviceId) ?? [];
+  }
+}
 
 export type SimulateMode = 'off' | 'all' | 'missing';
 
@@ -120,6 +163,7 @@ export class RoomHost {
   private readonly activeListeners = new Set<() => void>();
   /** One connection per shared site device, whatever number of rooms use it. */
   readonly shared: SharedDevices;
+  private controlOn = true;
 
   constructor(
     private readonly mode: SimulateMode,
@@ -127,6 +171,17 @@ export class RoomHost {
     private readonly emit: (event: TelemetryEvent) => void,
   ) {
     this.shared = new SharedDevices(log);
+  }
+
+  /** Whether commands are accepted. The cloud says so on every heartbeat, from the organisation's plan. */
+  get control(): boolean {
+    return this.controlOn;
+  }
+
+  setControl(on: boolean) {
+    if (on === this.controlOn) return;
+    this.controlOn = on;
+    this.log('info', on ? 'Control switched on' : 'Control switched off: commands are refused');
   }
 
   get(roomId: string): LoadedRoom | undefined {
@@ -187,7 +242,7 @@ export class RoomHost {
     const runtime = new RoomRuntime({
       model: running.manifest.model,
       roomName: manifest.roomName,
-      bus: built.bus,
+      bus: new ControlGate(built.bus, () => this.controlOn),
       onDivider: (dividerId, open) => this.dividerListener?.(dividerId, open),
     });
     const scheduler = new TriggerScheduler(manifest.model, { fire: (t) => runtime.fire(t.run) });
@@ -306,7 +361,12 @@ export class RoomHost {
     );
     // Whether anyone is in the room, for the cloud's usage reports.
     const occupancy = occupancyTracker((occupied, deviceId) =>
-      this.emit({ at: at(), type: 'room.occupancy', roomId: room.roomId, data: { occupied, deviceId } }),
+      this.emit({
+        at: at(),
+        type: 'room.occupancy',
+        roomId: room.roomId,
+        data: { occupied, deviceId },
+      }),
     );
     for (const id of names.keys()) occupancy(id, room.bus.getState(id)?.occupied);
     const stopDevices = room.bus.subscribe(({ deviceId, state }) => {

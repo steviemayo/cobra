@@ -35,6 +35,7 @@ function world() {
     { id: 'b1', orgId: ORG, plan: 'pro', status: 'active', trialEndsAt: T0 },
   ]);
   const org = table([{ id: ORG, createdAt: T0 }]);
+  const orgLicenseOverride = table([]);
   const db = {
     room,
     deviceStatus,
@@ -43,8 +44,18 @@ function world() {
     remoteCommand,
     orgBilling,
     org,
+    orgLicenseOverride,
   } as unknown as MonitoringDb;
-  return { db, room, deviceStatus, incident, gateway, remoteCommand, orgBilling };
+  return {
+    db,
+    room,
+    deviceStatus,
+    incident,
+    gateway,
+    remoteCommand,
+    orgBilling,
+    orgLicenseOverride,
+  };
 }
 
 const report = (
@@ -78,7 +89,12 @@ describe('device status and incidents', () => {
     w.room.rows.find((r) => r.id === ROOM)!.kind = 'staging';
     const gw = { id: GW, orgId: ORG };
     await recordReports(w.db, gw, [report({ devices: offline() })], T0);
-    const jobs = await recordReports(w.db, gw, [report({ status: 'fault', error: 'boom', devices: offline() })], at(DEVICE_GRACE_MS));
+    const jobs = await recordReports(
+      w.db,
+      gw,
+      [report({ status: 'fault', error: 'boom', devices: offline() })],
+      at(DEVICE_GRACE_MS),
+    );
     expect(jobs).toEqual([]);
     expect(w.incident.rows).toHaveLength(0);
     // Its devices are still tracked, so the room page can show them.
@@ -289,10 +305,17 @@ describe('sweep', () => {
     expect(back[0]!.event).toBe('resolved');
   });
 
-  it('leaves organisations without monitoring alone', async () => {
+  it('leaves organisations alone when staff have switched monitoring off', async () => {
     const w = world();
     w.gateway.rows.push(gwRow());
-    w.orgBilling.rows[0]!.plan = 'basic';
+    w.orgLicenseOverride.rows.push({
+      id: 'o1',
+      orgId: ORG,
+      monitoring: false,
+      revokedAt: null,
+      expiresAt: null,
+      createdAt: T0,
+    });
     expect(await sweep(w.db, at(60 * 60_000))).toEqual([]);
     expect(w.incident.rows).toHaveLength(0);
   });

@@ -10,7 +10,7 @@ import { gatewayTooOld, setupProblem } from '../deploy-check';
 import { ReleaseRestoreError, restoreReleaseDesign } from '../release-restore';
 import { checkPublishable, createRelease } from '../release-service';
 import { SigningNotConfigured, loadSigningKey } from '../signing';
-import { orgProcedure, requireRole, router } from '../trpc';
+import { controlProcedure, orgProcedure, requireRole, router } from '../trpc';
 import { assertRoom } from './room-model-helpers';
 
 const orgId = z.string().uuid();
@@ -130,7 +130,7 @@ export const releaseRouter = router({
 
   // Freeze the current design as an immutable, signed release. With `deploy` it also starts running
   // on the room's gateway straight away; otherwise it waits to be deployed.
-  publish: orgProcedure
+  publish: controlProcedure
     .input(z.object({ orgId, roomId, deploy: z.boolean().default(false) }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);

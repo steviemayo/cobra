@@ -94,7 +94,7 @@
 
 - Multi-tenant: org → sites → rooms → devices. MSP/reseller tier later
 - Roles v1: owner / dev / support / customer viewer
-- Billing (per room/month): **Trial** 5 rooms, full control+monitoring 30d then control only · **Basic** control only + can purchase marketplace templates · **Pro** control + monitoring, marketplace upload/download, driver creation
+- Billing (per room/month) — **DECIDED and built 2026-09-27, except watch points** (`docs/decisions.md` TM-1..13): **Trial** 5 rooms, full control+monitoring 30d then monitoring only (no alerts, no analytics, no new rooms) · **Basic** (cheaper) monitoring only, 500 rooms/org (staff adjustable), limited alert channels · **Pro** control + monitoring, all alert channels, marketplace, custom drivers. Lapsed Pro falls back to Basic. Control is enforced in the gateway (`ControlGate`), not only hidden in the portal
 - Templates: Kestrel-global + per-org (shareable in org); marketplace (Pro publishes, Basic buys)
 - Data region: AU
 
