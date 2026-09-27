@@ -1,0 +1,18 @@
+<service>
+  <id>KestrelGateway</id>
+  <name>Kestrel Gateway</name>
+  <description>Runs Kestrel room programs and serves the panel UI. Restarts on its own if it stops.</description>
+  <executable>%BASE%\app\runtime\node.exe</executable>
+  <arguments>--disable-warning=ExperimentalWarning --import tsx src/main.ts</arguments>
+  <workingdirectory>%BASE%\app</workingdirectory>
+__ENV__
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>1</keepFiles>
+  </log>
+  <logpath>__LOGPATH__</logpath>
+  <onfailure action="restart" delay="10 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <startmode>Automatic</startmode>
+  <stoptimeout>15 sec</stoptimeout>
+</service>
