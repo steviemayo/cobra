@@ -210,6 +210,57 @@ describe('device status and incidents', () => {
   });
 });
 
+describe('device firmware', () => {
+  const gw = { id: GW, orgId: ORG };
+  const withFirmware = (firmware?: string, driver = 'pjlink') => [
+    { deviceId: 'dsp', name: 'DSP', online: true, driver: 'biamp-tesira' },
+    {
+      deviceId: 'display',
+      name: 'Display',
+      online: true,
+      driver,
+      ...(firmware ? { firmware } : {}),
+    },
+  ];
+  const display = (w: ReturnType<typeof world>) =>
+    w.deviceStatus.rows.find((r) => r.deviceId === 'display')!;
+
+  it('records the driver and firmware a device reports, and when it first saw that version', async () => {
+    const w = world();
+    await recordReports(w.db, gw, [report({ devices: withFirmware('1.07') })], T0);
+    expect(display(w)).toMatchObject({ driver: 'pjlink', firmware: '1.07', firmwareSince: T0 });
+    const dsp = w.deviceStatus.rows.find((r) => r.deviceId === 'dsp')!;
+    expect(dsp.driver).toBe('biamp-tesira');
+    expect(dsp.firmware).toBeUndefined();
+  });
+
+  it('keeps the first-seen time while the version is unchanged, and moves it when the version changes', async () => {
+    const w = world();
+    await recordReports(w.db, gw, [report({ devices: withFirmware('1.07') })], T0);
+    await recordReports(w.db, gw, [report({ devices: withFirmware('1.07') })], at(60_000));
+    expect(display(w).firmwareSince).toEqual(T0);
+    await recordReports(w.db, gw, [report({ devices: withFirmware('1.08') })], at(120_000));
+    expect(display(w)).toMatchObject({ firmware: '1.08', firmwareSince: at(120_000) });
+  });
+
+  it('remembers the last version when a heartbeat leaves it out', async () => {
+    const w = world();
+    await recordReports(w.db, gw, [report({ devices: withFirmware('1.07') })], T0);
+    await recordReports(w.db, gw, [report({ devices: withFirmware(undefined) })], at(60_000));
+    expect(display(w)).toMatchObject({ firmware: '1.07', firmwareSince: T0 });
+  });
+
+  it('does not treat a firmware report as a change of reachability', async () => {
+    const w = world();
+    await recordReports(w.db, gw, [report({ devices: withFirmware('1.07') })], T0);
+    const since = display(w).since;
+    await recordReports(w.db, gw, [report({ devices: withFirmware('1.08') })], at(60_000));
+    expect(display(w).since).toEqual(since);
+    expect(display(w).online).toBe(true);
+    expect(w.incident.rows).toHaveLength(0);
+  });
+});
+
 describe('sweep', () => {
   const gwRow = (over = {}) => ({
     id: GW,

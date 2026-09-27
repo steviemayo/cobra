@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import {
+  CircuitBoard,
   Activity,
   AlertTriangle,
   BellRing,
@@ -134,6 +135,9 @@ export function CommandMenu({ children }: { children: React.ReactNode }) {
               </CommandItem>
               <CommandItem onSelect={() => go('/incidents')}>
                 <AlertTriangle /> Incidents
+              </CommandItem>
+              <CommandItem onSelect={() => go('/firmware')}>
+                <CircuitBoard /> Firmware
               </CommandItem>
               <CommandItem onSelect={() => go('/tickets')}>
                 <LifeBuoy /> Support requests

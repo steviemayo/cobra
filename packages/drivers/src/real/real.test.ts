@@ -42,7 +42,15 @@ async function until(check: () => boolean, ms = 3000) {
 // ---- Mock PJLink projector -----------------------------------------------------------------
 
 async function pjlink(
-  opts: { password?: string; warmMs?: number; power?: string; input?: string; avmt?: boolean } = {},
+  opts: {
+    password?: string;
+    warmMs?: number;
+    power?: string;
+    input?: string;
+    avmt?: boolean;
+    /** A class 2 projector's software version. Without it the projector is class 1 and refuses SVER. */
+    sver?: string;
+  } = {},
 ) {
   const state = { power: opts.power ?? '0', input: opts.input ?? '31', mute: '30' };
   const received: string[] = [];
@@ -72,6 +80,8 @@ async function pjlink(
           const [cmd, arg] = line.slice(2).split(' ');
           if (cmd === 'POWR' && arg === '?') socket.end(`%1POWR=${state.power}\r`);
           else if (cmd === 'INPT' && arg === '?') socket.end(`%1INPT=${state.input}\r`);
+          else if (cmd === 'SVER' && opts.sver !== undefined && line.startsWith('%2'))
+            socket.end(`%2SVER=${opts.sver}\r`);
           else if (cmd === 'AVMT' && opts.avmt && arg === '?') socket.end(`%1AVMT=${state.mute}\r`);
           else if (cmd === 'AVMT' && opts.avmt) {
             state.mute = arg!;
@@ -110,6 +120,40 @@ describe('PJLink driver', () => {
     p.state.mute = '31';
     d.start();
     await until(() => d.getState().blanked === true);
+  });
+
+  it('reports the software version of a class 2 projector, and asks only once', async () => {
+    const p = await pjlink({ power: '1', sver: '1.07' });
+    const d = new PjlinkDriver(display({ host: '127.0.0.1', port: p.port, pollMs: 30 }), ctx);
+    drivers.push(d);
+    expect(d.getState().firmware).toBeUndefined();
+    d.start();
+    await until(() => d.getState().firmware === '1.07');
+    await wait(200);
+    expect(p.received.filter((l) => l.startsWith('%2SVER'))).toEqual(['%2SVER ?']);
+    expect(d.getState().online).toBe(true);
+  });
+
+  it('a class 1 projector reports no firmware, is not asked again, and is not made to look faulty', async () => {
+    const p = await pjlink({ power: '1' });
+    const d = new PjlinkDriver(display({ host: '127.0.0.1', port: p.port, pollMs: 30 }), ctx);
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().power === 'on');
+    await wait(250);
+    expect(d.getState().firmware).toBeUndefined();
+    expect(d.getState().online).toBe(true);
+    expect(p.received.filter((l) => l.startsWith('%2SVER'))).toHaveLength(1);
+  });
+
+  it('keeps only printable characters of the version, and no more than fits', async () => {
+    const p = await pjlink({ power: '1', sver: `V\u0001 2.${'9'.repeat(200)}` });
+    const d = new PjlinkDriver(display({ host: '127.0.0.1', port: p.port, pollMs: 30 }), ctx);
+    drivers.push(d);
+    d.start();
+    await until(() => !!d.getState().firmware);
+    expect(d.getState().firmware!.length).toBeLessThanOrEqual(100);
+    expect(d.getState().firmware).toMatch(/^V 2\.9+$/);
   });
 
   it('a projector that does not know AVMT still shows as online, and refuses the blank in plain words', async () => {

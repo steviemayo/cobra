@@ -81,6 +81,8 @@ export const DeviceState = z.object({
   occupied: z.boolean().optional(),
   /** Input port -> is a signal present. Only devices with signal_detect report this. */
   signal: z.record(z.string(), z.boolean()).default({}),
+  /** The firmware or software version the device reported about itself, as it wrote it. Read only: nothing here changes it. */
+  firmware: z.string().max(100).optional(),
 });
 export type DeviceState = z.infer<typeof DeviceState>;
 

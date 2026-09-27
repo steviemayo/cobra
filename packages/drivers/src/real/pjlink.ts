@@ -4,7 +4,8 @@ import type { Device, DeviceCommand, PowerState, QuickActionId } from '@kestrel/
 import { BaseDriver } from './base';
 import type { DriverContext } from './types';
 
-// PJLink class 1 (projectors and many displays). Settings: host, port (4352), password,
+// PJLink class 1 (projectors and many displays). A class 2 device is also asked for its software
+// version (SVER) every few hours; a class 1 device answers ERR1 and is not asked again. Settings: host, port (4352), password,
 // inputs (portId -> PJLink input code, e.g. { in: "31" } for HDMI 1), warmupTimeoutMs, pollMs.
 const POWER: Record<string, PowerState> = { '0': 'off', '1': 'on', '2': 'cooling', '3': 'warming' };
 
@@ -16,11 +17,17 @@ const ERRORS: Record<string, string> = {
   ERRA: 'wrong password',
 };
 
+/** How long a firmware reading is trusted before the device is asked again. */
+const FIRMWARE_REREAD_MS = 6 * 3_600_000;
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class PjlinkDriver extends BaseDriver {
   private poller: ReturnType<typeof setInterval> | null = null;
   private closed = false;
+  private firmwareAt = 0;
+  /** The device said it has no SVER command (class 1). */
+  private noFirmware = false;
 
   constructor(device: Device, ctx: DriverContext) {
     super(device, ctx);
@@ -41,7 +48,7 @@ export class PjlinkDriver extends BaseDriver {
   }
 
   /** One short-lived PJLink session: greeting, one command, one reply. */
-  private exchange(body: string): Promise<string> {
+  private exchange(body: string, pjlinkClass: 1 | 2 = 1): Promise<string> {
     if (!this.host) return Promise.reject(new Error(`${this.device.name}: no host configured`));
     return new Promise((resolve, reject) => {
       const socket = connect({ host: this.host, port: this.port });
@@ -78,7 +85,7 @@ export class PjlinkDriver extends BaseDriver {
                 .update(`${salt ?? ''}${password}`)
                 .digest('hex');
             }
-            socket.write(`${prefix}%1${body}\r`);
+            socket.write(`${prefix}%${pjlinkClass}${body}\r`);
           } else {
             finish(null, line);
           }
@@ -88,18 +95,35 @@ export class PjlinkDriver extends BaseDriver {
   }
 
   /** Runs a command and returns the value after '=', throwing PJLink errors in plain language. */
-  private async command(body: string): Promise<string> {
-    const reply = await this.exchange(body);
+  private async command(body: string, pjlinkClass: 1 | 2 = 1): Promise<string> {
+    const reply = await this.exchange(body, pjlinkClass);
     // Any reply, even an error, means the device is reachable.
     this.update((s) => {
       s.online = true;
     });
     // A rejected password is answered with "PJLINK ERRA" rather than a normal reply.
     if (reply.startsWith('PJLINK ERRA')) this.fail(ERRORS.ERRA!);
-    const value = reply.split('=')[1] ?? '';
+    const at = reply.indexOf('=');
+    const value = at >= 0 ? reply.slice(at + 1) : '';
     if (value in ERRORS) this.fail(ERRORS[value]!);
     if (/^ERR/.test(value)) this.fail(`error ${value}`);
     return value;
+  }
+
+  /** Class 2 devices know their software version. Anything else is left unreported. */
+  private async readFirmware() {
+    if (this.noFirmware || Date.now() - this.firmwareAt < FIRMWARE_REREAD_MS) return;
+    this.firmwareAt = Date.now();
+    try {
+      const version = (await this.command('SVER ?', 2)).replace(/[^\x20-\x7e]/g, '').trim();
+      if (version)
+        this.update((s) => {
+          s.firmware = version.slice(0, 100);
+        });
+    } catch (e) {
+      // ERR1: no such command, so this is a class 1 device. Anything else is tried again later.
+      if (e instanceof Error && /command not supported/.test(e.message)) this.noFirmware = true;
+    }
   }
 
   private async refresh() {
@@ -120,6 +144,7 @@ export class PjlinkDriver extends BaseDriver {
             Object.entries(map).find(([, code]) => code === input)?.[0] ?? s.selectedInput ?? null;
         } else if (POWER[power] === 'off') s.selectedInput = null;
       });
+      void this.readFirmware();
     } catch {
       this.update((s) => {
         s.online = false;

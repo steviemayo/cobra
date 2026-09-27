@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { RoomModel, type Device } from '@kestrel/model';
-import { checkDeployable, gatewayTooOld, setupProblem, type DeployCheckDb } from './deploy-check';
+import { DriverSpec, RoomModel, type CustomDrivers, type Device } from '@kestrel/model';
+import {
+  checkDeployable,
+  driversReadFirmware,
+  gatewayTooOld,
+  setupProblem,
+  type DeployCheckDb,
+} from './deploy-check';
 import { table } from './test-db';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
@@ -19,14 +25,27 @@ const proj: Device = {
 };
 const room = (devices: Device[]) => RoomModel.parse({ roomType: 'meeting', devices });
 
-function world(opts: { features?: string[]; external?: boolean; devices?: Device[] } = {}) {
+function world(
+  opts: {
+    features?: string[];
+    external?: boolean;
+    devices?: Device[];
+    drivers?: CustomDrivers;
+  } = {},
+) {
   const model = room(opts.devices ?? [proj]);
   const release = table([
     {
       id: REL,
       orgId: ORG,
       roomId: ROOM,
-      manifest: { manifest: { model, drivers: {}, ...(opts.external ? { bindingsExternal: true } : {}) } },
+      manifest: {
+        manifest: {
+          model,
+          drivers: opts.drivers ?? {},
+          ...(opts.external ? { bindingsExternal: true } : {}),
+        },
+      },
     },
   ]);
   const gateway = table([{ id: GW, orgId: ORG, features: opts.features ?? [] }]);
@@ -35,7 +54,15 @@ function world(opts: { features?: string[]; external?: boolean; devices?: Device
   const siteDevice = table([]);
   const rooms = table([{ id: ROOM, orgId: ORG, siteId: 'site-1', gatewayId: GW }]);
   const roomDraft = table([]);
-  const db = { release, gateway, roomBinding, credentialSet, siteDevice, room: rooms, roomDraft } as unknown as DeployCheckDb;
+  const db = {
+    release,
+    gateway,
+    roomBinding,
+    credentialSet,
+    siteDevice,
+    room: rooms,
+    roomDraft,
+  } as unknown as DeployCheckDb;
   return { db, roomBinding };
 }
 const input = { orgId: ORG, roomId: ROOM, gatewayId: GW, releaseId: REL };
@@ -53,6 +80,51 @@ describe('setupProblem', () => {
   });
 });
 
+const firmwareDriver = (reads: boolean): CustomDrivers => ({
+  'custom:acme': {
+    spec: DriverSpec.parse({
+      id: 'acme',
+      name: 'Acme',
+      transport: { type: 'tcp', keepOpen: true },
+      commands: { 'power.on': { send: 'ON' } },
+      feedback: {
+        poll: [{ action: { send: 'STATUS?' } }],
+        patterns: reads ? [{ match: '^FW=(.+)$', set: 'firmware', value: '$1' }] : [],
+      },
+    }),
+  },
+});
+
+describe('a custom driver that reads firmware', () => {
+  const ready = { ...proj, settings: { host: '10.0.0.9' } };
+
+  it('is noticed, and a driver that does not read it is not', () => {
+    expect(driversReadFirmware(firmwareDriver(true))).toBe(true);
+    expect(driversReadFirmware(firmwareDriver(false))).toBe(false);
+    expect(driversReadFirmware(undefined)).toBe(false);
+  });
+
+  it('is refused for a gateway that has not said it can handle it, and allowed for one that has', async () => {
+    const old = await checkDeployable(
+      world({ devices: [ready], drivers: firmwareDriver(true), features: ['bindings'] }).db,
+      input,
+    );
+    expect(!old.ok && old.message).toMatch(/reads device firmware/);
+    expect(
+      await checkDeployable(
+        world({ devices: [ready], drivers: firmwareDriver(true), features: ['firmware'] }).db,
+        input,
+      ),
+    ).toEqual({ ok: true });
+  });
+
+  it('does not hold back a room whose drivers do not read it', async () => {
+    expect(
+      await checkDeployable(world({ devices: [ready], drivers: firmwareDriver(false) }).db, input),
+    ).toEqual({ ok: true });
+  });
+});
+
 describe('checkDeployable', () => {
   it('blocks a room whose address has not been filled in', async () => {
     const res = await checkDeployable(world().db, input);
@@ -62,7 +134,15 @@ describe('checkDeployable', () => {
 
   it('allows it once the address is in the bindings', async () => {
     const w = world();
-    w.roomBinding.rows.push({ id: 'b', orgId: ORG, roomId: ROOM, version: 1, values: { proj: { host: '10.0.0.9' } }, sealed: null, credentialSets: {} });
+    w.roomBinding.rows.push({
+      id: 'b',
+      orgId: ORG,
+      roomId: ROOM,
+      version: 1,
+      values: { proj: { host: '10.0.0.9' } },
+      sealed: null,
+      credentialSets: {},
+    });
     expect(await checkDeployable(w.db, input)).toEqual({ ok: true });
   });
 
@@ -73,19 +153,38 @@ describe('checkDeployable', () => {
 
   it('blocks a release that keeps its addresses apart from a gateway that cannot fetch them', async () => {
     const w = world({ external: true, features: [] });
-    w.roomBinding.rows.push({ id: 'b', orgId: ORG, roomId: ROOM, version: 1, values: { proj: { host: '10.0.0.9' } }, sealed: null, credentialSets: {} });
+    w.roomBinding.rows.push({
+      id: 'b',
+      orgId: ORG,
+      roomId: ROOM,
+      version: 1,
+      values: { proj: { host: '10.0.0.9' } },
+      sealed: null,
+      credentialSets: {},
+    });
     const res = await checkDeployable(w.db, input);
     expect(!res.ok && res.message).toMatch(/needs updating/);
   });
 
   it('allows it for a gateway that says it can', async () => {
     const w = world({ external: true, features: ['bindings'] });
-    w.roomBinding.rows.push({ id: 'b', orgId: ORG, roomId: ROOM, version: 1, values: { proj: { host: '10.0.0.9' } }, sealed: null, credentialSets: {} });
+    w.roomBinding.rows.push({
+      id: 'b',
+      orgId: ORG,
+      roomId: ROOM,
+      version: 1,
+      values: { proj: { host: '10.0.0.9' } },
+      sealed: null,
+      credentialSets: {},
+    });
     expect(await checkDeployable(w.db, input)).toEqual({ ok: true });
   });
 
   it('refuses a release from another room or organisation', async () => {
-    const res = await checkDeployable(world().db, { ...input, orgId: '11111111-1111-4111-8111-111111111112' });
+    const res = await checkDeployable(world().db, {
+      ...input,
+      orgId: '11111111-1111-4111-8111-111111111112',
+    });
     expect(res).toEqual({ ok: false, message: 'That release does not exist' });
   });
 });
@@ -113,14 +212,18 @@ describe('gateway too old', () => {
 
   it('blocks a release that presses keys or launches apps on a gateway that cannot', async () => {
     const w = world({ features: ['bindings'] });
-    (w.db.release as unknown as { rows: { manifest: { manifest: { model: unknown } } }[] }).rows[0]!.manifest.manifest.model = modelNeeding();
+    (
+      w.db.release as unknown as { rows: { manifest: { manifest: { model: unknown } } }[] }
+    ).rows[0]!.manifest.manifest.model = modelNeeding();
     const res = await checkDeployable(w.db, input);
     expect(!res.ok && res.message).toMatch(/too old/);
   });
 
   it('allows it once the gateway says it can', async () => {
     const w = world({ features: ['bindings', 'display-extras'] });
-    (w.db.release as unknown as { rows: { manifest: { manifest: { model: unknown } } }[] }).rows[0]!.manifest.manifest.model = modelNeeding();
+    (
+      w.db.release as unknown as { rows: { manifest: { manifest: { model: unknown } } }[] }
+    ).rows[0]!.manifest.manifest.model = modelNeeding();
     expect(await checkDeployable(w.db, input)).toEqual({ ok: true });
   });
 

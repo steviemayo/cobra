@@ -226,6 +226,9 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
                 <span className="inline-flex items-center gap-2.5 text-sm">
                   <OnlineDot online={dev.online} />
                   <span className="font-medium">{dev.name}</span>
+                  {dev.firmware && (
+                    <span className="text-xs text-muted-foreground">Firmware {dev.firmware}</span>
+                  )}
                 </span>
                 <span className="flex items-center gap-3 text-sm text-muted-foreground">
                   {dev.online ? 'Online' : 'Offline'} since {timeAgo(dev.since)}

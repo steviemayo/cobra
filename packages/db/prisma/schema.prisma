@@ -504,15 +504,21 @@ model DeploymentEvent {
 
 // Latest reachability of each device in a room's running release, as reported by its gateway.
 model DeviceStatus {
-  id        String   @id @default(uuid()) @db.Uuid
-  orgId     String   @db.Uuid
-  roomId    String   @db.Uuid
-  deviceId  String
-  name      String
-  online    Boolean
+  id            String    @id @default(uuid()) @db.Uuid
+  orgId         String    @db.Uuid
+  roomId        String    @db.Uuid
+  deviceId      String
+  name          String
+  online        Boolean
   /// When the device last changed between online and offline.
-  since     DateTime
-  updatedAt DateTime @default(now()) @updatedAt
+  since         DateTime
+  /// The driver it uses ("pjlink", "custom:my-driver"), as the gateway reports it.
+  driver        String?
+  /// The firmware version the device reported about itself. Kept when a heartbeat leaves it out.
+  firmware      String?
+  /// When this firmware version was first seen on the device.
+  firmwareSince DateTime?
+  updatedAt     DateTime  @default(now()) @updatedAt
 
   org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)

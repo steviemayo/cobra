@@ -1,12 +1,19 @@
 import type { PrismaClient } from '@kestrel/db';
-import { gatewayNeeds, missingBindings, type CustomDrivers, type DeviceValues, type RoomModel } from '@kestrel/model';
+import {
+  gatewayNeeds,
+  missingBindings,
+  type CustomDrivers,
+  type DeviceValues,
+  type RoomModel,
+} from '@kestrel/model';
 import { resolveBindings, type BindingsDb } from './bindings';
 import { sharedGatewayProblem } from './site-devices';
 
 // Whether a release can go to a room's gateway right now: the gateway must be able to run it, and
 // every address and login the room needs must be filled in. These functions take the database as a
 // parameter so they can be tested without one.
-export type DeployCheckDb = Pick<PrismaClient, 'release' | 'gateway' | 'room' | 'roomDraft'> & BindingsDb;
+export type DeployCheckDb = Pick<PrismaClient, 'release' | 'gateway' | 'room' | 'roomDraft'> &
+  BindingsDb;
 
 export type DeployCheck = { ok: true } | { ok: false; message: string };
 
@@ -22,6 +29,12 @@ export function setupProblem(
   const more = missing.length > 1 ? ` (and ${missing.length - 1} more)` : '';
   return `Needs setup: ${first.deviceName} needs its ${first.label.toLowerCase()}${more}. Fill it in under the room’s devices.`;
 }
+
+/** Whether a custom driver reads the device's firmware version, which a gateway must know how to handle. */
+export const driversReadFirmware = (drivers: CustomDrivers | undefined): boolean =>
+  Object.values(drivers ?? {}).some((d) =>
+    d.spec.feedback.patterns.some((p) => p.set === 'firmware'),
+  );
 
 /** A sentence when this room's design needs something its gateway has not said it can do, else null. */
 export async function gatewayTooOld(
@@ -52,7 +65,9 @@ export async function checkDeployable(
   if (!manifest?.model) return { ok: false, message: 'That release cannot be read' };
 
   if (manifest.bindingsExternal) {
-    const gateway = await db.gateway.findFirst({ where: { id: input.gatewayId, orgId: input.orgId } });
+    const gateway = await db.gateway.findFirst({
+      where: { id: input.gatewayId, orgId: input.orgId },
+    });
     if (!gateway?.features?.includes('bindings'))
       return {
         ok: false,
@@ -76,6 +91,19 @@ export async function checkDeployable(
 
   const tooOld = await gatewayTooOld(db, input.orgId, input.gatewayId, manifest.model);
   if (tooOld) return { ok: false, message: tooOld };
+
+  // A custom driver that reads firmware uses a driver format an older gateway would refuse to load.
+  if (driversReadFirmware(manifest.drivers)) {
+    const gateway = await db.gateway.findFirst({
+      where: { id: input.gatewayId, orgId: input.orgId },
+    });
+    if (!gateway?.features?.includes('firmware'))
+      return {
+        ok: false,
+        message:
+          'A custom driver in this room reads device firmware, which this room’s gateway is too old to run. Update the gateway first.',
+      };
+  }
 
   const resolved = await resolveBindings(db, input.orgId, input.roomId, undefined, manifest.model);
   const problem = setupProblem(manifest.model, resolved?.devices ?? {}, manifest.drivers ?? {});

@@ -24,7 +24,11 @@ afterEach(() => {
   servers.splice(0).forEach((s) => s.close());
 });
 
-const dsp = (driverId: string, settings: Record<string, unknown>, points: ControlPoint[]): Device => ({
+const dsp = (
+  driverId: string,
+  settings: Record<string, unknown>,
+  points: ControlPoint[],
+): Device => ({
   ...base.devices.find((d) => d.id === 'dsp')!,
   control: { kind: 'driver', driverId },
   settings,
@@ -42,7 +46,13 @@ interface Core {
 
 async function fakeCore(): Promise<Core> {
   const components = new Map<string, Map<string, number | boolean>>([
-    ['Room', new Map<string, number | boolean>([['gain', -20], ['mute', false]])],
+    [
+      'Room',
+      new Map<string, number | boolean>([
+        ['gain', -20],
+        ['mute', false],
+      ]),
+    ],
     ['Lectern', new Map<string, number | boolean>([['gain', -10]])],
   ]);
   const sets: Core['sets'] = [];
@@ -54,16 +64,27 @@ async function fakeCore(): Promise<Core> {
       buf += chunk;
       let i: number;
       while ((i = buf.indexOf('\0')) >= 0) {
-        const msg = JSON.parse(buf.slice(0, i)) as { id: number; method: string; params: { Name: string; Controls: { Name: string; Value?: number }[] } };
+        const msg = JSON.parse(buf.slice(0, i)) as {
+          id: number;
+          method: string;
+          params: { Name: string; Controls: { Name: string; Value?: number }[] };
+        };
         buf = buf.slice(i + 1);
-        const reply = (result: unknown) => socket.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }) + '\0');
+        const reply = (result: unknown) =>
+          socket.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }) + '\0');
         const comp = components.get(msg.params?.Name);
         if (msg.method === 'Component.Get') {
           reply({
             Name: msg.params.Name,
             Controls: msg.params.Controls.flatMap((c) =>
               comp?.has(c.Name)
-                ? [{ Name: c.Name, Value: comp.get(c.Name), ...(c.Name === 'gain' ? { ValueMin: -100, ValueMax: 20 } : {}) }]
+                ? [
+                    {
+                      Name: c.Name,
+                      Value: comp.get(c.Name),
+                      ...(c.Name === 'gain' ? { ValueMin: -100, ValueMax: 20 } : {}),
+                    },
+                  ]
                 : [],
             ),
           });
@@ -83,15 +104,39 @@ async function fakeCore(): Promise<Core> {
 }
 
 const qpoints: ControlPoint[] = [
-  { id: 'vol', name: 'Room volume', type: 'level', address: { component: 'Room', control: 'gain' }, role: 'room_volume', min: -40, max: 0 },
-  { id: 'mute', name: 'Room mute', type: 'mute', address: { component: 'Room', control: 'mute' }, role: 'room_mute' },
-  { id: 'lect', name: 'Lectern level', type: 'level', address: { component: 'Lectern', control: 'gain' }, min: -20, max: 0 },
+  {
+    id: 'vol',
+    name: 'Room volume',
+    type: 'level',
+    address: { component: 'Room', control: 'gain' },
+    role: 'room_volume',
+    min: -40,
+    max: 0,
+  },
+  {
+    id: 'mute',
+    name: 'Room mute',
+    type: 'mute',
+    address: { component: 'Room', control: 'mute' },
+    role: 'room_mute',
+  },
+  {
+    id: 'lect',
+    name: 'Lectern level',
+    type: 'level',
+    address: { component: 'Lectern', control: 'gain' },
+    min: -20,
+    max: 0,
+  },
 ];
 
 describe('Q-SYS control points', () => {
   const start = async (points = qpoints) => {
     const core = await fakeCore();
-    const d = createDriver(dsp('qsys-core', { host: '127.0.0.1', port: core.port, timeoutMs: 400, pollMs: 100 }, points), ctx)!;
+    const d = createDriver(
+      dsp('qsys-core', { host: '127.0.0.1', port: core.port, timeoutMs: 400, pollMs: 100 }, points),
+      ctx,
+    )!;
     drivers.push(d);
     d.start();
     await until(() => d.getState().online);
@@ -100,7 +145,9 @@ describe('Q-SYS control points', () => {
 
   it('reads every point into state, as 0 to 100 for a level, and follows the room roles', async () => {
     const { d } = await start();
-    await until(() => d.getState().points.vol !== undefined && d.getState().points.lect !== undefined);
+    await until(
+      () => d.getState().points.vol !== undefined && d.getState().points.lect !== undefined,
+    );
     const s = d.getState();
     expect(s.points).toMatchObject({ vol: 50, mute: false, lect: 50 });
     expect(s.volume).toBe(50);
@@ -130,21 +177,36 @@ describe('Q-SYS control points', () => {
   });
 
   it('refuses a point it does not know, and a meter it cannot set', async () => {
-    const { d } = await start([...qpoints, { id: 'peak', name: 'Peak', type: 'meter', address: { component: 'Room', control: 'gain' } }]);
-    await expect(d.send({ type: 'point', pointId: 'nope', value: 1 })).rejects.toThrow(/no control point/);
+    const { d } = await start([
+      ...qpoints,
+      { id: 'peak', name: 'Peak', type: 'meter', address: { component: 'Room', control: 'gain' } },
+    ]);
+    await expect(d.send({ type: 'point', pointId: 'nope', value: 1 })).rejects.toThrow(
+      /no control point/,
+    );
     await expect(d.send({ type: 'point', pointId: 'peak', value: 1 })).rejects.toThrow(/read only/);
   });
 
   it('checks a point exists and learns its range, or says it is missing', async () => {
     const { d } = await start();
-    await expect(d.readPoint!({ type: 'level', address: { component: 'Room', control: 'gain' } })).resolves.toEqual({ value: -20, min: -100, max: 20 });
-    await expect(d.readPoint!({ type: 'mute', address: { component: 'Room', control: 'mute' } })).resolves.toEqual({ value: false });
-    await expect(d.readPoint!({ type: 'level', address: { component: 'Room', control: 'nothing' } })).rejects.toThrow(/no control "nothing"/);
-    await expect(d.readPoint!({ type: 'level', address: { component: 'Room' } })).rejects.toThrow(/no component and control/);
+    await expect(
+      d.readPoint!({ type: 'level', address: { component: 'Room', control: 'gain' } }),
+    ).resolves.toEqual({ value: -20, min: -100, max: 20 });
+    await expect(
+      d.readPoint!({ type: 'mute', address: { component: 'Room', control: 'mute' } }),
+    ).resolves.toEqual({ value: false });
+    await expect(
+      d.readPoint!({ type: 'level', address: { component: 'Room', control: 'nothing' } }),
+    ).rejects.toThrow(/no control "nothing"/);
+    await expect(d.readPoint!({ type: 'level', address: { component: 'Room' } })).rejects.toThrow(
+      /no component and control/,
+    );
   });
 
   it('is what a Q-SYS device asks for', () => {
-    expect(createDriver(dsp('qsys-core', { host: '127.0.0.1' }, []), ctx)).toBeInstanceOf(QsysDriver);
+    expect(createDriver(dsp('qsys-core', { host: '127.0.0.1' }, []), ctx)).toBeInstanceOf(
+      QsysDriver,
+    );
   });
 });
 
@@ -168,6 +230,7 @@ async function fakeTesira(): Promise<Tesira> {
     ['Level1 get maxLevel 1', '12.000000'],
     ['Mute1 get mute 1', 'false'],
     ['"my level" get level 2', '-20.000000'],
+    ['DEVICE get version', '"4.2.1.3"'],
   ]);
   const server: Server = createServer((socket: Socket) => {
     socket.on('error', () => undefined);
@@ -193,7 +256,8 @@ async function fakeTesira(): Promise<Tesira> {
         const value = values.get(line);
         if (value !== undefined) socket.write(`+OK "value":${value}\r\n`);
         else if (/ set /.test(line) || /recallPresetByName/.test(line)) socket.write('+OK\r\n');
-        else socket.write('-ERR address not found: {"deviceId":0 "classCode":0 "instanceNum":0}\r\n');
+        else
+          socket.write('-ERR address not found: {"deviceId":0 "classCode":0 "instanceNum":0}\r\n');
       }
     });
   });
@@ -203,16 +267,49 @@ async function fakeTesira(): Promise<Tesira> {
 }
 
 const tpoints: ControlPoint[] = [
-  { id: 'vol', name: 'Room volume', type: 'level', address: { tag: 'Level1', index: 1 }, role: 'room_volume', min: -60, max: 0 },
-  { id: 'mute', name: 'Room mute', type: 'mute', address: { tag: 'Mute1', index: 1 }, role: 'room_mute' },
-  { id: 'spaced', name: 'Spaced tag', type: 'level', address: { tag: 'my level', index: 2 }, min: -40, max: 0 },
-  { id: 'x', name: 'Crosspoint', type: 'crosspoint', address: { tag: 'Mixer1', input: 1, output: 2 } },
+  {
+    id: 'vol',
+    name: 'Room volume',
+    type: 'level',
+    address: { tag: 'Level1', index: 1 },
+    role: 'room_volume',
+    min: -60,
+    max: 0,
+  },
+  {
+    id: 'mute',
+    name: 'Room mute',
+    type: 'mute',
+    address: { tag: 'Mute1', index: 1 },
+    role: 'room_mute',
+  },
+  {
+    id: 'spaced',
+    name: 'Spaced tag',
+    type: 'level',
+    address: { tag: 'my level', index: 2 },
+    min: -40,
+    max: 0,
+  },
+  {
+    id: 'x',
+    name: 'Crosspoint',
+    type: 'crosspoint',
+    address: { tag: 'Mixer1', input: 1, output: 2 },
+  },
 ];
 
 describe('Biamp Tesira driver', () => {
   const start = async () => {
     const t = await fakeTesira();
-    const d = createDriver(dsp('biamp-tesira', { host: '127.0.0.1', port: t.port, timeoutMs: 400, pollMs: 100 }, tpoints), ctx)!;
+    const d = createDriver(
+      dsp(
+        'biamp-tesira',
+        { host: '127.0.0.1', port: t.port, timeoutMs: 400, pollMs: 100 },
+        tpoints,
+      ),
+      ctx,
+    )!;
     drivers.push(d);
     d.start();
     await until(() => d.getState().online);
@@ -220,7 +317,9 @@ describe('Biamp Tesira driver', () => {
   };
 
   it('is what a Tesira device asks for', () => {
-    expect(createDriver(dsp('biamp-tesira', { host: '127.0.0.1' }, []), ctx)).toBeInstanceOf(TesiraDriver);
+    expect(createDriver(dsp('biamp-tesira', { host: '127.0.0.1' }, []), ctx)).toBeInstanceOf(
+      TesiraDriver,
+    );
   });
 
   it('refuses every telnet option the server offers, then goes online after the welcome line', async () => {
@@ -232,10 +331,37 @@ describe('Biamp Tesira driver', () => {
 
   it('reads points into state, ignoring the echoed lines', async () => {
     const { d } = await start();
-    await until(() => ['vol', 'mute', 'spaced'].every((id) => d.getState().points[id] !== undefined));
+    await until(() =>
+      ['vol', 'mute', 'spaced'].every((id) => d.getState().points[id] !== undefined),
+    );
     // -10 dB over -60..0 is 83.
     expect(d.getState()).toMatchObject({ volume: 83, muted: false });
     expect(d.getState().points.spaced).toBe(50);
+  });
+
+  it('reports the firmware version, and asks for it only once', async () => {
+    const { t, d } = await start();
+    await until(() => d.getState().firmware === '4.2.1.3');
+    await wait(350);
+    expect(t.seen.filter((l) => l === 'DEVICE get version')).toHaveLength(1);
+  });
+
+  it('carries on normally when the device gives no version', async () => {
+    const t = await fakeTesira();
+    t.values.delete('DEVICE get version');
+    const d = createDriver(
+      dsp(
+        'biamp-tesira',
+        { host: '127.0.0.1', port: t.port, timeoutMs: 400, pollMs: 100 },
+        tpoints,
+      ),
+      ctx,
+    )!;
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().points.vol !== undefined);
+    expect(d.getState().firmware).toBeUndefined();
+    expect(d.getState().online).toBe(true);
   });
 
   it('sets the room volume and mute as TTP commands over the point range', async () => {
@@ -259,13 +385,19 @@ describe('Biamp Tesira driver', () => {
 
   it('says what the server said when a command fails', async () => {
     const { d } = await start();
-    await expect(d.readPoint!({ type: 'level', address: { tag: 'Nope', index: 1 } })).rejects.toThrow(/address not found/);
+    await expect(
+      d.readPoint!({ type: 'level', address: { tag: 'Nope', index: 1 } }),
+    ).rejects.toThrow(/address not found/);
   });
 
   it('checks a level and learns its range', async () => {
     const { d } = await start();
-    await expect(d.readPoint!({ type: 'level', address: { tag: 'Level1', index: 1 } })).resolves.toEqual({ value: -10, min: -100, max: 12 });
-    await expect(d.readPoint!({ type: 'mute', address: { tag: 'Mute1', index: 1 } })).resolves.toEqual({ value: false });
+    await expect(
+      d.readPoint!({ type: 'level', address: { tag: 'Level1', index: 1 } }),
+    ).resolves.toEqual({ value: -10, min: -100, max: 12 });
+    await expect(
+      d.readPoint!({ type: 'mute', address: { tag: 'Mute1', index: 1 } }),
+    ).resolves.toEqual({ value: false });
   });
 
   it('runs commands one at a time, in order', async () => {
@@ -276,12 +408,19 @@ describe('Biamp Tesira driver', () => {
       d.send({ type: 'volume', level: 30 }),
     ]);
     const sets = t.seen.filter((l) => l.startsWith('Level1 set level'));
-    expect(sets).toEqual(['Level1 set level 1 -54', 'Level1 set level 1 -48', 'Level1 set level 1 -42']);
+    expect(sets).toEqual([
+      'Level1 set level 1 -54',
+      'Level1 set level 1 -48',
+      'Level1 set level 1 -42',
+    ]);
   });
 
   it('cannot send without a point for the role', async () => {
     const t = await fakeTesira();
-    const d = createDriver(dsp('biamp-tesira', { host: '127.0.0.1', port: t.port, timeoutMs: 400 }, []), ctx)!;
+    const d = createDriver(
+      dsp('biamp-tesira', { host: '127.0.0.1', port: t.port, timeoutMs: 400 }, []),
+      ctx,
+    )!;
     drivers.push(d);
     d.start();
     await until(() => d.getState().online);

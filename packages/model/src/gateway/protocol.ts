@@ -186,6 +186,10 @@ export const DeviceReport = z.object({
   deviceId: z.string().min(1).max(100),
   name: z.string().max(200),
   online: z.boolean(),
+  /** The driver this device uses (for example "pjlink" or "custom:my-driver"), so versions can be compared by driver. */
+  driver: z.string().max(100).optional(),
+  /** The firmware version the device reported, if its driver can ask. */
+  firmware: z.string().max(100).optional(),
 });
 export type DeviceReport = z.infer<typeof DeviceReport>;
 

@@ -244,6 +244,7 @@ export const GATEWAY_FEATURES = [
   'avoip',
   'schedule',
   'discovery',
+  'firmware',
 ] as const;
 export type GatewayFeature = (typeof GATEWAY_FEATURES)[number];
 

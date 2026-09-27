@@ -61,6 +61,36 @@ function modelWithDsp(port: number): RoomModel {
   return m;
 }
 
+/** A room whose display is a real PJLink projector on the given port; everything else is simulated. */
+function modelWithProjector(port: number): RoomModel {
+  const m = structuredClone(STARTER_TEMPLATES[0]!.model);
+  for (const d of m.devices) delete d.control;
+  const display = m.devices.find((d) => d.id === 'display1')!;
+  display.control = { kind: 'generic', protocol: 'pjlink' };
+  display.settings = { host: '127.0.0.1', port, pollMs: 40 };
+  return m;
+}
+
+/** A class 2 projector that says what software it runs. */
+function class2Projector(version: string): Server {
+  return createServer((socket) => {
+    socket.on('error', () => undefined);
+    socket.write('PJLINK 0\r');
+    let buf = '';
+    socket.on('data', (d) => {
+      buf += d.toString('latin1');
+      let i: number;
+      while ((i = buf.indexOf('\r')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        if (line === '%1POWR ?') socket.end('%1POWR=0\r');
+        else if (line === '%2SVER ?') socket.end(`%2SVER=${version}\r`);
+        else socket.end(`${line.slice(0, 6)}=ERR1\r`);
+      }
+    });
+  });
+}
+
 const command = (
   type: GatewayCommand['type'],
   args: Record<string, string> = {},
@@ -106,6 +136,28 @@ describe('device monitoring', () => {
     expect(devices.length).toBeGreaterThan(3);
     expect(devices.find((d) => d.deviceId === 'dsp')).toMatchObject({ online: true });
     expect(devices.every((d) => d.name.length > 0)).toBe(true);
+  });
+
+  it('reports each device’s driver, and the firmware version when its device gave one', async () => {
+    const projector = class2Projector('3.1.0');
+    const port = await listen(projector);
+    cloud.assign(ROOM, modelWithProjector(port));
+    const { gateway, host } = boot();
+    gateway.start();
+    await until(() => host.ids().includes(ROOM));
+    await until(
+      () => host.reports()[0]!.devices.find((d) => d.deviceId === 'display1')?.firmware === '3.1.0',
+    );
+    await gateway.tick();
+    const devices = cloud.heartbeats.at(-1)!.rooms[0]!.devices;
+    expect(devices.find((d) => d.deviceId === 'display1')).toMatchObject({
+      driver: 'pjlink',
+      firmware: '3.1.0',
+    });
+    // Devices that did not report one say nothing, rather than an empty version.
+    const other = devices.find((d) => d.deviceId !== 'display1')!;
+    expect(other.firmware).toBeUndefined();
+    projector.close();
   });
 
   it('reports a device that stops answering, sends an event with when it happened, and then a recovery', async () => {
@@ -192,16 +244,30 @@ describe('remote commands', () => {
   it('checks a control point: refuses a bad address, and a simulated room answers with a made-up range', async () => {
     const g = await ready();
     const point = (over: Record<string, string>) =>
-      command('verify_point', { deviceId: 'dsp', type: 'level', address: '{"component":"C","control":"gain"}', ...over });
+      command('verify_point', {
+        deviceId: 'dsp',
+        type: 'level',
+        address: '{"component":"C","control":"gain"}',
+        ...over,
+      });
     const bad = point({ address: 'not json' });
     const wrongType = point({ type: 'nonsense' });
     const generic = point({});
     // (A room on real hardware asks the driver; a driver that cannot read points refuses, tested with the drivers.)
     cloud.queuedCommands.push(bad, wrongType, generic);
     await g.gateway.tick();
-    expect(resultFor(bad.id)).toMatchObject({ ok: false, error: 'The control point address is not valid' });
-    expect(resultFor(wrongType.id)).toMatchObject({ ok: false, error: 'The control point is not valid' });
-    expect(resultFor(generic.id)).toMatchObject({ ok: true, output: { device: 'DSP', value: -20, min: -100, max: 12 } });
+    expect(resultFor(bad.id)).toMatchObject({
+      ok: false,
+      error: 'The control point address is not valid',
+    });
+    expect(resultFor(wrongType.id)).toMatchObject({
+      ok: false,
+      error: 'The control point is not valid',
+    });
+    expect(resultFor(generic.id)).toMatchObject({
+      ok: true,
+      output: { device: 'DSP', value: -20, min: -100, max: 12 },
+    });
   });
 
   it('fails cleanly for a device that is not in the room, or a room the gateway does not run', async () => {
