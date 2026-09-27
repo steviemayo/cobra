@@ -25,6 +25,7 @@ import { roomRouter } from './room';
 import { siteRouter } from './site';
 import { templateRouter } from './template';
 import { ticketRouter } from './ticket';
+import { usageRouter } from './usage';
 
 export const appRouter = router({
   org: orgRouter,
@@ -53,5 +54,6 @@ export const appRouter = router({
   binding: bindingRouter,
   bulk: bulkRouter,
   siteDevice: siteDeviceRouter,
+  usage: usageRouter,
 });
 export type AppRouter = typeof appRouter;

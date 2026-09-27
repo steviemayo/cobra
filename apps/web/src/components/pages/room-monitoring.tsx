@@ -57,6 +57,8 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       return `${s(data.name) || 'A device'} is back`;
     case 'room.status':
       return `Room is now ${s(data.status)}`;
+    case 'room.occupancy':
+      return data.occupied ? 'Someone is in the room' : 'The room is empty';
     case 'activity.started':
       return `Activity started (${s(data.activityId)})`;
     case 'activity.stopped':
