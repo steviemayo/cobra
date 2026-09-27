@@ -6,6 +6,10 @@ export type StoredPlan = 'trial' | PaidPlan;
 /** How long a new organisation's trial lasts, and how many rooms it can have. */
 export const TRIAL_DAYS = 30;
 export const TRIAL_MAX_ROOMS = 5;
+/** Rooms a paid organisation may have for now. Staff can raise or lower it per organisation. */
+export const PAID_MAX_ROOMS = 500;
+/** The alert channels Basic keeps. Pro (and a running trial) has all of them. */
+export const BASIC_ALERT_CHANNELS = ['email'] as const;
 
 /** Stripe statuses under which a paid plan keeps working. past_due gets a grace period. */
 const PAYING_STATUSES = new Set(['active', 'trialing', 'past_due']);
@@ -21,9 +25,16 @@ export type EffectivePlan = 'trial' | 'trial_expired' | 'lapsed' | 'basic' | 'pr
 
 export interface Entitlements {
   plan: EffectivePlan;
-  /** Running rooms and using the panel. Never switched off by billing. */
-  control: true;
+  /** Deploying and controlling rooms: the panel, the portal's controls, room design. Pro and a running trial. */
+  control: boolean;
+  /** Watching devices and rooms. Every plan has it, so a room is never left unwatched by billing. */
   monitoring: boolean;
+  /** Sending alerts at all. Off once a trial has ended. */
+  alerts: boolean;
+  /** Teams, webhook and ITSM alerts as well as email. */
+  allAlertChannels: boolean;
+  /** Usage and reports. */
+  analytics: boolean;
   marketplaceBuy: boolean;
   marketplacePublish: boolean;
   driverCreate: boolean;
@@ -35,19 +46,32 @@ export interface Entitlements {
   adjusted?: { until: Date | null };
 }
 
-const CONTROL_ONLY = {
-  control: true,
-  monitoring: false,
+/** Nothing but watching what is already there: an ended trial. */
+const MONITOR_ONLY = {
+  control: false,
+  monitoring: true,
+  alerts: false,
+  allAlertChannels: false,
+  analytics: false,
   marketplaceBuy: false,
   marketplacePublish: false,
   driverCreate: false,
-  maxRooms: TRIAL_MAX_ROOMS,
+  maxRooms: 0,
+} as const;
+
+/** Basic: monitoring, email alerts and analytics. No control, no marketplace, no custom drivers. */
+const BASIC = {
+  ...MONITOR_ONLY,
+  alerts: true,
+  analytics: true,
+  maxRooms: PAID_MAX_ROOMS,
 } as const;
 
 /**
- * What an organisation may do right now. A trial has everything for 30 days, then drops to control
- * only: rooms keep running and can be deployed, but monitoring and the marketplace switch off.
- * A paid plan that stops paying falls back the same way.
+ * What an organisation may do right now. A trial has control and monitoring for 30 days, then drops
+ * to monitoring only: existing rooms are still watched, but there are no alerts, no analytics and
+ * no new rooms. Basic is monitoring only; Pro adds control, every alert channel, the marketplace and
+ * custom drivers. A paid plan that stops paying falls back to Basic.
  */
 export function entitlementsFor(state: BillingState, now = new Date()): Entitlements {
   const trialDaysLeft =
@@ -58,21 +82,28 @@ export function entitlementsFor(state: BillingState, now = new Date()): Entitlem
 
   if (state.plan === 'trial')
     return trialDaysLeft > 0
-      ? { plan: 'trial', ...CONTROL_ONLY, monitoring: true, ...base }
-      : { plan: 'trial_expired', ...CONTROL_ONLY, ...base };
+      ? {
+          plan: 'trial',
+          ...BASIC,
+          control: true,
+          allAlertChannels: true,
+          maxRooms: TRIAL_MAX_ROOMS,
+          ...base,
+        }
+      : { plan: 'trial_expired', ...MONITOR_ONLY, ...base };
 
-  if (!PAYING_STATUSES.has(state.status)) return { plan: 'lapsed', ...CONTROL_ONLY, ...base };
+  if (!PAYING_STATUSES.has(state.status)) return { plan: 'lapsed', ...BASIC, ...base };
 
   return state.plan === 'basic'
-    ? { plan: 'basic', ...CONTROL_ONLY, marketplaceBuy: true, maxRooms: null, ...base }
+    ? { plan: 'basic', ...BASIC, ...base }
     : {
         plan: 'pro',
-        ...CONTROL_ONLY,
-        monitoring: true,
+        ...BASIC,
+        control: true,
+        allAlertChannels: true,
         marketplaceBuy: true,
         marketplacePublish: true,
         driverCreate: true,
-        maxRooms: null,
         ...base,
       };
 }
@@ -91,36 +122,67 @@ export const PLAN_FEATURES: Record<
 > = {
   basic: {
     label: 'Basic',
-    summary: 'Control your rooms and buy templates.',
-    features: ['Unlimited rooms', 'Deploy and control every room', 'Buy marketplace templates'],
+    summary: 'Watch your rooms and devices.',
+    features: [
+      'Live monitoring of every device and room',
+      'Incidents and email alerts',
+      'Usage and reports',
+      'Remote diagnostics for support',
+    ],
   },
   pro: {
     label: 'Pro',
-    summary: 'Everything in Basic, plus live monitoring.',
+    summary: 'Everything in Basic, plus control.',
     features: [
       'Everything in Basic',
-      'Live monitoring, incidents and alerts',
-      'Remote diagnostics for support',
-      'Publish to the marketplace',
+      'Deploy and control every room',
+      'Teams, webhook and service desk alerts',
+      'Marketplace templates',
       'Create your own drivers',
     ],
   },
 };
 
-export type Feature = 'monitoring' | 'marketplaceBuy' | 'marketplacePublish' | 'driverCreate';
+export type Feature =
+  | 'control'
+  | 'monitoring'
+  | 'alerts'
+  | 'allAlertChannels'
+  | 'analytics'
+  | 'marketplaceBuy'
+  | 'marketplacePublish'
+  | 'driverCreate';
 export const FEATURE_LABEL: Record<Feature, string> = {
+  control: 'Deploying and controlling rooms',
   monitoring: 'Monitoring',
-  marketplaceBuy: 'Buying marketplace templates',
+  alerts: 'Alerts',
+  allAlertChannels: 'Teams, webhook and service desk alerts',
+  analytics: 'Usage and reports',
+  marketplaceBuy: 'Marketplace templates',
   marketplacePublish: 'Publishing to the marketplace',
   driverCreate: 'Creating drivers',
 };
 /** The lowest plan that includes a feature, for "upgrade to ..." messages. */
 export const FEATURE_PLAN: Record<Feature, PaidPlan> = {
-  monitoring: 'pro',
-  marketplaceBuy: 'basic',
+  control: 'pro',
+  monitoring: 'basic',
+  alerts: 'basic',
+  allAlertChannels: 'pro',
+  analytics: 'basic',
+  marketplaceBuy: 'pro',
   marketplacePublish: 'pro',
   driverCreate: 'pro',
 };
+
+/** Whether an alert channel type may be used, given what the plan allows. */
+export function alertChannelAllowed(
+  e: Pick<Entitlements, 'alerts' | 'allAlertChannels'>,
+  type: string,
+) {
+  return (
+    e.alerts && (e.allAlertChannels || (BASIC_ALERT_CHANNELS as readonly string[]).includes(type))
+  );
+}
 
 /**
  * A staff adjustment to what an organisation may do (see OrgLicenseOverride). Every field is
@@ -135,6 +197,8 @@ export interface LicenseOverride {
   unlimitedRooms?: boolean;
   /** Force monitoring on or off. */
   monitoring?: boolean | null;
+  /** Force control on or off. */
+  control?: boolean | null;
   expiresAt?: Date | null;
   revokedAt?: Date | null;
 }
@@ -180,6 +244,7 @@ export function entitlementsWithOverride(
   };
   if (override.monitoring !== null && override.monitoring !== undefined)
     e.monitoring = override.monitoring;
+  if (override.control !== null && override.control !== undefined) e.control = override.control;
   if (override.unlimitedRooms) e.maxRooms = null;
   else if (override.maxRooms !== null && override.maxRooms !== undefined)
     e.maxRooms = override.maxRooms;

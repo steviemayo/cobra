@@ -5,7 +5,7 @@ import { PanelIntent } from '@kestrel/model';
 import { portalIntent, portalSnapshot } from '../control-service';
 import { effectivePanel, readPanel } from '../panel-settings';
 import { orgPanelBranding } from '../provider-brand';
-import { orgProcedure, router } from '../trpc';
+import { controlProcedure, orgProcedure, router } from '../trpc';
 
 const orgId = z.string().uuid();
 const roomId = z.string().uuid();
@@ -27,7 +27,7 @@ export const controlRouter = router({
     return { ...snap, branding };
   }),
 
-  intent: orgProcedure
+  intent: controlProcedure
     .input(z.object({ orgId, roomId, intent: PanelIntent }))
     .mutation(async ({ ctx, input }) => {
       const res = await portalIntent(db, {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PAID_MAX_ROOMS,
   TRIAL_MAX_ROOMS,
+  alertChannelAllowed,
   entitlementsFor,
   entitlementsWithOverride,
   overrideActive,
@@ -17,26 +19,32 @@ const state = (over: Partial<BillingState> = {}): BillingState => ({
 });
 
 describe('entitlements', () => {
-  it('gives a trial everything except the marketplace, limited to five rooms', () => {
+  it('gives a trial control, monitoring and every alert channel, but not the marketplace, limited to five rooms', () => {
     const e = entitlementsFor(state(), NOW);
     expect(e).toMatchObject({
       plan: 'trial',
       control: true,
       monitoring: true,
+      alerts: true,
+      allAlertChannels: true,
+      analytics: true,
       maxRooms: TRIAL_MAX_ROOMS,
       trialDaysLeft: 10,
     });
     expect(e.marketplaceBuy || e.marketplacePublish || e.driverCreate).toBe(false);
   });
 
-  it('drops to control only when the trial ends, without touching control', () => {
+  it('drops to monitoring only when the trial ends: no control, alerts, analytics or new rooms', () => {
     const e = entitlementsFor(state({ trialEndsAt: new Date(NOW.getTime() - 1) }), NOW);
     expect(e).toMatchObject({
       plan: 'trial_expired',
-      control: true,
-      monitoring: false,
+      control: false,
+      monitoring: true,
+      alerts: false,
+      allAlertChannels: false,
+      analytics: false,
       trialDaysLeft: 0,
-      maxRooms: TRIAL_MAX_ROOMS,
+      maxRooms: 0,
     });
   });
 
@@ -47,15 +55,19 @@ describe('entitlements', () => {
     ).toBe(4);
   });
 
-  it('Basic controls rooms and buys templates, with no monitoring and no room limit', () => {
+  it('Basic is monitoring only: email alerts and analytics, no control, marketplace or custom drivers', () => {
     const e = entitlementsFor(state({ plan: 'basic', status: 'active' }), NOW);
     expect(e).toMatchObject({
       plan: 'basic',
-      monitoring: false,
-      marketplaceBuy: true,
+      control: false,
+      monitoring: true,
+      alerts: true,
+      allAlertChannels: false,
+      analytics: true,
+      marketplaceBuy: false,
       marketplacePublish: false,
       driverCreate: false,
-      maxRooms: null,
+      maxRooms: PAID_MAX_ROOMS,
     });
   });
 
@@ -63,11 +75,15 @@ describe('entitlements', () => {
     const e = entitlementsFor(state({ plan: 'pro', status: 'active' }), NOW);
     expect(e).toMatchObject({
       plan: 'pro',
+      control: true,
       monitoring: true,
+      alerts: true,
+      allAlertChannels: true,
+      analytics: true,
       marketplaceBuy: true,
       marketplacePublish: true,
       driverCreate: true,
-      maxRooms: null,
+      maxRooms: PAID_MAX_ROOMS,
     });
   });
 
@@ -76,7 +92,7 @@ describe('entitlements', () => {
     expect(entitlementsFor(state({ plan: 'pro', status: 'trialing' }), NOW).plan).toBe('pro');
   });
 
-  it('falls back to control only when a subscription ends or is unpaid, whatever the old trial date says', () => {
+  it('falls back to Basic when a subscription ends or is unpaid, whatever the old trial date says', () => {
     for (const status of [
       'canceled',
       'unpaid',
@@ -88,17 +104,35 @@ describe('entitlements', () => {
       const e = entitlementsFor(state({ plan: 'pro', status }), NOW);
       expect(e, status).toMatchObject({
         plan: 'lapsed',
-        monitoring: false,
+        control: false,
+        monitoring: true,
+        alerts: true,
+        allAlertChannels: false,
         marketplaceBuy: false,
-        control: true,
+        maxRooms: PAID_MAX_ROOMS,
       });
     }
   });
 
-  it('never turns control off', () => {
+  it('never turns monitoring off, whatever the plan', () => {
     for (const plan of ['trial', 'basic', 'pro'] as const)
       for (const status of ['none', 'active', 'canceled'])
-        expect(entitlementsFor(state({ plan, status, trialEndsAt: null }), NOW).control).toBe(true);
+        expect(entitlementsFor(state({ plan, status, trialEndsAt: null }), NOW).monitoring).toBe(
+          true,
+        );
+  });
+
+  it('allows email alerts on Basic, and every channel on Pro and a running trial', () => {
+    const basic = entitlementsFor(state({ plan: 'basic', status: 'active' }), NOW);
+    const pro = entitlementsFor(state({ plan: 'pro', status: 'active' }), NOW);
+    const ended = entitlementsFor(state({ trialEndsAt: new Date(NOW.getTime() - 1) }), NOW);
+    expect(alertChannelAllowed(basic, 'email')).toBe(true);
+    for (const t of ['teams', 'webhook', 'itsm']) {
+      expect(alertChannelAllowed(basic, t), t).toBe(false);
+      expect(alertChannelAllowed(pro, t), t).toBe(true);
+      expect(alertChannelAllowed(ended, t), t).toBe(false);
+    }
+    expect(alertChannelAllowed(ended, 'email')).toBe(false);
   });
 });
 
@@ -119,9 +153,9 @@ describe('a staff adjustment', () => {
     ).toEqual(plain);
   });
 
-  it('extends an ended trial, so monitoring comes back', () => {
+  it('extends an ended trial, so control and alerts come back', () => {
     const e = entitlementsWithOverride(expiredTrial, { trialEndsAt: days(14) }, NOW);
-    expect(e).toMatchObject({ plan: 'trial', monitoring: true, trialDaysLeft: 14 });
+    expect(e).toMatchObject({ plan: 'trial', control: true, alerts: true, trialDaysLeft: 14 });
     expect(e.adjusted).toEqual({ until: null });
   });
 
@@ -141,14 +175,17 @@ describe('a staff adjustment', () => {
       monitoring: true,
       marketplacePublish: true,
       driverCreate: true,
-      maxRooms: null,
+      maxRooms: PAID_MAX_ROOMS,
     });
   });
 
-  it('can force monitoring on for a plan that lacks it, or off for one that has it', () => {
-    expect(entitlementsWithOverride(paid, { monitoring: true }, NOW).monitoring).toBe(true);
+  it('can force monitoring off for a plan that has it, and control on or off', () => {
     expect(
       entitlementsWithOverride({ ...paid, plan: 'pro' }, { monitoring: false }, NOW).monitoring,
+    ).toBe(false);
+    expect(entitlementsWithOverride(paid, { control: true }, NOW).control).toBe(true);
+    expect(
+      entitlementsWithOverride({ ...paid, plan: 'pro' }, { control: false }, NOW).control,
     ).toBe(false);
   });
 

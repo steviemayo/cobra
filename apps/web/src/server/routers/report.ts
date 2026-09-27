@@ -16,7 +16,7 @@ import { validTimeZone } from '../usage-analytics';
 const orgId = z.string().uuid();
 const tz = z.string().max(64).default('UTC');
 const month = z.object({ year: z.number().int().min(2024).max(2100), month: z.number().int().min(1).max(12) });
-const reports = featureProcedure('monitoring');
+const reports = featureProcedure('analytics');
 
 function checkMonth(m: { year: number; month: number }, zone: string) {
   if (!validTimeZone(zone)) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unknown time zone' });

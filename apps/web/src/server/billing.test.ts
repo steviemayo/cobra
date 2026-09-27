@@ -8,6 +8,7 @@ import {
   getEntitlements,
   handleStripeEvent,
   planRequired,
+  roomLimitMessage,
   type BillingDb,
   type StripeSubscriptionLike,
 } from './billing';
@@ -70,9 +71,17 @@ describe('billing rows', () => {
     );
     expect(canAddRoom(trial, 4)).toBe(true);
     expect(canAddRoom(trial, 5)).toBe(false);
-    expect(
-      canAddRoom(entitlementsFor({ plan: 'pro', status: 'active', trialEndsAt: null }, NOW), 500),
-    ).toBe(true);
+    const pro = entitlementsFor({ plan: 'pro', status: 'active', trialEndsAt: null }, NOW);
+    expect(canAddRoom(pro, 499)).toBe(true);
+    expect(canAddRoom(pro, 500)).toBe(false);
+    // An ended trial keeps its rooms watched but adds none.
+    const ended = entitlementsFor(
+      { plan: 'trial', status: 'none', trialEndsAt: new Date(NOW.getTime() - 1) },
+      NOW,
+    );
+    expect(canAddRoom(ended, 0)).toBe(false);
+    expect(roomLimitMessage(ended)).toMatch(/no new rooms/);
+    expect(roomLimitMessage(pro)).toMatch(/500 rooms/);
     expect(planRequired('monitoring')).toBe('PLAN_REQUIRED:monitoring');
   });
 });
@@ -170,7 +179,7 @@ describe('Stripe webhook events', () => {
     expect(w.stripeEvent.rows).toHaveLength(1);
   });
 
-  it('treats a deleted subscription as cancelled, which drops the organisation to control only', async () => {
+  it('treats a deleted subscription as cancelled, which drops the organisation to Basic', async () => {
     const w = world();
     await handleStripeEvent(
       w.db,
@@ -191,7 +200,7 @@ describe('Stripe webhook events', () => {
         { plan: b.plan as 'pro', status: b.status as string, trialEndsAt: b.trialEndsAt as Date },
         NOW,
       ),
-    ).toMatchObject({ plan: 'lapsed', monitoring: false, control: true });
+    ).toMatchObject({ plan: 'lapsed', monitoring: true, control: false });
   });
 
   it('links the customer when checkout completes', async () => {

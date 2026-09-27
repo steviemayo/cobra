@@ -15,7 +15,7 @@ import {
   saveGroup,
   syncCombinedRooms,
 } from '../room-groups';
-import { orgProcedure, requireRole, router } from '../trpc';
+import { controlProcedure, orgProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
 const groupId = z.string().uuid();
@@ -135,7 +135,7 @@ export const roomGroupRouter = router({
   }),
 
   // Publish (where the design changed) and deploy every room and combined room of the group.
-  deploy: orgProcedure.input(z.object({ orgId, groupId })).mutation(async ({ ctx, input }) => {
+  deploy: controlProcedure.input(z.object({ orgId, groupId })).mutation(async ({ ctx, input }) => {
     requireRole(ctx.role, ['owner', 'dev']);
     let key;
     try {

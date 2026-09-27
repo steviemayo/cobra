@@ -29,6 +29,7 @@ const KEY_CREDENTIAL = 'credential';
 const KEY_IDENTITY = 'identity';
 const KEY_PUBLIC_KEYS = 'publicKeys';
 const KEY_CONFIG_VERSION = 'configVersion';
+const KEY_CONTROL = 'control';
 const BINDINGS_PREFIX = 'bindings:';
 const keyBindings = (roomId: string) => `${BINDINGS_PREFIX}${roomId}`;
 const MAX_BACKOFF_MS = 60_000;
@@ -84,6 +85,8 @@ export class Gateway {
     private readonly host: RoomHost,
     private readonly log: Logger,
   ) {
+    // What the plan said last time, so a restart while offline does not start accepting commands.
+    host.setControl(store.get(KEY_CONTROL) !== 'off');
     this.groups = new GroupCoordinator(host, store, log);
     this.phone = new PhoneLinks(store, cfg.cloudUrl);
   }
@@ -320,6 +323,8 @@ export class Gateway {
       });
     this.pendingResults.splice(0, results.length);
     this.inbox.push(...res.commands);
+    if (res.control !== this.host.control) this.store.set(KEY_CONTROL, res.control ? 'on' : 'off');
+    this.host.setControl(res.control);
     this.setWatch(res.watch);
     this.bookings.apply(res.schedules);
     const { update } = res;

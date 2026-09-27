@@ -10,6 +10,8 @@ import {
 export interface SelectOption<T extends string> {
   value: T;
   label: string;
+  /** Shown but not choosable. */
+  disabled?: boolean;
 }
 
 // Thin wrapper over the Base UI select so callers pass plain options and get a string back.
@@ -44,7 +46,7 @@ export function SimpleSelect<T extends string>({
       </SelectTrigger>
       <SelectContent>
         {options.map((o) => (
-          <SelectItem key={o.value} value={o.value}>
+          <SelectItem key={o.value} value={o.value} disabled={o.disabled}>
             {o.label}
           </SelectItem>
         ))}

@@ -3,6 +3,7 @@ import { useId } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'motion/react';
+import { Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface NavTab {
@@ -11,6 +12,8 @@ export interface NavTab {
   /** Match only this exact path (default: prefix match). */
   exact?: boolean;
   soon?: boolean;
+  /** Not part of the plan: still shown, with a lock, and the page explains what to do. */
+  locked?: boolean;
   badge?: React.ReactNode;
 }
 
@@ -28,6 +31,7 @@ export function NavTabs({ tabs }: { tabs: NavTab[] }) {
           const inner = (
             <>
               {t.label}
+              {t.locked && <Lock aria-label="Not in your plan" className="size-3" />}
               {t.badge}
               {t.soon && (
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">

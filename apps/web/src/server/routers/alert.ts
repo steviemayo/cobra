@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db, type Prisma } from '@kestrel/db';
+import { alertChannelAllowed } from '@kestrel/model';
 import {
   ChannelConfig,
   assertPublicUrl,
@@ -11,10 +12,11 @@ import {
 } from '../alerts';
 import { ChannelRules, describeRules, hasRules } from '../alert-rules';
 import { writeAudit } from '../audit';
+import { getEntitlements, planRequired } from '../billing';
 import { featureProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
-const monitoringProcedure = featureProcedure('monitoring');
+const monitoringProcedure = featureProcedure('alerts');
 const channelId = z.string().uuid();
 const name = z.string().trim().min(1).max(80);
 const severity = z.enum(['info', 'warning', 'critical']);
@@ -84,9 +86,12 @@ export const alertRouter = router({
       orderBy: { at: 'desc' },
       take: 200,
     });
+    const entitlements = await getEntitlements(db, ctx.orgId);
     return rows.map((c) => {
       const last = recent.find((d) => d.channelId === c.id);
       return {
+        /** True when the plan no longer lets this kind of channel send (a lapsed Pro organisation). */
+        locked: !alertChannelAllowed(entitlements, c.type),
         id: c.id,
         name: c.name,
         type: c.type,
@@ -108,8 +113,10 @@ export const alertRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
-      await checkDestination(input.config);
       const { type, config } = split(input.config);
+      if (!alertChannelAllowed(await getEntitlements(db, ctx.orgId), type))
+        throw new TRPCError({ code: 'FORBIDDEN', message: planRequired('allAlertChannels') });
+      await checkDestination(input.config);
       const row = await db.alertChannel.create({
         data: {
           orgId: ctx.orgId,
@@ -186,7 +193,10 @@ export const alertRouter = router({
       const rest = { ...((ch.config ?? {}) as Record<string, unknown>) };
       delete rest.rules;
       const next = input.rules && hasRules(input.rules) ? { ...rest, rules: input.rules } : rest;
-      await db.alertChannel.update({ where: { id: ch.id }, data: { config: next as Prisma.InputJsonValue } });
+      await db.alertChannel.update({
+        where: { id: ch.id },
+        data: { config: next as Prisma.InputJsonValue },
+      });
       await writeAudit({
         orgId: ctx.orgId,
         actorId: ctx.user.id,

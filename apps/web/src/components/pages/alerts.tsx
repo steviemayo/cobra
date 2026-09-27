@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/common/empty-state';
 import { SEVERITY_LABEL, dateTime } from '@/components/common/health';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
+import { useBilling } from '@/components/common/plan-gate';
 import { useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
 import {
@@ -167,6 +168,7 @@ export function AlertsView() {
                     <div className="font-medium">{c.name}</div>
                     <div className="text-xs text-muted-foreground">
                       {TYPE_LABEL[c.type] ?? c.type}
+                      {c.locked && ' · paused, needs Pro'}
                     </div>
                   </TableCell>
                   <TableCell className="max-w-64 truncate text-muted-foreground">
@@ -290,6 +292,8 @@ function AddChannelDialog({
 }) {
   const trpc = useTRPC();
   const { orgId } = useOrg();
+  // Basic keeps email only; the other channels need Pro.
+  const allChannels = useBilling().data?.entitlements.allAlertChannels ?? true;
   const [type, setType] = useState<ChannelType>('email');
   const [name, setName] = useState('');
   const [minSeverity, setMinSeverity] = useState<Severity>('warning');
@@ -350,7 +354,8 @@ function AddChannelDialog({
                 onValueChange={setType}
                 options={Object.entries(TYPE_LABEL).map(([value, label]) => ({
                   value: value as ChannelType,
-                  label,
+                  label: value === 'email' || allChannels ? label : `${label} (Pro)`,
+                  disabled: value !== 'email' && !allChannels,
                 }))}
               />
             </div>
