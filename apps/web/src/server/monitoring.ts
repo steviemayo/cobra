@@ -12,7 +12,8 @@ export type MonitoringDb = Pick<
 >;
 
 export type Severity = 'info' | 'warning' | 'critical';
-export type IncidentKind = 'device_offline' | 'gateway_offline' | 'room_fault' | 'deploy_failed';
+export type IncidentKind =
+  'device_offline' | 'gateway_offline' | 'room_fault' | 'deploy_failed' | 'point_alert';
 
 export interface AlertJob {
   incidentId: string;
@@ -134,8 +135,12 @@ export async function recordReports(
         ]),
       );
       const seen = new Set<string>();
+      // Watched points the gateway read this time, and the devices that are answering.
+      const readSubjects = new Set<string>();
+      const answering = new Set<string>();
       for (const d of report.devices) {
         seen.add(d.deviceId);
+        if (d.online) answering.add(d.deviceId);
         const subject = `${room.id}:${d.deviceId}`;
         let since = now;
         const row = known.get(d.deviceId);
@@ -187,6 +192,50 @@ export async function recordReports(
               now,
             ),
           );
+        for (const w of d.watched ?? []) {
+          const watchSubject = `${subject}:${w.pointId}`;
+          readSubjects.add(watchSubject);
+          if (w.ok)
+            add(
+              await resolveIncident(
+                db,
+                { orgId: gw.orgId, kind: 'point_alert', subject: watchSubject },
+                now,
+              ),
+            );
+          else
+            add(
+              await raise(
+                db,
+                {
+                  ...base,
+                  kind: 'point_alert',
+                  subject: watchSubject,
+                  severity: w.severity,
+                  title: `${d.name}: ${w.name}`,
+                  detail: `${w.message ?? `${w.name} is out of bounds`} (${d.name} in ${room.name}).`,
+                },
+                now,
+              ),
+            );
+        }
+      }
+      // A watch that was taken off a point (or a device that was dropped) no longer holds its
+      // incident open. A device that is offline is left alone: it cannot be read, not read as fine.
+      const openPoints = await db.incident.findMany({
+        where: { orgId: gw.orgId, roomId: room.id, kind: 'point_alert', status: 'open' },
+      });
+      for (const inc of openPoints) {
+        const deviceId = inc.subject.split(':')[1] ?? '';
+        if (readSubjects.has(inc.subject) || (seen.has(deviceId) && !answering.has(deviceId)))
+          continue;
+        add(
+          await resolveIncident(
+            db,
+            { orgId: gw.orgId, kind: 'point_alert', subject: inc.subject },
+            now,
+          ),
+        );
       }
       // A new release may have dropped devices; forget them and close anything open for them.
       for (const [deviceId, row] of known)

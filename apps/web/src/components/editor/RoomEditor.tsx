@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RoomModel } from '@kestrel/model';
 import { ValueTabs } from '@/components/common/nav-tabs';
 import { PageContainer } from '@/components/common/page-header';
+import { MonitoredNotice } from './MonitoredNotice';
+import { useBilling } from '@/components/common/plan-gate';
 import { useRoom } from '@/components/pages/room-shell';
 import { useOrg } from '@/components/shell/org-context';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -21,6 +23,9 @@ import { SaveStatusBadge, Toolbar } from './Toolbar';
 import { TriggersPanel } from './TriggersPanel';
 import { ValidationPanel, tabForRef, type TabId } from './ValidationPanel';
 import { useRoomEditor } from './use-room-editor';
+
+// A room without control is monitored only: its devices and their addresses, nothing to route or run.
+const MONITORED_TABS: TabId[] = ['devices', 'setup'];
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'graph', label: 'Graph' },
@@ -40,6 +45,7 @@ export function RoomEditorWorkspace({ roomId }: { roomId: string }) {
   const qc = useQueryClient();
   const { orgId, canEdit } = useOrg();
   const { room } = useRoom(roomId);
+  const control = useBilling().data?.entitlements.control ?? true;
   // Always load the draft fresh: the editor owns it once mounted and saves against this revision.
   const draft = useQuery({
     ...trpc.draft.get.queryOptions({ orgId, roomId }),
@@ -71,6 +77,7 @@ export function RoomEditorWorkspace({ roomId }: { roomId: string }) {
             orgId={orgId}
             roomId={roomId}
             roomType={room.type}
+            monitoredOnly={!control}
             onCreated={() => {
               void qc.invalidateQueries({ queryKey: trpc.draft.get.queryKey() });
               void qc.invalidateQueries({ queryKey: trpc.room.overview.queryKey() });
@@ -103,7 +110,11 @@ function RoomEditor(props: {
   const { model, update, status, flush, replace, validation } = useRoomEditor(props);
   const qc = useQueryClient();
   const trpc = useTRPC();
-  const [tab, setTab] = useState<TabId>('graph');
+  const control = useBilling().data?.entitlements.control ?? true;
+  const tabs = control ? TABS : TABS.filter((t) => MONITORED_TABS.includes(t.id));
+  const [picked, setTab] = useState<TabId>(control ? 'graph' : 'devices');
+  // A tab this plan does not show (control was switched off while it was open) falls back to the first.
+  const tab = tabs.some((t) => t.id === picked) ? picked : tabs[0]!.id;
 
   const count = (id: TabId, severity: 'error' | 'warning') =>
     validation.issues.filter((i) => i.severity === severity && tabForRef(i.ref) === id).length;
@@ -133,10 +144,11 @@ function RoomEditor(props: {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="min-w-0 space-y-4">
+          {!control && <MonitoredNotice />}
           <ValueTabs
             value={tab}
             onChange={setTab}
-            tabs={TABS.map((t) => ({
+            tabs={tabs.map((t) => ({
               ...t,
               errors: count(t.id, 'error'),
               warnings: count(t.id, 'warning'),

@@ -11,3 +11,4 @@ export * from './room-types';
 export * from './templates';
 export * from './drivers';
 export * from './groups';
+export * from './monitored';

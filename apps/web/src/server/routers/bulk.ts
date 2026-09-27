@@ -8,7 +8,7 @@ import { getEntitlements } from '../billing';
 import { applyBulk, planBulk, type BulkDb, type BulkInput } from '../bulk-rooms';
 import { pinDrivers } from '../custom-drivers';
 import { syncQuantity } from '../stripe';
-import { orgProcedure, requireRole, router } from '../trpc';
+import { controlProcedure, requireRole, router } from '../trpc';
 import { findTemplateModel } from './room-model-helpers';
 
 const orgId = z.string().uuid();
@@ -32,7 +32,10 @@ const gridInput = z.object({
 });
 
 /** What a bulk run needs from the template and the organisation, checked once. */
-async function prepare(ctx: { orgId: string; user: { id: string } }, input: z.infer<typeof gridInput>) {
+async function prepare(
+  ctx: { orgId: string; user: { id: string } },
+  input: z.infer<typeof gridInput>,
+) {
   const site = await db.site.findFirst({ where: { id: input.siteId, orgId: ctx.orgId } });
   if (!site) throw new TRPCError({ code: 'NOT_FOUND', message: 'Site not found' });
   const model = await findTemplateModel(ctx.orgId, input.templateId);
@@ -52,11 +55,12 @@ async function prepare(ctx: { orgId: string; user: { id: string } }, input: z.in
   return { site, bulk };
 }
 
+// Bulk creation starts from a template, which carries routing and activities, so it needs control.
 // Create many rooms from one template, or update the addresses of rooms that already have the
 // names in the sheet. Nothing is written unless every row is fine.
 export const bulkRouter = router({
   // The columns a template needs, and which devices need a shared login.
-  columns: orgProcedure
+  columns: controlProcedure
     .input(z.object({ orgId, templateId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
@@ -65,13 +69,13 @@ export const bulkRouter = router({
       return { roomType: model.roomType, ...bulkColumns(model, pinned.ok ? pinned.drivers : {}) };
     }),
 
-  preview: orgProcedure.input(gridInput).mutation(async ({ ctx, input }) => {
+  preview: controlProcedure.input(gridInput).mutation(async ({ ctx, input }) => {
     requireRole(ctx.role, ['owner', 'dev']);
     const { bulk } = await prepare(ctx, input);
     return planBulk(db as unknown as BulkDb, bulk);
   }),
 
-  create: orgProcedure.input(gridInput).mutation(async ({ ctx, input }) => {
+  create: controlProcedure.input(gridInput).mutation(async ({ ctx, input }) => {
     requireRole(ctx.role, ['owner', 'dev']);
     const { site, bulk } = await prepare(ctx, input);
     const result = await db.$transaction((tx) => applyBulk(tx as unknown as BulkDb, bulk), {
@@ -96,7 +100,9 @@ export const bulkRouter = router({
     });
     if (result.created.length > 0)
       after(() =>
-        syncQuantity(db, ctx.orgId).catch((e) => console.error('[billing] quantity sync failed', e)),
+        syncQuantity(db, ctx.orgId).catch((e) =>
+          console.error('[billing] quantity sync failed', e),
+        ),
       );
     return { created: result.created, updated: result.updated };
   }),

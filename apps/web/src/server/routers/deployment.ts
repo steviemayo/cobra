@@ -8,7 +8,7 @@ import { roomDeployStates } from '../deployment-queries';
 import { cancelScheduled, createDeployment } from '../deployment-service';
 import { orgPanelBranding } from '../provider-brand';
 import { SigningNotConfigured, loadSigningKey } from '../signing';
-import { controlProcedure, orgProcedure, requireRole, router } from '../trpc';
+import { orgProcedure, requireRole, router } from '../trpc';
 import { assertRoom } from './room-model-helpers';
 
 const orgId = z.string().uuid();
@@ -89,7 +89,7 @@ export const deploymentRouter = router({
     }),
 
   // Start a release now, or schedule it. Choosing an older release than the running one is a rollback.
-  create: controlProcedure
+  create: orgProcedure
     .input(
       z.object({
         orgId,
@@ -164,7 +164,7 @@ export const deploymentRouter = router({
 
   // Publish (where the design changed) and deploy, or roll back, every chosen room that is ready.
   // Rooms that cannot go are reported and skipped; the others still go.
-  bulkDeploy: controlProcedure.input(bulkInput).mutation(async ({ ctx, input }) => {
+  bulkDeploy: orgProcedure.input(bulkInput).mutation(async ({ ctx, input }) => {
     requireRole(ctx.role, ['owner', 'dev']);
     let key;
     try {

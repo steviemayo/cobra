@@ -182,6 +182,17 @@ export const CommandResult = z.object({
 });
 export type CommandResult = z.infer<typeof CommandResult>;
 
+/** One watched control point and whether its reading is in bounds. Points with no reading yet are left out. */
+export const WatchedPoint = z.object({
+  pointId: z.string().min(1).max(100),
+  name: z.string().max(200),
+  ok: z.boolean(),
+  /** In plain words, when it is not ok. */
+  message: z.string().max(300).optional(),
+  severity: z.enum(['info', 'warning', 'critical']).default('warning'),
+});
+export type WatchedPoint = z.infer<typeof WatchedPoint>;
+
 export const DeviceReport = z.object({
   deviceId: z.string().min(1).max(100),
   name: z.string().max(200),
@@ -190,6 +201,8 @@ export const DeviceReport = z.object({
   driver: z.string().max(100).optional(),
   /** The firmware version the device reported, if its driver can ask. */
   firmware: z.string().max(100).optional(),
+  /** The points this device is watched on. Absent when none are. */
+  watched: z.array(WatchedPoint).max(100).optional(),
 });
 export type DeviceReport = z.infer<typeof DeviceReport>;
 
