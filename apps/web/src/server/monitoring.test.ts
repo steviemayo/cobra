@@ -84,6 +84,66 @@ describe('device status and incidents', () => {
     expect(w.incident.rows).toHaveLength(0);
   });
 
+  describe('watched points', () => {
+    const gw = { id: GW, orgId: ORG };
+    const watched = (ok: boolean, over: object = {}) => ({
+      pointId: 'mut',
+      name: 'Mic mute',
+      ok,
+      ...(ok ? {} : { message: 'Mic mute is on, expected off' }),
+      severity: 'critical' as const,
+      ...over,
+    });
+    const withWatch = (w: ReturnType<typeof watched>[] | undefined, online = true) =>
+      report({
+        devices: [
+          { deviceId: 'dsp', name: 'DSP', online, ...(w ? { watched: w } : {}) },
+          { deviceId: 'display', name: 'Display', online: true },
+        ],
+      });
+
+    it('raises an incident with the severity of the watch, and resolves it when the value is fine again', async () => {
+      const w = world();
+      const jobs = await recordReports(w.db, gw, [withWatch([watched(false)])], T0);
+      expect(jobs).toEqual([{ incidentId: expect.any(String), event: 'opened' }]);
+      expect(w.incident.rows[0]).toMatchObject({
+        kind: 'point_alert',
+        subject: `${ROOM}:dsp:mut`,
+        severity: 'critical',
+        title: 'DSP: Mic mute',
+        status: 'open',
+      });
+      expect(w.incident.rows[0]!.detail).toContain('Mic mute is on, expected off');
+      // Still wrong: the same incident, no second alert.
+      expect(await recordReports(w.db, gw, [withWatch([watched(false)])], at(1000))).toEqual([]);
+      expect(w.incident.rows).toHaveLength(1);
+      const back = await recordReports(w.db, gw, [withWatch([watched(true)])], at(2000));
+      expect(back[0]!.event).toBe('resolved');
+      expect(w.incident.rows[0]!.status).toBe('resolved');
+    });
+
+    it('closes the incident when the watch is taken off the point', async () => {
+      const w = world();
+      await recordReports(w.db, gw, [withWatch([watched(false)])], T0);
+      const jobs = await recordReports(w.db, gw, [withWatch(undefined)], at(1000));
+      expect(jobs[0]!.event).toBe('resolved');
+    });
+
+    it('leaves the incident open while the device is offline, because nothing can be read', async () => {
+      const w = world();
+      await recordReports(w.db, gw, [withWatch([watched(false)])], T0);
+      expect(await recordReports(w.db, gw, [withWatch(undefined, false)], at(1000))).toEqual([]);
+      expect(w.incident.rows[0]!.status).toBe('open');
+    });
+
+    it('never alerts for a staging room', async () => {
+      const w = world();
+      w.room.rows.find((r) => r.id === ROOM)!.kind = 'staging';
+      expect(await recordReports(w.db, gw, [withWatch([watched(false)])], T0)).toEqual([]);
+      expect(w.incident.rows).toHaveLength(0);
+    });
+  });
+
   it('watches a staging room but never raises an incident or an alert for it', async () => {
     const w = world();
     w.room.rows.find((r) => r.id === ROOM)!.kind = 'staging';

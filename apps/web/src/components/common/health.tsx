@@ -94,4 +94,5 @@ export const INCIDENT_KIND_LABEL: Record<string, string> = {
   gateway_offline: 'Gateway offline',
   room_fault: 'Room fault',
   deploy_failed: 'Release refused',
+  point_alert: 'Watched value out of bounds',
 };

@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db, type Prisma } from '@kestrel/db';
-import { RoomModel, newRoomModel } from '@kestrel/model';
+import { RoomModel, changesControlContent, newRoomModel } from '@kestrel/model';
+import { getEntitlements, planRequired } from '../billing';
 import { orgProcedure, requireRole, router } from '../trpc';
 import { assertRoom, findTemplateModel, toJson } from './room-model-helpers';
 
@@ -27,6 +28,9 @@ export const draftRouter = router({
       const room = await assertRoom(ctx.orgId, input.roomId);
       const existing = await db.roomDraft.findUnique({ where: { roomId: room.id } });
       if (existing) throw new TRPCError({ code: 'CONFLICT', message: 'Draft already exists' });
+      // Templates carry routing and activities, which need control. Without it a room starts blank.
+      if (input.templateId && !(await getEntitlements(db, ctx.orgId)).control)
+        throw new TRPCError({ code: 'FORBIDDEN', message: planRequired('control') });
       const model = input.templateId
         ? await findTemplateModel(ctx.orgId, input.templateId)
         : newRoomModel(room.type);
@@ -52,6 +56,15 @@ export const draftRouter = router({
           code: 'BAD_REQUEST',
           message: 'Model room type does not match room',
         });
+      // Without control a room is monitored only: devices and their addresses can change, but the
+      // routing, states, activities and triggers stay as they are.
+      if (!(await getEntitlements(db, ctx.orgId)).control) {
+        const current = await db.roomDraft.findFirst({
+          where: { roomId: room.id, orgId: ctx.orgId },
+        });
+        if (changesControlContent(current ? RoomModel.parse(current.model) : null, input.model))
+          throw new TRPCError({ code: 'FORBIDDEN', message: planRequired('control') });
+      }
       const { count } = await db.roomDraft.updateMany({
         where: { roomId: room.id, orgId: ctx.orgId, revision: input.baseRevision },
         data: {

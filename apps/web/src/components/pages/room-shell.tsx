@@ -37,7 +37,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
   const router = useRouter();
   const pathname = usePathname();
   const { orgId, canEdit, canSupport } = useOrg();
-  // Without control (Basic, an ended trial) the design and deploy tabs stay visible but locked.
+  // Without control (Basic, an ended trial) the simulator and control tabs stay visible but locked.
   const control = useBilling().data?.entitlements.control ?? true;
   const { room, isPending } = useRoom(roomId);
   const onDesign = pathname.endsWith('/design') || pathname.endsWith('/simulate');
@@ -155,10 +155,10 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
             ...(canSupport
               ? [
                   { label: 'Overview', href: base, exact: true },
-                  { label: 'Design', href: `${base}/design`, locked: !control },
+                  { label: 'Design', href: `${base}/design` },
                   { label: 'Simulate', href: `${base}/simulate`, locked: !control },
                   { label: 'Devices', href: `${base}/devices` },
-                  { label: 'Deployments', href: `${base}/deployments`, locked: !control },
+                  { label: 'Deployments', href: `${base}/deployments` },
                   { label: 'Commissioning', href: `${base}/commissioning` },
                 ]
               : []),

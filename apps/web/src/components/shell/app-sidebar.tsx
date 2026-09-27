@@ -365,11 +365,10 @@ export function AppSidebar() {
       },
     canSupport &&
       full && { href: `${base}/groups`, icon: Link2, label: 'Room groups', locked: !control },
-    canSupport &&
-      full && { href: `${base}/deployments`, icon: Rocket, label: 'Deployments', locked: !control },
   ]);
   const devices = entries([
     canSupport && { href: `${base}/gateways`, icon: Router, label: 'Gateways' },
+    canSupport && full && { href: `${base}/deployments`, icon: Rocket, label: 'Deployments' },
     canEdit && full && { href: `${base}/shared-devices`, icon: Server, label: 'Shared devices' },
     canEdit && full && { href: `${base}/credentials`, icon: KeyRound, label: 'Shared logins' },
     canSupport && { href: `${base}/firmware`, icon: CircuitBoard, label: 'Firmware' },

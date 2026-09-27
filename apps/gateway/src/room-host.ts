@@ -6,7 +6,7 @@ import {
   createDriver,
   type DeviceDriver,
 } from '@kestrel/drivers/real';
-import { applyBindings } from '@kestrel/model';
+import { applyBindings, checkWatch } from '@kestrel/model';
 import type {
   DeviceBus,
   DeviceCommand,
@@ -325,12 +325,31 @@ export class RoomHost {
             : d.control?.kind === 'generic'
               ? d.control.protocol
               : undefined;
+        // Watched points that have been read. A device that is offline has no reading worth judging.
+        const watched =
+          (state?.online ?? true)
+            ? (d.points ?? []).flatMap((p) => {
+                const value = p.watch ? state?.points[p.id] : undefined;
+                if (!p.watch || value === undefined) return [];
+                const result = checkWatch(p.name, p.watch, value);
+                return [
+                  {
+                    pointId: p.id,
+                    name: p.name,
+                    ok: result.ok,
+                    ...(result.ok ? {} : { message: result.message }),
+                    severity: p.watch.severity,
+                  },
+                ];
+              })
+            : [];
         return {
           deviceId: d.id,
           name: d.name,
           online: state?.online ?? true,
           ...(driver && { driver }),
           ...(state?.firmware && { firmware: state.firmware }),
+          ...(watched.length > 0 && { watched }),
         };
       }),
     }));

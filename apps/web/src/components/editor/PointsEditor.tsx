@@ -12,6 +12,7 @@ import {
   type PointType,
   type RoomModel,
 } from '@kestrel/model';
+import { useBilling } from '@/components/common/plan-gate';
 import { useOrg } from '@/components/shell/org-context';
 import { uniqueId } from '@/lib/editor/ops';
 import { useTRPC } from '@/trpc/client';
@@ -61,7 +62,7 @@ export function PointsEditor({
       <div className="text-xs text-muted-foreground">Control points</div>
       {points.length === 0 && (
         <p className="text-xs text-muted-foreground">
-          No points yet. Add the levels, mutes and so on to control, then give each a role to connect it to the room.
+          No points yet. Add the levels, mutes and so on to watch or control, then give each a role to connect it to the room.
         </p>
       )}
       {points.map((p) => (
@@ -94,6 +95,8 @@ function PointRow({
   edit: (fn: (d: Device) => void) => void;
   roomId?: string;
 }) {
+  // A role connects a point to activities and the panel, which a room without control does not have.
+  const control = useBilling().data?.entitlements.control ?? true;
   const fields = forms[p.type] ?? [];
   const roles = POINT_ROLES.filter((r) => POINT_ROLE_INFO[r].type === p.type);
   const info = p.role ? POINT_ROLE_INFO[p.role] : null;
@@ -143,6 +146,7 @@ function PointRow({
         </button>
       </div>
       <div className="flex flex-wrap items-end gap-2">
+        {control && (
         <Label text="Role in the room">
           <Select
             value={p.role ?? 'none'}
@@ -160,7 +164,8 @@ function PointRow({
             }
           />
         </Label>
-        {info?.needsMic && (
+        )}
+        {control && info?.needsMic && (
           <Label text="Microphone">
             <Select
               value={p.targetId ?? ''}
@@ -196,6 +201,88 @@ function PointRow({
           if (x.max === undefined && max !== undefined) x.max = max;
         })} />
       </div>
+      <WatchRow point={p} change={change} />
+    </div>
+  );
+}
+
+type WatchMode = 'none' | 'expect' | 'range';
+const SEVERITY_OPTIONS = [
+  { value: 'info' as const, label: 'Note' },
+  { value: 'warning' as const, label: 'Warning' },
+  { value: 'critical' as const, label: 'Critical' },
+];
+
+/**
+ * Watch a point: raise an incident (and alert) when its value is not what it should be. Works in a
+ * room without control too, which is how a monitored room uses a point.
+ */
+function WatchRow({ point: p, change }: { point: ControlPoint; change: (id: string, fn: (p: ControlPoint) => void) => void }) {
+  const w = p.watch;
+  const numeric = p.type === 'level' || p.type === 'meter';
+  const mode: WatchMode = !w ? 'none' : w.expect !== undefined ? 'expect' : w.min !== undefined || w.max !== undefined ? 'range' : 'none';
+  const modes: { value: WatchMode; label: string }[] = [
+    { value: 'none', label: 'Don’t watch' },
+    { value: 'expect', label: p.type === 'mute' ? 'Should be on or off' : 'Should be a certain value' },
+    ...(numeric ? [{ value: 'range' as const, label: 'Should stay in a range' }] : []),
+  ];
+  const set = (fn: (x: NonNullable<ControlPoint['watch']>) => void) =>
+    change(p.id, (x) => {
+      const next = x.watch ?? { severity: 'warning' as const };
+      fn(next);
+      x.watch = next;
+    });
+  const number = (v: string) => (v === '' ? undefined : Number(v));
+
+  return (
+    <div className="flex flex-wrap items-end gap-2 border-t border-border pt-2">
+      <Label text="Watch this point">
+        <Select
+          value={mode}
+          options={modes}
+          onChange={(m) =>
+            change(p.id, (x) => {
+              if (m === 'none') delete x.watch;
+              else if (m === 'expect') x.watch = { severity: x.watch?.severity ?? 'warning', expect: p.type === 'mute' ? false : numeric ? 50 : '' };
+              else x.watch = { severity: x.watch?.severity ?? 'warning', min: 20 };
+            })
+          }
+        />
+      </Label>
+      {mode === 'expect' && p.type === 'mute' && (
+        <Label text="Should be">
+          <Select
+            value={w?.expect === true ? 'on' : 'off'}
+            options={[{ value: 'off', label: 'Off (unmuted)' }, { value: 'on', label: 'On (muted)' }]}
+            onChange={(v) => set((x) => void (x.expect = v === 'on'))}
+          />
+        </Label>
+      )}
+      {mode === 'expect' && p.type !== 'mute' && (
+        <Label text={numeric ? 'Should be (0 to 100)' : 'Should say'}>
+          <input
+            className={`${inputCls} w-32`}
+            type={numeric ? 'number' : 'text'}
+            value={w?.expect === undefined ? '' : String(w.expect)}
+            onChange={(e) => set((x) => void (x.expect = numeric ? (number(e.target.value) ?? 0) : e.target.value))}
+          />
+        </Label>
+      )}
+      {mode === 'range' && (
+        <>
+          <Label text="Lowest allowed (0 to 100)">
+            <input className={`${inputCls} w-28`} type="number" value={w?.min ?? ''} onChange={(e) => set((x) => void (x.min = number(e.target.value)))} />
+          </Label>
+          <Label text="Highest allowed">
+            <input className={`${inputCls} w-28`} type="number" value={w?.max ?? ''} onChange={(e) => set((x) => void (x.max = number(e.target.value)))} />
+          </Label>
+        </>
+      )}
+      {mode !== 'none' && (
+        <Label text="Alert as">
+          <Select value={w?.severity ?? 'warning'} options={SEVERITY_OPTIONS} onChange={(v) => set((x) => void (x.severity = v))} />
+        </Label>
+      )}
     </div>
   );
 }
