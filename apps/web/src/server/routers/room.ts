@@ -9,12 +9,16 @@ import { canAddRoom, getEntitlements } from '../billing';
 import { checkDeployable } from '../deploy-check';
 import { sharedGatewayProblem } from '../site-devices';
 import { createDeployment } from '../deployment-service';
+import { DuplicateRoomError, duplicateRoom } from '../duplicate-room';
 import { effectiveStatus } from '../gateway-service';
 import { PanelInput, applyPanelInput, publicPanel, readPanel } from '../panel-settings';
 import { summariseDraft } from '../room-summary';
 import { syncQuantity } from '../stripe';
 import { SITE_SCOPED, siteFilter } from '../site-scope';
 import { orgProcedure, requireRole, router } from '../trpc';
+import { designOnly } from './room-model-helpers';
+import { promoteStaging, PromoteError } from '../promote-staging';
+import { STAGING, billedRooms } from '../room-kinds';
 
 const orgId = z.string().uuid();
 const roomId = z.string().uuid();
@@ -148,7 +152,7 @@ export const roomRouter = router({
       if (
         !canAddRoom(
           entitlements,
-          await db.room.count({ where: { orgId: ctx.orgId, kind: { not: 'combined' } } }),
+          await db.room.count({ where: { orgId: ctx.orgId, ...billedRooms } }),
         )
       )
         throw new TRPCError({
@@ -172,6 +176,108 @@ export const roomRouter = router({
         ),
       );
       return room;
+    }),
+
+  // A new room at the same site with this room's design and gateway. Addresses are not copied;
+  // the shared logins chosen are.
+  duplicate: orgProcedure
+    .input(z.object({ orgId, roomId, name, staging: z.boolean().default(false) }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const source = await findRoom(ctx.orgId, input.roomId);
+      if (input.staging && source.kind === STAGING)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'A staging room cannot have a staging copy of its own.' });
+      if (source.kind === 'combined')
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'A combined room is made from its room group and cannot be copied.',
+        });
+      const draft = await db.roomDraft.findFirst({ where: { roomId: source.id, orgId: ctx.orgId } });
+      if (!draft) throw new TRPCError({ code: 'BAD_REQUEST', message: 'This room has no design to copy yet' });
+      // A staging room is free, so only a live copy counts against the plan.
+      const entitlements = input.staging ? null : await getEntitlements(db, ctx.orgId);
+      if (
+        entitlements &&
+        !canAddRoom(
+          entitlements,
+          await db.room.count({ where: { orgId: ctx.orgId, ...billedRooms } }),
+        )
+      )
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `Your plan includes ${entitlements.maxRooms} rooms. Subscribe to add more.`,
+        });
+      const model = await designOnly(ctx.orgId, RoomModel.parse(draft.model));
+      let copy;
+      try {
+        copy = await db.$transaction((tx) =>
+          duplicateRoom(tx as unknown as Parameters<typeof duplicateRoom>[0], {
+            orgId: ctx.orgId,
+            source: {
+              id: source.id,
+              siteId: source.siteId,
+              type: source.type,
+              gatewayId: source.gatewayId,
+            },
+            name: input.name,
+            model,
+            userId: ctx.user.id,
+            kind: input.staging ? 'staging' : 'standard',
+          }),
+        );
+      } catch (e) {
+        if (e instanceof DuplicateRoomError) throw new TRPCError({ code: 'CONFLICT', message: e.message });
+        throw e;
+      }
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: input.staging ? 'room.staging_copy' : 'room.duplicate',
+        target: copy.id,
+        meta: { name: copy.name, from: source.name },
+      });
+      if (!input.staging)
+        after(() =>
+          syncQuantity(db, ctx.orgId).catch((e) =>
+            console.error('[billing] quantity sync failed', e),
+          ),
+        );
+      return copy;
+    }),
+
+  // Put a staging room's design into a live room's working draft. Publishes and deploys nothing; the
+  // live room's draft is kept as a saved version first. Addresses are not copied.
+  promoteStaging: orgProcedure
+    .input(z.object({ orgId, roomId, targetRoomId: roomId }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const staging = await findRoom(ctx.orgId, input.roomId);
+      const draft = await db.roomDraft.findFirst({ where: { roomId: staging.id, orgId: ctx.orgId } });
+      if (!draft) throw new TRPCError({ code: 'BAD_REQUEST', message: 'This room has no design to promote yet' });
+      const model = await designOnly(ctx.orgId, RoomModel.parse(draft.model));
+      try {
+        const result = await promoteStaging(db, {
+          orgId: ctx.orgId,
+          stagingId: staging.id,
+          targetId: input.targetRoomId,
+          model,
+          userId: ctx.user.id,
+        });
+        if (result.changed) {
+          const target = await findRoom(ctx.orgId, input.targetRoomId);
+          await writeAudit({
+            orgId: ctx.orgId,
+            actorId: ctx.user.id,
+            action: 'room.staging_promote',
+            target: target.id,
+            meta: { staging: staging.name, room: target.name },
+          });
+        }
+        return result;
+      } catch (e) {
+        if (e instanceof PromoteError) throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
+        throw e;
+      }
     }),
 
   update: orgProcedure

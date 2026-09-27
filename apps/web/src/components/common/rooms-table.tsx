@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GatewayStatus, HealthBadge, roomHealth, StatusDot } from '@/components/common/status';
+import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -46,6 +47,7 @@ export function RoomsTable({ rooms, showSite = true }: { rooms: RoomRow[]; showS
                   >
                     <StatusDot health={roomHealth(r.draft)} />
                     {r.name}
+                    {r.kind === 'staging' && <Badge variant="secondary">Staging</Badge>}
                   </Link>
                 </TableCell>
                 {showSite && (
