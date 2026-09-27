@@ -9,5 +9,8 @@ export const NOT_BILLED_KINDS = ['combined', STAGING] as const;
 /** A Prisma `where` fragment for the rooms an organisation pays for. */
 export const billedRooms = { kind: { notIn: [...NOT_BILLED_KINDS] } };
 
+/** A Prisma `where` fragment that leaves staging rooms out of usage and reports. */
+export const notStaging = { kind: { not: STAGING } };
+
 export const isBilledRoom = (room: { kind?: string | null }) =>
   !(NOT_BILLED_KINDS as readonly string[]).includes(room.kind ?? 'standard');

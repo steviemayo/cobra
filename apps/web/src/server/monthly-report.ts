@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@kestrel/db';
 import { loadUsageReport, zonedDayStart, type UsageDb, type UsageReport } from './usage-analytics';
+import { notStaging } from './room-kinds';
 
 // A month's report for a customer: how much rooms were used, how often they were down and for how
 // long, and how support went. It is built from data Kestrel already keeps (telemetry, incidents,
@@ -66,12 +67,23 @@ const RETENTION_DAYS = 90;
 const MAX_INCIDENTS_LISTED = 25;
 
 const monthLabel = (m: ReportMonth) =>
-  new Date(Date.UTC(m.year, m.month - 1, 15)).toLocaleString('en-AU', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  new Date(Date.UTC(m.year, m.month - 1, 15)).toLocaleString('en-AU', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
 
 /** The calendar month `now` falls in, in the zone. */
 export function currentMonth(now: Date, tz: string): ReportMonth {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: 'numeric' }).formatToParts(now);
-  return { year: Number(parts.find((p) => p.type === 'year')!.value), month: Number(parts.find((p) => p.type === 'month')!.value) };
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: 'numeric',
+  }).formatToParts(now);
+  return {
+    year: Number(parts.find((p) => p.type === 'year')!.value),
+    month: Number(parts.find((p) => p.type === 'month')!.value),
+  };
 }
 
 /** The month before `now` in the zone, so a report sent on the 1st covers the month just ended. */
@@ -103,7 +115,11 @@ export async function buildMonthlyReport(
   now = new Date(),
 ): Promise<MonthlyReport> {
   const from = zonedDayStart(tz, month.year, month.month);
-  const end = zonedDayStart(tz, month.month === 12 ? month.year + 1 : month.year, month.month === 12 ? 1 : month.month + 1);
+  const end = zonedDayStart(
+    tz,
+    month.month === 12 ? month.year + 1 : month.year,
+    month.month === 12 ? 1 : month.month + 1,
+  );
   // A month still under way is reported up to now.
   const to = new Date(Math.min(end.getTime(), now.getTime()));
   const f = from.getTime();
@@ -114,12 +130,23 @@ export async function buildMonthlyReport(
     loadUsageReport(db, orgId, { from, to, tz, businessStartHour: 8, businessEndHour: 18 }),
     // Anything open at any point in the month: opened before the end and not resolved before the start.
     db.incident.findMany({
-      where: { orgId, openedAt: { lte: to }, OR: [{ resolvedAt: null }, { resolvedAt: { gte: from } }] },
+      where: {
+        orgId,
+        openedAt: { lte: to },
+        OR: [{ resolvedAt: null }, { resolvedAt: { gte: from } }],
+      },
       orderBy: { openedAt: 'asc' },
     }),
-    db.room.findMany({ where: { orgId }, select: { id: true, name: true } }),
+    db.room.findMany({ where: { orgId, ...notStaging }, select: { id: true, name: true } }),
     db.ticket.findMany({
-      where: { orgId, OR: [{ createdAt: { gte: from, lte: to } }, { closedAt: { gte: from, lte: to } }, { status: { not: 'closed' } }] },
+      where: {
+        orgId,
+        OR: [
+          { createdAt: { gte: from, lte: to } },
+          { closedAt: { gte: from, lte: to } },
+          { status: { not: 'closed' } },
+        ],
+      },
       select: { createdAt: true, closedAt: true, status: true },
     }),
   ]);
@@ -131,8 +158,12 @@ export async function buildMonthlyReport(
   ];
 
   const opened = incidents.filter((i) => i.openedAt.getTime() >= f);
-  const resolved = incidents.filter((i) => i.resolvedAt && i.resolvedAt.getTime() >= f && i.resolvedAt.getTime() <= t);
-  const resolveTimes = resolved.map((i) => (i.resolvedAt!.getTime() - i.openedAt.getTime()) / 60_000);
+  const resolved = incidents.filter(
+    (i) => i.resolvedAt && i.resolvedAt.getTime() >= f && i.resolvedAt.getTime() <= t,
+  );
+  const resolveTimes = resolved.map(
+    (i) => (i.resolvedAt!.getTime() - i.openedAt.getTime()) / 60_000,
+  );
 
   // Downtime per room: outages only, overlapping ones counted once. A gateway outage is not a room's.
   const byRoom = new Map<string, Interval[]>();
@@ -148,10 +179,18 @@ export async function buildMonthlyReport(
   const availability = rooms
     .map((r) => {
       const down = minutesOf(merged(byRoom.get(r.id) ?? []));
-      return { roomId: r.id, name: r.name, downtimeMinutes: Math.round(down), availability: Math.max(0, 1 - down / span) };
+      return {
+        roomId: r.id,
+        name: r.name,
+        downtimeMinutes: Math.round(down),
+        availability: Math.max(0, 1 - down / span),
+      };
     })
     .sort((a, b) => a.availability - b.availability || a.name.localeCompare(b.name));
-  const downtime = Math.round([...byRoom.values()].reduce((n, list) => n + minutesOf(merged(list)), 0) + minutesOf(merged(gatewayDown)));
+  const downtime = Math.round(
+    [...byRoom.values()].reduce((n, list) => n + minutesOf(merged(list)), 0) +
+      minutesOf(merged(gatewayDown)),
+  );
 
   const kinds = new Map<string, number>();
   for (const i of opened) kinds.set(i.kind, (kinds.get(i.kind) ?? 0) + 1);
@@ -169,8 +208,12 @@ export async function buildMonthlyReport(
     .sort((a, b) => b.minutes - a.minutes)
     .slice(0, MAX_INCIDENTS_LISTED);
 
-  const ticketsOpened = tickets.filter((x) => x.createdAt.getTime() >= f && x.createdAt.getTime() <= t).length;
-  const ticketsClosed = tickets.filter((x) => x.closedAt && x.closedAt.getTime() >= f && x.closedAt.getTime() <= t).length;
+  const ticketsOpened = tickets.filter(
+    (x) => x.createdAt.getTime() >= f && x.createdAt.getTime() <= t,
+  ).length;
+  const ticketsClosed = tickets.filter(
+    (x) => x.closedAt && x.closedAt.getTime() >= f && x.closedAt.getTime() <= t,
+  ).length;
   const withUtil = usage.rooms.filter((r) => r.utilisation !== null);
 
   return {
@@ -184,11 +227,15 @@ export async function buildMonthlyReport(
     summary: {
       rooms: rooms.length,
       hoursInUse: Math.round(usage.rooms.reduce((n, r) => n + r.inUseMinutes, 0) / 6) / 10,
-      avgUtilisation: withUtil.length ? withUtil.reduce((n, r) => n + (r.utilisation ?? 0), 0) / withUtil.length : null,
+      avgUtilisation: withUtil.length
+        ? withUtil.reduce((n, r) => n + (r.utilisation ?? 0), 0) / withUtil.length
+        : null,
       sessions: usage.rooms.reduce((n, r) => n + r.sessions, 0),
       incidentsOpened: opened.length,
       incidentsResolved: resolved.length,
-      avgResolveMinutes: resolveTimes.length ? Math.round(resolveTimes.reduce((a, b) => a + b, 0) / resolveTimes.length) : null,
+      avgResolveMinutes: resolveTimes.length
+        ? Math.round(resolveTimes.reduce((a, b) => a + b, 0) / resolveTimes.length)
+        : null,
       downtimeMinutes: downtime,
       ticketsOpened,
       ticketsClosed,
@@ -197,14 +244,17 @@ export async function buildMonthlyReport(
     usage,
     availability,
     incidents: listed,
-    incidentsByKind: [...kinds].map(([kind, count]) => ({ kind, count })).sort((a, b) => b.count - a.count),
+    incidentsByKind: [...kinds]
+      .map(([kind, count]) => ({ kind, count }))
+      .sort((a, b) => b.count - a.count),
   };
 }
 
 // ---- Text version, for email -----------------------------------------------------------------------
 
 const pct = (x: number | null) => (x === null ? 'n/a' : `${Math.round(x * 1000) / 10}%`);
-const duration = (m: number) => (m >= 120 ? `${Math.round((m / 60) * 10) / 10} h` : `${Math.round(m)} min`);
+const duration = (m: number) =>
+  m >= 120 ? `${Math.round((m / 60) * 10) / 10} h` : `${Math.round(m)} min`;
 
 export function reportText(r: MonthlyReport, portalUrl?: string): string {
   const s = r.summary;
@@ -214,17 +264,34 @@ export function reportText(r: MonthlyReport, portalUrl?: string): string {
     'Use',
     `- ${s.rooms} rooms, ${s.hoursInUse} hours in use across ${s.sessions} sessions`,
     `- Business hours in use, on average per room: ${pct(s.avgUtilisation)}`,
-    ...r.usage.rooms.slice(0, 5).map((x) => `  ${x.name}: ${pct(x.utilisation)} of business hours, ${Math.round(x.inUseMinutes / 6) / 10} h in use`),
+    ...r.usage.rooms
+      .slice(0, 5)
+      .map(
+        (x) =>
+          `  ${x.name}: ${pct(x.utilisation)} of business hours, ${Math.round(x.inUseMinutes / 6) / 10} h in use`,
+      ),
     '',
     'Reliability',
     `- ${s.incidentsOpened} problems came up, ${s.incidentsResolved} were resolved${s.avgResolveMinutes === null ? '' : ` (average ${duration(s.avgResolveMinutes)} to resolve)`}`,
     `- Time rooms and gateways were out: ${duration(s.downtimeMinutes)}`,
-    ...r.availability.filter((a) => a.downtimeMinutes > 0).slice(0, 5).map((a) => `  ${a.name}: available ${pct(a.availability)} (${duration(a.downtimeMinutes)} out)`),
+    ...r.availability
+      .filter((a) => a.downtimeMinutes > 0)
+      .slice(0, 5)
+      .map(
+        (a) => `  ${a.name}: available ${pct(a.availability)} (${duration(a.downtimeMinutes)} out)`,
+      ),
     '',
     'Support',
     `- ${s.ticketsOpened} requests opened, ${s.ticketsClosed} closed, ${s.ticketsOpenNow} still open`,
-    ...(r.usage.insights.length ? ['', 'Worth a look', ...r.usage.insights.slice(0, 5).map((i) => `- ${i.text}`)] : []),
-    ...(r.beyondRetention ? ['', 'Part of this month is older than the history Kestrel keeps (90 days), so figures may be low.'] : []),
+    ...(r.usage.insights.length
+      ? ['', 'Worth a look', ...r.usage.insights.slice(0, 5).map((i) => `- ${i.text}`)]
+      : []),
+    ...(r.beyondRetention
+      ? [
+          '',
+          'Part of this month is older than the history Kestrel keeps (90 days), so figures may be low.',
+        ]
+      : []),
     ...(portalUrl ? ['', `Full report: ${portalUrl}`] : []),
   ];
   return lines.join('\n');
