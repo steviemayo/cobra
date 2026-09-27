@@ -4,6 +4,7 @@ import { db } from '@kestrel/db';
 import { DriverSetting, checkDriverSpec } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { saveDriver } from '../custom-drivers';
+import { findDriverUpdates } from '../driver-updates';
 import { featureProcedure, orgProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
@@ -29,6 +30,13 @@ export const driverRouter = router({
         settings: settings.success ? settings.data : [],
       };
     });
+  }),
+
+  // Rooms running an older version of one of the organisation's drivers than the latest, so they
+  // can be updated together. Not shown to a provider limited to some sites (it covers everything).
+  updates: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
+    requireRole(ctx.role, ['owner', 'dev']);
+    return findDriverUpdates(db, ctx.orgId);
   }),
 
   list: proProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {

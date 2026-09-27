@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ActivityFeed } from '@/components/common/activity-feed';
+import { ApiKeysSetting } from '@/components/common/api-keys-setting';
 import { AuditExportButtons } from '@/components/common/audit-export-buttons';
 import {
   BrandingFields,
@@ -76,6 +77,7 @@ export function GeneralSettings() {
       </form>
       <OrgBrandingForm />
       <CalendarSettings />
+      <ApiKeysSetting />
       {org.kind !== 'msp' && <ServiceProvidersSetting />}
       <StaffAccessSetting />
     </PageContainer>

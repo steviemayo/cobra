@@ -13,8 +13,10 @@ import {
   SyncBadge,
   SYNC_HELP,
 } from '@/components/common/deploy-status';
+import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer } from '@/components/common/page-header';
+import { SimpleSelect } from '@/components/common/simple-select';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -200,21 +202,21 @@ export function RoomDeployments({ roomId }: { roomId: string }) {
         ) : (
           <ul className="divide-y">
             {shown.map((r) => (
-              <li key={r.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="tabular font-medium">Release {r.number}</span>
-                  {r.id === s?.desiredRelease?.id && <Badge variant="secondary">To run</Badge>}
-                  {r.id === s?.reportedRelease?.id && <Badge>Running</Badge>}
-                </span>
-                <span className="flex shrink-0 items-center gap-3">
-                  <span className="text-xs text-muted-foreground">{timeAgo(r.createdAt)}</span>
-                  {canEdit && hasGateway && !(r.id === s?.desiredRelease?.id && s.state === 'in_sync') && (
+              <ReleaseRow
+                key={r.id}
+                r={r}
+                roomId={roomId}
+                all={list}
+                isToRun={r.id === s?.desiredRelease?.id}
+                isRunning={r.id === s?.reportedRelease?.id}
+                action={
+                  canEdit && hasGateway && !(r.id === s?.desiredRelease?.id && s.state === 'in_sync') ? (
                     <Button variant="outline" size="xs" onClick={() => setDeploying({ id: r.id, number: r.number })}>
                       {running && r.number < running.number ? 'Roll back' : 'Deploy'}
                     </Button>
-                  )}
-                </span>
-              </li>
+                  ) : null
+                }
+              />
             ))}
             {list.length > 6 && (
               <li className="px-4 py-2">
@@ -260,6 +262,111 @@ export function RoomDeployments({ roomId }: { roomId: string }) {
         />
       )}
     </PageContainer>
+  );
+}
+
+type ReleaseItem = RouterOutputs['release']['list']['releases'][number];
+
+/** One release: who published it, and (opened) what it changed, comparable with any other release. */
+function ReleaseRow({
+  r,
+  roomId,
+  all,
+  isToRun,
+  isRunning,
+  action,
+}: {
+  r: ReleaseItem;
+  roomId: string;
+  all: ReleaseItem[];
+  isToRun: boolean;
+  isRunning: boolean;
+  action: React.ReactNode;
+}) {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const { orgId, canEdit } = useOrg();
+  const [open, setOpen] = useState(false);
+  const [against, setAgainst] = useState('previous');
+  const [restoring, setRestoring] = useState(false);
+  const restore = useMutation(
+    trpc.release.restoreDesign.mutationOptions({
+      onSuccess: async (res) => {
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: trpc.draft.get.queryKey() }),
+          qc.invalidateQueries({ queryKey: trpc.deployment.roomStatus.queryKey() }),
+          qc.invalidateQueries({ queryKey: trpc.room.overview.queryKey() }),
+        ]);
+        toast.success(
+          res.changed
+            ? `The design is back to release ${r.number}. Review it, then publish. The earlier design is kept in the room’s saved versions.`
+            : `The design already matches release ${r.number}.`,
+        );
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const others = all.filter((x) => x.id !== r.id);
+  return (
+    <li>
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex min-w-0 items-center gap-2 text-left"
+        >
+          <ChevronRight className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+          <span className="tabular font-medium">Release {r.number}</span>
+          {isToRun && <Badge variant="secondary">To run</Badge>}
+          {isRunning && <Badge>Running</Badge>}
+        </button>
+        <span className="flex shrink-0 items-center gap-3">
+          <span className="hidden text-xs text-muted-foreground sm:inline">{r.createdByEmail ?? ''}</span>
+          <span className="text-xs text-muted-foreground">{timeAgo(r.createdAt)}</span>
+          {action}
+        </span>
+      </div>
+      <AnimatedCollapse open={open}>
+        <div className="space-y-3 border-t bg-muted/20 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              Compare with
+              <SimpleSelect
+                size="sm"
+                value={against}
+                onValueChange={setAgainst}
+                options={[
+                  { value: 'previous', label: 'The release before' },
+                  { value: 'none', label: 'Nothing (show everything)' },
+                  ...others.map((x) => ({ value: x.id, label: `Release ${x.number}` })),
+                ]}
+              />
+            </label>
+            {canEdit && (
+              <Button variant="outline" size="xs" onClick={() => setRestoring(true)}>
+                Restore this design
+              </Button>
+            )}
+          </div>
+          {open && (
+            <DiffView
+              roomId={roomId}
+              toReleaseId={r.id}
+              fromReleaseId={against === 'previous' ? undefined : against === 'none' ? null : against}
+            />
+          )}
+        </div>
+      </AnimatedCollapse>
+      <ConfirmDialog
+        open={restoring}
+        onOpenChange={setRestoring}
+        title={`Restore the design of release ${r.number}?`}
+        description="Replaces the working design with this release. Nothing is published or deployed, and the current design is kept in the room’s saved versions."
+        confirmLabel="Restore design"
+        onConfirm={() => restore.mutate({ orgId, roomId, releaseId: r.id })}
+      />
+    </li>
   );
 }
 

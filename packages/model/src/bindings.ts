@@ -243,6 +243,7 @@ export const GATEWAY_FEATURES = [
   'shared-devices',
   'avoip',
   'schedule',
+  'discovery',
 ] as const;
 export type GatewayFeature = (typeof GATEWAY_FEATURES)[number];
 
