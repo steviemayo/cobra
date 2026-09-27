@@ -45,6 +45,7 @@ model Org {
   rooms               Room[]
   audit               AuditLog[]
   retention           OrgRetention?
+  commissioningRuns   CommissioningRun[]
   apiKeys             ApiKey[]
   reportSchedule      ReportSchedule?
   drafts              RoomDraft[]
@@ -165,18 +166,19 @@ model Room {
   reportedAt              DateTime?
   updatedAt               DateTime  @default(now()) @updatedAt
 
-  org         Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site        Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  gateway     Gateway?        @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
-  group       RoomGroup?      @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  draft       RoomDraft?
-  binding     RoomBinding?
-  releases    Release[]
-  deployments Deployment[]
-  devices     DeviceStatus[]
-  incidents   Incident[]
-  commands    RemoteCommand[]
-  tickets     Ticket[]
+  org               Org                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site              Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  gateway           Gateway?           @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  group             RoomGroup?         @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  draft             RoomDraft?
+  binding           RoomBinding?
+  releases          Release[]
+  commissioningRuns CommissioningRun[]
+  deployments       Deployment[]
+  devices           DeviceStatus[]
+  incidents         Incident[]
+  commands          RemoteCommand[]
+  tickets           Ticket[]
 
   @@index([orgId])
   @@index([siteId])
@@ -268,6 +270,32 @@ model OrgRetention {
   updatedAt DateTime @updatedAt
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// One walk through a room to check it works, and who signed it off. `items` is the checklist made
+// from the room's design when the run started: [{ id, group, label, hint?, result, note? }] with
+// result pending, pass, fail or skip. A signed-off run never changes.
+model CommissioningRun {
+  id               String    @id @default(uuid()) @db.Uuid
+  orgId            String    @db.Uuid
+  roomId           String    @db.Uuid
+  /// The release the room was set to run when the check started.
+  releaseNumber    Int?
+  items            Json
+  status           String    @default("in_progress")
+  startedBy        String?   @db.Uuid
+  startedByEmail   String?
+  startedAt        DateTime  @default(now())
+  signedOffBy      String?   @db.Uuid
+  signedOffByEmail String?
+  signedOffAt      DateTime?
+  notes            String?
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, startedAt])
+  @@index([orgId])
 }
 
 // A key an organisation's own systems use to read its data through the public API (/api/v1). Only

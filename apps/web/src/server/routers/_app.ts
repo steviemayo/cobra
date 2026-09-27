@@ -11,6 +11,7 @@ import { mspRouter } from './msp';
 import { roomGroupRouter } from './room-group';
 import { staffRouter } from './staff';
 import { commandRouter } from './command';
+import { commissioningRouter } from './commissioning';
 import { controlRouter } from './control';
 import { deploymentRouter } from './deployment';
 import { draftRouter } from './draft';
@@ -56,6 +57,7 @@ export const appRouter = router({
   binding: bindingRouter,
   bulk: bulkRouter,
   siteDevice: siteDeviceRouter,
+  commissioning: commissioningRouter,
   apikey: apikeyRouter,
   usage: usageRouter,
   report: reportRouter,
