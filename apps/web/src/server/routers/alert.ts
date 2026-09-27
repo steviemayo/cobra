@@ -4,10 +4,12 @@ import { db, type Prisma } from '@kestrel/db';
 import {
   ChannelConfig,
   assertPublicUrl,
+  channelRules,
   deliverToChannel,
   portalLink,
   type AlertMessage,
 } from '../alerts';
+import { ChannelRules, describeRules, hasRules } from '../alert-rules';
 import { writeAudit } from '../audit';
 import { featureProcedure, requireRole, router } from '../trpc';
 
@@ -91,6 +93,8 @@ export const alertRouter = router({
         minSeverity: c.minSeverity,
         enabled: c.enabled,
         ...describe(c.type, c.config),
+        rules: channelRules(c),
+        rulesText: describeRules(channelRules(c)),
         lastDelivery: last
           ? { status: last.status, error: last.error, at: last.at, event: last.event }
           : null,
@@ -168,6 +172,27 @@ export const alertRouter = router({
         action: 'alert_channel.update',
         target: existing.id,
         meta: { name: existing.name },
+      });
+      return { ok: true };
+    }),
+
+  // Set (or clear, with null) when a channel may alert and how it escalates. The destination and any
+  // secret stay as they are.
+  setRules: monitoringProcedure
+    .input(z.object({ orgId, channelId, rules: ChannelRules.nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const ch = await find(ctx.orgId, input.channelId);
+      const rest = { ...((ch.config ?? {}) as Record<string, unknown>) };
+      delete rest.rules;
+      const next = input.rules && hasRules(input.rules) ? { ...rest, rules: input.rules } : rest;
+      await db.alertChannel.update({ where: { id: ch.id }, data: { config: next as Prisma.InputJsonValue } });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'alert_channel.rules',
+        target: ch.id,
+        meta: { name: ch.name, rules: describeRules(input.rules) ?? 'none' },
       });
       return { ok: true };
     }),

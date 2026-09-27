@@ -1,5 +1,6 @@
 import { router } from '../trpc';
 import { alertRouter } from './alert';
+import { apikeyRouter } from './apikey';
 import { auditRouter } from './audit';
 import { billingRouter } from './billing';
 import { bindingRouter } from './binding';
@@ -10,6 +11,7 @@ import { mspRouter } from './msp';
 import { roomGroupRouter } from './room-group';
 import { staffRouter } from './staff';
 import { commandRouter } from './command';
+import { commissioningRouter } from './commissioning';
 import { controlRouter } from './control';
 import { deploymentRouter } from './deployment';
 import { draftRouter } from './draft';
@@ -21,10 +23,12 @@ import { memberRouter } from './member';
 import { monitoringRouter } from './monitoring';
 import { orgRouter } from './org';
 import { releaseRouter } from './release';
+import { reportRouter } from './report';
 import { roomRouter } from './room';
 import { siteRouter } from './site';
 import { templateRouter } from './template';
 import { ticketRouter } from './ticket';
+import { usageRouter } from './usage';
 
 export const appRouter = router({
   org: orgRouter,
@@ -53,5 +57,9 @@ export const appRouter = router({
   binding: bindingRouter,
   bulk: bulkRouter,
   siteDevice: siteDeviceRouter,
+  commissioning: commissioningRouter,
+  apikey: apikeyRouter,
+  usage: usageRouter,
+  report: reportRouter,
 });
 export type AppRouter = typeof appRouter;
