@@ -625,7 +625,7 @@ Candidates from the MVP-to-launch review. Only usage and occupancy analytics was
 - **R. Pre-deploy validation and dry run.** Warn before a release goes out if a room will break (for example the driver is missing on its gateway). Extends the engine validator.
 - **S. Device discovery.** The gateway scans its network for known device types and prefills the room model.
 - **T. Firmware and driver update management.** Track device firmware versions; flag out-of-date or vulnerable ones.
-- **U. Room booking integration.** Current and next meeting on the panel, auto-start, check-in, release no-shows. Goes beyond the existing calendar triggers.
+- **U. Room booking display. Built (read only).** The panel shows the room's calendar: the meeting on now (title, organiser, start, end) and "Next available at", or "Available" and "Next meeting at". Private meetings show as "Private meeting". Uses the room's calendar trigger and needs migration `20260927130000_room_schedule`. `docs/room-booking.md`. Not built: booking from the panel and releasing no-shows (needs calendar write access), a per-room off switch, a day view.
 - **V. Notification and escalation rules.** On-call schedules, quiet hours, repeat alerts until acknowledged. Extends the alert channels.
 - **W. Reporting.** Monthly PDF or email per customer: uptime, usage, tickets. Depends on N.
 - **X. Public API and outbound webhooks.** API keys per organisation; an event stream for building systems, ITSM and chat tools.

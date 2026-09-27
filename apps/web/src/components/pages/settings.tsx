@@ -220,6 +220,12 @@ function CalendarSettings() {
           calendar. Add a calendar trigger to the room’s design and give it the room’s calendar
           address.
         </p>
+        <p className="text-sm text-muted-foreground">
+          The same calendar is shown on the room’s panel: what is on now (title, organiser, start
+          and end), when the room is next free, or when the next meeting is. Kestrel only reads
+          calendars. Meetings marked private or confidential show as “Private meeting”, with no
+          title or organiser.
+        </p>
       </div>
       {!info.data.available && (
         <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">

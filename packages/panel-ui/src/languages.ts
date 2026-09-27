@@ -104,6 +104,13 @@ const es: Dictionary = {
   'power.body': 'Las pantallas y el audio se apagarán.',
   'power.confirm': 'Apagar',
   'power.cancel': 'Cancelar',
+  'booking.in_use': 'En uso',
+  'booking.free': 'Disponible',
+  'booking.private': 'Reunión privada',
+  'booking.organiser': 'Organiza: {name}',
+  'booking.times': '{start} – {end}',
+  'booking.available_at': 'Próxima disponibilidad: {time}',
+  'booking.next_at': 'Próxima reunión: {time}',
 };
 
 const fr: Dictionary = {
@@ -208,6 +215,13 @@ const fr: Dictionary = {
   'power.body': 'Les écrans et le son seront éteints.',
   'power.confirm': 'Éteindre',
   'power.cancel': 'Annuler',
+  'booking.in_use': 'Occupée',
+  'booking.free': 'Disponible',
+  'booking.private': 'Réunion privée',
+  'booking.organiser': 'Organisée par {name}',
+  'booking.times': '{start} – {end}',
+  'booking.available_at': 'Prochaine disponibilité : {time}',
+  'booking.next_at': 'Prochaine réunion : {time}',
 };
 
 const de: Dictionary = {
@@ -314,6 +328,13 @@ const de: Dictionary = {
   'power.body': 'Bildschirme und Audio werden ausgeschaltet.',
   'power.confirm': 'Ausschalten',
   'power.cancel': 'Abbrechen',
+  'booking.in_use': 'Belegt',
+  'booking.free': 'Frei',
+  'booking.private': 'Private Besprechung',
+  'booking.organiser': 'Organisiert von {name}',
+  'booking.times': '{start} – {end}',
+  'booking.available_at': 'Nächste Verfügbarkeit: {time}',
+  'booking.next_at': 'Nächste Besprechung: {time}',
 };
 
 export const LANGUAGES: Record<string, { label: string; dictionary: Dictionary }> = {

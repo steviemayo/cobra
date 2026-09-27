@@ -13,13 +13,21 @@ async function main() {
   const store = new Store(join(cfg.dataDir, 'gateway.db'));
 
   // A gateway must keep running rooms even if something unexpected throws.
-  process.on('unhandledRejection', (e) => log('error', 'Unhandled rejection', { error: String(e) }));
+  process.on('unhandledRejection', (e) =>
+    log('error', 'Unhandled rejection', { error: String(e) }),
+  );
   process.on('uncaughtException', (e) => log('error', 'Uncaught exception', { error: String(e) }));
 
   const host = new RoomHost(cfg.simulate, log, (event) => store.enqueue(event));
   const gateway = new Gateway(cfg, store, new CloudClient(cfg.cloudUrl), host, log);
 
-  const panel = await createPanelServer({ host, log, panelDir: cfg.panelDir, phone: gateway.phone });
+  const panel = await createPanelServer({
+    host,
+    log,
+    panelDir: cfg.panelDir,
+    phone: gateway.phone,
+    schedule: gateway.bookings,
+  });
   await panel.listen({ port: cfg.panelPort, host: cfg.panelHost });
   log('info', 'Panel server listening', { port: cfg.panelPort });
 

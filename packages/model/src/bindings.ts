@@ -37,7 +37,12 @@ const GENERIC_SLOTS: Record<string, BindingSlot[]> = {
   rest: [
     HOST,
     PORT,
-    { key: 'headers', label: 'Request headers (may hold a token)', scope: 'secret', required: false },
+    {
+      key: 'headers',
+      label: 'Request headers (may hold a token)',
+      scope: 'secret',
+      required: false,
+    },
   ],
 };
 
@@ -93,7 +98,10 @@ function declared(device: Device, custom: CustomSettingSources): DeclaredSetting
 }
 
 /** Every setting of a device's driver, whatever it is for, for showing them as fields. Undefined when the driver is not known. */
-export function declaredSettings(device: Device, custom: CustomSettingSources = {}): DeclaredSetting[] | undefined {
+export function declaredSettings(
+  device: Device,
+  custom: CustomSettingSources = {},
+): DeclaredSetting[] | undefined {
   return declared(device, custom);
 }
 
@@ -101,7 +109,10 @@ export function declaredSettings(device: Device, custom: CustomSettingSources = 
  * The design settings a device's driver starts from that the device does not have yet. Addresses and
  * logins never appear here: they are filled in on the Setup tab, and no example value is a real one.
  */
-export function settingDefaults(device: Device, custom: CustomSettingSources = {}): Record<string, unknown> {
+export function settingDefaults(
+  device: Device,
+  custom: CustomSettingSources = {},
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const s of declared(device, custom) ?? [])
     if (s.scope === 'design' && s.default !== undefined && device.settings[s.key] === undefined)
@@ -112,12 +123,18 @@ export function settingDefaults(device: Device, custom: CustomSettingSources = {
 /** What someone has to fill in for this device outside the design. Empty for a device with no driver. */
 export function slotsFor(device: Device, custom: CustomDrivers = {}): BindingSlot[] {
   return (declared(device, custom) ?? []).flatMap((s): BindingSlot[] =>
-    s.scope === 'design' ? [] : [{ key: s.key, label: s.label, scope: s.scope, required: s.required }],
+    s.scope === 'design'
+      ? []
+      : [{ key: s.key, label: s.label, scope: s.scope, required: s.required }],
   );
 }
 
 /** The scope of one setting of a device: from its driver, else from the setting's name. */
-export function scopeOfSetting(device: Device, key: string, custom: CustomDrivers = {}): SettingScope {
+export function scopeOfSetting(
+  device: Device,
+  key: string,
+  custom: CustomDrivers = {},
+): SettingScope {
   const known = declared(device, custom)?.find((s) => s.key === key);
   return known ? known.scope : settingScope(key);
 }
@@ -142,7 +159,11 @@ export function splitSettings(device: Device, custom: CustomDrivers = {}) {
 export function stripBindings(
   model: RoomModel,
   custom: CustomDrivers = {},
-): { model: RoomModel; values: DeviceValues; parts: { binding: DeviceValues; secret: DeviceValues } } {
+): {
+  model: RoomModel;
+  values: DeviceValues;
+  parts: { binding: DeviceValues; secret: DeviceValues };
+} {
   const values: DeviceValues = {};
   const parts = { binding: {} as DeviceValues, secret: {} as DeviceValues };
   const devices = model.devices.map((d) => {
@@ -221,6 +242,7 @@ export const GATEWAY_FEATURES = [
   'control-points',
   'shared-devices',
   'avoip',
+  'schedule',
   'discovery',
 ] as const;
 export type GatewayFeature = (typeof GATEWAY_FEATURES)[number];
@@ -230,11 +252,16 @@ export type GatewayFeature = (typeof GATEWAY_FEATURES)[number];
  * something must not go to a gateway that has not said it can (an older one would fail to read it).
  */
 export function gatewayNeeds(model: RoomModel): GatewayFeature[] {
-  const actions = [...model.activities.flatMap((a) => a.actions), ...model.states.flatMap((s) => s.actions)];
+  const actions = [
+    ...model.activities.flatMap((a) => a.actions),
+    ...model.states.flatMap((s) => s.actions),
+  ];
   const needs: GatewayFeature[] = [];
-  if (actions.some((a) => a.type === 'press_key' || a.type === 'launch_app')) needs.push('display-extras');
+  if (actions.some((a) => a.type === 'press_key' || a.type === 'launch_app'))
+    needs.push('display-extras');
   if (model.devices.some((d) => (d.points?.length ?? 0) > 0)) needs.push('control-points');
   if (model.devices.some((d) => d.siteDeviceId)) needs.push('shared-devices');
-  if (model.devices.some((d) => d.category === 'avoip_encoder' || d.category === 'avoip_decoder')) needs.push('avoip');
+  if (model.devices.some((d) => d.category === 'avoip_encoder' || d.category === 'avoip_decoder'))
+    needs.push('avoip');
   return needs;
 }

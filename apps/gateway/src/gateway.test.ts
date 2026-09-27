@@ -98,7 +98,11 @@ describe('enrolment and sync', () => {
     await gateway.tick();
     const last = cloud.heartbeats.at(-1)!;
     expect(last.rooms).toHaveLength(1);
-    expect(last.rooms[0]).toMatchObject({ roomId: ROOM, releaseId: signed.manifest.releaseId, status: 'off' });
+    expect(last.rooms[0]).toMatchObject({
+      roomId: ROOM,
+      releaseId: signed.manifest.releaseId,
+      status: 'off',
+    });
     expect(last.rooms[0]!.deployment).toMatchObject({ stage: 'active' });
     expect(last.configVersion).not.toBeNull();
     expect(last.uptimeSeconds).toBeGreaterThanOrEqual(0);
@@ -156,7 +160,10 @@ describe('enrolment and sync', () => {
     const next = { keyId: 'k2', publicKeyPem: cloud.keys.publicKeyPem };
     cloud.rotateKeys([...cloud.publicKeys, next]);
     await gateway.tick();
-    expect(store.getJson<{ keyId: string }[]>('publicKeys')!.map((k) => k.keyId)).toEqual(['test-key', 'k2']);
+    expect(store.getJson<{ keyId: string }[]>('publicKeys')!.map((k) => k.keyId)).toEqual([
+      'test-key',
+      'k2',
+    ]);
   });
 });
 
@@ -280,7 +287,9 @@ describe('offline operation', () => {
     cloud.telemetry.length = 0;
     await gateway.tick();
     expect(store.unsentCount()).toBe(0);
-    const statuses = cloud.telemetry.filter((e) => e.type === 'room.status').map((e) => e.data.status);
+    const statuses = cloud.telemetry
+      .filter((e) => e.type === 'room.status')
+      .map((e) => e.data.status);
     expect(statuses[0]).toBe('starting');
     const times = cloud.telemetry.map((e) => e.at);
     expect([...times].sort()).toEqual(times);
@@ -299,7 +308,9 @@ describe('telemetry', () => {
     const types = cloud.telemetry.map((e) => e.type);
     expect(types).toContain('room.status');
     expect(types).toContain('activity.started');
-    expect(cloud.telemetry.find((e) => e.type === 'activity.started')!.data).toEqual({ activityId: 'present' });
+    expect(cloud.telemetry.find((e) => e.type === 'activity.started')!.data).toEqual({
+      activityId: 'present',
+    });
   });
 });
 
@@ -332,7 +343,8 @@ describe('staged deployments', () => {
     await new Promise((r) => servers.pop()!.close(r));
     return port;
   };
-  const reportFor = (roomId = ROOM) => cloud.heartbeats.at(-1)?.rooms.find((r) => r.roomId === roomId);
+  const reportFor = (roomId = ROOM) =>
+    cloud.heartbeats.at(-1)?.rooms.find((r) => r.roomId === roomId);
 
   it('walks a release through every stage and reports them in order', async () => {
     cloud.assign(ROOM, plain());
@@ -341,8 +353,16 @@ describe('staged deployments', () => {
     await until(() => host.ids().includes(ROOM));
     await until(() => reportFor()?.deployment?.stage === 'active');
     const d = reportFor()!.deployment!;
-    expect(d.history.map((h) => h.stage)).toEqual(['downloading', 'verifying', 'staging', 'health_check', 'active']);
-    expect(new Date(d.history[0]!.at).getTime()).toBeLessThanOrEqual(new Date(d.history.at(-1)!.at).getTime());
+    expect(d.history.map((h) => h.stage)).toEqual([
+      'downloading',
+      'verifying',
+      'staging',
+      'health_check',
+      'active',
+    ]);
+    expect(new Date(d.history[0]!.at).getTime()).toBeLessThanOrEqual(
+      new Date(d.history.at(-1)!.at).getTime(),
+    );
     expect(d.error).toBeUndefined();
   });
 
@@ -374,7 +394,13 @@ describe('staged deployments', () => {
     expect(host.get(ROOM)!.runtime.getSnapshot().roomName).toBe('Good v1');
     const d = reportFor()!.deployment!;
     expect(d.stage).toBe('rolled_back');
-    expect(d.history.map((h) => h.stage)).toEqual(['downloading', 'verifying', 'staging', 'health_check', 'rolled_back']);
+    expect(d.history.map((h) => h.stage)).toEqual([
+      'downloading',
+      'verifying',
+      'staging',
+      'health_check',
+      'rolled_back',
+    ]);
     expect(d.error).toMatch(/Release 2 rejected: could not reach DSP/);
     expect(reportFor()!.releaseId).toBe(host.get(ROOM)!.releaseId);
   });
@@ -489,6 +515,27 @@ describe('bindings', () => {
   const dspAt = (port: number) => ({ dsp: { host: '127.0.0.1', port } });
   const reportFor = () => cloud.heartbeats.at(-1)?.rooms.find((r) => r.roomId === ROOM);
 
+  it('says it shows bookings, and keeps the ones the cloud sends', async () => {
+    const { gateway } = boot();
+    cloud.schedules = [
+      {
+        roomId: ROOM,
+        meetings: [
+          {
+            id: 'm1',
+            title: 'Budget review',
+            start: '2026-09-28T09:00:00.000Z',
+            end: '2026-09-28T10:00:00.000Z',
+            private: false,
+          },
+        ],
+      },
+    ];
+    await gateway.tick();
+    expect(cloud.heartbeats.at(-1)!.features).toContain('schedule');
+    expect(gateway.bookings.get(ROOM)?.map((m) => m.title)).toEqual(['Budget review']);
+  });
+
   it('says it can fetch bindings', async () => {
     const { gateway } = boot();
     await gateway.tick();
@@ -575,7 +622,9 @@ describe('bindings', () => {
     cloud.setBindings(ROOM, dspAt(await listening()));
     const first = boot({ healthTimeoutMs: 1000 }, cloud.url, 'missing');
     await first.gateway.tick();
-    const raw = first.store.getJson<{ payload: { devices: Record<string, unknown> } }>(`bindings:${ROOM}`)!;
+    const raw = first.store.getJson<{ payload: { devices: Record<string, unknown> } }>(
+      `bindings:${ROOM}`,
+    )!;
     raw.payload.devices = { dsp: { host: '6.6.6.6' } };
     first.store.setJson(`bindings:${ROOM}`, raw);
     first.gateway.stop();
@@ -608,7 +657,9 @@ describe('bindings', () => {
     servers.push(server);
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     const port = (server.address() as { port: number }).port;
-    const shared = { dsp: { siteDeviceId: '77777777-7777-4777-8777-777777777771', exclusive: false } };
+    const shared = {
+      dsp: { siteDeviceId: '77777777-7777-4777-8777-777777777771', exclusive: false },
+    };
     for (const room of [ROOM, ROOM2]) {
       cloud.assign(room, design(), { external: true });
       cloud.setBindings(room, dspAt(port), { shared });
@@ -620,7 +671,9 @@ describe('bindings', () => {
     expect(connections).toHaveLength(1);
     expect(host.shared.size).toBe(1);
     // Both rooms see the device online.
-    expect(host.reports().every((r) => r.devices.find((d) => d.deviceId === 'dsp')!.online)).toBe(true);
+    expect(host.reports().every((r) => r.devices.find((d) => d.deviceId === 'dsp')!.online)).toBe(
+      true,
+    );
     // Unloading one keeps the connection for the other; unloading both closes it.
     host.unload(ROOM);
     expect(host.shared.size).toBe(1);
@@ -652,9 +705,16 @@ describe('bindings', () => {
   it('runs an AVoIP system: the room builds the virtual switcher over its endpoints and they answer', async () => {
     const unit = createHttpServer((req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
-      if (req.url === '/Device/StreamTransmit') res.end(JSON.stringify({ Device: { StreamTransmit: { Streams: [{ UUID: 'u1' }] } } }));
-      else if (req.url === '/Device/AvRouting') res.end(JSON.stringify({ Device: { AvRouting: { Routes: [{ VideoSource: 'u1' }] } } }));
-      else res.end(JSON.stringify({ Device: { AudioVideoInputOutput: { Inputs: [{ Ports: [{ IsSyncDetected: true }] }] } } }));
+      if (req.url === '/Device/StreamTransmit')
+        res.end(JSON.stringify({ Device: { StreamTransmit: { Streams: [{ UUID: 'u1' }] } } }));
+      else if (req.url === '/Device/AvRouting')
+        res.end(JSON.stringify({ Device: { AvRouting: { Routes: [{ VideoSource: 'u1' }] } } }));
+      else
+        res.end(
+          JSON.stringify({
+            Device: { AudioVideoInputOutput: { Inputs: [{ Ports: [{ IsSyncDetected: true }] }] } },
+          }),
+        );
     });
     await new Promise<void>((r) => unit.listen(0, '127.0.0.1', r));
     const port = (unit.address() as { port: number }).port;
@@ -662,16 +722,26 @@ describe('bindings', () => {
     for (const d of m.devices) delete d.control;
     const made = addAvoipSystem(m, { family: 'crestron-nvx', encoders: 1, decoders: 1 });
     if (!made.ok) throw new Error(made.message);
-    const endpoint = { host: '127.0.0.1', port, protocol: 'http', username: 'admin', password: 'x' };
+    const endpoint = {
+      host: '127.0.0.1',
+      port,
+      protocol: 'http',
+      username: 'admin',
+      password: 'x',
+    };
     cloud.assign(ROOM, m, { external: true });
     cloud.setBindings(ROOM, { [made.encoderIds![0]!]: endpoint, [made.decoderIds![0]!]: endpoint });
     const { gateway, host } = boot({ healthTimeoutMs: 3000 }, cloud.url, 'missing');
     await gateway.tick();
     expect(host.ids()).toEqual([ROOM]);
-    const online = () => Object.fromEntries(host.reports()[0]!.devices.map((d) => [d.deviceId, d.online]));
+    const online = () =>
+      Object.fromEntries(host.reports()[0]!.devices.map((d) => [d.deviceId, d.online]));
     await until(() => online()[made.switcherId!] === true);
-    expect(online()).toMatchObject({ [made.encoderIds![0]!]: true, [made.decoderIds![0]!]: true, [made.switcherId!]: true });
+    expect(online()).toMatchObject({
+      [made.encoderIds![0]!]: true,
+      [made.decoderIds![0]!]: true,
+      [made.switcherId!]: true,
+    });
     unit.close();
   });
 });
-

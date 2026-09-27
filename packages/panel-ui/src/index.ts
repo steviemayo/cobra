@@ -1,5 +1,6 @@
 export { PanelApp, usePanel, type PanelAppProps } from './PanelApp';
 export { PanelSession } from './PanelSession';
+export { Bookings } from './Bookings';
 export {
   EMPTY_VIEW,
   WsPanelClient,

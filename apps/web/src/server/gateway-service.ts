@@ -17,6 +17,7 @@ import { getEntitlements } from './billing';
 import { groupsForGateway, recordDividers } from './gateway-groups';
 import { hasWaitingIntents, watchedRooms } from './control-service';
 import { maybeSweep, recordReports } from './monitoring';
+import { schedulesForGateway } from './room-schedule';
 import type { SigningKey } from './signing';
 
 // The cloud's half of the gateway protocol. Route handlers are thin wrappers over these functions,
@@ -44,6 +45,7 @@ export type Db = Pick<
   | 'roomBinding'
   | 'credentialSet'
   | 'siteDevice'
+  | 'roomSchedule'
 >;
 type GatewayRow = NonNullable<Awaited<ReturnType<Db['gateway']['findFirst']>>>;
 export interface Result {
@@ -157,11 +159,19 @@ async function assignments(db: Db, gatewayId: string, masterKey = process.env.KE
   // A room that uses shared devices also changes when one of them does.
   const sharedIds = [...new Set(releases.flatMap((r) => r.siteDeviceIds ?? []))];
   const sharedVersions = new Map(
-    sharedIds.length ? (await db.siteDevice.findMany({ where: { id: { in: sharedIds } } })).map((d) => [d.id, d.version]) : [],
+    sharedIds.length
+      ? (await db.siteDevice.findMany({ where: { id: { in: sharedIds } } })).map((d) => [
+          d.id,
+          d.version,
+        ])
+      : [],
   );
   const versionFor = (roomId: string, releaseId: string | null) => {
     const own = bindingsOf.get(roomId) ?? 0;
-    const shared = (byId.get(releaseId ?? '')?.siteDeviceIds ?? []).reduce((n, id) => n + (sharedVersions.get(id) ?? 0), 0);
+    const shared = (byId.get(releaseId ?? '')?.siteDeviceIds ?? []).reduce(
+      (n, id) => n + (sharedVersions.get(id) ?? 0),
+      0,
+    );
     return own + shared > 0 ? Math.max(1, own + shared) : undefined;
   };
   const out: AssignedRoom[] = [];
@@ -175,7 +185,9 @@ async function assignments(db: Db, gatewayId: string, masterKey = process.env.KE
         releaseNumber: rel.number,
         manifestHash: rel.hash,
         deploymentId: room.desiredDeploymentId!,
-        ...(versionFor(room.id, room.desiredReleaseId) ? { bindingsVersion: versionFor(room.id, room.desiredReleaseId)! } : {}),
+        ...(versionFor(room.id, room.desiredReleaseId)
+          ? { bindingsVersion: versionFor(room.id, room.desiredReleaseId)! }
+          : {}),
         ...(masterKey ? { phoneSecret: roomAccessSecret(masterKey, room.id) } : {}),
       });
   }
@@ -241,6 +253,10 @@ export async function heartbeat(
       watch: await watchedRooms(db, gw.id, now),
       pollNow: await hasWaitingIntents(db, gw.id, now),
       update: { channel: gw.channel, latest: latestVersions()[gw.channel] },
+      // Only a gateway that says it shows bookings is sent them; an older one has no use for them.
+      schedules: parsed.data.features.includes('schedule')
+        ? await schedulesForGateway(db, gw, now)
+        : [],
     },
     after: jobs.length ? () => deliverAlerts(db, jobs) : undefined,
   };
@@ -277,16 +293,29 @@ export async function bindings(
   signing: SigningKey | null,
 ): Promise<Result> {
   if (!signing) return fail(503, 'The cloud has no signing key configured yet');
-  const room = await db.room.findFirst({ where: { id: roomId, gatewayId: gw.id, orgId: gw.orgId } });
+  const room = await db.room.findFirst({
+    where: { id: roomId, gatewayId: gw.id, orgId: gw.orgId },
+  });
   if (!room) return fail(404, 'No such room for this gateway');
   // The design this gateway will run says which shared devices it uses.
   const release = room.desiredReleaseId
-    ? await db.release.findFirst({ where: { id: room.desiredReleaseId, roomId: room.id, orgId: gw.orgId } })
+    ? await db.release.findFirst({
+        where: { id: room.desiredReleaseId, roomId: room.id, orgId: gw.orgId },
+      })
     : null;
-  const parsed = RoomModel.safeParse((release?.manifest as { manifest?: { model?: unknown } } | null)?.manifest?.model);
+  const parsed = RoomModel.safeParse(
+    (release?.manifest as { manifest?: { model?: unknown } } | null)?.manifest?.model,
+  );
   let signed;
   try {
-    signed = await signedBindingsFor(db, gw.orgId, room.id, signing, undefined, parsed.success ? parsed.data : undefined);
+    signed = await signedBindingsFor(
+      db,
+      gw.orgId,
+      room.id,
+      signing,
+      undefined,
+      parsed.success ? parsed.data : undefined,
+    );
   } catch {
     return fail(503, 'The cloud cannot open this room’s logins right now');
   }
