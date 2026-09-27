@@ -11,9 +11,11 @@ import {
   PanelSettings,
   type PanelActivity,
   type PanelClient,
+  type Meeting,
   type PanelViewModel,
 } from '@kestrel/model';
 import { BottomBar } from './BottomBar';
+import { Bookings } from './Bookings';
 import { FunctionPage, PAGE_ICON, functionPages, type PageId } from './FunctionPages';
 import { IdleScreen } from './IdleScreen';
 import { LinkingSheet } from './LinkingSheet';
@@ -211,6 +213,8 @@ export interface PanelAppProps {
   className?: string;
   /** An extra control for the top bar, e.g. the phone-control button. */
   headerAction?: ReactNode;
+  /** The room's bookings. Null or absent: not known, so none are shown. */
+  schedule?: readonly Meeting[] | null;
 }
 
 /**
@@ -228,6 +232,7 @@ export function PanelApp({
   language,
   className,
   headerAction,
+  schedule,
 }: PanelAppProps) {
   const vm = usePanel(client);
   const t = translate ?? translatorFor(language);
@@ -378,6 +383,8 @@ export function PanelApp({
           </div>
         </header>
 
+        <Bookings meetings={schedule} t={t} variant="strip" />
+
         <main className={`kp-main ${off ? 'kp-main-centre' : ''}`}>
           <PromptBar vm={vm} t={t} dispatch={dispatch} />
           <WarningBar vm={vm} t={t} dispatch={dispatch} />
@@ -494,6 +501,7 @@ export function PanelApp({
           logoUrl={theme.logoUrl}
           supportText={ui.idle.supportText}
           supportUrl={ui.idle.supportUrl}
+          schedule={schedule}
           t={t}
           onWake={wake}
         />

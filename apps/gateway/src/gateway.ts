@@ -18,6 +18,7 @@ import {
 import { CloudClient, CloudError } from './cloud';
 import type { GatewayConfig } from './config';
 import { PhoneLinks } from './phone';
+import { ScheduleStore } from './schedule';
 import { GroupCoordinator } from './groups';
 import { runCommand } from './commands';
 import type { Logger } from './log';
@@ -89,6 +90,8 @@ export class Gateway {
 
   /** Signs the QR links shown on room panels. */
   readonly phone: PhoneLinks;
+  /** Today's bookings for each room, as the cloud last sent them. */
+  readonly bookings = new ScheduleStore();
   private announcedUpdate: string | null = null;
 
   private readonly groups: GroupCoordinator;
@@ -146,7 +149,10 @@ export class Gateway {
           this.log('warn', 'Cached bindings missing or failed verification; room not started', {
             roomId: cached.roomId,
           });
-          this.roomErrors.set(cached.roomId, 'Saved addresses and logins are missing or were rejected');
+          this.roomErrors.set(
+            cached.roomId,
+            'Saved addresses and logins are missing or were rejected',
+          );
           continue;
         }
       }
@@ -166,12 +172,18 @@ export class Gateway {
     const raw = this.store.getJson<unknown>(keyBindings(roomId));
     if (!raw) return null;
     const result = verifyBindings(raw, keys);
-    if (!result.ok || result.signed.payload.roomId !== roomId || result.signed.payload.orgId !== orgId)
+    if (
+      !result.ok ||
+      result.signed.payload.roomId !== roomId ||
+      result.signed.payload.orgId !== orgId
+    )
       return null;
     return {
       version: result.signed.payload.version,
       devices: result.signed.payload.devices as RoomBindings['devices'],
-      ...(result.signed.payload.sharedDevices ? { sharedDevices: result.signed.payload.sharedDevices } : {}),
+      ...(result.signed.payload.sharedDevices
+        ? { sharedDevices: result.signed.payload.sharedDevices }
+        : {}),
     };
   }
 
@@ -183,17 +195,34 @@ export class Gateway {
     credential: string,
     assigned: AssignedRoom,
     keys: PublicKey[],
-  ): Promise<{ ok: true; bindings: RoomBindings; raw: unknown } | { ok: false; retry: boolean; problem: string }> {
+  ): Promise<
+    | { ok: true; bindings: RoomBindings; raw: unknown }
+    | { ok: false; retry: boolean; problem: string }
+  > {
     let raw: unknown;
     try {
       raw = await this.cloud.bindings(credential, assigned.roomId);
     } catch (e) {
       const missing = e instanceof CloudError && e.status === 404;
-      this.log('warn', 'Could not download a room’s bindings', { roomId: assigned.roomId, error: String(e) });
-      return { ok: false, retry: !missing, problem: missing ? 'the cloud has no addresses for this room' : 'could not download addresses' };
+      this.log('warn', 'Could not download a room’s bindings', {
+        roomId: assigned.roomId,
+        error: String(e),
+      });
+      return {
+        ok: false,
+        retry: !missing,
+        problem: missing
+          ? 'the cloud has no addresses for this room'
+          : 'could not download addresses',
+      };
     }
     const result = verifyBindings(raw, keys);
-    if (!result.ok) return { ok: false, retry: false, problem: `addresses failed the signature check (${result.reason})` };
+    if (!result.ok)
+      return {
+        ok: false,
+        retry: false,
+        problem: `addresses failed the signature check (${result.reason})`,
+      };
     const { payload } = result.signed;
     if (payload.roomId !== assigned.roomId || payload.orgId !== this.identity?.orgId)
       return { ok: false, retry: false, problem: 'addresses are for a different room' };
@@ -292,8 +321,13 @@ export class Gateway {
     this.pendingResults.splice(0, results.length);
     this.inbox.push(...res.commands);
     this.setWatch(res.watch);
+    this.bookings.apply(res.schedules);
     const { update } = res;
-    if (update?.latest && update.latest !== this.cfg.version && update.latest !== this.announcedUpdate) {
+    if (
+      update?.latest &&
+      update.latest !== this.cfg.version &&
+      update.latest !== this.announcedUpdate
+    ) {
       this.announcedUpdate = update.latest;
       this.log('info', 'A different gateway version is published on this channel', {
         channel: update.channel,
@@ -466,7 +500,10 @@ export class Gateway {
       const rec = this.deploymentRecord(assigned.roomId);
       if (this.host.releaseOf(assigned.roomId) === assigned.releaseId) {
         this.roomErrors.delete(assigned.roomId);
-        if (assigned.bindingsVersion && this.host.get(assigned.roomId)?.bindings?.version !== assigned.bindingsVersion)
+        if (
+          assigned.bindingsVersion &&
+          this.host.get(assigned.roomId)?.bindings?.version !== assigned.bindingsVersion
+        )
           rebind.push(assigned);
         if (rec?.deploymentId !== assigned.deploymentId) {
           // Already running (from the cache, or set up before deployments existed): that is this deployment's result.
@@ -605,7 +642,11 @@ export class Gateway {
    * deployment: build alongside, wait for the devices to answer, then swap. On any failure the
    * room keeps running with what it had.
    */
-  private async rebind(credential: string, assigned: AssignedRoom, keys: PublicKey[]): Promise<DeployOutcome> {
+  private async rebind(
+    credential: string,
+    assigned: AssignedRoom,
+    keys: PublicKey[],
+  ): Promise<DeployOutcome> {
     const { roomId } = assigned;
     const running = this.host.get(roomId);
     if (!running) return 'refused';
@@ -625,7 +666,10 @@ export class Gateway {
     }
     let unreachable: string[];
     try {
-      unreachable = await this.host.healthCheck(staged, this.cfg.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS);
+      unreachable = await this.host.healthCheck(
+        staged,
+        this.cfg.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS,
+      );
     } catch (e) {
       staged.close();
       return fail(`health check failed (${e instanceof Error ? e.message : String(e)})`);

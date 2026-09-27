@@ -3,6 +3,7 @@ import { PinnedDriver } from '../driver-spec';
 import { LocalId } from '../room/common';
 import { TransitionAction } from '../room/groups';
 import { RoomModel } from '../room/room-model';
+import { Meetings, RoomMeetings } from '../schedule';
 import { PanelIntent, PanelViewModel, RoomStatus } from '../runtime/panel';
 
 // Gateway <-> cloud protocol, version 1. The gateway only ever makes outbound HTTPS requests.
@@ -117,7 +118,13 @@ export type DeploymentReport = z.infer<typeof DeploymentReport>;
 // ---- Remote commands ---------------------------------------------------------------------------
 
 /** The only things support can ask a gateway to do. Anything else is refused on both ends. */
-export const COMMAND_TYPES = ['diagnostics', 'test_device', 'restart_room', 'room_off', 'verify_point'] as const;
+export const COMMAND_TYPES = [
+  'diagnostics',
+  'test_device',
+  'restart_room',
+  'room_off',
+  'verify_point',
+] as const;
 export const CommandType = z.enum(COMMAND_TYPES);
 export type CommandType = z.infer<typeof CommandType>;
 
@@ -255,6 +262,8 @@ export const HeartbeatResponse = z.object({
   update: z
     .object({ channel: z.enum(['stable', 'beta']), latest: z.string().max(50).nullable() })
     .optional(),
+  /** Today's bookings for the rooms whose calendars were read recently. Sent only to a gateway that says it shows them. */
+  schedules: z.array(RoomMeetings).max(200).default([]),
 });
 export type HeartbeatResponse = z.infer<typeof HeartbeatResponse>;
 
@@ -361,6 +370,8 @@ export const PanelServerMessage = z.discriminatedUnion('t', [
   z.object({ t: z.literal('snapshot'), vm: PanelViewModel }),
   /** A link that lets someone at the room control it from their phone; replaced before it expires. */
   z.object({ t: z.literal('qr'), url: z.string().url(), expiresAt: z.string().datetime() }),
+  /** The room's bookings, replaced whole. Null means they are not known right now (hide them). */
+  z.object({ t: z.literal('schedule'), meetings: Meetings.nullable() }),
   z.object({ t: z.literal('error'), message: z.string() }),
 ]);
 export type PanelServerMessage = z.infer<typeof PanelServerMessage>;

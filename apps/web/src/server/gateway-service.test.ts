@@ -119,6 +119,7 @@ function world() {
   const roomBinding = table([]);
   const credentialSet = table([]);
   const siteDevice = table([]);
+  const roomSchedule = table([]);
   const db = {
     gateway,
     room,
@@ -141,11 +142,13 @@ function world() {
     roomBinding,
     credentialSet,
     siteDevice,
+    roomSchedule,
   } as unknown as Db;
   return {
     db,
     gateway,
     room,
+    roomSchedule,
     release,
     gatewayEvent,
     auditLog,
@@ -329,6 +332,31 @@ describe('heartbeat', () => {
     });
   });
 
+  it('sends bookings only to a gateway that says it shows them, and only for its own rooms', async () => {
+    const w = world();
+    const now = new Date();
+    const meeting = {
+      id: 'm1',
+      title: 'Budget review',
+      organiser: 'Sam Lee',
+      start: new Date(now.getTime() - 600_000).toISOString(),
+      end: new Date(now.getTime() + 600_000).toISOString(),
+      private: false,
+    };
+    w.roomSchedule.rows.push(
+      { roomId: ROOM, orgId: ORG, fetchedAt: now, meetings: [meeting] },
+      { roomId: ROOM2, orgId: ORG, fetchedAt: now, meetings: [{ ...meeting, id: 'm2' }] },
+    );
+    const gw = w.gateway.rows[0]! as never;
+    const plain = await heartbeat(w.db, gw, hb([]), keys);
+    expect(HeartbeatResponse.parse(plain.body).schedules).toEqual([]);
+    const shows = await heartbeat(w.db, gw, { ...hb([]), features: ['schedule'] }, keys);
+    const { schedules } = HeartbeatResponse.parse(shows.body);
+    expect(schedules).toHaveLength(1);
+    expect(schedules[0]).toMatchObject({ roomId: ROOM });
+    expect(schedules[0]!.meetings[0]!.title).toBe('Budget review');
+  });
+
   it('tells the gateway which channel it follows and the newest version on it', async () => {
     const w = world();
     const gw = { ...w.gateway.rows[0]!, channel: 'beta' } as never;
@@ -336,7 +364,10 @@ describe('heartbeat', () => {
     process.env.GATEWAY_LATEST_BETA = '0.3.0-beta.1';
     try {
       const res = await heartbeat(w.db, gw, hb([]), keys);
-      expect(HeartbeatResponse.parse(res.body).update).toEqual({ channel: 'beta', latest: '0.3.0-beta.1' });
+      expect(HeartbeatResponse.parse(res.body).update).toEqual({
+        channel: 'beta',
+        latest: '0.3.0-beta.1',
+      });
     } finally {
       if (prev === undefined) delete process.env.GATEWAY_LATEST_BETA;
       else process.env.GATEWAY_LATEST_BETA = prev;
@@ -694,13 +725,20 @@ describe('plan gating over the heartbeat', () => {
 
 describe('bindings', () => {
   const pair = generateKeyPair();
-  const signing = { keyId: 'k1', privateKeyPem: pair.privateKeyPem, publicKeyPem: pair.publicKeyPem };
+  const signing = {
+    keyId: 'k1',
+    privateKeyPem: pair.privateKeyPem,
+    publicKeyPem: pair.publicKeyPem,
+  };
   const trusted = [{ keyId: 'k1', publicKeyPem: pair.publicKeyPem }];
 
   it('remembers what a gateway says it can do, and the bindings version each room runs', async () => {
     const w = world();
     const gw = w.gateway.rows[0]! as never;
-    const req = { ...hb([{ roomId: ROOM, releaseId: REL, status: 'on', bindingsVersion: 4 }]), features: ['bindings'] };
+    const req = {
+      ...hb([{ roomId: ROOM, releaseId: REL, status: 'on', bindingsVersion: 4 }]),
+      features: ['bindings'],
+    };
     await heartbeat(w.db, gw, req, keys);
     expect(w.gateway.rows[0]!.features).toEqual(['bindings']);
     expect(w.room.rows[0]!.reportedBindingsVersion).toBe(4);
@@ -711,7 +749,15 @@ describe('bindings', () => {
     const gw = w.gateway.rows[0]! as never;
     const before = ConfigResponse.parse((await config(w.db, gw, keys)).body);
     expect(before.rooms[0]!.bindingsVersion).toBeUndefined();
-    w.roomBinding.rows.push({ id: 'b1', orgId: ORG, roomId: ROOM, version: 2, values: {}, sealed: null, credentialSets: {} });
+    w.roomBinding.rows.push({
+      id: 'b1',
+      orgId: ORG,
+      roomId: ROOM,
+      version: 2,
+      values: {},
+      sealed: null,
+      credentialSets: {},
+    });
     const after = ConfigResponse.parse((await config(w.db, gw, keys)).body);
     expect(after.rooms[0]!.bindingsVersion).toBe(2);
     expect(after.configVersion).not.toBe(before.configVersion);
@@ -741,7 +787,15 @@ describe('bindings', () => {
 
   it('refuses a room that belongs to another gateway, and a room with none', async () => {
     const w = world();
-    w.roomBinding.rows.push({ id: 'b2', orgId: ORG, roomId: ROOM2, version: 1, values: { a: { host: 'x' } }, sealed: null, credentialSets: {} });
+    w.roomBinding.rows.push({
+      id: 'b2',
+      orgId: ORG,
+      roomId: ROOM2,
+      version: 1,
+      values: { a: { host: 'x' } },
+      sealed: null,
+      credentialSets: {},
+    });
     expect((await bindings(w.db, w.gateway.rows[0]! as never, ROOM2, signing)).status).toBe(404);
     expect((await bindings(w.db, w.gateway.rows[0]! as never, ROOM, signing)).status).toBe(404);
   });
@@ -754,7 +808,15 @@ describe('bindings', () => {
   it('will not open logins when the server has lost its secrets key', async () => {
     const w = world();
     const sealed = 'v1.not-a-real-seal';
-    w.roomBinding.rows.push({ id: 'b1', orgId: ORG, roomId: ROOM, version: 1, values: {}, sealed, credentialSets: {} });
+    w.roomBinding.rows.push({
+      id: 'b1',
+      orgId: ORG,
+      roomId: ROOM,
+      version: 1,
+      values: {},
+      sealed,
+      credentialSets: {},
+    });
     const prev = process.env.KESTREL_SECRETS_KEY;
     process.env.KESTREL_SECRETS_KEY = generateSealKey();
     try {

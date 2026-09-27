@@ -137,6 +137,7 @@ export function PanelSession({
         translate={t}
         className={className}
         headerAction={phoneButton}
+        schedule={conn.schedule}
       />
       {conn.qr && showQr && (
         <div data-mode={theme.mode} style={themeStyle(theme)}>
