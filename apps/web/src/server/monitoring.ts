@@ -123,6 +123,8 @@ export async function recordReports(
     const room = byId.get(report.roomId);
     if (!room) continue;
     const base = { orgId: gw.orgId, roomId: room.id, gatewayId: gw.id };
+    // A staging room is for trying things out: it is watched, but never raises a problem or an alert.
+    const raise: typeof openIncident = room.kind === 'staging' ? async () => null : openIncident;
 
     if (report.status !== 'unloaded') {
       const known = new Map(
@@ -137,6 +139,14 @@ export async function recordReports(
         const subject = `${room.id}:${d.deviceId}`;
         let since = now;
         const row = known.get(d.deviceId);
+        // What the device says about itself. A heartbeat that leaves the firmware out (the gateway
+        // has just restarted and not asked yet) keeps the last version rather than forgetting it.
+        const about = {
+          ...(d.driver && d.driver !== row?.driver ? { driver: d.driver } : {}),
+          ...(d.firmware && d.firmware !== row?.firmware
+            ? { firmware: d.firmware, firmwareSince: now }
+            : {}),
+        };
         if (!row) {
           await db.deviceStatus.create({
             data: {
@@ -146,23 +156,25 @@ export async function recordReports(
               name: d.name,
               online: d.online,
               since: now,
+              ...about,
             },
           });
-        } else if (row.online !== d.online) {
-          await db.deviceStatus.update({
-            where: { id: row.id },
-            data: { online: d.online, since: now, name: d.name },
-          });
         } else {
-          since = row.since;
-          if (row.name !== d.name)
-            await db.deviceStatus.update({ where: { id: row.id }, data: { name: d.name } });
+          const patch: Record<string, unknown> = { ...about };
+          if (row.online !== d.online)
+            Object.assign(patch, { online: d.online, since: now, name: d.name });
+          else {
+            since = row.since;
+            if (row.name !== d.name) patch.name = d.name;
+          }
+          if (Object.keys(patch).length > 0)
+            await db.deviceStatus.update({ where: { id: row.id }, data: patch });
         }
         if (d.online)
           add(await resolveIncident(db, { orgId: gw.orgId, kind: 'device_offline', subject }, now));
         else if (now.getTime() - since.getTime() >= DEVICE_GRACE_MS)
           add(
-            await openIncident(
+            await raise(
               db,
               {
                 ...base,
@@ -192,7 +204,7 @@ export async function recordReports(
 
     if (report.status === 'fault')
       add(
-        await openIncident(
+        await raise(
           db,
           {
             ...base,
@@ -212,7 +224,7 @@ export async function recordReports(
 
     if (report.error)
       add(
-        await openIncident(
+        await raise(
           db,
           {
             ...base,

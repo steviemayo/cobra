@@ -288,4 +288,29 @@ describe('PanelSession', () => {
     fireEvent.click(screen.getByText('Close'));
     expect(container.querySelector('.kp-qr')).toBeNull();
   });
+
+  it('shows the room’s bookings from the gateway, replaces them, and hides them when told they are not known', () => {
+    const c = client();
+    const { container } = render(<PanelSession client={c} />);
+    const meeting = (title: string) => ({
+      id: title,
+      title,
+      organiser: 'Sam Lee',
+      start: new Date(Date.now() - 30 * 60_000).toISOString(),
+      end: new Date(Date.now() + 30 * 60_000).toISOString(),
+      private: false,
+    });
+    act(() => {
+      socket().open();
+      socket().receive(hello());
+      socket().receive({ t: 'snapshot', vm: vm() });
+    });
+    expect(container.querySelector('.kp-booking')).toBeNull();
+    act(() => socket().receive({ t: 'schedule', meetings: [meeting('Budget review')] }));
+    expect(container.querySelector('.kp-booking')!.textContent).toContain('Budget review');
+    act(() => socket().receive({ t: 'schedule', meetings: [meeting('Design sync')] }));
+    expect(container.querySelector('.kp-booking')!.textContent).toContain('Design sync');
+    act(() => socket().receive({ t: 'schedule', meetings: null }));
+    expect(container.querySelector('.kp-booking')).toBeNull();
+  });
 });

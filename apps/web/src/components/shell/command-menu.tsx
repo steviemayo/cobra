@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import {
+  CircuitBoard,
   Activity,
   AlertTriangle,
   BellRing,
@@ -21,6 +22,8 @@ import {
   Settings,
   Store,
   Users,
+  BarChart3,
+  FileText,
 } from 'lucide-react';
 import {
   Command,
@@ -124,8 +127,17 @@ export function CommandMenu({ children }: { children: React.ReactNode }) {
               <CommandItem onSelect={() => go('/monitoring')}>
                 <Activity /> Monitoring
               </CommandItem>
+              <CommandItem onSelect={() => go('/usage')}>
+                <BarChart3 /> Usage
+              </CommandItem>
+              <CommandItem onSelect={() => go('/reports')}>
+                <FileText /> Reports
+              </CommandItem>
               <CommandItem onSelect={() => go('/incidents')}>
                 <AlertTriangle /> Incidents
+              </CommandItem>
+              <CommandItem onSelect={() => go('/firmware')}>
+                <CircuitBoard /> Firmware
               </CommandItem>
               <CommandItem onSelect={() => go('/tickets')}>
                 <LifeBuoy /> Support requests

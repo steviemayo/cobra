@@ -106,6 +106,13 @@ export const en = {
   'power.body': 'The displays and audio will turn off.',
   'power.confirm': 'Power off',
   'power.cancel': 'Cancel',
+  'booking.in_use': 'In use',
+  'booking.free': 'Available',
+  'booking.private': 'Private meeting',
+  'booking.organiser': 'Organised by {name}',
+  'booking.times': '{start} – {end}',
+  'booking.available_at': 'Next available at: {time}',
+  'booking.next_at': 'Next meeting at: {time}',
 } as const;
 
 export type TextKey = keyof typeof en;

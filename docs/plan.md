@@ -569,11 +569,76 @@ After the first customers. Pre-read: `docs/staff-portal-and-msp.md`, `apps/web/s
 
 ### L. Provider billing and white label
 
-Needs a business decision first: today the customer pays Kestrel directly and the provider pays nothing. Pre-read: `docs/staff-portal-and-msp.md` ("Decided": billing), `apps/web/src/server/stripe.ts`, `billing.ts`, `packages/model/src/billing.ts`. Options to decide: the provider pays for its customers' rooms (wholesale), per-customer choice, or provider-branded panels and portal.
+**Decided 2026-09-27: the customer always pays Kestrel directly; no wholesale billing. White label (look only) is built, see AA.** The text below is the original brief. Needs a business decision first: today the customer pays Kestrel directly and the provider pays nothing. Pre-read: `docs/staff-portal-and-msp.md` ("Decided": billing), `apps/web/src/server/stripe.ts`, `billing.ts`, `packages/model/src/billing.ts`. Options to decide: the provider pays for its customers' rooms (wholesale), per-customer choice, or provider-branded panels and portal.
 
 ### M. Earlier candidates
 
 WSS push (removes the first-connect lag), Stripe Connect payouts for marketplace publishers, third-party driver marketplace, sandboxed custom-logic hooks. Pre-read for each: `docs/phase-4-preread.md` ("Known limitations", "Suggested next steps"), `docs/driver-sdk.md`, `docs/plan.md` (Key Architectural Bets).
+
+### Launch readiness (added 2026-09-26, do soon, none done)
+
+From the MVP-to-launch review. Legal items need a lawyer; the rest are build or setup work. A code scan on 2026-09-26 found no Terms or Privacy pages, no rate limiting, no CSP or security headers, no customer MFA (staff only) and no backup or incident docs; re-check before starting.
+
+**Before any paying customer**
+
+- [ ] **LR-1 Terms of Service / SaaS agreement.** Liability cap (including a bad deploy taking rooms down), acceptable use, IP ownership of customer room programs.
+- [ ] **LR-2 Privacy Policy.** Australian Privacy Act 1988 / APPs; GDPR too if any EU or UK customers or users. State the real data location (Vercel compute may not be in AU).
+- [ ] **LR-3 Data Processing Addendum (DPA) template.** Kestrel acts as processor. Enterprise customers will ask.
+- [ ] **LR-4 Subprocessor list.** Supabase, Vercel, Stripe, Resend, GitHub/GHCR, plus any email or Teams providers. Publish it.
+- [ ] **LR-5 Acceptance flow.** Click-through at sign-up and org creation; store the terms version and timestamp per user or org. Terms and Privacy pages in the portal.
+- [ ] **LR-6 SLA position.** Decide what is promised, or state nothing is promised at launch.
+- [ ] **LR-7 Stripe live and tax.** Move from test to live; GST/tax settings, invoices, refund and cancellation terms.
+- [ ] **LR-8 Company basics.** Registered entity, professional indemnity and cyber insurance, owned domain and sending domain (SPF/DKIM/DMARC; already blocks email in step 6).
+- [ ] **LR-9 Rate limiting and lockout.** Login, password reset, gateway enrollment, panel PIN attempts, tRPC API.
+- [ ] **LR-10 Security headers.** CSP, HSTS, frame-ancestors; CSRF review of the Stripe and cron endpoints.
+- [ ] **LR-11 Prod and dev separation.** Separate Supabase and Stripe projects; rotate secrets used during development.
+- [ ] **LR-12 Backups.** Supabase point-in-time recovery (paid tier) and a tested restore.
+- [ ] **LR-13 Breach runbook.** Australian Notifiable Data Breaches scheme: who decides, who notifies the OAIC and affected people, and within what time.
+- [ ] **LR-14 Personal data map.** What is held (emails, names, IPs, audit logs, ticket contents, calendar data), why, and for how long. Feeds LR-2 and LR-3.
+
+**Before the first enterprise deal**
+
+- [ ] **LR-15 Customer MFA.** Available to all; enforced for owner and dev roles.
+- [ ] **LR-16 Org deletion and full data export.** Deletion that cascades, plus user and org export (audit export exists; the rest does not).
+- [ ] **LR-17 Retention policy.** Extend beyond the 90-day telemetry and audit settings: tickets, deleted accounts, backups.
+- [ ] **LR-18 Row Level Security as defence-in-depth,** plus cross-tenant access tests on every router.
+- [ ] **LR-19 Signing key plan.** Storage, rotation and compromise recovery for the manifest signing key.
+- [ ] **LR-20 Gateway hardening.** Enrollment token revocation, image signing (cosign) with a pinned digest, updater that cannot be hijacked.
+- [ ] **LR-21 Supply chain.** Dependabot, `pnpm audit` in CI, lockfile review.
+- [ ] **LR-22 Error tracking and alerting.** Sentry (or similar) with PII scrubbing; alerts on failed cron jobs and webhooks.
+- [ ] **LR-23 Third-party penetration test,** `security.txt` and a disclosure contact.
+- [ ] **LR-24 Operations.** Vercel Pro (cron limits and commercial-use terms), status page, staged gateway rollout with a tested rollback, support intake and onboarding doc.
+- [ ] **LR-25 Load and soak test.** ~50 rooms per gateway; many gateways sending heartbeat and telemetry together.
+- [ ] **LR-26 SOC 2 or ISO 27001 groundwork.** Start collecting evidence early (Vanta or Drata). Essential Eight / IRAP only if targeting Australian government.
+
+### Post-launch roadmap (added 2026-09-26; built and merged to `dev` 2026-09-27, PRs #59-#74)
+
+Candidates from the MVP-to-launch review. Only usage and occupancy analytics was kept from the "big value adds"; predictive health, AI room design, the marketplace and simulator sharing were dropped (the marketplace stays under M as before). Each item below says what was built, in which PR, and what was left out. **Nothing here has had a browser pass or a real-hardware test.**
+
+**After merging: migrations and deploy order**
+
+- Six new migrations, none applied by the build: `20260927100000_report_schedule` (W), `20260927110000_api_keys` (X), `20260927120000_commissioning_runs` (Y), `20260927130000_room_schedule` (U), `20260927140000_provider_brand` (AA), `20260927150000_device_firmware` (T). Apply with `pnpm --filter @kestrel/db exec prisma migrate deploy`. Each only affects the feature that uses it
+- Deploy the web app before updating gateways: #63 (analytics) adds a telemetry event type, #69 (discovery) a command type, and #72 (bookings) and #74 (firmware) heartbeat fields that an older side would refuse or ignore. Discovery, bookings and firmware are also gated on features a gateway reports (`discovery`, `schedule`, `firmware`)
+- Staging rooms are left out of usage analytics and monthly reports (done after the merge)
+
+**N. Usage and occupancy analytics. Built: #63.** A Usage page (monitoring feature): hours in use, share of business hours per room, sessions, hours by day, a day-and-hour heatmap in the viewer's time zone, activity mix, and plain-language insights. Gateways now report a room-level `room.occupancy` event. Not built: no-shows (needs U); business hours are fixed at Mon to Fri 8am to 6pm; reach is the 90-day telemetry retention.
+
+**Missing features**
+
+- **O. Bulk operations and staged rollouts. Built: #60** (with R). Choose rooms on the Deployments page, then deploy or roll back together, with a "send to one room first" canary. The canary is not gated automatically: a person opens the dialog again to send the rest (automatic gating needs a rollout table). No scheduling of a bulk deploy.
+- **P. Room cloning and site templates. Built: #61.** Duplicate room on the room settings page. Stamping many rooms from a master was already possible with Save as template plus the bulk sheet.
+- **Q. Config diff and history. Built: #62.** Each release opens to show what it changed, comparable with any other release, with who published it; "Restore this design" puts an old release's design back in the working draft (the current draft is saved first). The diff engine already existed.
+- **R. Pre-deploy validation and dry run. Built: #60** (with O). The bulk dialog previews every room and names any that cannot go, with the reason. Also #70: deploying now publishes a new release when a driver has a newer version.
+- **S. Device discovery. Built: #69.** "Find devices on the network" on the Devices page: the gateway looks at its own private /24 networks for well-known control ports and asks PJLink devices who they are; "Use this address" fills a device's address. Read-only. Not built: identifying non-PJLink devices beyond the port, other VLANs, other ports.
+- **T. Firmware and driver update management. Driver half built: #70. Firmware reporting built (read only): #74, see `docs/device-firmware.md`.** Devices report the firmware version they run (PJLink class 2, Biamp Tesira, and any custom driver with a `firmware` pattern); it shows on the room's monitoring page and on a new **Firmware** page (by driver, with a "Mixed versions" flag). Needs migration `20260927150000_device_firmware`. **Not built:** updating firmware (Kestrel never changes a device), alerts on old versions, a known-good version list, a version history, and firmware reporting for the other bundled drivers (each needs its vendor's documented query).
+- **U. Room booking display. Built (read only): #72.** The panel shows the room's calendar: the meeting on now (title, organiser, start, end) and "Next available at", or "Available" and "Next meeting at". Private meetings show as "Private meeting". Uses the room's calendar trigger and needs migration `20260927130000_room_schedule`. `docs/room-booking.md`. Not built: booking from the panel and releasing no-shows (needs calendar write access), a per-room off switch, a day view.
+- **V. Notification and escalation rules. Built: #65.** Per alert channel: only alert on chosen days and hours (overnight and time zones work), wait before alerting (skipped if acknowledged), repeat until acknowledged. An on-call rota is a channel per person. No migration (rules live in the channel config).
+- **W. Reporting. Built: #64.** A Reports page (a month's use, reliability, support; print or save as PDF), "Email me a copy", and an optional monthly email to a list. Text email only.
+- **X. Public API and outbound webhooks. Built: #67.** API keys (Settings) and read-only `GET /api/v1/rooms`, `/rooms/{id}`, `/incidents` (`docs/public-api.md`). Outbound events already exist as the Webhook alert channel. Not built: control from the API, usage and report data, events other than problems.
+- **Y. Mobile tech app and commissioning checklist. Built: #68.** A Commissioning tab per room: a checklist made from the design, Works/Problem/Skip on each item (made for a phone), sign-off, a record that never changes, printable. Not built: photos on failed items, and driving the room from the check screen.
+- **Z. Staging rooms. Built: #66.** A staging copy of a room (free, no alerts, badged) and Promote to a live room (into its draft, with the live draft saved first).
+- **AA. White label for service providers. Built (name, logo, colour): #73.** A provider sets its brand on its home page; a customer's owner chooses per connection to show it in their portal and, as a fallback, on their panels. **The customer always pays Kestrel directly** (decided 2026-09-27; the wholesale option in L is dropped). Needs migration `20260927140000_provider_brand`. `docs/white-label.md`. Not built: custom domains, branded sign-in and emails.
+- **AB. SSO (SAML/OIDC). Sign-in side built: #71.** "Sign in with single sign-on" on the login page and `docs/sso.md` for the per-company Supabase setup. **Not run end to end** (needs a real identity provider and a paid Supabase project). Not built: forcing SSO-only for a company, SCIM, and role mapping from provider groups.
 
 ### Small fixes to fit in anywhere
 

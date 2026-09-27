@@ -1,6 +1,7 @@
 import type { PanelBranding } from '@kestrel/model';
 import { gatewayTooOld, setupProblem } from './deploy-check';
 import { createDeployment, type DeploymentDb } from './deployment-service';
+import { pinnedVersions } from './driver-updates';
 import {
   checkPublishable,
   createRelease,
@@ -33,11 +34,65 @@ export interface GroupDeployPlan {
   steps: GroupDeployStep[];
 }
 
-interface Work {
+export interface Work {
   step: GroupDeployStep;
   room: { id: string; name: string; gatewayId: string; panel: unknown };
   checked: Extract<Publishable, { ok: true }>;
   existing: { id: string; number: number } | null;
+}
+
+const sortKeys = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : 1)));
+
+export interface PlanRoom {
+  id: string;
+  name: string;
+  gatewayId: string | null;
+  panel: unknown;
+  desiredReleaseId: string | null;
+  reportedReleaseId: string | null;
+}
+
+/**
+ * What deploying one room would do: a release of its current design (a new one only if the design
+ * changed) and a deployment, or a plain sentence saying what stops it. Changes nothing.
+ */
+export async function planRoomDeploy(
+  db: GroupDeployDb,
+  orgId: string,
+  room: PlanRoom,
+  kind: GroupDeployStep['kind'],
+): Promise<{ problem: string } | { work: Work }> {
+  const checked = await checkPublishable(db, orgId, room);
+  if (!checked.ok) return { problem: checked.message };
+  const latest = await db.release.findFirst({
+    where: { roomId: room.id, orgId },
+    orderBy: { number: 'desc' },
+  });
+  // A driver that has a newer version since the last release also needs a new release, though the
+  // design itself has not changed: a release pins the driver version it was published with.
+  const pins = Object.fromEntries(Object.entries(checked.drivers).map(([k, d]) => [k, d.spec.version]));
+  const driversChanged = !!latest && JSON.stringify(sortKeys(pinnedVersions(latest.manifest))) !== JSON.stringify(sortKeys(pins));
+  const current = !!latest && latest.draftRevision === checked.draft.revision && !driversChanged;
+  const running =
+    current && room.desiredReleaseId === latest.id && room.reportedReleaseId === latest.id;
+  const setup = running ? null : setupProblem(checked.model, checked.bindings, checked.drivers);
+  if (setup) return { problem: setup };
+  const tooOld = running || !room.gatewayId ? null : await gatewayTooOld(db, orgId, room.gatewayId, checked.model);
+  if (tooOld) return { problem: tooOld };
+  return {
+    work: {
+      step: {
+        roomId: room.id,
+        name: room.name,
+        kind,
+        action: running ? 'up_to_date' : current ? 'deploy' : 'publish_and_deploy',
+        number: current ? latest.number : (latest?.number ?? 0) + 1,
+      },
+      room: { id: room.id, name: room.name, gatewayId: room.gatewayId ?? '', panel: room.panel },
+      checked,
+      existing: current ? { id: latest.id, number: latest.number } : null,
+    },
+  };
 }
 
 /** What deploying the group would do, room by room, or what stops it. Changes nothing. */
@@ -83,40 +138,9 @@ export async function planGroupDeploy(
   for (const o of order) {
     const room = byId.get(o.id);
     if (!room) continue;
-    const checked = await checkPublishable(db, orgId, room);
-    if (!checked.ok) {
-      problems.push(`${room.name}: ${checked.message}`);
-      continue;
-    }
-    const latest = await db.release.findFirst({
-      where: { roomId: room.id, orgId },
-      orderBy: { number: 'desc' },
-    });
-    const current = !!latest && latest.draftRevision === checked.draft.revision;
-    const running =
-      current && room.desiredReleaseId === latest.id && room.reportedReleaseId === latest.id;
-    const setup = running ? null : setupProblem(checked.model, checked.bindings, checked.drivers);
-    if (setup) {
-      problems.push(`${room.name}: ${setup}`);
-      continue;
-    }
-    const tooOld = running || !room.gatewayId ? null : await gatewayTooOld(db, orgId, room.gatewayId, checked.model);
-    if (tooOld) {
-      problems.push(`${room.name}: ${tooOld}`);
-      continue;
-    }
-    work.push({
-      step: {
-        roomId: room.id,
-        name: room.name,
-        kind: o.kind,
-        action: running ? 'up_to_date' : current ? 'deploy' : 'publish_and_deploy',
-        number: current ? latest.number : (latest?.number ?? 0) + 1,
-      },
-      room: { id: room.id, name: room.name, gatewayId: room.gatewayId ?? '', panel: room.panel },
-      checked,
-      existing: current ? { id: latest.id, number: latest.number } : null,
-    });
+    const planned = await planRoomDeploy(db, orgId, room, o.kind);
+    if ('problem' in planned) problems.push(`${room.name}: ${planned.problem}`);
+    else work.push(planned.work);
   }
   return {
     plan: { problems, steps: problems.length ? [] : work.map((w) => w.step) },

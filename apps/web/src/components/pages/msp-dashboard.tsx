@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Copy, Handshake } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmptyState } from '@/components/common/empty-state';
+import { ProviderBrandSetting } from '@/components/common/provider-brand-setting';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
@@ -90,6 +91,8 @@ export function MspDashboard() {
           </Button>
         </div>
       </section>
+
+      <ProviderBrandSetting />
 
       {d.invites.length > 0 && (
         <section className="space-y-2">

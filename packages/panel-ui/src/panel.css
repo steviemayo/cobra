@@ -840,6 +840,91 @@
   flex-shrink: 0;
 }
 
+/* Bookings from the room's calendar: a slim strip under the top bar, a card on the idle screen */
+.kp-booking {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.4em;
+  color: var(--kp-text);
+}
+.kp-booking-now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3em 1em;
+  min-width: 0;
+}
+.kp-booking-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.8em;
+}
+.kp-booking-dot {
+  width: 0.7em;
+  height: 0.7em;
+  border-radius: 50%;
+  background: var(--kp-ok);
+}
+.kp-booking-busy .kp-booking-dot {
+  background: var(--kp-error);
+}
+.kp-booking-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.kp-booking-organiser,
+.kp-booking-times,
+.kp-booking-after {
+  color: var(--kp-muted);
+  font-variant-numeric: tabular-nums;
+}
+.kp-booking-after {
+  flex-shrink: 0;
+  font-weight: 500;
+  color: var(--kp-text);
+}
+.kp-booking-strip {
+  padding: 0.55em 1.6em;
+  border-bottom: 1px solid var(--kp-glass-line);
+  background: var(--kp-glass);
+  font-size: 0.95em;
+}
+.kp-booking-card {
+  flex-direction: column;
+  gap: 0.6em;
+  min-width: 22em;
+  max-width: 44em;
+  padding: 1.1em 1.6em;
+  border: 1px solid var(--kp-glass-line);
+  border-radius: var(--kp-radius);
+  background: var(--kp-glass);
+  text-align: center;
+}
+.kp-booking-card .kp-booking-now {
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35em;
+}
+.kp-booking-card .kp-booking-title {
+  font-size: 1.6em;
+  white-space: normal;
+}
+.kp-booking-card .kp-booking-times {
+  font-size: 1.15em;
+}
+.kp-booking-card .kp-booking-after {
+  font-size: 1.15em;
+}
+
 /* Glass: translucent, blurred surfaces over the gradient, with a light edge and soft shadow */
 .kp-app {
   --kp-glass: rgb(255 255 255 / 0.07);

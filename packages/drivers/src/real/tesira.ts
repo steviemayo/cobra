@@ -17,6 +17,8 @@ import type { DriverContext } from './types';
 // +OK (a successful get carries `"value":...`) or -ERR. The server also echoes what it is sent, so
 // only lines that begin +OK or -ERR count as answers. One command is in flight at a time.
 //
+// The firmware version is read with `DEVICE get version`, every few hours.
+//
 // Settings: host, port (23), timeoutMs (3000), pollMs (5000).
 // Control points: level and mute (`tag` and `index`, the channel), crosspoint (`tag`, `input`,
 // `output`). Level points are in dB; the room sees 0 to 100 over the min and max of the point.
@@ -27,6 +29,8 @@ const DONT = 0xfe;
 const WILL = 0xfb;
 const WONT = 0xfc;
 const MAX_BACKOFF_MS = 15_000;
+/** How long a firmware reading is trusted before the device is asked again. */
+const FIRMWARE_REREAD_MS = 6 * 3_600_000;
 
 interface Waiting {
   resolve: (line: string) => void;
@@ -54,6 +58,7 @@ export class TesiraDriver extends BaseDriver {
   private closed = false;
   /** Goes up on every write, so a read that began before one is not allowed to overwrite it. */
   private writes = 0;
+  private firmwareAt = 0;
 
   constructor(device: Device, ctx: DriverContext) {
     super(device, ctx);
@@ -168,7 +173,8 @@ export class TesiraDriver extends BaseDriver {
     const w = this.waiting;
     this.waiting = null;
     clearTimeout(w.timer);
-    if (line.startsWith('-ERR')) w.reject(new DeviceAnswered(`${this.device.name}: ${line.slice(5).trim() || 'error'}`));
+    if (line.startsWith('-ERR'))
+      w.reject(new DeviceAnswered(`${this.device.name}: ${line.slice(5).trim() || 'error'}`));
     else w.resolve(line);
   }
 
@@ -182,11 +188,14 @@ export class TesiraDriver extends BaseDriver {
           this.queue.shift()?.();
           return reject(new Error(`${this.device.name} is not connected`));
         }
-        const timer = setTimeout(() => {
-          this.waiting = null;
-          reject(new Error(`${this.device.name} did not respond`));
-          this.next();
-        }, this.setting<number>('timeoutMs', 3000));
+        const timer = setTimeout(
+          () => {
+            this.waiting = null;
+            reject(new Error(`${this.device.name} did not respond`));
+            this.next();
+          },
+          this.setting<number>('timeoutMs', 3000),
+        );
         this.waiting = {
           resolve: (l) => {
             resolve(l);
@@ -241,13 +250,30 @@ export class TesiraDriver extends BaseDriver {
     if (p.type === 'level') return this.command(`${this.tag(p)} get level ${this.index(p)}`);
     if (p.type === 'mute') return this.command(`${this.tag(p)} get mute ${this.index(p)}`);
     if (p.type === 'crosspoint')
-      return this.command(`${this.tag(p)} get crosspoint ${Number(p.address.input)} ${Number(p.address.output)}`);
+      return this.command(
+        `${this.tag(p)} get crosspoint ${Number(p.address.input)} ${Number(p.address.output)}`,
+      );
     this.fail(`cannot read a ${p.type} point`);
+  }
+
+  private async readFirmware() {
+    if (Date.now() - this.firmwareAt < FIRMWARE_REREAD_MS) return;
+    this.firmwareAt = Date.now();
+    try {
+      const version = String(TesiraDriver.value(await this.command('DEVICE get version'))).trim();
+      if (version)
+        this.update((s) => {
+          s.firmware = version.slice(0, 100);
+        });
+    } catch {
+      // A reply without a version is not a fault: the device is still reachable.
+    }
   }
 
   private async refresh() {
     if (!this.ready) return;
     try {
+      await this.readFirmware();
       for (const p of this.points) {
         if (!['level', 'mute', 'crosspoint'].includes(p.type)) continue;
         try {
@@ -262,7 +288,11 @@ export class TesiraDriver extends BaseDriver {
         } catch (e) {
           // A point the DSP does not know is a problem with that point, not a device that is gone.
           if (!(e instanceof DeviceAnswered)) throw e;
-          this.ctx.log('warn', 'A Tesira control point could not be read', { device: this.device.name, point: p.name, error: e.message });
+          this.ctx.log('warn', 'A Tesira control point could not be read', {
+            device: this.device.name,
+            point: p.name,
+            error: e.message,
+          });
         }
       }
       this.update((s) => {
@@ -275,12 +305,19 @@ export class TesiraDriver extends BaseDriver {
     }
   }
 
-  async readPoint(point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>): Promise<PointReading> {
+  async readPoint(
+    point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>,
+  ): Promise<PointReading> {
     const value = TesiraDriver.value(await this.read(point));
     if (point.type !== 'level') return { value };
     const reading: PointReading = { value };
-    for (const [attribute, key] of [['minLevel', 'min'], ['maxLevel', 'max']] as const) {
-      const line = await this.command(`${this.tag(point)} get ${attribute} ${this.index(point)}`).catch(() => null);
+    for (const [attribute, key] of [
+      ['minLevel', 'min'],
+      ['maxLevel', 'max'],
+    ] as const) {
+      const line = await this.command(
+        `${this.tag(point)} get ${attribute} ${this.index(point)}`,
+      ).catch(() => null);
       const v = line ? TesiraDriver.value(line) : null;
       if (typeof v === 'number') reading[key] = v;
     }
@@ -289,8 +326,14 @@ export class TesiraDriver extends BaseDriver {
 
   private async setPoint(p: ControlPoint, value: number | boolean | string) {
     this.writes++;
-    if (p.type === 'level') await this.command(`${this.tag(p)} set level ${this.index(p)} ${pointFromLevel(p, Number(value))}`);
-    else if (p.type === 'mute') await this.command(`${this.tag(p)} set mute ${this.index(p)} ${value === true || value === 'true' ? 'true' : 'false'}`);
+    if (p.type === 'level')
+      await this.command(
+        `${this.tag(p)} set level ${this.index(p)} ${pointFromLevel(p, Number(value))}`,
+      );
+    else if (p.type === 'mute')
+      await this.command(
+        `${this.tag(p)} set mute ${this.index(p)} ${value === true || value === 'true' ? 'true' : 'false'}`,
+      );
     else if (p.type === 'crosspoint')
       await this.command(
         `${this.tag(p)} set crosspoint ${Number(p.address.input)} ${Number(p.address.output)} ${value === true || value === 'true' ? 'true' : 'false'}`,

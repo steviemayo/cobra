@@ -8,6 +8,7 @@ import { PanelClientMessage, type PanelServerMessage } from '@kestrel/model';
 import type { WebSocket } from 'ws';
 import type { Logger } from './log';
 import type { PhoneLinks } from './phone';
+import type { ScheduleStore } from './schedule';
 import type { RoomHost } from './room-host';
 
 const MAX_PIN_FAILURES = 5;
@@ -25,6 +26,8 @@ export interface PanelServerOptions {
   phone?: PhoneLinks;
   /** How often the QR link is replaced. */
   qrRefreshMs?: number;
+  /** When set, panels are sent the room's bookings from its calendar. */
+  schedule?: ScheduleStore;
 }
 
 const PLACEHOLDER_PAGE = `<!doctype html><meta charset="utf-8"><title>Kestrel panel</title>
@@ -53,6 +56,14 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
   host.onActiveChange(() => {
     for (const follow of followers) follow();
   });
+
+  // While the cloud cannot be reached nothing new arrives, so old bookings are cleared on a timer.
+  if (opts.schedule) {
+    const store = opts.schedule;
+    const sweep = setInterval(() => store.expire(), 60_000);
+    sweep.unref?.();
+    app.addHook('onClose', async () => clearInterval(sweep));
+  }
 
   const dir = resolve(opts.panelDir);
   const built = existsSync(resolve(dir, 'index.html'));
@@ -96,6 +107,7 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
     let authed = !pinRequired;
     let unsubscribe: (() => void) | null = null;
     let qrTimer: ReturnType<typeof setInterval> | null = null;
+    let offSchedule: (() => void) | null = null;
     let windowStart = Date.now();
     let intents = 0;
 
@@ -127,6 +139,15 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
         if (link) send({ t: 'qr', ...link });
       };
       sendQr();
+      // Bookings belong to the room the panel is in, not to whichever combined room is running.
+      if (opts.schedule) {
+        const store = opts.schedule;
+        const sendSchedule = () => send({ t: 'schedule', meetings: store.get(roomId) });
+        sendSchedule();
+        offSchedule = store.onChange((id) => {
+          if (id === roomId) sendSchedule();
+        });
+      }
       if (opts.phone) {
         qrTimer = setInterval(sendQr, opts.qrRefreshMs ?? 5 * 60_000);
         qrTimer.unref?.();
@@ -180,6 +201,7 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
       unsubscribe?.();
       if (follow) followers.delete(follow);
       if (qrTimer) clearInterval(qrTimer);
+      offSchedule?.();
       sockets.get(roomId)?.delete(socket);
     });
     socket.on('error', () => socket.close());

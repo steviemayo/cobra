@@ -2,6 +2,7 @@ import { createSign } from 'node:crypto';
 import { z } from 'zod';
 import type { PrismaClient } from '@kestrel/db';
 import { open } from '@kestrel/crypto';
+import { MAX_MEETINGS, type Meeting } from '@kestrel/model';
 import { queueTrigger, type ControlDb } from './control-service';
 
 // Calendar triggers: a room's calendar starts a meeting, so the room starts itself. Kestrel reads
@@ -187,6 +188,122 @@ export async function meetingsStarting(
   });
 }
 
+const utc = (dateTime: string) =>
+  new Date(/[zZ]|[+-]\d\d:\d\d$/.test(dateTime) ? dateTime : `${dateTime}Z`);
+
+/**
+ * The meetings in a room's calendar that overlap `from` to `to`, for showing on the room's panel.
+ * Read only. A meeting marked private or confidential comes back with its title and organiser
+ * removed, so they never leave Kestrel. Cancelled and all-day entries are left out.
+ */
+export async function meetingsBetween(
+  creds: CalendarCredentials,
+  resourceId: string,
+  from: Date,
+  to: Date,
+  deps: Deps,
+  now = Date.now(),
+): Promise<Meeting[]> {
+  const shape = (
+    id: string,
+    start: Date,
+    end: Date,
+    hidden: boolean,
+    title: string | undefined,
+    organiser: string | undefined,
+  ): Meeting[] =>
+    Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start
+      ? []
+      : [
+          {
+            id,
+            title: hidden ? '' : (title ?? '').slice(0, 200),
+            ...(hidden || !organiser ? {} : { organiser: organiser.slice(0, 200) }),
+            start: start.toISOString(),
+            end: end.toISOString(),
+            private: hidden,
+          },
+        ];
+
+  if (creds.provider === 'graph') {
+    const token = await graphToken(creds, deps, now);
+    const url = new URL(
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(resourceId)}/calendarView`,
+    );
+    url.searchParams.set('startDateTime', from.toISOString());
+    url.searchParams.set('endDateTime', to.toISOString());
+    url.searchParams.set(
+      '$select',
+      'id,subject,organizer,start,end,isCancelled,isAllDay,sensitivity',
+    );
+    url.searchParams.set('$orderby', 'start/dateTime');
+    url.searchParams.set('$top', String(MAX_MEETINGS * 2));
+    const res = await deps.fetch(url, {
+      headers: { authorization: `Bearer ${token}`, prefer: 'outlook.timezone="UTC"' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = await json(res, 'Microsoft Calendar');
+    const events = (Array.isArray(body.value) ? body.value : []) as {
+      id?: string;
+      subject?: string;
+      isCancelled?: boolean;
+      isAllDay?: boolean;
+      sensitivity?: string;
+      organizer?: { emailAddress?: { name?: string; address?: string } };
+      start?: { dateTime?: string };
+      end?: { dateTime?: string };
+    }[];
+    return events.flatMap((e) =>
+      !e.id || e.isCancelled || e.isAllDay || !e.start?.dateTime || !e.end?.dateTime
+        ? []
+        : shape(
+            e.id,
+            utc(e.start.dateTime),
+            utc(e.end.dateTime),
+            !!e.sensitivity && e.sensitivity !== 'normal',
+            e.subject,
+            e.organizer?.emailAddress?.name || e.organizer?.emailAddress?.address,
+          ),
+    );
+  }
+
+  const token = await googleToken(creds, deps, now);
+  const url = new URL(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(resourceId)}/events`,
+  );
+  url.searchParams.set('timeMin', from.toISOString());
+  url.searchParams.set('timeMax', to.toISOString());
+  url.searchParams.set('singleEvents', 'true');
+  url.searchParams.set('orderBy', 'startTime');
+  url.searchParams.set('maxResults', String(MAX_MEETINGS * 2));
+  const res = await deps.fetch(url, {
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  const body = await json(res, 'Google Calendar');
+  const items = (Array.isArray(body.items) ? body.items : []) as {
+    id?: string;
+    status?: string;
+    summary?: string;
+    visibility?: string;
+    organizer?: { displayName?: string; email?: string };
+    start?: { dateTime?: string };
+    end?: { dateTime?: string };
+  }[];
+  return items.flatMap((e) =>
+    !e.id || e.status === 'cancelled' || !e.start?.dateTime || !e.end?.dateTime
+      ? []
+      : shape(
+          e.id,
+          new Date(e.start.dateTime),
+          new Date(e.end.dateTime),
+          e.visibility === 'private' || e.visibility === 'confidential',
+          e.summary,
+          e.organizer?.displayName || e.organizer?.email,
+        ),
+  );
+}
+
 /** Checks the credentials by signing in. Used when someone adds a connection. */
 export async function testCredentials(
   creds: CalendarCredentials,
@@ -199,13 +316,13 @@ export async function testCredentials(
 
 // ---- The job -------------------------------------------------------------------------------------
 
-interface CalendarTrigger {
+export interface CalendarTrigger {
   id: string;
   provider: 'graph' | 'google';
   resourceId: string;
 }
 
-function calendarTriggers(manifest: unknown): CalendarTrigger[] {
+export function calendarTriggers(manifest: unknown): CalendarTrigger[] {
   const triggers = (manifest as { manifest?: { model?: { triggers?: unknown[] } } })?.manifest
     ?.model?.triggers;
   if (!Array.isArray(triggers)) return [];

@@ -1,6 +1,11 @@
 import { RoomRuntime, TriggerScheduler } from '@kestrel/engine';
 import { createSimulation } from '@kestrel/drivers';
-import { HybridBus, attachVirtualDrivers, createDriver, type DeviceDriver } from '@kestrel/drivers/real';
+import {
+  HybridBus,
+  attachVirtualDrivers,
+  createDriver,
+  type DeviceDriver,
+} from '@kestrel/drivers/real';
 import { applyBindings } from '@kestrel/model';
 import type {
   DeviceBus,
@@ -12,6 +17,7 @@ import type {
   TelemetryEvent,
 } from '@kestrel/model';
 import type { Logger } from './log';
+import { occupancyTracker } from './occupancy';
 import { SharedDevices } from './shared-devices';
 
 export type SimulateMode = 'off' | 'all' | 'missing';
@@ -52,7 +58,10 @@ export interface RoomBindings {
 export function withBindings(signed: SignedManifest, bindings?: RoomBindings): SignedManifest {
   if (!bindings) return signed;
   const { manifest } = signed;
-  return { ...signed, manifest: { ...manifest, model: applyBindings(manifest.model, bindings.devices) } };
+  return {
+    ...signed,
+    manifest: { ...manifest, model: applyBindings(manifest.model, bindings.devices) },
+  };
 }
 
 /** Real drivers where the room configures them; simulated devices fill the gaps if allowed. */
@@ -69,7 +78,7 @@ export function buildBus(
     return { bus: sim, offline: () => [], close: () => sim.dispose() };
   }
   const real = new Map<string, DeviceDriver>();
-  const make = (device: typeof model.devices[number]) =>
+  const make = (device: (typeof model.devices)[number]) =>
     createDriver(
       device,
       { log: (l, m, x) => log(l, m, { device: device.name, ...x }) },
@@ -253,11 +262,22 @@ export class RoomHost {
       manifestHash: r.signed.hash,
       status: r.runtime.getSnapshot().status,
       ...(r.bindings ? { bindingsVersion: r.bindings.version } : {}),
-      devices: r.signed.manifest.model.devices.map((d) => ({
-        deviceId: d.id,
-        name: d.name,
-        online: r.bus.getState(d.id)?.online ?? true,
-      })),
+      devices: r.signed.manifest.model.devices.map((d) => {
+        const state = r.bus.getState(d.id);
+        const driver =
+          d.control?.kind === 'driver'
+            ? d.control.driverId
+            : d.control?.kind === 'generic'
+              ? d.control.protocol
+              : undefined;
+        return {
+          deviceId: d.id,
+          name: d.name,
+          online: state?.online ?? true,
+          ...(driver && { driver }),
+          ...(state?.firmware && { firmware: state.firmware }),
+        };
+      }),
     }));
   }
 
@@ -284,7 +304,13 @@ export class RoomHost {
     const reachable = new Map<string, boolean>(
       [...names.keys()].map((id) => [id, room.bus.getState(id)?.online ?? true]),
     );
+    // Whether anyone is in the room, for the cloud's usage reports.
+    const occupancy = occupancyTracker((occupied, deviceId) =>
+      this.emit({ at: at(), type: 'room.occupancy', roomId: room.roomId, data: { occupied, deviceId } }),
+    );
+    for (const id of names.keys()) occupancy(id, room.bus.getState(id)?.occupied);
     const stopDevices = room.bus.subscribe(({ deviceId, state }) => {
+      if (names.has(deviceId)) occupancy(deviceId, state.occupied);
       if (!names.has(deviceId) || reachable.get(deviceId) === state.online) return;
       reachable.set(deviceId, state.online);
       this.emit({
@@ -304,7 +330,8 @@ export class RoomHost {
       if (vm.status !== status) {
         status = vm.status;
         // A device that serves one room at a time is held while the room is on.
-        if (status === 'starting' || status === 'on') this.shared.acquire(room.roomId, room.signed.manifest.roomName);
+        if (status === 'starting' || status === 'on')
+          this.shared.acquire(room.roomId, room.signed.manifest.roomName);
         else if (status === 'off') this.shared.release(room.roomId);
         this.emit({ at: at(), type: 'room.status', roomId: room.roomId, data: { status } });
         if (status === 'fault')

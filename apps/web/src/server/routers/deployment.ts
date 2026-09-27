@@ -2,15 +2,29 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { writeAudit } from '../audit';
+import { BulkDeployError, MAX_BULK_DEPLOY_ROOMS, deployBulk, planBulkDeploy } from '../bulk-deploy';
 import { checkDeployable } from '../deploy-check';
 import { roomDeployStates } from '../deployment-queries';
 import { cancelScheduled, createDeployment } from '../deployment-service';
+import { orgPanelBranding } from '../provider-brand';
+import { SigningNotConfigured, loadSigningKey } from '../signing';
 import { orgProcedure, requireRole, router } from '../trpc';
 import { assertRoom } from './room-model-helpers';
 
 const orgId = z.string().uuid();
 const roomId = z.string().uuid();
 const MAX_SCHEDULE_AHEAD_MS = 90 * 24 * 3_600_000;
+
+const bulkInput = z.object({
+  orgId,
+  roomIds: z.array(roomId).min(1).max(MAX_BULK_DEPLOY_ROOMS),
+  mode: z.enum(['deploy', 'rollback']),
+});
+
+function asTrpc(e: unknown): never {
+  if (e instanceof BulkDeployError) throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
+  throw e;
+}
 
 const listSelect = {
   id: true,
@@ -136,6 +150,73 @@ export const deploymentRouter = router({
       });
       return { id: deployment.id, status: deployment.status, kind: deployment.kind };
     }),
+
+  // What deploying (or rolling back) the chosen rooms would do, room by room, and which cannot go.
+  // Changes nothing.
+  bulkPreview: orgProcedure.input(bulkInput).query(async ({ ctx, input }) => {
+    requireRole(ctx.role, ['owner', 'dev']);
+    try {
+      return (await planBulkDeploy(db, ctx.orgId, input.roomIds, input.mode)).plan;
+    } catch (e) {
+      return asTrpc(e);
+    }
+  }),
+
+  // Publish (where the design changed) and deploy, or roll back, every chosen room that is ready.
+  // Rooms that cannot go are reported and skipped; the others still go.
+  bulkDeploy: orgProcedure.input(bulkInput).mutation(async ({ ctx, input }) => {
+    requireRole(ctx.role, ['owner', 'dev']);
+    let key;
+    try {
+      key = loadSigningKey();
+    } catch (e) {
+      if (e instanceof SigningNotConfigured)
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: e.message });
+      throw e;
+    }
+    const org = await db.org.findFirst({ where: { id: ctx.orgId }, select: { branding: true } });
+    try {
+      const out = await deployBulk(db, ctx.orgId, input.roomIds, input.mode, {
+        key,
+        orgBranding: await orgPanelBranding(db, ctx.orgId, org?.branding),
+        userId: ctx.user.id,
+      });
+      // The same records as deploying each room by hand, plus one for the whole run.
+      for (const r of out.results) {
+        if (r.published)
+          await writeAudit({
+            orgId: ctx.orgId,
+            actorId: ctx.user.id,
+            action: 'release.publish',
+            target: r.roomId,
+            meta: { room: r.name, number: r.number },
+          });
+        await writeAudit({
+          orgId: ctx.orgId,
+          actorId: ctx.user.id,
+          action: 'deployment.create',
+          target: r.deploymentId,
+          meta: { room: r.name, number: r.number, kind: r.kind },
+        });
+      }
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'deployment.bulk',
+        target: ctx.orgId,
+        meta: {
+          mode: input.mode,
+          chosen: input.roomIds.length,
+          sent: out.results.length,
+          skipped: out.skipped.length,
+          blocked: out.blocked.length,
+        },
+      });
+      return out;
+    } catch (e) {
+      return asTrpc(e);
+    }
+  }),
 
   // Only a deployment still waiting for its time can be cancelled.
   cancel: orgProcedure.input(z.object({ orgId, deploymentId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
