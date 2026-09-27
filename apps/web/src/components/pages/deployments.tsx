@@ -44,6 +44,7 @@ export function DeploymentsView() {
   const overview = useQuery({ ...trpc.deployment.overview.queryOptions({ orgId }), refetchInterval: 10_000 });
   const history = useQuery({ ...trpc.deployment.list.queryOptions({ orgId, limit: 30 }), refetchInterval: 10_000 });
   const [open, setOpen] = useState<string | null>(null);
+  const updates = useQuery({ ...trpc.driver.updates.queryOptions({ orgId }), enabled: canEdit, staleTime: 30_000 });
   const [picked, setPicked] = useState<string[]>([]);
   const [bulk, setBulk] = useState<'deploy' | 'rollback' | null>(null);
 
@@ -78,6 +79,28 @@ export function DeploymentsView() {
             <Stat label="Need attention" value={count((r) => ATTENTION.includes(r.state))} tone="text-destructive" />
             <Stat label="Scheduled" value={scheduled} />
           </div>
+          {canEdit && (updates.data?.length ?? 0) > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/5 px-4 py-3 text-sm">
+              <div>
+                <p className="font-medium">
+                  {plural(new Set(updates.data!.map((u) => u.roomId)).size, 'room')} running an older version of a driver
+                </p>
+                <p className="text-muted-foreground">
+                  {[...new Set(updates.data!.map((u) => `${u.driver.name} (version ${u.running} to ${u.latest})`))].slice(0, 3).join(', ')}
+                  . A driver fix only reaches a room when it is published and deployed again.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setPicked([...new Set(updates.data!.map((u) => u.roomId))]);
+                  setBulk('deploy');
+                }}
+              >
+                <Rocket /> Update these rooms
+              </Button>
+            </div>
+          )}
           {canEdit && chosen.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-4 py-2.5 text-sm">
               <span className="mr-auto">{plural(chosen.length, 'room')} chosen</span>
