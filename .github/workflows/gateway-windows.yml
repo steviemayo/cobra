@@ -62,7 +62,7 @@ jobs:
         run: |
           # Runs as a real Windows service. The plain .NET-Framework build needs no runtime install
           # (Framework 4 ships with Windows), unlike the newer .NET-based v3 builds.
-          Invoke-WebRequest "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.exe" `
+          Invoke-WebRequest "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET4.exe" `
             -OutFile bundle/app/windows/KestrelGatewayService.exe
       - name: Build the installer (KestrelGatewaySetup.exe)
         run: |
