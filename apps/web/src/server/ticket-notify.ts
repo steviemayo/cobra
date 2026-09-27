@@ -25,7 +25,7 @@ export interface NotifyDeps {
   resolve?: Parameters<typeof assertPublicUrl>[1];
   env: Record<string, string | undefined>;
 }
-const realDeps = (): NotifyDeps => ({ fetch, env: process.env });
+export const realDeps = (): NotifyDeps => ({ fetch, env: process.env });
 
 const HEADLINE: Record<TicketEventKind, (e: TicketEvent) => string> = {
   escalated: (e) =>
@@ -51,7 +51,7 @@ function body(e: TicketEvent, url: string | null) {
   };
 }
 
-async function post(d: NotifyDeps, rawUrl: string, payload: unknown, secret?: string) {
+export async function post(d: NotifyDeps, rawUrl: string, payload: unknown, secret?: string) {
   const url = await assertPublicUrl(rawUrl, d.resolve);
   const text = JSON.stringify(payload);
   const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -90,29 +90,37 @@ export function parseAddresses(list: string | undefined): string[] {
  * Sends a plain text email through Resend. Returns false (without trying) when the server has no
  * email settings, so a Kestrel that has not set up its sending domain simply does not send.
  */
-async function email(
+export async function sendEmail(
   d: NotifyDeps,
   to: string[],
-  e: TicketEvent,
-  url: string | null,
+  subject: string,
+  text: string,
 ): Promise<boolean> {
   const key = d.env.RESEND_API_KEY;
   const from = d.env.ALERT_FROM_EMAIL;
   if (!key || !from || to.length === 0) return false;
-  const headline = HEADLINE[e.kind](e).replace(/[\r\n]+/g, ' ');
   const res = await d.fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       from,
       to: to.slice(0, MAX_RECIPIENTS),
-      subject: `[Kestrel] ${headline}`,
-      text: body(e, url).text,
+      subject: subject.replace(/[\r\n]+/g, ' '),
+      text,
     }),
     signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`The email service answered HTTP ${res.status}`);
   return true;
+}
+
+async function email(
+  d: NotifyDeps,
+  to: string[],
+  e: TicketEvent,
+  url: string | null,
+): Promise<boolean> {
+  return sendEmail(d, to, `[Kestrel] ${HEADLINE[e.kind](e)}`, body(e, url).text);
 }
 
 /**

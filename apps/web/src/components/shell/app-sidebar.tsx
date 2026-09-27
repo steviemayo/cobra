@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -50,6 +51,7 @@ import {
 } from '@/components/ui/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useEstate } from '@/lib/use-estate';
+import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
 import { useDialogs } from './dialogs';
 import { OrgSwitcher } from './org-switcher';
@@ -68,12 +70,15 @@ function NavItem({
   label,
   exact,
   soon,
+  count,
 }: {
   href?: string;
   icon: LucideIcon;
   label: string;
   exact?: boolean;
   soon?: boolean;
+  /** A number to show beside the label (something waiting), when above zero. */
+  count?: number;
 }) {
   const isActive = useActive();
   if (soon || !href)
@@ -96,6 +101,9 @@ function NavItem({
         <Icon />
         <span>{label}</span>
       </SidebarMenuButton>
+      {!!count && (
+        <SidebarMenuBadge aria-label={`${count} waiting`}>{count}</SidebarMenuBadge>
+      )}
     </SidebarMenuItem>
   );
 }
@@ -210,6 +218,13 @@ export function AppSidebar() {
   // A provider limited to some sites only gets the site-aware areas.
   const scoped = !!org.scoped;
   const { openNewSite } = useDialogs();
+  const trpc = useTRPC();
+  // People from the company asking to join, waiting for an owner.
+  const joinRequests = useQuery({
+    ...trpc.joinRequest.count.queryOptions({ orgId }),
+    enabled: isOwner && !scoped,
+    refetchInterval: 60_000,
+  });
   const base = orgPath(orgId);
   const isActive = useActive();
   const settingsOpen = isActive(`${base}/settings`);
@@ -312,7 +327,12 @@ export function AppSidebar() {
             <SidebarGroupLabel>Organisation</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                <NavItem href={`${base}/team`} icon={Users} label="Team" />
+                <NavItem
+                  href={`${base}/team`}
+                  icon={Users}
+                  label="Team"
+                  count={joinRequests.data}
+                />
                 <NavItem href={`${base}/alerts`} icon={BellRing} label="Alerts" />
                 <SidebarMenuItem>
                   <SidebarMenuButton
