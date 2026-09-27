@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from '@kestrel/db';
 import type { RoomModel, RoomType } from '@kestrel/model';
+import { STAGING } from './room-kinds';
 import { readPlainBindings, setRoomBindings, type BindingsDb } from './bindings';
 
 // Copying a room: a new room at the same site with the same design and gateway. Addresses are not
@@ -18,6 +19,8 @@ export interface DuplicateInput {
   /** The source's design, already stripped of addresses. */
   model: RoomModel;
   userId: string | null;
+  /** A staging room is a copy for trying changes; it is not billed and raises no alerts. */
+  kind?: 'standard' | 'staging';
 }
 
 const normal = (name: string) => name.trim().toLowerCase();
@@ -38,6 +41,7 @@ export async function duplicateRoom(
       siteId: input.source.siteId,
       name,
       type: input.source.type,
+      ...(input.kind === 'staging' ? { kind: STAGING } : {}),
       ...(input.source.gatewayId ? { gatewayId: input.source.gatewayId } : {}),
     },
   });

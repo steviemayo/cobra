@@ -50,6 +50,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `created room “${s(meta.name)}” in ${s(meta.site)}`;
     case 'room.duplicate':
       return `copied room “${s(meta.from)}” to a new room “${s(meta.name)}”`;
+    case 'room.staging_copy':
+      return `made a staging copy of room “${s(meta.from)}” called “${s(meta.name)}”`;
+    case 'room.staging_promote':
+      return `promoted the design of staging room “${s(meta.staging)}” into “${s(meta.room)}”`;
     case 'room.update':
       return `updated room “${s(meta.name)}”${meta.site ? ` (now in ${s(meta.site)})` : ''}`;
     case 'room.delete':
