@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
+import { DeviceFeedback } from '@kestrel/model';
 import { deliverAlerts } from '../alerts';
 import { writeAudit } from '../audit';
 import { firmwareReport } from '../firmware-report';
@@ -73,6 +74,9 @@ export const monitoringRouter = router({
           since: d.since,
           driver: d.driver ?? null,
           firmware: d.firmware ?? null,
+          // Stored loosely (Json); parsed here so an old row from before this field existed, or
+          // anything unexpected, can't reach the page as something the UI doesn't understand.
+          feedback: DeviceFeedback.safeParse(d.feedback ?? {}).data ?? null,
         })),
         incidents,
         events: events.map((e) => ({ ...e, data: (e.data ?? {}) as Record<string, unknown> })),

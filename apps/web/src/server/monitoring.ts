@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@kestrel/db';
+import { Prisma, type PrismaClient } from '@kestrel/db';
 import type { RoomReport } from '@kestrel/model';
 import { getEntitlements } from './billing';
 import { effectiveStatus } from './gateway-status';
@@ -146,11 +146,16 @@ export async function recordReports(
         const row = known.get(d.deviceId);
         // What the device says about itself. A heartbeat that leaves the firmware out (the gateway
         // has just restarted and not asked yet) keeps the last version rather than forgetting it.
+        // Kept when a heartbeat leaves it out (a device that briefly answers nothing still had a
+        // last known state worth showing).
+        const feedbackChanged =
+          !!d.feedback && JSON.stringify(d.feedback) !== JSON.stringify(row?.feedback ?? null);
         const about = {
           ...(d.driver && d.driver !== row?.driver ? { driver: d.driver } : {}),
           ...(d.firmware && d.firmware !== row?.firmware
             ? { firmware: d.firmware, firmwareSince: now }
             : {}),
+          ...(feedbackChanged ? { feedback: d.feedback as Prisma.InputJsonValue } : {}),
         };
         if (!row) {
           await db.deviceStatus.create({

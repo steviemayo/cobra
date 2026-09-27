@@ -132,6 +132,15 @@ Planned "after the first customers"; built early because it needs no new data (e
 | K-6 | Queues put overdue before due soon before the rest **within a priority**                                                                                                                                                                                                                                                                                             | Priority stays the main order                                                                                           |
 | K-7 | **Not built:** warnings by email or Teams as a target nears (the badge is the warning), pausing the clock while waiting for the customer, and reports of how often targets were met                                                                                                                                                                                  | Needs the business-hours and status decisions above                                                                     |
 
+## Device feedback for monitored devices (TM-18, 2026-09-27)
+
+Every driver already reads back whatever its device's own API offers while it runs (power, the input selected, mute, volume, blanked/shutter, recording, occupancy, an AVoIP stream's connection, an app running) — that never depended on control, since a driver's read side and its `send` side are separate and only `send` is what `ControlGate` refuses. The gap was that none of it reached the cloud or the portal; a report only ever said `online`.
+
+- **TM-18** The gateway now reports **whatever the driver answered**, not just online/offline, as `feedback` on each device (`DeviceFeedback`: power, input — resolved to the port's name, not its id — muted, volume, blanked, recording, occupied, streamConnected, activeApp). A field the driver has nothing to say about is left out, and a device with nothing at all gets no `feedback`. It flows exactly the same whether or not the room has control, monitored room or not
+- Stored on `DeviceStatus.feedback` (new `Json?` column, migration `20260927170000_device_feedback`, **not applied**), kept when a later heartbeat leaves it out (a momentary hiccup should not blank it), and only written when it actually changes
+- Shown on the room monitoring page as a row of small chips under each device
+- This is separate from watch points (TM-16): a watch point is something the room owner chose to be alerted about; feedback is just what the device already says, shown for anyone reading the room's status
+
 ## Driver classes (plan: `docs/driver-classes.md`)
 
 ### Slice 1: foundations (built, 2026-09-26)

@@ -6,7 +6,7 @@ import {
   createDriver,
   type DeviceDriver,
 } from '@kestrel/drivers/real';
-import { applyBindings, checkWatch } from '@kestrel/model';
+import { applyBindings, checkWatch, type DeviceFeedback } from '@kestrel/model';
 import type {
   DeviceBus,
   DeviceCommand,
@@ -15,6 +15,7 @@ import type {
   DeviceValues,
   PanelAccess,
   PanelBranding,
+  Port,
   RoomReport,
   SignedManifest,
   TelemetryEvent,
@@ -105,6 +106,28 @@ export function withBindings(signed: SignedManifest, bindings?: RoomBindings): S
     ...signed,
     manifest: { ...manifest, model: applyBindings(manifest.model, bindings.devices) },
   };
+}
+
+/**
+ * Whatever the driver reports back for one device, in the shape the cloud stores: an input's port
+ * id resolved to its name, and every other field carried over as is. Control or not, since none of
+ * this is a command — it is what `reports()` sends up alongside `online`.
+ */
+export function deviceFeedback(state: DeviceState | undefined, ports: Port[]): DeviceFeedback {
+  const feedback: DeviceFeedback = {};
+  if (state?.power) feedback.power = state.power;
+  if (state?.selectedInput) {
+    const port = ports.find((p) => p.id === state.selectedInput);
+    if (port) feedback.input = port.name;
+  }
+  if (state?.muted !== undefined) feedback.muted = state.muted;
+  if (state?.volume !== undefined) feedback.volume = state.volume;
+  if (state?.blanked !== undefined) feedback.blanked = state.blanked;
+  if (state?.recording !== undefined) feedback.recording = state.recording;
+  if (state?.occupied !== undefined) feedback.occupied = state.occupied;
+  if (state?.streamConnected !== undefined) feedback.streamConnected = state.streamConnected;
+  if (state?.activeApp !== undefined) feedback.activeApp = state.activeApp;
+  return feedback;
 }
 
 /** Real drivers where the room configures them; simulated devices fill the gaps if allowed. */
@@ -343,6 +366,8 @@ export class RoomHost {
                 ];
               })
             : [];
+        // Everything the driver reports back, monitored room or not: this never touches control.
+        const feedback = deviceFeedback(state, d.ports);
         return {
           deviceId: d.id,
           name: d.name,
@@ -350,6 +375,7 @@ export class RoomHost {
           ...(driver && { driver }),
           ...(state?.firmware && { firmware: state.firmware }),
           ...(watched.length > 0 && { watched }),
+          ...(Object.keys(feedback).length > 0 && { feedback }),
         };
       }),
     }));

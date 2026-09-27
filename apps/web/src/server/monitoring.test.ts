@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { RoomReport } from '@kestrel/model';
 import {
   DEVICE_GRACE_MS,
@@ -82,6 +82,58 @@ describe('device status and incidents', () => {
     expect(jobs).toEqual([]);
     expect(w.deviceStatus.rows).toHaveLength(2);
     expect(w.incident.rows).toHaveLength(0);
+  });
+
+  it('stores whatever the driver reported back, and keeps it when a later heartbeat leaves it out', async () => {
+    const w = world();
+    await recordReports(
+      w.db,
+      { id: GW, orgId: ORG },
+      [
+        report({
+          devices: [
+            { deviceId: 'dsp', name: 'DSP', online: true, feedback: { power: 'on', muted: false } },
+          ],
+        }),
+      ],
+      T0,
+    );
+    expect(w.deviceStatus.rows[0]).toMatchObject({ feedback: { power: 'on', muted: false } });
+    // Same reading again: no pointless write.
+    const update = vi.spyOn(w.deviceStatus, 'update');
+    await recordReports(
+      w.db,
+      { id: GW, orgId: ORG },
+      [
+        report({
+          devices: [
+            { deviceId: 'dsp', name: 'DSP', online: true, feedback: { power: 'on', muted: false } },
+          ],
+        }),
+      ],
+      at(1000),
+    );
+    expect(update).not.toHaveBeenCalled();
+    // A heartbeat that says nothing about it (a momentary hiccup) keeps the last known reading.
+    await recordReports(
+      w.db,
+      { id: GW, orgId: ORG },
+      [report({ devices: [{ deviceId: 'dsp', name: 'DSP', online: true }] })],
+      at(2000),
+    );
+    expect(w.deviceStatus.rows[0]).toMatchObject({ feedback: { power: 'on', muted: false } });
+    // A changed reading is written.
+    await recordReports(
+      w.db,
+      { id: GW, orgId: ORG },
+      [
+        report({
+          devices: [{ deviceId: 'dsp', name: 'DSP', online: true, feedback: { power: 'off' } }],
+        }),
+      ],
+      at(3000),
+    );
+    expect(w.deviceStatus.rows[0]).toMatchObject({ feedback: { power: 'off' } });
   });
 
   describe('watched points', () => {
