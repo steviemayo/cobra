@@ -1,11 +1,12 @@
 name: Gateway Windows bundle
 
-# Builds the self-contained Windows gateway (its own Node, the panel app, the install scripts) and
-# publishes it as a rolling release per channel. The installer and the daily update task read from
-# these releases:
+# Builds the self-contained Windows gateway (its own Node, the panel app, the install scripts), the
+# WinSW service wrapper, and the KestrelGatewaySetup.exe installer (Inno Setup, preinstalled on
+# windows-latest), then publishes them as a rolling release per channel. The installer, install.ps1
+# and the daily update task read from these releases:
 #   main -> release "gateway-stable"
 #   dev  -> release "gateway-beta" (pre-release)
-# Pull requests only check that the bundle builds.
+# Pull requests only check that the bundle and installer build.
 on:
   pull_request:
     paths:
@@ -57,10 +58,29 @@ jobs:
           Copy-Item "node-extract/node-$node-win-x64/node.exe" bundle/app/runtime/node.exe
           Compress-Archive -Path bundle/app/* -DestinationPath kestrel-gateway-win-x64.zip
           Copy-Item bundle/app/VERSION VERSION
+      - name: Bundle the service wrapper (WinSW, MIT licensed)
+        run: |
+          # Runs as a real Windows service. The plain .NET-Framework build needs no runtime install
+          # (Framework 4 ships with Windows), unlike the newer .NET-based v3 builds.
+          Invoke-WebRequest "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.exe" `
+            -OutFile bundle/app/windows/KestrelGatewayService.exe
+      - name: Build the installer (KestrelGatewaySetup.exe)
+        run: |
+          $version = Get-Content VERSION
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DAppVersion=$version" `
+            "/DCloudUrlDefault=${{ vars.GATEWAY_CLOUD_URL_DEFAULT }}" `
+            "/DSourceDir=$PWD\bundle\app" `
+            "/DOutputDir=$PWD" `
+            apps/gateway/windows/setup.iss
       - uses: actions/upload-artifact@v4
         with:
           name: kestrel-gateway-win-x64
           path: kestrel-gateway-win-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KestrelGatewaySetup
+          path: KestrelGatewaySetup.exe
       - name: Publish to the channel's release
         if: github.event_name != 'pull_request' && github.ref_name != ''
         env:
@@ -78,4 +98,5 @@ jobs:
           }
           # VERSION goes last: the update task reads it first, so it must never point at a missing bundle.
           gh release upload $tag kestrel-gateway-win-x64.zip --clobber
+          gh release upload $tag KestrelGatewaySetup.exe --clobber
           gh release upload $tag VERSION --clobber

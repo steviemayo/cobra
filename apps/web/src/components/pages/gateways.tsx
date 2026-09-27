@@ -1,7 +1,18 @@
 'use client';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Copy, Download, MoreHorizontal, Pencil, Plus, RefreshCw, Rocket, Router, Trash2 } from 'lucide-react';
+import {
+  Check,
+  Copy,
+  Download,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Rocket,
+  Router,
+  Trash2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
@@ -37,6 +48,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { plural, timeAgo } from '@/lib/format';
 import { useSites } from '@/lib/use-estate';
 import { cn } from '@/lib/utils';
@@ -46,10 +58,10 @@ import type { RouterOutputs } from '@/trpc/types';
 type Gateway = RouterOutputs['gateway']['list'][number];
 
 const IMAGE = process.env.NEXT_PUBLIC_GATEWAY_IMAGE ?? 'ghcr.io/steviemayo/kestrel-gateway:stable';
-// The self-contained Windows bundle (brings its own Node, no Docker needed), published by CI to the stable release.
-const WINDOWS_BUNDLE =
-  process.env.NEXT_PUBLIC_GATEWAY_WINDOWS_URL ??
-  'https://github.com/steviemayo/cobra/releases/download/gateway-stable/kestrel-gateway-win-x64.zip';
+// The Windows installer (brings its own Node, no Docker needed; lets you pick service or tray at
+// install time). Proxied through the portal by default since the release lives in a private repo.
+const WINDOWS_SETUP_URL =
+  process.env.NEXT_PUBLIC_GATEWAY_WINDOWS_URL ?? '/api/gateway/download?platform=windows';
 
 function StatusPill({ status }: { status: Gateway['status'] }) {
   const tone = { online: 'bg-success', offline: 'bg-destructive', pending: 'bg-warning' }[status];
@@ -76,8 +88,12 @@ export function GatewaysView() {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const { orgId, canEdit } = useOrg();
-  const gateways = useQuery({ ...trpc.gateway.list.queryOptions({ orgId }), refetchInterval: 15_000 });
+  const gateways = useQuery({
+    ...trpc.gateway.list.queryOptions({ orgId }),
+    refetchInterval: 15_000,
+  });
   const [adding, setAdding] = useState(false);
+  const [installOpen, setInstallOpen] = useState(false);
   const [token, setToken] = useState<{ name: string; token: string; expiresAt: Date } | null>(null);
   const [renaming, setRenaming] = useState<Gateway | null>(null);
   const [reenrolling, setReenrolling] = useState<Gateway | null>(null);
@@ -126,13 +142,9 @@ export function GatewaysView() {
         description="On-site machines that run your rooms, keep them working offline and report their status."
         actions={
           <>
-            <a
-              href={WINDOWS_BUNDLE}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-              title="Self-contained gateway for Windows. No Docker needed"
-            >
-              <Download data-icon="inline-start" /> Windows bundle
-            </a>
+            <Button variant="outline" size="sm" onClick={() => setInstallOpen(true)}>
+              <Download data-icon="inline-start" /> Install a gateway
+            </Button>
             {canEdit && (
               <Button size="sm" onClick={() => setAdding(true)}>
                 <Plus data-icon="inline-start" /> Add gateway
@@ -148,7 +160,9 @@ export function GatewaysView() {
           icon={Router}
           title="No gateways yet"
           description="Add a gateway, run the container on a machine at the site, and it will connect itself. Then assign rooms to it."
-          action={canEdit ? <Button onClick={() => setAdding(true)}>Add a gateway</Button> : undefined}
+          action={
+            canEdit ? <Button onClick={() => setAdding(true)}>Add a gateway</Button> : undefined
+          }
         />
       ) : (
         <div className="overflow-hidden rounded-lg border">
@@ -169,13 +183,18 @@ export function GatewaysView() {
                 <TableRow key={g.id}>
                   <TableCell>
                     <div className="font-medium">{g.name}</div>
-                    {g.hostname && <div className="text-xs text-muted-foreground">{g.hostname}</div>}
+                    {g.hostname && (
+                      <div className="text-xs text-muted-foreground">{g.hostname}</div>
+                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">{g.site.name}</TableCell>
                   <TableCell>
                     <StatusPill status={g.status} />
                   </TableCell>
-                  <TableCell className="text-muted-foreground" title={g.rooms.map((r) => r.name).join(', ')}>
+                  <TableCell
+                    className="text-muted-foreground"
+                    title={g.rooms.map((r) => r.name).join(', ')}
+                  >
                     {plural(g.rooms.length, 'room')}
                   </TableCell>
                   <TableCell className="tabular text-muted-foreground">
@@ -183,7 +202,10 @@ export function GatewaysView() {
                       {g.version ?? '—'}
                       {g.channel === 'beta' && <Badge variant="outline">beta</Badge>}
                       {g.update.status === 'behind' && (
-                        <Badge variant="secondary" title={`Version ${g.update.latest} is available on the ${g.channel} channel`}>
+                        <Badge
+                          variant="secondary"
+                          title={`Version ${g.update.latest} is available on the ${g.channel} channel`}
+                        >
                           Update available
                         </Badge>
                       )}
@@ -197,7 +219,11 @@ export function GatewaysView() {
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
-                            <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${g.name}`} />
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Actions for ${g.name}`}
+                            />
                           }
                         >
                           <MoreHorizontal />
@@ -216,7 +242,9 @@ export function GatewaysView() {
                             }
                           >
                             <Rocket className="size-4" />{' '}
-                            {g.channel === 'beta' ? 'Follow the stable channel' : 'Follow the beta channel'}
+                            {g.channel === 'beta'
+                              ? 'Follow the stable channel'
+                              : 'Follow the beta channel'}
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => setReenrolling(g)}>
                             <RefreshCw className="size-4" /> Re-enrol on a new machine
@@ -244,6 +272,7 @@ export function GatewaysView() {
           setToken(t);
         }}
       />
+      <InstallDialog open={installOpen} onOpenChange={setInstallOpen} />
       <TokenDialog token={token} onClose={() => setToken(null)} />
       <RenameDialog gateway={renaming} onClose={() => setRenaming(null)} onDone={refresh} />
       <ConfirmDialog
@@ -298,7 +327,9 @@ function AddDialog({
         {sites.isSuccess && sites.data.length === 0 ? (
           <DialogHeader>
             <DialogTitle>Create a site first</DialogTitle>
-            <DialogDescription>A gateway belongs to a site. Add one from the Sites page.</DialogDescription>
+            <DialogDescription>
+              A gateway belongs to a site. Add one from the Sites page.
+            </DialogDescription>
           </DialogHeader>
         ) : (
           <form
@@ -379,6 +410,71 @@ function CopyBox({ text, label }: { text: string; label: string }) {
   );
 }
 
+function PlatformInstall({ token }: { token?: string }) {
+  const dockerCommand = runCommand(token ?? '<enrolment token>');
+  return (
+    <Tabs defaultValue="windows">
+      <TabsList>
+        <TabsTrigger value="windows">Windows</TabsTrigger>
+        <TabsTrigger value="linux">Linux</TabsTrigger>
+        <TabsTrigger value="docker">Docker</TabsTrigger>
+      </TabsList>
+      <TabsContent value="windows" className="space-y-3 pt-3">
+        <p className="text-sm text-muted-foreground">
+          The installer lets you choose to run the gateway as a Windows service (starts at boot,
+          before anyone logs in) or from the system tray (starts when you log in). Either way it
+          restarts on its own and keeps running until stopped.
+        </p>
+        <a href={WINDOWS_SETUP_URL} className={buttonVariants({ size: 'sm' })}>
+          <Download data-icon="inline-start" /> Download for Windows
+        </a>
+      </TabsContent>
+      <TabsContent value="linux" className="space-y-3 pt-3">
+        <CopyBox
+          label="Install Docker, if it isn't already"
+          text="curl -fsSL https://get.docker.com | sh"
+        />
+        <CopyBox label="Run the gateway" text={dockerCommand} />
+      </TabsContent>
+      <TabsContent value="docker" className="space-y-3 pt-3">
+        <CopyBox label="Run the gateway" text={dockerCommand} />
+      </TabsContent>
+      {!token && (
+        <p className="text-xs text-muted-foreground">
+          Replace <code className="font-mono">&lt;enrolment token&gt;</code> with the one-time token
+          from “Add gateway”, or from a gateway's ⋯ menu — this box will have it filled in there.
+        </p>
+      )}
+    </Tabs>
+  );
+}
+
+function InstallDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Install a gateway</DialogTitle>
+          <DialogDescription>
+            Pick a platform. You'll still need a one-time enrolment token — get one from “Add
+            gateway” above, or from an existing gateway's ⋯ menu.
+          </DialogDescription>
+        </DialogHeader>
+        <PlatformInstall />
+        <DialogFooter>
+          <Button onClick={() => onOpenChange(false)}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function TokenDialog({
   token,
   onClose,
@@ -394,18 +490,12 @@ function TokenDialog({
             <DialogHeader>
               <DialogTitle>Run “{token.name}” on site</DialogTitle>
               <DialogDescription>
-                The token works once and expires {timeAgo(token.expiresAt)}. It won’t be shown again. The gateway needs outbound HTTPS only; no ports need opening to the internet.
+                The token works once and expires {timeAgo(token.expiresAt)}. It won’t be shown
+                again. The gateway needs outbound HTTPS only; no ports need opening to the internet.
               </DialogDescription>
             </DialogHeader>
             <CopyBox label="Enrolment token" text={token.token} />
-            <CopyBox label="Run on the gateway machine (Docker)" text={runCommand(token.token)} />
-            <p className="text-xs text-muted-foreground">
-              No Docker on the machine?{' '}
-              <a className="underline underline-offset-4" href={WINDOWS_BUNDLE}>
-                Download the Windows bundle
-              </a>
-              .
-            </p>
+            <PlatformInstall token={token.token} />
             <DialogFooter>
               <Button onClick={onClose}>Done</Button>
             </DialogFooter>

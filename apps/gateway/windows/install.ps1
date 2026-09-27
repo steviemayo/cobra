@@ -1,16 +1,19 @@
 <#
 .SYNOPSIS
-  Installs the Kestrel gateway on Windows and keeps it updated from its release channel.
+  Downloads and installs the Kestrel gateway on Windows, and keeps it updated from its release channel.
 
 .DESCRIPTION
-  Run in an elevated PowerShell:
+  Most people should use the KestrelGatewaySetup.exe installer linked from the Gateways page instead —
+  this script is the scriptable path (mass deployment, automation) that does the same thing from an
+  elevated PowerShell:
     .\install.ps1 -CloudUrl https://<your kestrel app> -EnrollToken <token from the portal>
 
   What it sets up (all removable with uninstall.ps1):
     - the gateway, with its own copy of Node, under C:\Program Files\Kestrel Gateway
-    - a scheduled task that starts the gateway at boot and restarts it if it stops
+    - either a Windows service (starts at boot, before anyone logs in) or a system tray app that
+      starts at login (-Mode Tray) — either way, it restarts on its own and runs until stopped
     - a daily scheduled task that updates the gateway from the stable or beta channel
-    - a firewall rule so touch panels on the LAN can reach port 8080
+    - a firewall rule so touch panels on the LAN can reach the panel port
 
   Nothing else on the machine is changed. Data (the gateway's identity, cached room releases and
   buffered telemetry) lives in C:\ProgramData\Kestrel Gateway and survives updates.
@@ -24,7 +27,8 @@ param(
   [string] $InstallDir = (Join-Path $env:ProgramFiles 'Kestrel Gateway'),
   [string] $DataDir = (Join-Path $env:ProgramData 'Kestrel Gateway'),
   [int] $PanelPort = 8080,
-  [switch] $NoFirewall
+  [switch] $NoFirewall,
+  [ValidateSet('Service', 'Tray')] [string] $Mode = 'Service'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,11 +40,25 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 if ($CloudUrl -notmatch '^https?://') { throw 'CloudUrl must start with http:// or https://' }
 
-$ServiceTask = 'Kestrel Gateway'
-$UpdateTask = 'Kestrel Gateway Update'
-$FirewallRule = 'Kestrel Gateway panel'
-
 New-Item -ItemType Directory -Force -Path $InstallDir, $DataDir, (Join-Path $DataDir 'logs') | Out-Null
+
+# Stop a previous install before replacing its files: if it's still running, the app folder's files
+# (especially runtime\node.exe) are locked.
+$envFile = Join-Path $InstallDir 'gateway.env'
+if (Test-Path $envFile) {
+  $prevMode = 'Service'
+  foreach ($line in Get-Content $envFile) { if ($line -match '^KESTREL_RUN_MODE=(.+)$') { $prevMode = $Matches[1] } }
+  if ($prevMode -eq 'Tray') {
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.CommandLine -like "*$([regex]::Escape((Join-Path $InstallDir 'tray.ps1')))*" } |
+      ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  } else {
+    & (Join-Path $InstallDir 'KestrelGatewayService.exe') stop 2>$null
+  }
+  Get-Process -Name node -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -like (Join-Path $InstallDir '*') } | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 1
+}
 
 # The bundle for this channel: everything needed to run, including Node.
 $tag = "gateway-$Channel"
@@ -55,62 +73,10 @@ Expand-Archive -Path $zip -DestinationPath $stage -Force
 Remove-Item -Force $zip
 if (-not (Test-Path (Join-Path $stage 'runtime\node.exe'))) { throw 'The download does not look like a Kestrel gateway bundle.' }
 
-# Stop an existing install before replacing its files.
-$existing = Get-ScheduledTask -TaskName $ServiceTask -ErrorAction SilentlyContinue
-if ($existing) {
-  Stop-ScheduledTask -TaskName $ServiceTask -ErrorAction SilentlyContinue
-  Get-Process -Name node -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -like (Join-Path $InstallDir '*') } | Stop-Process -Force
-}
 $app = Join-Path $InstallDir 'app'
 if (Test-Path $app) { Remove-Item -Recurse -Force $app }
 Move-Item -Path $stage -Destination $app
 
-# Settings the runner script reads. The enrolment token is only needed for the first start.
-$config = @(
-  "KESTREL_CLOUD_URL=$CloudUrl",
-  "KESTREL_ENROLL_TOKEN=$EnrollToken",
-  "KESTREL_DATA_DIR=$DataDir",
-  "KESTREL_PANEL_PORT=$PanelPort",
-  "KESTREL_PANEL_DIR=$(Join-Path $app 'panel')",
-  "KESTREL_CHANNEL=$Channel",
-  "KESTREL_REPO=$Repo"
-)
-$configPath = Join-Path $InstallDir 'gateway.env'
-Set-Content -Path $configPath -Value $config -Encoding ASCII
-# Only administrators and the system may read the enrolment token.
-icacls $configPath /inheritance:r /grant:r 'SYSTEM:(R)' 'Administrators:(F)' | Out-Null
-
-Copy-Item -Force (Join-Path $app 'windows\run.ps1') (Join-Path $InstallDir 'run.ps1')
-Copy-Item -Force (Join-Path $app 'windows\update.ps1') (Join-Path $InstallDir 'update.ps1')
-Copy-Item -Force (Join-Path $app 'windows\uninstall.ps1') (Join-Path $InstallDir 'uninstall.ps1')
-
-$ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$system = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-
-$run = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $InstallDir 'run.ps1')`""
-$runSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-  -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
-  -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName $ServiceTask -Force -Principal $system -Settings $runSettings `
-  -Action $run -Trigger (New-ScheduledTaskTrigger -AtStartup) `
-  -Description 'Runs the Kestrel gateway.' | Out-Null
-
-$upd = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $InstallDir 'update.ps1')`""
-$updTrigger = New-ScheduledTaskTrigger -Daily -At '03:30' -RandomDelay (New-TimeSpan -Minutes 30)
-$updSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1)
-Register-ScheduledTask -TaskName $UpdateTask -Force -Principal $system -Settings $updSettings `
-  -Action $upd -Trigger $updTrigger -Description "Updates the Kestrel gateway from the $Channel channel." | Out-Null
-
-if (-not $NoFirewall) {
-  Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-  New-NetFirewallRule -DisplayName $FirewallRule -Direction Inbound -Protocol TCP -LocalPort $PanelPort `
-    -Action Allow -Profile Domain, Private | Out-Null
-}
-
-Start-ScheduledTask -TaskName $ServiceTask
-$version = (Get-Content (Join-Path $app 'VERSION') -ErrorAction SilentlyContinue | Select-Object -First 1)
-Write-Host ''
-Write-Host "Kestrel gateway $version installed (channel: $Channel)."
-Write-Host "It is starting now. Panels open http://<this machine>:$PanelPort/room/<room id>."
-Write-Host "Logs: $(Join-Path $DataDir 'logs\gateway.log')"
+& (Join-Path $app 'windows\configure.ps1') `
+  -CloudUrl $CloudUrl -EnrollToken $EnrollToken -Channel $Channel -Repo $Repo `
+  -InstallDir $InstallDir -DataDir $DataDir -PanelPort $PanelPort -Mode $Mode -NoFirewall:$NoFirewall
