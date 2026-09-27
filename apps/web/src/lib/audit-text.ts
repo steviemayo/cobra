@@ -152,6 +152,8 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `added alert channel “${s(meta.name)}” (${s(meta.type)})`;
     case 'alert_channel.update':
       return `changed alert channel “${s(meta.name)}”`;
+    case 'alert_channel.rules':
+      return `changed the timing of the alert channel “${s(meta.name)}”: ${s(meta.rules)}`;
     case 'alert_channel.delete':
       return `removed alert channel “${s(meta.name)}”`;
     case 'ticket.create':
