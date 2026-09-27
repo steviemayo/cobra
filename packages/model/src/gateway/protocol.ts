@@ -204,6 +204,19 @@ export const DeviceFeedback = z.object({
   activeApp: z.string().max(200).optional(),
 });
 export type DeviceFeedback = z.infer<typeof DeviceFeedback>;
+/** The fields of `DeviceFeedback`, for code that walks them generically (change detection, history). */
+export const DEVICE_FEEDBACK_FIELDS = [
+  'power',
+  'input',
+  'muted',
+  'volume',
+  'blanked',
+  'recording',
+  'occupied',
+  'streamConnected',
+  'activeApp',
+] as const satisfies readonly (keyof DeviceFeedback)[];
+export type DeviceFeedbackField = (typeof DEVICE_FEEDBACK_FIELDS)[number];
 
 /** One watched control point and whether its reading is in bounds. Points with no reading yet are left out. */
 export const WatchedPoint = z.object({
@@ -398,6 +411,8 @@ export const TelemetryEvent = z.object({
     'device.fault',
     'device.offline',
     'device.online',
+    /** A feedback field changed (see DeviceFeedback): logged for history and usage reports, control or not. */
+    'device.feedback',
     'command.finished',
     'gateway.started',
     'manifest.rejected',

@@ -2,9 +2,10 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
-import { DeviceFeedback } from '@kestrel/model';
+import { DEVICE_FEEDBACK_FIELDS, DeviceFeedback } from '@kestrel/model';
 import { deliverAlerts } from '../alerts';
 import { writeAudit } from '../audit';
+import { deviceFeedbackHistory } from '../device-feedback-history';
 import { firmwareReport } from '../firmware-report';
 import { maybeSweep } from '../monitoring';
 import { orgOverview } from '../monitoring-queries';
@@ -13,6 +14,8 @@ import { featureProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
 const monitoringProcedure = featureProcedure('monitoring');
+// A history is a report, like Usage: the same plan gate as usage.report and reports.list.
+const analyticsProcedure = featureProcedure('analytics');
 
 /**
  * For a site-limited provider: which incidents it may see, as a Prisma OR list (an incident is
@@ -81,6 +84,37 @@ export const monitoringRouter = router({
         incidents,
         events: events.map((e) => ({ ...e, data: (e.data ?? {}) as Record<string, unknown> })),
       };
+    }),
+
+  // How long one device's feedback field held each value, over the last `days` (default 30, capped
+  // at the 90-day telemetry reach). Works for any device that reports the field, control or not.
+  deviceHistory: analyticsProcedure
+    .meta(SITE_SCOPED)
+    .input(
+      z.object({
+        orgId,
+        roomId: z.string().uuid(),
+        deviceId: z.string().min(1),
+        // "online" is the reachability history every device already has, alongside its feedback fields.
+        field: z.enum([...DEVICE_FEEDBACK_FIELDS, 'online']),
+        days: z.number().int().min(1).max(90).default(30),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const room = await db.room.findFirst({
+        where: { id: input.roomId, orgId: ctx.orgId, ...siteFilter(ctx.siteScope) },
+      });
+      if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
+      const to = new Date();
+      const from = new Date(to.getTime() - input.days * 86_400_000);
+      return deviceFeedbackHistory(db, {
+        orgId: ctx.orgId,
+        roomId: room.id,
+        deviceId: input.deviceId,
+        field: input.field,
+        from,
+        to,
+      });
     }),
 
   // The firmware each device reports, across the estate. Read only.

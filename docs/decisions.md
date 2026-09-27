@@ -141,6 +141,15 @@ Every driver already reads back whatever its device's own API offers while it ru
 - Shown on the room monitoring page as a row of small chips under each device
 - This is separate from watch points (TM-16): a watch point is something the room owner chose to be alerted about; feedback is just what the device already says, shown for anyone reading the room's status
 
+## Device history: logging feedback for usage reports (TM-19, 2026-09-27)
+
+Checked and confirmed: every `DeviceFeedback` field works in both scopes already, by construction. `ControlGate` only refuses `send`; `getState`, `subscribe`, `readPoint` and `quickActions` all pass straight through, in both the gateway (`RoomHost.reports()`, `watch()`) and the panel (`RoomRuntime` reads the same `DeviceState`). Nothing in this feature, or in TM-18, treats monitoring and control as separate data — only as separate permission to send a command. Confirmed by a test that flips control off mid-room and checks feedback still logs (`apps/gateway/src/gateway.test.ts`).
+
+- **TM-19** The gateway now also logs a **`device.feedback` telemetry event** each time a field actually changes (not every heartbeat), onto the same `GatewayEvent` pipeline and 90-day retention `usage-analytics.ts` already uses for room usage. "online"/"offline" were already logged this way; feedback fields now are too
+- A new **`monitoring.deviceHistory`** query (gated by `analytics`, like Usage and Reports) turns a device's logged changes for one field — including "online" — into **how many minutes it held each value** over a period (default 30 days, capped at 90). The maths (`durationsByValue`) is a pure function over events, same shape as `usage-analytics.ts`
+- Shown on the room monitoring page as a line under each device: "Last 30 days: On 18h 20m, Off 5h 40m" for power, the same for input, and always for online/offline
+- **Not built:** a dedicated device history page or chart (this is one line per field, not a graph); a cap on how many devices show it (every device with feedback gets its own query — fine for the sizes tested, worth revisiting for a 50-room gateway); the read never uses Postgres JSON path filtering, so it fetches every `device.feedback` row for the room, up to 3000, and filters client-side — cheap while feedback changes stay rare, worth an index or a per-device query if that stops being true
+
 ## Driver classes (plan: `docs/driver-classes.md`)
 
 ### Slice 1: foundations (built, 2026-09-26)

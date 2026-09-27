@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DeviceState, Port } from '@kestrel/model';
-import { deviceFeedback } from './room-host';
+import { deviceFeedback, feedbackChanges } from './room-host';
 
 const ports: Port[] = [
   { id: 'hdmi1', name: 'HDMI 1', direction: 'in', signal: 'video' },
@@ -42,5 +42,32 @@ describe('deviceFeedback', () => {
       volume: 0,
       recording: false,
     });
+  });
+});
+
+describe('feedbackChanges', () => {
+  it('lists only the fields that changed, each with its new value', () => {
+    const prev = { power: 'off', muted: false } as const;
+    const next = { power: 'on', muted: false, input: 'HDMI 1' } as const;
+    expect(feedbackChanges(prev, next)).toEqual([
+      ['power', 'on'],
+      ['input', 'HDMI 1'],
+    ]);
+  });
+
+  it('is empty when nothing changed, or from nothing to nothing', () => {
+    expect(feedbackChanges({ power: 'on' }, { power: 'on' })).toEqual([]);
+    expect(feedbackChanges({}, {})).toEqual([]);
+  });
+
+  it('never reports a field going away: only a defined new value counts as a change', () => {
+    expect(feedbackChanges({ power: 'on' }, {})).toEqual([]);
+  });
+
+  it('treats false and zero as real changes, not as nothing to report', () => {
+    expect(feedbackChanges({ muted: true, volume: 50 }, { muted: false, volume: 0 })).toEqual([
+      ['muted', false],
+      ['volume', 0],
+    ]);
   });
 });

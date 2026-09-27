@@ -14,6 +14,7 @@ import {
 import { toast } from 'sonner';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
+import { useBilling } from '@/components/common/plan-gate';
 import {
   HealthPill,
   INCIDENT_KIND_LABEL,
@@ -51,6 +52,46 @@ function feedbackChips(f: DeviceFeedback | null | undefined): string[] {
     chips.push(f.streamConnected ? 'Stream connected' : 'Stream not connected');
   if (f.activeApp) chips.push(f.activeApp);
   return chips;
+}
+
+function minutesLabel(m: number): string {
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  return rest ? `${h}h ${rest}m` : `${h}h`;
+}
+
+/**
+ * How long a feedback field held each value over the last 30 days, from the changes Kestrel has
+ * logged — the same feedback whether the room has control or not. Says nothing while there is
+ * nothing yet to show, rather than an empty "Last 30 days:".
+ */
+function DeviceHistoryLine({
+  orgId,
+  roomId,
+  deviceId,
+  field,
+}: {
+  orgId: string;
+  roomId: string;
+  deviceId: string;
+  field: 'power' | 'input' | 'online';
+}) {
+  const trpc = useTRPC();
+  const history = useQuery({
+    ...trpc.monitoring.deviceHistory.queryOptions({ orgId, roomId, deviceId, field, days: 30 }),
+    staleTime: 5 * 60_000,
+  });
+  const durations = history.data?.durations ?? [];
+  if (durations.length === 0) return null;
+  // "online" reuses the on/off wording durationsByValue gives any boolean; say what it means here.
+  const show = (v: string) => (field === 'online' ? (v === 'on' ? 'Online' : 'Offline') : v);
+  return (
+    <span className="text-xs text-muted-foreground">
+      Last 30 days: {durations.map((d) => `${show(d.value)} ${minutesLabel(d.minutes)}`).join(', ')}
+      {history.data?.truncated && ' (partial)'}
+    </span>
+  );
 }
 
 function Section({
@@ -194,6 +235,8 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
       q.state.data?.some((c) => c.status === 'pending' || c.status === 'sent') ? 2_000 : 15_000,
   });
 
+  // Ended trial: analytics is off, so no history query gets sent.
+  const analytics = useBilling().data?.entitlements.analytics ?? true;
   const room = overview.data?.rooms.find((r) => r.id === roomId);
   const run = useMutation(
     trpc.command.request.mutationOptions({
@@ -278,6 +321,32 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
                         {chip}
                       </span>
                     ))}
+                  </div>
+                )}
+                {analytics && (
+                  <div className="flex flex-col gap-0.5 pl-6">
+                    <DeviceHistoryLine
+                      orgId={orgId}
+                      roomId={roomId}
+                      deviceId={dev.deviceId}
+                      field="online"
+                    />
+                    {dev.feedback?.power !== undefined && (
+                      <DeviceHistoryLine
+                        orgId={orgId}
+                        roomId={roomId}
+                        deviceId={dev.deviceId}
+                        field="power"
+                      />
+                    )}
+                    {dev.feedback?.input !== undefined && (
+                      <DeviceHistoryLine
+                        orgId={orgId}
+                        roomId={roomId}
+                        deviceId={dev.deviceId}
+                        field="input"
+                      />
+                    )}
                   </div>
                 )}
               </li>

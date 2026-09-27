@@ -6,7 +6,13 @@ import {
   createDriver,
   type DeviceDriver,
 } from '@kestrel/drivers/real';
-import { applyBindings, checkWatch, type DeviceFeedback } from '@kestrel/model';
+import {
+  DEVICE_FEEDBACK_FIELDS,
+  applyBindings,
+  checkWatch,
+  type DeviceFeedback,
+  type DeviceFeedbackField,
+} from '@kestrel/model';
 import type {
   DeviceBus,
   DeviceCommand,
@@ -106,6 +112,20 @@ export function withBindings(signed: SignedManifest, bindings?: RoomBindings): S
     ...signed,
     manifest: { ...manifest, model: applyBindings(manifest.model, bindings.devices) },
   };
+}
+
+/**
+ * Which feedback fields changed between two readings, and their new values. Compares only the
+ * fields `DeviceFeedback` knows about, in a fixed order, so callers get a stable, small diff rather
+ * than every field the object happens to carry.
+ */
+export function feedbackChanges(
+  prev: DeviceFeedback,
+  next: DeviceFeedback,
+): [DeviceFeedbackField, DeviceFeedback[DeviceFeedbackField]][] {
+  return DEVICE_FEEDBACK_FIELDS.flatMap((field) =>
+    next[field] !== undefined && next[field] !== prev[field] ? [[field, next[field]] as const] : [],
+  );
 }
 
 /**
@@ -400,9 +420,15 @@ export class RoomHost {
         .map((a) => a.id),
     );
     // Tell the cloud when a device drops off or comes back, with the time it happened.
+    const devices = new Map(room.signed.manifest.model.devices.map((d) => [d.id, d]));
     const names = new Map(room.signed.manifest.model.devices.map((d) => [d.id, d.name]));
     const reachable = new Map<string, boolean>(
       [...names.keys()].map((id) => [id, room.bus.getState(id)?.online ?? true]),
+    );
+    // The device's own feedback (power, input, ...), so history and usage reports can be built from
+    // it later — logged the same way whether or not the room has control, since this is a read.
+    const lastFeedback = new Map<string, DeviceFeedback>(
+      [...devices].map(([id, d]) => [id, deviceFeedback(room.bus.getState(id), d.ports)]),
     );
     // Whether anyone is in the room, for the cloud's usage reports.
     const occupancy = occupancyTracker((occupied, deviceId) =>
@@ -415,8 +441,23 @@ export class RoomHost {
     );
     for (const id of names.keys()) occupancy(id, room.bus.getState(id)?.occupied);
     const stopDevices = room.bus.subscribe(({ deviceId, state }) => {
-      if (names.has(deviceId)) occupancy(deviceId, state.occupied);
-      if (!names.has(deviceId) || reachable.get(deviceId) === state.online) return;
+      const device = devices.get(deviceId);
+      if (!device) return;
+      occupancy(deviceId, state.occupied);
+      // Only while the device answers: it cannot be on an input it isn't there to report.
+      if (state.online) {
+        const feedback = deviceFeedback(state, device.ports);
+        const changes = feedbackChanges(lastFeedback.get(deviceId) ?? {}, feedback);
+        lastFeedback.set(deviceId, feedback);
+        for (const [field, value] of changes)
+          this.emit({
+            at: at(),
+            type: 'device.feedback',
+            roomId: room.roomId,
+            data: { deviceId, name: device.name, field, value },
+          });
+      }
+      if (reachable.get(deviceId) === state.online) return;
       reachable.set(deviceId, state.online);
       this.emit({
         at: at(),
