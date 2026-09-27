@@ -312,6 +312,56 @@ describe('telemetry', () => {
       activityId: 'present',
     });
   });
+
+  it('logs a device.feedback event for each feedback field that changes', async () => {
+    cloud.assign(ROOM, model());
+    const { gateway, host } = boot();
+    gateway.start();
+    await until(() => host.ids().includes(ROOM));
+    host.get(ROOM)!.runtime.dispatch({ type: 'activity.start', activityId: 'present' });
+    await until(() => host.get(ROOM)!.runtime.getSnapshot().status === 'on', 8000);
+    await gateway.tick();
+    const feedback = cloud.telemetry.filter((e) => e.type === 'device.feedback');
+    // Something turned on: displays report power going from off to on.
+    expect(
+      feedback.some(
+        (e) =>
+          (e.data as { field: string; value: unknown }).field === 'power' &&
+          (e.data as { value: unknown }).value === 'on',
+      ),
+    ).toBe(true);
+    for (const e of feedback)
+      expect(e.data).toMatchObject({
+        deviceId: expect.any(String),
+        name: expect.any(String),
+        field: expect.any(String),
+      });
+  });
+
+  it('keeps logging feedback once control is switched off, since it never sends anything', async () => {
+    cloud.assign(ROOM, model());
+    const { gateway, host } = boot();
+    gateway.start();
+    await until(() => host.ids().includes(ROOM));
+    host.get(ROOM)!.runtime.dispatch({ type: 'activity.start', activityId: 'present' });
+    await until(() => host.get(ROOM)!.runtime.getSnapshot().status === 'on', 8000);
+    await gateway.tick();
+    cloud.telemetry.length = 0;
+    host.setControl(false);
+    // `bus` is the room's raw device connection, not what dispatch runs commands through: sending on
+    // it directly stands in for some other controller changing the device, which Kestrel only watches.
+    await host.get(ROOM)!.bus.send('display1', { type: 'power', on: false });
+    await gateway.tick();
+    const feedback = cloud.telemetry.filter((e) => e.type === 'device.feedback');
+    expect(
+      feedback.some(
+        (e) =>
+          (e.data as { deviceId: string }).deviceId === 'display1' &&
+          (e.data as { field: string }).field === 'power' &&
+          (e.data as { value: unknown }).value === 'off',
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('staged deployments', () => {

@@ -132,6 +132,24 @@ Planned "after the first customers"; built early because it needs no new data (e
 | K-6 | Queues put overdue before due soon before the rest **within a priority**                                                                                                                                                                                                                                                                                             | Priority stays the main order                                                                                           |
 | K-7 | **Not built:** warnings by email or Teams as a target nears (the badge is the warning), pausing the clock while waiting for the customer, and reports of how often targets were met                                                                                                                                                                                  | Needs the business-hours and status decisions above                                                                     |
 
+## Device feedback for monitored devices (TM-18, 2026-09-27)
+
+Every driver already reads back whatever its device's own API offers while it runs (power, the input selected, mute, volume, blanked/shutter, recording, occupancy, an AVoIP stream's connection, an app running) — that never depended on control, since a driver's read side and its `send` side are separate and only `send` is what `ControlGate` refuses. The gap was that none of it reached the cloud or the portal; a report only ever said `online`.
+
+- **TM-18** The gateway now reports **whatever the driver answered**, not just online/offline, as `feedback` on each device (`DeviceFeedback`: power, input — resolved to the port's name, not its id — muted, volume, blanked, recording, occupied, streamConnected, activeApp). A field the driver has nothing to say about is left out, and a device with nothing at all gets no `feedback`. It flows exactly the same whether or not the room has control, monitored room or not
+- Stored on `DeviceStatus.feedback` (new `Json?` column, migration `20260927170000_device_feedback`, **not applied**), kept when a later heartbeat leaves it out (a momentary hiccup should not blank it), and only written when it actually changes
+- Shown on the room monitoring page as a row of small chips under each device
+- This is separate from watch points (TM-16): a watch point is something the room owner chose to be alerted about; feedback is just what the device already says, shown for anyone reading the room's status
+
+## Device history: logging feedback for usage reports (TM-19, 2026-09-27)
+
+Checked and confirmed: every `DeviceFeedback` field works in both scopes already, by construction. `ControlGate` only refuses `send`; `getState`, `subscribe`, `readPoint` and `quickActions` all pass straight through, in both the gateway (`RoomHost.reports()`, `watch()`) and the panel (`RoomRuntime` reads the same `DeviceState`). Nothing in this feature, or in TM-18, treats monitoring and control as separate data — only as separate permission to send a command. Confirmed by a test that flips control off mid-room and checks feedback still logs (`apps/gateway/src/gateway.test.ts`).
+
+- **TM-19** The gateway now also logs a **`device.feedback` telemetry event** each time a field actually changes (not every heartbeat), onto the same `GatewayEvent` pipeline and 90-day retention `usage-analytics.ts` already uses for room usage. "online"/"offline" were already logged this way; feedback fields now are too
+- A new **`monitoring.deviceHistory`** query (gated by `analytics`, like Usage and Reports) turns a device's logged changes for one field — including "online" — into **how many minutes it held each value** over a period (default 30 days, capped at 90). The maths (`durationsByValue`) is a pure function over events, same shape as `usage-analytics.ts`
+- Shown on the room monitoring page as a line under each device: "Last 30 days: On 18h 20m, Off 5h 40m" for power, the same for input, and always for online/offline
+- **Not built:** a dedicated device history page or chart (this is one line per field, not a graph); a cap on how many devices show it (every device with feedback gets its own query — fine for the sizes tested, worth revisiting for a 50-room gateway); the read never uses Postgres JSON path filtering, so it fetches every `device.feedback` row for the room, up to 3000, and filters client-side — cheap while feedback changes stay rare, worth an index or a per-device query if that stops being true
+
 ## Driver classes (plan: `docs/driver-classes.md`)
 
 ### Slice 1: foundations (built, 2026-09-26)

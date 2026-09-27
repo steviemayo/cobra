@@ -519,6 +519,8 @@ model DeviceStatus {
   firmware      String?
   /// When this firmware version was first seen on the device.
   firmwareSince DateTime?
+  /// Whatever the driver reports back (power, input, mute, ...), control or not. See DeviceFeedback.
+  feedback      Json?
   updatedAt     DateTime  @default(now()) @updatedAt
 
   org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
