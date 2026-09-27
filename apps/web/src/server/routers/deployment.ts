@@ -6,7 +6,7 @@ import { BulkDeployError, MAX_BULK_DEPLOY_ROOMS, deployBulk, planBulkDeploy } fr
 import { checkDeployable } from '../deploy-check';
 import { roomDeployStates } from '../deployment-queries';
 import { cancelScheduled, createDeployment } from '../deployment-service';
-import { readOrgBranding } from '../panel-settings';
+import { orgPanelBranding } from '../provider-brand';
 import { SigningNotConfigured, loadSigningKey } from '../signing';
 import { orgProcedure, requireRole, router } from '../trpc';
 import { assertRoom } from './room-model-helpers';
@@ -178,7 +178,7 @@ export const deploymentRouter = router({
     try {
       const out = await deployBulk(db, ctx.orgId, input.roomIds, input.mode, {
         key,
-        orgBranding: readOrgBranding(org?.branding),
+        orgBranding: await orgPanelBranding(db, ctx.orgId, org?.branding),
         userId: ctx.user.id,
       });
       // The same records as deploying each room by hand, plus one for the whole run.

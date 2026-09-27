@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from '@kestrel/db';
 import { effectiveStatus } from './gateway-status';
+import { isBilledRoom } from './room-kinds';
 
 // Kestrel staff: the people who can use /staff, and what the staff portal shows about every
 // organisation. Deliberately not scoped to one org. Functions take the database as a parameter so
@@ -131,7 +132,7 @@ export async function orgDirectory(db: StaffDb, now = new Date()): Promise<OrgSu
         trialDaysLeft: trial
           ? Math.ceil((bill!.trialEndsAt.getTime() - now.getTime()) / DAY)
           : null,
-        rooms: orgRooms.filter((x) => x.kind !== 'combined').length,
+        rooms: orgRooms.filter(isBilledRoom).length,
         combinedRooms: orgRooms.filter((x) => x.kind === 'combined').length,
         gateways: orgGateways.length,
         gatewaysOnline: orgGateways.filter((x) => effectiveStatus(x, now.getTime()) === 'online')
@@ -171,7 +172,7 @@ export async function orgDetail(
     sites: sites.map((s) => ({
       id: s.id,
       name: s.name,
-      rooms: rooms.filter((r) => r.siteId === s.id && r.kind !== 'combined').length,
+      rooms: rooms.filter((r) => r.siteId === s.id && isBilledRoom(r)).length,
     })),
     team: members.map((x) => ({ userId: x.userId, email: x.email, role: x.role })),
     recentActivity: activity.map((a) => ({

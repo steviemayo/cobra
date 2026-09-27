@@ -12,7 +12,7 @@ import { Breadcrumbs } from './breadcrumbs';
 import { CommandMenu, usePalette } from './command-menu';
 import { DialogsProvider } from './dialogs';
 import { PortalAccent } from './portal-accent';
-import { OrgProvider, type OrgSummary } from './org-context';
+import { OrgProvider, type OrgSummary, type PortalBrandMark } from './org-context';
 import { ThemeToggle } from './theme-toggle';
 
 function SearchButton() {
@@ -56,6 +56,7 @@ export function OrgShell({
   defaultOpen,
   viewAs,
   accent,
+  brand,
   children,
 }: {
   orgId: string;
@@ -66,10 +67,12 @@ export function OrgShell({
   viewAs?: ViewAs | null;
   /** The organisation's accent colour, if it set one. */
   accent?: string | null;
+  /** A service provider's name and logo, when this portal wears them. */
+  brand?: PortalBrandMark | null;
   children: React.ReactNode;
 }) {
   return (
-    <OrgProvider orgId={orgId} orgs={orgs} user={user}>
+    <OrgProvider orgId={orgId} orgs={orgs} user={user} brand={brand}>
       <PortalAccent accent={accent} />
       <SidebarProvider defaultOpen={defaultOpen}>
         <DialogsProvider>

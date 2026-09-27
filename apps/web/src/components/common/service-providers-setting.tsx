@@ -51,6 +51,15 @@ export function ServiceProvidersSetting() {
       onError: (e) => toast.error(e.message),
     }),
   );
+  const useBrand = useMutation(
+    trpc.msp.useBrand.mutationOptions({
+      onSuccess: async (_r, vars) => {
+        await refresh();
+        toast.success(vars.on ? 'Their branding is on' : 'Their branding is off');
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
   const end = useMutation(
     trpc.msp.end.mutationOptions({
       onSuccess: async () => {
@@ -68,7 +77,8 @@ export function ServiceProvidersSetting() {
         <p className="text-sm text-muted-foreground">
           Let a managed service provider look after this organisation. Ask them for their provider
           code. They only get the access you choose, never billing, team or settings, and you can
-          end it at any time.
+          end it at any time. You can also show a connected provider’s name, logo and colour in your
+          portal and, unless you set your own, on your room panels. You still pay Kestrel directly.
         </p>
       </div>
 
@@ -86,14 +96,31 @@ export function ServiceProvidersSetting() {
                 {g.siteNames.length === 0 ? 'whole organisation' : g.siteNames.join(', ')}
               </span>
             </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={end.isPending}
-              onClick={() => end.mutate({ orgId, grantId: g.id })}
-            >
-              {g.status === 'pending' ? 'Withdraw' : 'End connection'}
-            </Button>
+            <div className="flex flex-wrap items-center gap-3">
+              {g.status === 'active' && (
+                <label
+                  className="flex items-center gap-2 text-xs text-muted-foreground"
+                  title={g.hasBrand ? undefined : 'This provider has not set up its branding yet'}
+                >
+                  <Checkbox
+                    checked={g.useBrand}
+                    disabled={useBrand.isPending || (!g.hasBrand && !g.useBrand)}
+                    onCheckedChange={(on) =>
+                      useBrand.mutate({ orgId, grantId: g.id, on: on === true })
+                    }
+                  />
+                  Show their name, logo and colour
+                </label>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={end.isPending}
+                onClick={() => end.mutate({ orgId, grantId: g.id })}
+              >
+                {g.status === 'pending' ? 'Withdraw' : 'End connection'}
+              </Button>
+            </div>
           </li>
         ))}
       </ul>

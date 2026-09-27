@@ -3,6 +3,7 @@ import {
   type PanelBranding,
   type PanelClient,
   type PanelIntent,
+  type Meeting,
   type PanelViewModel,
 } from '@kestrel/model';
 
@@ -15,6 +16,8 @@ export interface Connection {
   branding?: PanelBranding;
   /** A link for controlling the room from a phone, replaced before it expires. */
   qr?: { url: string; expiresAt: string };
+  /** The room's bookings from its calendar. Null or absent: not known, so none are shown. */
+  schedule?: Meeting[] | null;
 }
 
 /** What a panel shows before the first snapshot arrives. */
@@ -154,6 +157,9 @@ export class WsPanelClient implements PanelClient {
             state: this.connection.state,
             qr: { url: msg.data.url, expiresAt: msg.data.expiresAt },
           });
+          break;
+        case 'schedule':
+          this.setConnection({ state: this.connection.state, schedule: msg.data.meetings });
           break;
         case 'error':
           this.setConnection({

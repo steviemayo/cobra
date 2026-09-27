@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, LifeBuoy, PlayCircle, Power, RotateCw, Stethoscope } from 'lucide-react';
+import { ChevronRight, LifeBuoy, PlayCircle, Power, RotateCw, Search, Stethoscope } from 'lucide-react';
 import { toast } from 'sonner';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
@@ -57,6 +57,8 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       return `${s(data.name) || 'A device'} is back`;
     case 'room.status':
       return `Room is now ${s(data.status)}`;
+    case 'room.occupancy':
+      return data.occupied ? 'Someone is in the room' : 'The room is empty';
     case 'activity.started':
       return `Activity started (${s(data.activityId)})`;
     case 'activity.stopped':
@@ -78,6 +80,7 @@ const COMMAND_ICON: Record<CommandType, typeof Power> = {
   restart_room: RotateCw,
   room_off: Power,
   verify_point: Stethoscope,
+  discover_devices: Search,
 };
 
 const STATUS_LABEL: Record<string, string> = {

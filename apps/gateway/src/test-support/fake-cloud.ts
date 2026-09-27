@@ -36,6 +36,8 @@ export class FakeCloud {
   readonly heartbeats: HeartbeatRequest[] = [];
   /** Commands handed to the gateway in its next heartbeat response. */
   readonly queuedCommands: GatewayCommand[] = [];
+  /** Bookings handed to the gateway in each heartbeat response. */
+  schedules: { roomId: string; meetings: unknown[] }[] = [];
   /** Rooms the fake portal is "controlling": the gateway is told to poll fast for them. */
   watching: string[] = [];
   /** Room groups the fake cloud reports in the gateway's config. */
@@ -45,7 +47,15 @@ export class FakeCloud {
   readonly telemetry: TelemetryEvent[] = [];
   readonly manifestFetches: string[] = [];
   readonly bindingsFetches: string[] = [];
-  private bindings = new Map<string, { version: number; devices: DeviceValues; tamper?: boolean; shared?: Record<string, { siteDeviceId: string; exclusive: boolean }> }>();
+  private bindings = new Map<
+    string,
+    {
+      version: number;
+      devices: DeviceValues;
+      tamper?: boolean;
+      shared?: Record<string, { siteDeviceId: string; exclusive: boolean }>;
+    }
+  >();
   private assignments = new Map<string, Assignment>();
   private version = 1;
   private server: Server | null = null;
@@ -120,7 +130,10 @@ export class FakeCloud {
   setBindings(
     roomId: string,
     devices: DeviceValues,
-    opts: { tamper?: boolean; shared?: Record<string, { siteDeviceId: string; exclusive: boolean }> } = {},
+    opts: {
+      tamper?: boolean;
+      shared?: Record<string, { siteDeviceId: string; exclusive: boolean }>;
+    } = {},
   ) {
     const version = (this.bindings.get(roomId)?.version ?? 0) + 1;
     this.bindings.set(roomId, { version, devices, ...opts });
@@ -193,6 +206,7 @@ export class FakeCloud {
         commands: this.queuedCommands.splice(0),
         watch: this.watching,
         pollNow: this.queuedIntents.length > 0,
+        schedules: this.schedules,
       });
     }
     if (req.method === 'POST' && path === '/poll') {
@@ -230,7 +244,13 @@ export class FakeCloud {
       if (!found) return this.json(res, 404, { error: 'This room has no bindings' });
       this.bindingsFetches.push(b[1]!);
       const signed = signBindings(
-        { orgId: ORG_ID, roomId: b[1]!, version: found.version, devices: found.devices, ...(found.shared ? { sharedDevices: found.shared } : {}) },
+        {
+          orgId: ORG_ID,
+          roomId: b[1]!,
+          version: found.version,
+          devices: found.devices,
+          ...(found.shared ? { sharedDevices: found.shared } : {}),
+        },
         { privateKeyPem: this.keys.privateKeyPem, keyId: this.keyId },
       );
       const wire = JSON.parse(JSON.stringify(signed)) as { payload: { devices: DeviceValues } };

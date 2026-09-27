@@ -45,6 +45,9 @@ model Org {
   rooms               Room[]
   audit               AuditLog[]
   retention           OrgRetention?
+  commissioningRuns   CommissioningRun[]
+  apiKeys             ApiKey[]
+  reportSchedule      ReportSchedule?
   drafts              RoomDraft[]
   draftVersions       RoomDraftVersion[]
   templates           Template[]
@@ -163,18 +166,19 @@ model Room {
   reportedAt              DateTime?
   updatedAt               DateTime  @default(now()) @updatedAt
 
-  org         Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site        Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  gateway     Gateway?        @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
-  group       RoomGroup?      @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  draft       RoomDraft?
-  binding     RoomBinding?
-  releases    Release[]
-  deployments Deployment[]
-  devices     DeviceStatus[]
-  incidents   Incident[]
-  commands    RemoteCommand[]
-  tickets     Ticket[]
+  org               Org                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site              Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  gateway           Gateway?           @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  group             RoomGroup?         @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  draft             RoomDraft?
+  binding           RoomBinding?
+  releases          Release[]
+  commissioningRuns CommissioningRun[]
+  deployments       Deployment[]
+  devices           DeviceStatus[]
+  incidents         Incident[]
+  commands          RemoteCommand[]
+  tickets           Ticket[]
 
   @@index([orgId])
   @@index([siteId])
@@ -264,6 +268,67 @@ model OrgRetention {
   auditDays Int      @default(365)
   updatedBy String?  @db.Uuid
   updatedAt DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// One walk through a room to check it works, and who signed it off. `items` is the checklist made
+// from the room's design when the run started: [{ id, group, label, hint?, result, note? }] with
+// result pending, pass, fail or skip. A signed-off run never changes.
+model CommissioningRun {
+  id               String    @id @default(uuid()) @db.Uuid
+  orgId            String    @db.Uuid
+  roomId           String    @db.Uuid
+  /// The release the room was set to run when the check started.
+  releaseNumber    Int?
+  items            Json
+  status           String    @default("in_progress")
+  startedBy        String?   @db.Uuid
+  startedByEmail   String?
+  startedAt        DateTime  @default(now())
+  signedOffBy      String?   @db.Uuid
+  signedOffByEmail String?
+  signedOffAt      DateTime?
+  notes            String?
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, startedAt])
+  @@index([orgId])
+}
+
+// A key an organisation's own systems use to read its data through the public API (/api/v1). Only
+// a hash of the secret is kept: the key is shown once, when it is made.
+model ApiKey {
+  id         String    @id @default(uuid()) @db.Uuid
+  orgId      String    @db.Uuid
+  name       String
+  /// The first characters of the key: recognised in a list, and how a request finds its key.
+  prefix     String    @unique
+  secretHash String
+  createdBy  String?   @db.Uuid
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+// A monthly usage and reliability report emailed to these addresses on the first days of each month.
+// No row means no schedule. `lastSentMonth` ("2026-09") stops a month being sent twice.
+model ReportSchedule {
+  orgId         String   @id @db.Uuid
+  enabled       Boolean  @default(true)
+  recipients    String[] @default([])
+  /// IANA time zone the month is read in.
+  timezone      String   @default("UTC")
+  lastSentMonth String?
+  updatedBy     String?  @db.Uuid
+  updatedAt     DateTime @updatedAt
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
@@ -751,12 +816,24 @@ model MspGrant {
   respondedAt    DateTime?
   endedAt        DateTime?
   endedBy        String?   @db.Uuid
+  /// The customer's owner chose to show this provider's name, logo and colour in its portal and on its panels.
+  useBrand       Boolean   @default(false)
 
   msp      Org @relation("MspSide", fields: [mspOrgId], references: [id], onDelete: Cascade)
   customer Org @relation("CustomerSide", fields: [customerOrgId], references: [id], onDelete: Cascade)
 
   @@index([customerOrgId, status])
   @@index([mspOrgId, status])
+}
+
+// How a service provider presents itself to customers that choose it (white label). No relations,
+// like RoomSchedule: it is only ever read by the provider's organisation id.
+model ProviderBrand {
+  mspOrgId  String   @id @db.Uuid
+  name      String
+  logoUrl   String?
+  accent    String?
+  updatedAt DateTime @updatedAt
 }
 
 // Kestrel staff: people who may use the /staff portal across every organisation. Separate from
@@ -850,6 +927,18 @@ model CalendarFire {
 
   @@unique([roomId, triggerId, eventKey])
   @@index([firedAt])
+}
+
+// The bookings for a room's panel, copied from its calendar by the calendar job (read only).
+// Titles and organisers of private meetings are already removed. No relations: a row for a room
+// that has since been deleted is harmless and is replaced or ignored.
+model RoomSchedule {
+  roomId    String   @id @db.Uuid
+  orgId     String   @db.Uuid
+  meetings  Json
+  fetchedAt DateTime
+
+  @@index([orgId])
 }
 
 // ---- Marketplace -------------------------------------------------------------------------------

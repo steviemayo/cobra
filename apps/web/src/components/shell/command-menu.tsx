@@ -22,6 +22,8 @@ import {
   Settings,
   Store,
   Users,
+  BarChart3,
+  FileText,
 } from 'lucide-react';
 import {
   Command,
@@ -124,6 +126,12 @@ export function CommandMenu({ children }: { children: React.ReactNode }) {
               </CommandItem>
               <CommandItem onSelect={() => go('/monitoring')}>
                 <Activity /> Monitoring
+              </CommandItem>
+              <CommandItem onSelect={() => go('/usage')}>
+                <BarChart3 /> Usage
+              </CommandItem>
+              <CommandItem onSelect={() => go('/reports')}>
+                <FileText /> Reports
               </CommandItem>
               <CommandItem onSelect={() => go('/incidents')}>
                 <AlertTriangle /> Incidents

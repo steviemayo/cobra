@@ -1,6 +1,7 @@
 import { parseAccess, roomAccessSecret, signAccess, verifyAccess } from '@kestrel/crypto';
 import { PanelIntent } from '@kestrel/model';
-import { effectivePanel, readOrgBranding, readPanel } from './panel-settings';
+import { effectivePanel, readPanel } from './panel-settings';
+import { orgPanelBranding, type BrandDb } from './provider-brand';
 import { portalIntent, portalSnapshot, type ControlDb } from './control-service';
 
 // Controlling a room from a phone. The wall panel shows a QR code holding a "join" link the gateway
@@ -10,7 +11,7 @@ import { portalIntent, portalSnapshot, type ControlDb } from './control-service'
 
 export const SESSION_TTL_SECONDS = 2 * 60 * 60;
 
-export type PhoneDb = ControlDb & Pick<import('@kestrel/db').PrismaClient, 'org'>;
+export type PhoneDb = ControlDb & BrandDb;
 export type PhoneResult<T> = { ok: true; value: T } | { ok: false; status: number; error: string };
 
 const bad = (status: number, error: string): { ok: false; status: number; error: string } => ({
@@ -64,7 +65,10 @@ export async function phoneState(db: PhoneDb, session: string, masterKey: string
   const snap = await portalSnapshot(db, { orgId: r.room.orgId, roomId: r.room.id }, now);
   if (!snap) return bad(404, 'Room not found');
   const org = await db.org.findFirst({ where: { id: r.room.orgId }, select: { branding: true } });
-  const { branding } = effectivePanel(readPanel(r.room.panel), readOrgBranding(org?.branding));
+  const { branding } = effectivePanel(
+    readPanel(r.room.panel),
+    await orgPanelBranding(db, r.room.orgId, org?.branding),
+  );
   return { ok: true, value: { ...snap, branding } } as const;
 }
 

@@ -10,6 +10,7 @@ import { PanelServerMessage, STARTER_TEMPLATES, type PanelAccess } from '@kestre
 import { silentLogger } from './log';
 import { createPanelServer } from './panel-server';
 import { PhoneLinks } from './phone';
+import { ScheduleStore } from './schedule';
 import { Store } from './store';
 import { RoomHost } from './room-host';
 
@@ -38,7 +39,11 @@ let app: FastifyInstance;
 let port: number;
 const clients: WebSocket[] = [];
 
-async function start(access?: Partial<PanelAccess>, panelDir = '/nonexistent', extra: Partial<Parameters<typeof createPanelServer>[0]> = {}) {
+async function start(
+  access?: Partial<PanelAccess>,
+  panelDir = '/nonexistent',
+  extra: Partial<Parameters<typeof createPanelServer>[0]> = {},
+) {
   host = new RoomHost('all', silentLogger, () => undefined);
   host.load(signedRoom(access));
   app = await createPanelServer({ host, log: silentLogger, panelDir, ...extra });
@@ -53,7 +58,9 @@ class Panel {
   constructor(roomId = ROOM) {
     this.ws = new WebSocket(`ws://127.0.0.1:${port}/ws/${roomId}`);
     clients.push(this.ws);
-    this.ws.on('message', (d) => this.messages.push(PanelServerMessage.parse(JSON.parse(d.toString()))));
+    this.ws.on('message', (d) =>
+      this.messages.push(PanelServerMessage.parse(JSON.parse(d.toString()))),
+    );
     this.ws.on('close', (code) => (this.closed = { code }));
     this.ws.on('error', () => undefined);
   }
@@ -99,7 +106,10 @@ describe('open panels', () => {
     const a = new Panel();
     const b = new Panel();
     await until(() => !!a.last && !!b.last);
-    a.send({ t: 'intent', intent: { type: 'activity.start', activityId: 'present', sourceId: 'laptop2' } });
+    a.send({
+      t: 'intent',
+      intent: { type: 'activity.start', activityId: 'present', sourceId: 'laptop2' },
+    });
     await until(() => a.last!.status === 'starting');
     await until(() => b.last!.status === 'starting'); // the other panel sees it too
     expect(host.get(ROOM)!.runtime.getSnapshot().status).toBe('starting');
@@ -122,7 +132,8 @@ describe('open panels', () => {
     await start();
     const p = new Panel();
     await until(() => !!p.last);
-    for (let i = 0; i < 100; i++) p.send({ t: 'intent', intent: { type: 'volume.bump', delta: 1 } });
+    for (let i = 0; i < 100; i++)
+      p.send({ t: 'intent', intent: { type: 'volume.bump', delta: 1 } });
     await wait(200);
     // 20 allowed per second; an unlimited flood would have pushed it to 100 (clamped).
     expect(host.get(ROOM)!.runtime.getSnapshot().volume.level).toBeLessThanOrEqual(70);
@@ -200,7 +211,10 @@ describe('serving the built panel app', () => {
   const site = () => {
     const dir = mkdtempSync(join(tmpdir(), 'kestrel-panel-'));
     mkdirSync(join(dir, 'assets'));
-    writeFileSync(join(dir, 'index.html'), '<!doctype html><title>Kestrel</title><div id="root"></div>');
+    writeFileSync(
+      join(dir, 'index.html'),
+      '<!doctype html><title>Kestrel</title><div id="root"></div>',
+    );
     writeFileSync(join(dir, 'assets', 'app.js'), 'console.log("panel")');
     writeFileSync(join(dirname(dir), 'kestrel-secret.txt'), 'top secret');
     return dir;
@@ -221,7 +235,12 @@ describe('serving the built panel app', () => {
   it('does not expose files outside the panel directory, or the directory itself', async () => {
     const dir = site();
     await start(undefined, dir);
-    for (const url of ['/assets/../../kestrel-secret.txt', '/assets/%2e%2e/%2e%2e/kestrel-secret.txt', '/index.html', '/assets']) {
+    for (const url of [
+      '/assets/../../kestrel-secret.txt',
+      '/assets/%2e%2e/%2e%2e/kestrel-secret.txt',
+      '/index.html',
+      '/assets',
+    ]) {
       const res = await app.inject({ method: 'GET', url });
       expect(res.body, url).not.toContain('top secret');
       expect(res.statusCode, url).toBeGreaterThanOrEqual(400);
@@ -232,7 +251,10 @@ describe('serving the built panel app', () => {
   it('still refuses to serve a room that is not running', async () => {
     const dir = site();
     await start(undefined, dir);
-    const res = await app.inject({ method: 'GET', url: '/room/33333333-3333-4333-8333-3333333333ff' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/room/33333333-3333-4333-8333-3333333333ff',
+    });
     expect(res.statusCode).toBe(404);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -250,7 +272,10 @@ describe('http', () => {
     const ok = await app.inject({ method: 'GET', url: `/room/${ROOM}` });
     expect(ok.statusCode).toBe(200);
     expect(ok.body).toContain('Panel app not built');
-    const missing = await app.inject({ method: 'GET', url: '/room/33333333-3333-4333-8333-3333333333ff' });
+    const missing = await app.inject({
+      method: 'GET',
+      url: '/room/33333333-3333-4333-8333-3333333333ff',
+    });
     expect(missing.statusCode).toBe(404);
     expect((await app.inject({ method: 'GET', url: '/room/nope' })).statusCode).toBe(404);
   });
@@ -261,7 +286,17 @@ describe('QR links for phones', () => {
   const links = () => {
     const store = new Store(':memory:');
     const phone = new PhoneLinks(store, 'https://kestrel.example');
-    phone.setSecrets([{ roomId: ROOM, roomName: 'Boardroom', releaseId: '44444444-4444-4444-8444-444444444441', releaseNumber: 1, manifestHash: 'h', deploymentId: '55555555-5555-4555-8555-555555555551', phoneSecret: SECRET }]);
+    phone.setSecrets([
+      {
+        roomId: ROOM,
+        roomName: 'Boardroom',
+        releaseId: '44444444-4444-4444-8444-444444444441',
+        releaseNumber: 1,
+        manifestHash: 'h',
+        deploymentId: '55555555-5555-4555-8555-555555555551',
+        phoneSecret: SECRET,
+      },
+    ]);
     return { store, phone };
   };
 
@@ -277,7 +312,10 @@ describe('QR links for phones', () => {
   });
 
   it('are replaced regularly, and held back from a panel that has not entered its PIN', async () => {
-    await start({ mode: 'pin', pinHash: hashPin('4821') }, '/nonexistent', { phone: links().phone, qrRefreshMs: 60 });
+    await start({ mode: 'pin', pinHash: hashPin('4821') }, '/nonexistent', {
+      phone: links().phone,
+      qrRefreshMs: 60,
+    });
     const p = new Panel();
     await until(() => p.of('hello').length > 0);
     await wait(150);
@@ -288,7 +326,9 @@ describe('QR links for phones', () => {
 
   it('are not sent when the cloud has not given the gateway a secret', async () => {
     const store = new Store(':memory:');
-    await start(undefined, '/nonexistent', { phone: new PhoneLinks(store, 'https://kestrel.example') });
+    await start(undefined, '/nonexistent', {
+      phone: new PhoneLinks(store, 'https://kestrel.example'),
+    });
     const p = new Panel();
     await until(() => !!p.last);
     await wait(80);
@@ -300,6 +340,59 @@ describe('QR links for phones', () => {
     expect(new PhoneLinks(store, 'https://k.example').link(ROOM)).not.toBeNull();
     phone.setSecrets([]);
     expect(phone.link(ROOM)).toBeNull();
+  });
+});
+
+describe('bookings on the panel', () => {
+  const meeting = (id: string) => ({
+    id,
+    title: `Meeting ${id}`,
+    organiser: 'Sam Lee',
+    start: '2026-09-28T09:00:00.000Z',
+    end: '2026-09-28T10:00:00.000Z',
+    private: false,
+  });
+
+  it('are sent when a panel connects, and again when they change', async () => {
+    const schedule = new ScheduleStore();
+    schedule.apply([{ roomId: ROOM, meetings: [meeting('a')] }]);
+    await start(undefined, '/nonexistent', { schedule });
+    const p = new Panel();
+    await until(() => p.of('schedule').length > 0);
+    expect(p.of('schedule')[0]!.meetings?.map((m) => m.id)).toEqual(['a']);
+    schedule.apply([{ roomId: ROOM, meetings: [meeting('a'), meeting('b')] }]);
+    await until(() => p.of('schedule').length > 1);
+    expect(p.of('schedule')[1]!.meetings).toHaveLength(2);
+  });
+
+  it('say "not known" when the cloud has not described the room', async () => {
+    await start(undefined, '/nonexistent', { schedule: new ScheduleStore() });
+    const p = new Panel();
+    await until(() => p.of('schedule').length > 0);
+    expect(p.of('schedule')[0]!.meetings).toBeNull();
+  });
+
+  it('are not sent to another room, or to a panel that has not entered its PIN', async () => {
+    const schedule = new ScheduleStore();
+    schedule.apply([{ roomId: '33333333-3333-4333-8333-333333333399', meetings: [meeting('x')] }]);
+    await start({ mode: 'pin', pinHash: hashPin('4821') }, '/nonexistent', { schedule });
+    const p = new Panel();
+    await until(() => p.of('hello').length > 0);
+    await wait(100);
+    expect(p.of('schedule')).toHaveLength(0);
+    p.send({ t: 'auth', pin: '4821' });
+    await until(() => p.of('schedule').length > 0);
+    expect(p.of('schedule')[0]!.meetings).toBeNull();
+    schedule.apply([{ roomId: '33333333-3333-4333-8333-333333333399', meetings: [meeting('y')] }]);
+    await wait(100);
+    expect(p.of('schedule')).toHaveLength(1);
+  });
+
+  it('are not sent at all when the gateway has no schedule store', async () => {
+    await start();
+    const p = new Panel();
+    await until(() => !!p.last);
+    expect(p.of('schedule')).toHaveLength(0);
   });
 });
 
@@ -332,7 +425,10 @@ describe('panels while walls are open', () => {
     host.notifyActiveChange();
     await until(() => p.last?.roomName === 'Boardroom + Annexe');
 
-    p.send({ t: 'intent', intent: { type: 'activity.start', activityId: 'present', sourceId: 'laptop1' } });
+    p.send({
+      t: 'intent',
+      intent: { type: 'activity.start', activityId: 'present', sourceId: 'laptop1' },
+    });
     await until(() => host.get(OTHER)!.runtime.getSnapshot().status === 'starting');
     expect(host.get(ROOM)!.runtime.getSnapshot().status).toBe('off');
 

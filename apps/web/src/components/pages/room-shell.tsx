@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { NavTabs } from '@/components/common/nav-tabs';
+import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/common/page-header';
 import { SyncBadge } from '@/components/common/deploy-status';
 import { HealthBadge } from '@/components/common/status';
@@ -92,6 +93,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
           title={room.name}
           meta={
             <>
+              {room.kind === 'staging' && <Badge variant="secondary">Staging</Badge>}
               <span className="text-sm text-muted-foreground">{ROOM_TYPE_LABEL[room.type]}</span>
               <span aria-hidden className="text-muted-foreground/50">
                 ·
@@ -154,6 +156,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
                   { label: 'Simulate', href: `${base}/simulate` },
                   { label: 'Devices', href: `${base}/devices` },
                   { label: 'Deployments', href: `${base}/deployments` },
+                  { label: 'Commissioning', href: `${base}/commissioning` },
                 ]
               : []),
             { label: 'Control', href: `${base}/control` },

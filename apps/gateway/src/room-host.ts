@@ -17,6 +17,7 @@ import type {
   TelemetryEvent,
 } from '@kestrel/model';
 import type { Logger } from './log';
+import { occupancyTracker } from './occupancy';
 import { SharedDevices } from './shared-devices';
 
 export type SimulateMode = 'off' | 'all' | 'missing';
@@ -303,7 +304,13 @@ export class RoomHost {
     const reachable = new Map<string, boolean>(
       [...names.keys()].map((id) => [id, room.bus.getState(id)?.online ?? true]),
     );
+    // Whether anyone is in the room, for the cloud's usage reports.
+    const occupancy = occupancyTracker((occupied, deviceId) =>
+      this.emit({ at: at(), type: 'room.occupancy', roomId: room.roomId, data: { occupied, deviceId } }),
+    );
+    for (const id of names.keys()) occupancy(id, room.bus.getState(id)?.occupied);
     const stopDevices = room.bus.subscribe(({ deviceId, state }) => {
+      if (names.has(deviceId)) occupancy(deviceId, state.occupied);
       if (!names.has(deviceId) || reachable.get(deviceId) === state.online) return;
       reachable.set(deviceId, state.online);
       this.emit({

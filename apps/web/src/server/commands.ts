@@ -11,7 +11,7 @@ import {
 // Remote commands. Support asks in the portal; the gateway collects the request in its next
 // heartbeat response (it never accepts inbound connections), runs it if it is on the allowlist,
 // and reports the outcome in a later heartbeat.
-export type CommandDb = Pick<PrismaClient, 'remoteCommand' | 'room' | 'deviceStatus' | 'auditLog'>;
+export type CommandDb = Pick<PrismaClient, 'remoteCommand' | 'room' | 'deviceStatus' | 'auditLog' | 'gateway'>;
 
 export const MAX_COMMANDS_PER_ROOM_MINUTE = 6;
 const MAX_PER_HEARTBEAT = 10;
@@ -35,6 +35,14 @@ export async function requestCommand(
   if (!room) return { ok: false, error: 'Room not found' };
   if (!room.gatewayId)
     return { ok: false, error: 'This room has no gateway to run the command on' };
+
+  // A gateway that does not know a command would fail to read the whole reply that carries it, so it
+  // is only sent to one that says it can run it.
+  if (type.data === 'discover_devices') {
+    const gateway = await db.gateway.findFirst({ where: { id: room.gatewayId, orgId: input.orgId } });
+    if (!gateway?.features?.includes('discovery'))
+      return { ok: false, error: 'This gateway needs updating before it can look for devices.' };
+  }
 
   const args: Record<string, string> = {};
   if (COMMAND_INFO[type.data].needsDevice) {
@@ -61,6 +69,13 @@ export async function requestCommand(
     if (text.length > 200) return { ok: false, error: 'That control point address is too long' };
     args.type = kind.data;
     args.address = text;
+  }
+
+  if (type.data === 'discover_devices' && input.args?.subnet) {
+    // One /24 the gateway is on, like 192.168.1. The gateway checks it is one of its own as well.
+    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(input.args.subnet))
+      return { ok: false, error: 'That is not a network address' };
+    args.subnet = input.args.subnet;
   }
 
   const recent = await db.remoteCommand.count({

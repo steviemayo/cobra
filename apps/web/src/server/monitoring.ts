@@ -123,6 +123,8 @@ export async function recordReports(
     const room = byId.get(report.roomId);
     if (!room) continue;
     const base = { orgId: gw.orgId, roomId: room.id, gatewayId: gw.id };
+    // A staging room is for trying things out: it is watched, but never raises a problem or an alert.
+    const raise: typeof openIncident = room.kind === 'staging' ? async () => null : openIncident;
 
     if (report.status !== 'unloaded') {
       const known = new Map(
@@ -172,7 +174,7 @@ export async function recordReports(
           add(await resolveIncident(db, { orgId: gw.orgId, kind: 'device_offline', subject }, now));
         else if (now.getTime() - since.getTime() >= DEVICE_GRACE_MS)
           add(
-            await openIncident(
+            await raise(
               db,
               {
                 ...base,
@@ -202,7 +204,7 @@ export async function recordReports(
 
     if (report.status === 'fault')
       add(
-        await openIncident(
+        await raise(
           db,
           {
             ...base,
@@ -222,7 +224,7 @@ export async function recordReports(
 
     if (report.error)
       add(
-        await openIncident(
+        await raise(
           db,
           {
             ...base,

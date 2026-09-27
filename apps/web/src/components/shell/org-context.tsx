@@ -15,12 +15,20 @@ export interface OrgSummary {
   scoped?: boolean;
 }
 
+/** A service provider's name and logo, shown in place of plain Kestrel (white label). */
+export interface PortalBrandMark {
+  name: string;
+  logoUrl: string | null;
+}
+
 interface OrgContextValue {
   orgId: string;
   org: OrgSummary;
   orgs: OrgSummary[];
   role: OrgRole;
   user: { id: string; email: string };
+  /** Set when the portal wears a service provider's brand. */
+  brand: PortalBrandMark | null;
   /** Owners and developers can create and edit estate and designs. */
   canEdit: boolean;
   isOwner: boolean;
@@ -36,11 +44,13 @@ export function OrgProvider({
   orgId,
   orgs,
   user,
+  brand = null,
   children,
 }: {
   orgId: string;
   orgs: OrgSummary[];
   user: { id: string; email: string };
+  brand?: PortalBrandMark | null;
   children: React.ReactNode;
 }) {
   const value = useMemo<OrgContextValue>(() => {
@@ -51,12 +61,13 @@ export function OrgProvider({
       orgs,
       role: org.role,
       user,
+      brand,
       canEdit: org.role === 'owner' || org.role === 'dev',
       isOwner: org.role === 'owner',
       canSeeTeam: org.role !== 'customer_viewer',
       canSupport: org.role !== 'customer_viewer',
     };
-  }, [orgId, orgs, user]);
+  }, [orgId, orgs, user, brand]);
 
   useEffect(() => rememberOrg(orgId), [orgId]);
 
