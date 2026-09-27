@@ -124,6 +124,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `${meta.combined ? 'joined' : 'split'} “${s(meta.name)}”`;
     case 'group.deploy':
       return `deployed a room group (${s(meta.deployed)} of ${s(meta.rooms)} rooms sent, ${s(meta.published)} new releases)`;
+    case 'report.schedule':
+      return meta.enabled
+        ? `set the monthly report to be emailed to ${s(meta.recipients)} ${meta.recipients === 1 ? 'address' : 'addresses'}`
+        : 'turned off the monthly report email';
     case 'org.retention':
       return `set how long the activity log is kept to ${s(meta.days)} days: “${s(meta.reason)}”`;
     case 'audit.export':

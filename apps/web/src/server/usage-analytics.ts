@@ -121,6 +121,14 @@ function offsetMs(tz: string, t: number): number {
   return off;
 }
 
+/** The moment a local calendar day begins in a time zone, as a real time. */
+export function zonedDayStart(tz: string, year: number, month: number, day = 1): Date {
+  const guess = Date.UTC(year, month - 1, day);
+  // Read the offset at the guess, then again at the answer, so a day that starts across a clock change is right.
+  const first = guess - offsetMs(tz, guess);
+  return new Date(guess - offsetMs(tz, first));
+}
+
 interface LocalTime {
   date: string;
   /** Monday is 0. */
