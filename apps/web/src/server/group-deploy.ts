@@ -1,6 +1,7 @@
 import type { PanelBranding } from '@kestrel/model';
 import { gatewayTooOld, setupProblem } from './deploy-check';
 import { createDeployment, type DeploymentDb } from './deployment-service';
+import { pinnedVersions } from './driver-updates';
 import {
   checkPublishable,
   createRelease,
@@ -40,6 +41,8 @@ export interface Work {
   existing: { id: string; number: number } | null;
 }
 
+const sortKeys = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : 1)));
+
 export interface PlanRoom {
   id: string;
   name: string;
@@ -65,7 +68,11 @@ export async function planRoomDeploy(
     where: { roomId: room.id, orgId },
     orderBy: { number: 'desc' },
   });
-  const current = !!latest && latest.draftRevision === checked.draft.revision;
+  // A driver that has a newer version since the last release also needs a new release, though the
+  // design itself has not changed: a release pins the driver version it was published with.
+  const pins = Object.fromEntries(Object.entries(checked.drivers).map(([k, d]) => [k, d.spec.version]));
+  const driversChanged = !!latest && JSON.stringify(sortKeys(pinnedVersions(latest.manifest))) !== JSON.stringify(sortKeys(pins));
+  const current = !!latest && latest.draftRevision === checked.draft.revision && !driversChanged;
   const running =
     current && room.desiredReleaseId === latest.id && room.reportedReleaseId === latest.id;
   const setup = running ? null : setupProblem(checked.model, checked.bindings, checked.drivers);
