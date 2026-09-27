@@ -27,7 +27,7 @@
 
 - **Verified against the real thing:** phases 4 and 5 (Docker gateway image + local cloud, Chrome for the monitoring UI)
 - **Unit/integration tests only** (fake clouds, fake devices, in-memory DB helper): billing/Stripe, calendar (Graph/Google), marketplace, combined rooms, driver SDK, NVX, Q-SYS, serial, VISCA, phone control, update channels, Phase 6/7 UI (not opened in a browser)
-- **Not run at all:** Windows installer/updater scripts (only parse-checked; the bundle layout was round-tripped with PowerShell 5.1), the Windows CI workflow, the Watchtower compose file (only `config`-validated)
+- **Not run at all:** Windows installer/updater scripts (only parse-checked; the bundle layout was round-tripped with PowerShell 5.1), the Windows CI workflow, the Watchtower compose file (only `config`-validated), the Step N rework (WinSW service, `tray.ps1`'s NotifyIcon, the Inno Setup wizard) — none of it has run on a real Windows machine yet (`docs/decisions.md`, N-1 to N-6)
 - Never tested on real hardware: DM-NVX, Q-SYS, PJLink, serial, VISCA, Extron/Cisco/Lutron/Shelly
 
 ### Known limitations

@@ -188,6 +188,7 @@ Full list (from `.env.example`). "Now" means set it before anything else works; 
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_BASIC`, `STRIPE_PRICE_PRO` | step 7 | Stripe |
 | `GATEWAY_LATEST_STABLE`, `GATEWAY_LATEST_BETA` | step 9 | newest gateway version per channel, e.g. `0.1.0` |
 | `NEXT_PUBLIC_GATEWAY_IMAGE` | optional | e.g. `ghcr.io/steviemayo/kestrel-gateway:stable`, shown in the "add gateway" instructions |
+| `GITHUB_RELEASE_TOKEN` | step N | fine-grained PAT, Contents: Read on this repo. Lets `/api/gateway/download` fetch the Windows installer from the private repo's release on people's behalf |
 
 Working when: the **Vercel preview for PR #9** builds, and opening a preview URL loads `/login`. (The three preview checks from PR #9 need the signing key: sign in, create a room, deploy a release; a deploy that fails with "Release signing is not configured" means the key is missing on that environment.)
 
@@ -419,7 +420,7 @@ Working rules that apply to all of them:
 | K | SLAs and priority timers | medium | **built** early (`docs/decisions.md`, K-1 to K-7); confirm the default targets with a first customer |
 | L | Provider billing and white label | large | a business decision on who pays |
 | M | Earlier candidates: WSS push, Stripe Connect payouts, third-party drivers, sandboxed logic hooks | large each | see `docs/phase-4-preread.md` |
-| N | Windows gateway download from the Gateways page | small | **built** (header button and enrolment dialog; `NEXT_PUBLIC_GATEWAY_WINDOWS_URL`). Needs the `gateway-stable` release asset to be downloadable without a GitHub sign-in: on 2026-09-26 it answered 404 to a signed-out request (private repo), so publish the zip somewhere public or serve it through the portal |
+| N | Windows service/tray installer, Windows/Linux/Docker install instructions on the Gateways page | medium | **built** (decisions in `docs/decisions.md`, N-1 to N-6). Fixes the 2026-09-26 404 by proxying the download through the portal (`/api/gateway/download`); needs `GITHUB_RELEASE_TOKEN` set (a repo-scoped PAT with Contents: Read) since the release lives in a private repo |
 
 Do A first: nothing from the last round has been clicked through while signed in. Then B and C are the highest value.
 
