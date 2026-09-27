@@ -329,6 +329,7 @@ export const TelemetryEvent = z.object({
   at: z.string().datetime(),
   type: z.enum([
     'room.status',
+    'room.occupancy',
     'activity.started',
     'activity.stopped',
     'device.fault',

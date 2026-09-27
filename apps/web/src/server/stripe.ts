@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { headers } from 'next/headers';
 import type { PaidPlan } from '@kestrel/model';
 import { ensureBilling, priceMapFromEnv, type BillingDb } from './billing';
+import { billedRooms } from './room-kinds';
 
 export class BillingNotConfigured extends Error {
   constructor(what = 'Billing') {
@@ -93,7 +94,7 @@ export async function syncQuantity(db: BillingDb, orgId: string): Promise<void> 
   if (!stripeConfigured()) return;
   const billing = await ensureBilling(db, orgId);
   if (!billing.stripeSubscriptionId || !billing.stripeItemId || !PAYING.has(billing.status)) return;
-  const rooms = Math.max(1, await db.room.count({ where: { orgId, kind: { not: 'combined' } } }));
+  const rooms = Math.max(1, await db.room.count({ where: { orgId, ...billedRooms } }));
   if (rooms === billing.quantity) return;
   await getStripe().subscriptionItems.update(billing.stripeItemId, {
     quantity: rooms,

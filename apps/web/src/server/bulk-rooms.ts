@@ -11,6 +11,7 @@ import {
   type DeviceValues,
 } from '@kestrel/model';
 import { bindingChanges, readPlainBindings, setRoomBindings, type BindingsDb } from './bindings';
+import { billedRooms } from './room-kinds';
 
 // Creating many rooms from one template at once (docs/driver-classes.md, "Bulk creation"). Each
 // row is a room: a new room gets the template's design and its addresses; a room that already has
@@ -127,7 +128,7 @@ export async function planBulk(db: BulkDb, input: BulkInput): Promise<BulkPlan> 
   const creates = rows.filter((r) => r.action === 'create').length;
   const updates = rows.filter((r) => r.action === 'update').length;
   if (input.maxRooms !== null && creates > 0) {
-    const total = await db.room.count({ where: { orgId: input.orgId, kind: { not: 'combined' } } });
+    const total = await db.room.count({ where: { orgId: input.orgId, ...billedRooms } });
     if (total + creates > input.maxRooms)
       problems.push(
         `Your plan includes ${input.maxRooms} rooms and this organisation has ${total}. Creating ${creates} more would go over. Subscribe to add more`,

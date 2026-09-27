@@ -39,6 +39,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import { RulesFields, draftFromRules, draftProblem, rulesFromDraft } from './alert-rules-fields';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
 
@@ -88,6 +89,7 @@ export function AlertsView() {
   });
   const [adding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState<Channel | null>(null);
+  const [timing, setTiming] = useState<Channel | null>(null);
   const refresh = () =>
     Promise.all([
       qc.invalidateQueries({ queryKey: trpc.alert.channels.queryKey() }),
@@ -170,6 +172,7 @@ export function AlertsView() {
                   <TableCell className="max-w-64 truncate text-muted-foreground">
                     {c.summary}
                     {c.hasSecret && <span className="ml-2 text-xs">(signed)</span>}
+                    {c.rulesText && <div className="whitespace-normal text-xs">{c.rulesText}</div>}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {SEVERITY_LABEL[c.minSeverity]} and up
@@ -216,6 +219,9 @@ export function AlertsView() {
                           <DropdownMenuItem onClick={() => test.mutate({ orgId, channelId: c.id })}>
                             Send a test alert
                           </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setTiming(c)}>
+                            Timing and escalation…
+                          </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem variant="destructive" onClick={() => setDeleting(c)}>
                             Remove channel
@@ -244,7 +250,7 @@ export function AlertsView() {
                     <TableCell className="w-44 text-muted-foreground">{dateTime(d.at)}</TableCell>
                     <TableCell>{d.channel}</TableCell>
                     <TableCell className="text-muted-foreground">
-                      {d.event === 'opened' ? 'Problem' : d.event === 'resolved' ? 'Fixed' : 'Test'}
+                      {d.event === 'opened' ? 'Problem' : d.event === 'reminder' ? 'Reminder' : d.event === 'resolved' ? 'Fixed' : 'Test'}
                     </TableCell>
                     <TableCell title={d.error ?? undefined}>
                       <DeliveryPill status={d.status} />
@@ -259,6 +265,7 @@ export function AlertsView() {
       </section>
 
       {adding && <AddChannelDialog open onOpenChange={setAdding} onDone={refresh} />}
+      {timing && <TimingDialog channel={timing} onOpenChange={(o) => !o && setTiming(null)} onDone={refresh} />}
       <ConfirmDialog
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}
@@ -290,6 +297,7 @@ function AddChannelDialog({
   const [url, setUrl] = useState('');
   const [secret, setSecret] = useState('');
   const [system, setSystem] = useState<'generic' | 'servicenow' | 'jira'>('generic');
+  const [rules, setRules] = useState(() => draftFromRules(null));
 
   const create = useMutation(
     trpc.alert.create.mutationOptions({
@@ -301,19 +309,22 @@ function AddChannelDialog({
     }),
   );
 
+  const timing = rulesFromDraft(rules);
   const config = () => {
+    const extra = timing ? { rules: timing } : {};
     switch (type) {
       case 'email':
-        return { type, to: emails.split(/[\s,;]+/).filter(Boolean) };
+        return { type, to: emails.split(/[\s,;]+/).filter(Boolean), ...extra };
       case 'teams':
-        return { type, url };
+        return { type, url, ...extra };
       case 'webhook':
-        return { type, url, ...(secret ? { secret } : {}) };
+        return { type, url, ...(secret ? { secret } : {}), ...extra };
       case 'itsm':
-        return { type, system, ...(url ? { url } : {}) };
+        return { type, system, ...(url ? { url } : {}), ...extra };
     }
   };
-  const ready = name.trim() && (type === 'email' ? emails.trim() : type === 'itsm' || url.trim());
+  const ready =
+    name.trim() && (type === 'email' ? emails.trim() : type === 'itsm' || url.trim()) && !draftProblem(rules);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -439,6 +450,12 @@ function AddChannelDialog({
               </p>
             </div>
           )}
+          <details className="rounded-md border px-3 py-2">
+            <summary className="cursor-pointer text-sm font-medium">Timing and escalation (optional)</summary>
+            <div className="pt-3">
+              <RulesFields value={rules} onChange={setRules} />
+            </div>
+          </details>
           {create.error && <p className="text-sm text-destructive">{create.error.message}</p>}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
@@ -447,6 +464,62 @@ function AddChannelDialog({
             <Button type="submit" disabled={create.isPending || !ready}>
               {create.isPending && <Spinner />}
               Add channel
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** When an existing channel may alert, and how it escalates. */
+function TimingDialog({
+  channel,
+  onOpenChange,
+  onDone,
+}: {
+  channel: Channel;
+  onOpenChange: (o: boolean) => void;
+  onDone: () => Promise<unknown>;
+}) {
+  const trpc = useTRPC();
+  const { orgId } = useOrg();
+  const [draft, setDraft] = useState(() => draftFromRules(channel.rules));
+  const save = useMutation(
+    trpc.alert.setRules.mutationOptions({
+      onSuccess: async () => {
+        await onDone();
+        toast.success('Timing saved');
+        onOpenChange(false);
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <form
+          className="space-y-5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save.mutate({ orgId, channelId: channel.id, rules: rulesFromDraft(draft) });
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Timing and escalation</DialogTitle>
+            <DialogDescription>
+              When “{channel.name}” may alert, and whether it waits or repeats. With nothing set it alerts straight away, at any time.
+              For an on-call rota, add a channel for each person and give each their days and hours.
+            </DialogDescription>
+          </DialogHeader>
+          <RulesFields value={draft} onChange={setDraft} />
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={save.isPending || !!draftProblem(draft)}>
+              {save.isPending && <Spinner />}
+              Save
             </Button>
           </DialogFooter>
         </form>
