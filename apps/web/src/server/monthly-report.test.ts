@@ -12,14 +12,28 @@ const NOW = new Date('2026-10-02T00:00:00Z');
 const SEPT = { year: 2026, month: 9 };
 
 const at = (s: string) => new Date(s);
-const status = (roomId: string, when: string, s: string) => ({ orgId: ORG, roomId, type: 'room.status', at: at(when), data: { status: s } });
+const status = (roomId: string, when: string, s: string) => ({
+  orgId: ORG,
+  roomId,
+  type: 'room.status',
+  at: at(when),
+  data: { status: s },
+});
 
-function world(over: { incidents?: Record<string, unknown>[]; tickets?: Record<string, unknown>[]; events?: Record<string, unknown>[] } = {}) {
+function world(
+  over: {
+    incidents?: Record<string, unknown>[];
+    tickets?: Record<string, unknown>[];
+    events?: Record<string, unknown>[];
+    extraRooms?: Record<string, unknown>[];
+  } = {},
+) {
   return {
     org: table([{ id: ORG, name: 'Acme' }]),
     room: table([
       { id: R1, orgId: ORG, siteId: SITE, name: 'Boardroom' },
       { id: R2, orgId: ORG, siteId: SITE, name: 'Annex' },
+      ...(over.extraRooms ?? []),
     ]),
     roomDraft: table([]),
     gatewayEvent: table(over.events ?? []),
@@ -39,10 +53,19 @@ const incident = (o: Record<string, unknown>) => ({
 
 describe('choosing the month', () => {
   it('is the month before now, in the zone', () => {
-    expect(previousMonth(new Date('2026-10-01T02:00:00Z'), 'UTC')).toEqual({ year: 2026, month: 9 });
-    expect(previousMonth(new Date('2026-01-15T00:00:00Z'), 'UTC')).toEqual({ year: 2025, month: 12 });
+    expect(previousMonth(new Date('2026-10-01T02:00:00Z'), 'UTC')).toEqual({
+      year: 2026,
+      month: 9,
+    });
+    expect(previousMonth(new Date('2026-01-15T00:00:00Z'), 'UTC')).toEqual({
+      year: 2025,
+      month: 12,
+    });
     // Already October on the 30 September UTC evening in Sydney.
-    expect(previousMonth(new Date('2026-09-30T20:00:00Z'), 'Australia/Sydney')).toEqual({ year: 2026, month: 9 });
+    expect(previousMonth(new Date('2026-09-30T20:00:00Z'), 'Australia/Sydney')).toEqual({
+      year: 2026,
+      month: 9,
+    });
   });
 });
 
@@ -59,13 +82,51 @@ describe('a monthly report', () => {
     expect(r.to).toBe('2026-10-01T00:00:00.000Z');
   });
 
+  it('leaves staging rooms out of the counts and the availability list', async () => {
+    const STAGING_ROOM = '33333333-3333-4333-8333-333333333399';
+    const db = world({
+      extraRooms: [
+        {
+          id: STAGING_ROOM,
+          orgId: ORG,
+          siteId: SITE,
+          name: 'Boardroom (staging)',
+          kind: 'staging',
+        },
+      ],
+      events: [
+        status(STAGING_ROOM, '2026-09-10T09:00:00Z', 'on'),
+        status(STAGING_ROOM, '2026-09-10T20:00:00Z', 'off'),
+      ],
+    });
+    const r = await buildMonthlyReport(db, ORG, SEPT, 'UTC', NOW);
+    expect(r.summary).toMatchObject({ rooms: 2, hoursInUse: 0, sessions: 0 });
+    expect(r.availability.map((a) => a.name)).not.toContain('Boardroom (staging)');
+  });
+
   it('adds up downtime per room, counting overlapping outages once', async () => {
     const db = world({
       incidents: [
-        incident({ id: 'a', openedAt: at('2026-09-05T10:00:00Z'), resolvedAt: at('2026-09-05T12:00:00Z'), subject: 'x' }),
+        incident({
+          id: 'a',
+          openedAt: at('2026-09-05T10:00:00Z'),
+          resolvedAt: at('2026-09-05T12:00:00Z'),
+          subject: 'x',
+        }),
         // Overlaps the first by an hour: 10:00 to 13:00 in all.
-        incident({ id: 'b', openedAt: at('2026-09-05T11:00:00Z'), resolvedAt: at('2026-09-05T13:00:00Z'), subject: 'y' }),
-        incident({ id: 'c', roomId: R2, openedAt: at('2026-09-06T00:00:00Z'), resolvedAt: at('2026-09-06T00:30:00Z'), subject: 'z' }),
+        incident({
+          id: 'b',
+          openedAt: at('2026-09-05T11:00:00Z'),
+          resolvedAt: at('2026-09-05T13:00:00Z'),
+          subject: 'y',
+        }),
+        incident({
+          id: 'c',
+          roomId: R2,
+          openedAt: at('2026-09-06T00:00:00Z'),
+          resolvedAt: at('2026-09-06T00:30:00Z'),
+          subject: 'z',
+        }),
       ],
     });
     const r = await buildMonthlyReport(db, ORG, SEPT, 'UTC', NOW);
@@ -85,8 +146,19 @@ describe('a monthly report', () => {
   it('cuts an incident that spans the month boundary to the part inside', async () => {
     const db = world({
       incidents: [
-        incident({ id: 'a', openedAt: at('2026-08-31T22:00:00Z'), resolvedAt: at('2026-09-01T02:00:00Z'), subject: 'x' }),
-        incident({ id: 'b', openedAt: at('2026-09-30T23:00:00Z'), resolvedAt: at('2026-10-01T05:00:00Z'), subject: 'y', roomId: R2 }),
+        incident({
+          id: 'a',
+          openedAt: at('2026-08-31T22:00:00Z'),
+          resolvedAt: at('2026-09-01T02:00:00Z'),
+          subject: 'x',
+        }),
+        incident({
+          id: 'b',
+          openedAt: at('2026-09-30T23:00:00Z'),
+          resolvedAt: at('2026-10-01T05:00:00Z'),
+          subject: 'y',
+          roomId: R2,
+        }),
       ],
     });
     const r = await buildMonthlyReport(db, ORG, SEPT, 'UTC', NOW);
@@ -99,7 +171,15 @@ describe('a monthly report', () => {
 
   it('counts an incident still open to the end of the month', async () => {
     const db = world({
-      incidents: [incident({ id: 'a', status: 'open', openedAt: at('2026-09-30T00:00:00Z'), resolvedAt: null, subject: 'x' })],
+      incidents: [
+        incident({
+          id: 'a',
+          status: 'open',
+          openedAt: at('2026-09-30T00:00:00Z'),
+          resolvedAt: null,
+          subject: 'x',
+        }),
+      ],
     });
     const r = await buildMonthlyReport(db, ORG, SEPT, 'UTC', NOW);
     expect(r.summary.downtimeMinutes).toBe(1440);
@@ -110,23 +190,56 @@ describe('a monthly report', () => {
   it('does not count warnings that are not outages as downtime, and gateway outages separately', async () => {
     const db = world({
       incidents: [
-        incident({ id: 'a', kind: 'deploy_failed', openedAt: at('2026-09-05T10:00:00Z'), resolvedAt: at('2026-09-05T12:00:00Z'), subject: 'x' }),
-        incident({ id: 'b', kind: 'gateway_offline', roomId: null, openedAt: at('2026-09-07T10:00:00Z'), resolvedAt: at('2026-09-07T11:00:00Z'), subject: 'y' }),
+        incident({
+          id: 'a',
+          kind: 'deploy_failed',
+          openedAt: at('2026-09-05T10:00:00Z'),
+          resolvedAt: at('2026-09-05T12:00:00Z'),
+          subject: 'x',
+        }),
+        incident({
+          id: 'b',
+          kind: 'gateway_offline',
+          roomId: null,
+          openedAt: at('2026-09-07T10:00:00Z'),
+          resolvedAt: at('2026-09-07T11:00:00Z'),
+          subject: 'y',
+        }),
       ],
     });
     const r = await buildMonthlyReport(db, ORG, SEPT, 'UTC', NOW);
     expect(r.summary.downtimeMinutes).toBe(60);
     expect(r.availability.every((a) => a.downtimeMinutes === 0)).toBe(true);
-    expect(r.incidentsByKind).toEqual(expect.arrayContaining([{ kind: 'deploy_failed', count: 1 }, { kind: 'gateway_offline', count: 1 }]));
+    expect(r.incidentsByKind).toEqual(
+      expect.arrayContaining([
+        { kind: 'deploy_failed', count: 1 },
+        { kind: 'gateway_offline', count: 1 },
+      ]),
+    );
   });
 
   it('counts tickets opened and closed in the month, and those still open', async () => {
     const db = world({
       tickets: [
-        { orgId: ORG, status: 'closed', createdAt: at('2026-09-02T00:00:00Z'), closedAt: at('2026-09-03T00:00:00Z') },
-        { orgId: ORG, status: 'closed', createdAt: at('2026-08-20T00:00:00Z'), closedAt: at('2026-09-04T00:00:00Z') },
+        {
+          orgId: ORG,
+          status: 'closed',
+          createdAt: at('2026-09-02T00:00:00Z'),
+          closedAt: at('2026-09-03T00:00:00Z'),
+        },
+        {
+          orgId: ORG,
+          status: 'closed',
+          createdAt: at('2026-08-20T00:00:00Z'),
+          closedAt: at('2026-09-04T00:00:00Z'),
+        },
         { orgId: ORG, status: 'open', createdAt: at('2026-09-20T00:00:00Z'), closedAt: null },
-        { orgId: ORG, status: 'closed', createdAt: at('2026-07-01T00:00:00Z'), closedAt: at('2026-07-02T00:00:00Z') },
+        {
+          orgId: ORG,
+          status: 'closed',
+          createdAt: at('2026-07-01T00:00:00Z'),
+          closedAt: at('2026-07-02T00:00:00Z'),
+        },
       ],
     });
     const r = await buildMonthlyReport(db, ORG, SEPT, 'UTC', NOW);
@@ -146,7 +259,13 @@ describe('a monthly report', () => {
   it('starts and ends the month at local midnight in the zone, across a clock change', async () => {
     // Sydney is UTC+10 until 4 October and UTC+11 (daylight saving) after, so October is 31 days
     // and 1 hour long in real time.
-    const r = await buildMonthlyReport(world(), ORG, { year: 2026, month: 10 }, 'Australia/Sydney', new Date('2026-11-05T00:00:00Z'));
+    const r = await buildMonthlyReport(
+      world(),
+      ORG,
+      { year: 2026, month: 10 },
+      'Australia/Sydney',
+      new Date('2026-11-05T00:00:00Z'),
+    );
     expect(r.from).toBe('2026-09-30T14:00:00.000Z');
     expect(r.to).toBe('2026-10-31T13:00:00.000Z');
   });
@@ -154,9 +273,19 @@ describe('a monthly report', () => {
   it('writes a plain text version', async () => {
     const db = world({
       events: [status(R1, '2026-09-10T09:00:00Z', 'on'), status(R1, '2026-09-10T11:00:00Z', 'off')],
-      incidents: [incident({ id: 'a', openedAt: at('2026-09-05T10:00:00Z'), resolvedAt: at('2026-09-05T12:00:00Z'), subject: 'x' })],
+      incidents: [
+        incident({
+          id: 'a',
+          openedAt: at('2026-09-05T10:00:00Z'),
+          resolvedAt: at('2026-09-05T12:00:00Z'),
+          subject: 'x',
+        }),
+      ],
     });
-    const text = reportText(await buildMonthlyReport(db, ORG, SEPT, 'UTC', NOW), 'https://app.example/o/1/reports');
+    const text = reportText(
+      await buildMonthlyReport(db, ORG, SEPT, 'UTC', NOW),
+      'https://app.example/o/1/reports',
+    );
     expect(text).toContain('Acme: September 2026 report');
     expect(text).toContain('2 rooms, 2 hours in use across 1 sessions');
     expect(text).toContain('1 problems came up, 1 were resolved (average 2 h to resolve)');

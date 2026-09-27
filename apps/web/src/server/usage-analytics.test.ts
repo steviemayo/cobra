@@ -27,14 +27,34 @@ const opts = (over: Partial<UsageOptions> = {}): UsageOptions => ({
   businessEndHour: 18,
   ...over,
 });
-const status = (at: string, s: string): UsageEvent => ({ roomId: ROOM, type: 'room.status', at: new Date(at), data: { status: s } });
-const occupied = (at: string, o: boolean): UsageEvent => ({ roomId: ROOM, type: 'room.occupancy', at: new Date(at), data: { occupied: o } });
-const activity = (at: string, id: string): UsageEvent => ({ roomId: ROOM, type: 'activity.started', at: new Date(at), data: { activityId: id } });
-const analyse = (events: UsageEvent[], o = opts(), names = new Map<string, string>()) => analyseRoom(room, events, o, names);
+const status = (at: string, s: string): UsageEvent => ({
+  roomId: ROOM,
+  type: 'room.status',
+  at: new Date(at),
+  data: { status: s },
+});
+const occupied = (at: string, o: boolean): UsageEvent => ({
+  roomId: ROOM,
+  type: 'room.occupancy',
+  at: new Date(at),
+  data: { occupied: o },
+});
+const activity = (at: string, id: string): UsageEvent => ({
+  roomId: ROOM,
+  type: 'activity.started',
+  at: new Date(at),
+  data: { activityId: id },
+});
+const analyse = (events: UsageEvent[], o = opts(), names = new Map<string, string>()) =>
+  analyseRoom(room, events, o, names);
 
 describe('time in use', () => {
   it('adds up the time a room was on, and how much of business hours that is', () => {
-    const r = analyse([status('2026-09-21T00:00:00Z', 'off'), status('2026-09-22T09:00:00Z', 'on'), status('2026-09-22T11:00:00Z', 'off')]);
+    const r = analyse([
+      status('2026-09-21T00:00:00Z', 'off'),
+      status('2026-09-22T09:00:00Z', 'on'),
+      status('2026-09-22T11:00:00Z', 'off'),
+    ]);
     expect(r.inUseMinutes).toBe(120);
     expect(r.businessInUseMinutes).toBe(120);
     expect(r.utilisation).toBeCloseTo(120 / 3000);
@@ -44,14 +64,22 @@ describe('time in use', () => {
   });
 
   it('counts starting as in use, and time outside business hours only in the total', () => {
-    const r = analyse([status('2026-09-22T06:00:00Z', 'starting'), status('2026-09-22T06:05:00Z', 'on'), status('2026-09-22T09:00:00Z', 'off')]);
+    const r = analyse([
+      status('2026-09-22T06:00:00Z', 'starting'),
+      status('2026-09-22T06:05:00Z', 'on'),
+      status('2026-09-22T09:00:00Z', 'off'),
+    ]);
     expect(r.inUseMinutes).toBe(180);
     expect(r.businessInUseMinutes).toBe(60);
   });
 
   it('does not count a weekend as business hours', () => {
     const r = analyse(
-      [status('2026-09-19T00:00:00Z', 'off'), status('2026-09-20T09:00:00Z', 'on'), status('2026-09-20T11:00:00Z', 'off')],
+      [
+        status('2026-09-19T00:00:00Z', 'off'),
+        status('2026-09-20T09:00:00Z', 'on'),
+        status('2026-09-20T11:00:00Z', 'off'),
+      ],
       opts({ from: new Date('2026-09-19T00:00:00Z'), to: new Date('2026-09-22T00:00:00Z') }),
     );
     expect(r.inUseMinutes).toBe(120);
@@ -59,7 +87,10 @@ describe('time in use', () => {
   });
 
   it('carries a room that was already on when the range began', () => {
-    const r = analyse([status('2026-09-20T22:00:00Z', 'on'), status('2026-09-21T10:00:00Z', 'off')]);
+    const r = analyse([
+      status('2026-09-20T22:00:00Z', 'on'),
+      status('2026-09-21T10:00:00Z', 'off'),
+    ]);
     expect(r.inUseMinutes).toBe(600);
   });
 
@@ -70,7 +101,11 @@ describe('time in use', () => {
 
   it('does not treat the time before a room first reported as unused', () => {
     // First heard from on Wednesday: the window is Wednesday to Friday, three days of business hours.
-    const r = analyse([status('2026-09-23T00:00:00Z', 'off'), status('2026-09-23T08:00:00Z', 'on'), status('2026-09-23T18:00:00Z', 'off')]);
+    const r = analyse([
+      status('2026-09-23T00:00:00Z', 'off'),
+      status('2026-09-23T08:00:00Z', 'on'),
+      status('2026-09-23T18:00:00Z', 'off'),
+    ]);
     expect(r.utilisation).toBeCloseTo(600 / 1800);
     expect(r.coveredMinutes).toBe(3 * 1440);
   });
@@ -109,7 +144,10 @@ describe('occupancy', () => {
   });
 
   it('reports none of it for a room with no sensor', () => {
-    const r = analyse([status('2026-09-22T09:00:00Z', 'on'), status('2026-09-22T11:00:00Z', 'off')]);
+    const r = analyse([
+      status('2026-09-22T09:00:00Z', 'on'),
+      status('2026-09-22T11:00:00Z', 'off'),
+    ]);
     expect(r.hasOccupancy).toBe(false);
     expect([r.occupiedMinutes, r.inUseEmptyMinutes, r.occupiedIdleMinutes]).toEqual([0, 0, 0]);
   });
@@ -136,17 +174,33 @@ describe('activities', () => {
 
 describe('the whole report', () => {
   it('shows use by day of the week and hour, and by date, including quiet days', () => {
-    const rep = buildReport([room], [status('2026-09-22T09:00:00Z', 'on'), status('2026-09-22T11:00:00Z', 'off')], new Map(), opts());
+    const rep = buildReport(
+      [room],
+      [status('2026-09-22T09:00:00Z', 'on'), status('2026-09-22T11:00:00Z', 'off')],
+      new Map(),
+      opts(),
+    );
     expect(rep.heatmap[1]![9]).toBe(60);
     expect(rep.heatmap[1]![10]).toBe(60);
     expect(rep.heatmap[1]![11]).toBe(0);
-    expect(rep.daily.map((d) => d.date)).toEqual(['2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25']);
+    expect(rep.daily.map((d) => d.date)).toEqual([
+      '2026-09-21',
+      '2026-09-22',
+      '2026-09-23',
+      '2026-09-24',
+      '2026-09-25',
+    ]);
     expect(rep.daily.find((d) => d.date === '2026-09-22')!.inUseMinutes).toBe(120);
   });
 
   it('reads days and hours in the chosen time zone', () => {
     // 23:00 UTC on Tuesday is 09:00 on Wednesday in Sydney (UTC+10 before daylight saving starts).
-    const rep = buildReport([room], [status('2026-09-22T23:00:00Z', 'on'), status('2026-09-23T00:00:00Z', 'off')], new Map(), opts({ tz: 'Australia/Sydney' }));
+    const rep = buildReport(
+      [room],
+      [status('2026-09-22T23:00:00Z', 'on'), status('2026-09-23T00:00:00Z', 'off')],
+      new Map(),
+      opts({ tz: 'Australia/Sydney' }),
+    );
     expect(rep.heatmap[2]![9]).toBe(60);
     expect(rep.daily.find((d) => d.date === '2026-09-23')!.inUseMinutes).toBe(60);
   });
@@ -157,9 +211,24 @@ describe('the whole report', () => {
       status('2026-09-22T09:00:00Z', 'on'),
       status('2026-09-22T10:00:00Z', 'off'),
       activity('2026-09-22T09:00:00Z', 'present'),
-      { roomId: 'r2', type: 'room.status', at: new Date('2026-09-22T09:00:00Z'), data: { status: 'on' } },
-      { roomId: 'r2', type: 'room.status', at: new Date('2026-09-22T15:00:00Z'), data: { status: 'off' } },
-      { roomId: 'r2', type: 'activity.started', at: new Date('2026-09-22T09:00:00Z'), data: { activityId: 'present' } },
+      {
+        roomId: 'r2',
+        type: 'room.status',
+        at: new Date('2026-09-22T09:00:00Z'),
+        data: { status: 'on' },
+      },
+      {
+        roomId: 'r2',
+        type: 'room.status',
+        at: new Date('2026-09-22T15:00:00Z'),
+        data: { status: 'off' },
+      },
+      {
+        roomId: 'r2',
+        type: 'activity.started',
+        at: new Date('2026-09-22T09:00:00Z'),
+        data: { activityId: 'present' },
+      },
     ];
     const names = new Map([
       [ROOM, new Map([['present', 'Present']])],
@@ -176,7 +245,10 @@ describe('insights', () => {
   it('points out a room that is on with nobody in it', () => {
     const r = { ...base, hasOccupancy: true, inUseMinutes: 600, inUseEmptyMinutes: 300 };
     expect(insightsFor([r])).toEqual([
-      expect.objectContaining({ kind: 'in_use_empty', text: expect.stringContaining('nobody in it for 5 h (50%') }),
+      expect.objectContaining({
+        kind: 'in_use_empty',
+        text: expect.stringContaining('nobody in it for 5 h (50%'),
+      }),
     ]);
   });
   it('points out people in a room without using it', () => {
@@ -205,7 +277,7 @@ describe('time zones', () => {
 describe('loading a report', () => {
   const world = (
     events: Record<string, unknown>[],
-    rooms = [{ id: ROOM, orgId: ORG, siteId: SITE, name: 'Boardroom' }],
+    rooms: Record<string, unknown>[] = [{ id: ROOM, orgId: ORG, siteId: SITE, name: 'Boardroom' }],
   ) => {
     const model = RoomModel.parse({
       roomType: 'meeting',
@@ -221,14 +293,74 @@ describe('loading a report', () => {
 
   it('reads events and the state each room began in, and names activities from the design', async () => {
     const db = world([
-      { roomId: ROOM, type: 'room.status', at: new Date('2026-09-20T22:00:00Z'), data: { status: 'on' } },
-      { roomId: ROOM, type: 'room.status', at: new Date('2026-09-21T10:00:00Z'), data: { status: 'off' } },
-      { roomId: ROOM, type: 'activity.started', at: new Date('2026-09-21T09:00:00Z'), data: { activityId: 'present' } },
+      {
+        roomId: ROOM,
+        type: 'room.status',
+        at: new Date('2026-09-20T22:00:00Z'),
+        data: { status: 'on' },
+      },
+      {
+        roomId: ROOM,
+        type: 'room.status',
+        at: new Date('2026-09-21T10:00:00Z'),
+        data: { status: 'off' },
+      },
+      {
+        roomId: ROOM,
+        type: 'activity.started',
+        at: new Date('2026-09-21T09:00:00Z'),
+        data: { activityId: 'present' },
+      },
     ]);
     const rep = await loadUsageReport(db, ORG, opts());
     expect(rep.rooms[0]).toMatchObject({ name: 'Boardroom', inUseMinutes: 600, sessions: 1 });
     expect(rep.activities).toEqual([{ activityId: 'present', name: 'Present', count: 1 }]);
     expect(rep.truncated).toBe(false);
+  });
+
+  it('leaves staging rooms out, however busy they were', async () => {
+    const STAGING_ROOM = '33333333-3333-4333-8333-333333333399';
+    const db = world(
+      [
+        {
+          roomId: ROOM,
+          type: 'room.status',
+          at: new Date('2026-09-21T09:00:00Z'),
+          data: { status: 'on' },
+        },
+        {
+          roomId: ROOM,
+          type: 'room.status',
+          at: new Date('2026-09-21T10:00:00Z'),
+          data: { status: 'off' },
+        },
+        {
+          roomId: STAGING_ROOM,
+          type: 'room.status',
+          at: new Date('2026-09-21T09:00:00Z'),
+          data: { status: 'on' },
+        },
+        {
+          roomId: STAGING_ROOM,
+          type: 'room.status',
+          at: new Date('2026-09-21T15:00:00Z'),
+          data: { status: 'off' },
+        },
+      ],
+      [
+        { id: ROOM, orgId: ORG, siteId: SITE, name: 'Boardroom', kind: 'standard' },
+        {
+          id: STAGING_ROOM,
+          orgId: ORG,
+          siteId: SITE,
+          name: 'Boardroom (staging)',
+          kind: 'staging',
+        },
+      ],
+    );
+    const rep = await loadUsageReport(db, ORG, opts());
+    expect(rep.rooms.map((r) => r.name)).toEqual(['Boardroom']);
+    expect(rep.rooms[0]).toMatchObject({ inUseMinutes: 60 });
   });
 
   it('is empty for an organisation with no rooms', async () => {

@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@kestrel/db';
 import { RoomModel } from '@kestrel/model';
+import { notStaging } from './room-kinds';
 
 // Usage reports: how much each room is used, when, for what, and whether anyone is in it while it
 // is on. Worked out from the telemetry the gateways already send (room on/off, someone in the room,
@@ -114,7 +115,14 @@ function offsetMs(tz: string, t: number): number {
   }
   const parts = f.formatToParts(new Date(hour * 3_600_000));
   const get = (type: string) => Number(parts.find((p) => p.type === type)!.value);
-  const local = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'));
+  const local = Date.UTC(
+    get('year'),
+    get('month') - 1,
+    get('day'),
+    get('hour') % 24,
+    get('minute'),
+    get('second'),
+  );
   const off = local - hour * 3_600_000;
   if (offsets.size > 20_000) offsets.clear();
   offsets.set(key, off);
@@ -146,7 +154,12 @@ function localTime(t: number, tz: string): LocalTime {
 }
 
 /** Calls back once per quarter hour (or part of one) of the interval, with its local time. */
-function forEachSlice(startMs: number, endMs: number, tz: string, cb: (at: LocalTime, minutes: number) => void) {
+function forEachSlice(
+  startMs: number,
+  endMs: number,
+  tz: string,
+  cb: (at: LocalTime, minutes: number) => void,
+) {
   let t = startMs;
   while (t < endMs) {
     const next = Math.min(endMs, (Math.floor(t / SLICE_MS) + 1) * SLICE_MS);
@@ -160,7 +173,13 @@ function forEachSlice(startMs: number, endMs: number, tz: string, cb: (at: Local
 type Interval = [number, number];
 
 /** When the predicate held, from a room's ordered events, cut to [from, to]. */
-function holds(events: UsageEvent[], types: string[], on: (e: UsageEvent) => boolean | undefined, from: number, to: number): Interval[] {
+function holds(
+  events: UsageEvent[],
+  types: string[],
+  on: (e: UsageEvent) => boolean | undefined,
+  from: number,
+  to: number,
+): Interval[] {
   const out: Interval[] = [];
   let since: number | null = null;
   for (const e of events) {
@@ -216,7 +235,8 @@ function businessMinutes(list: Interval[], o: UsageOptions): number {
 // ---- One room ------------------------------------------------------------------------------------
 
 const IN_USE = new Set(['starting', 'on']);
-const dataOf = (e: UsageEvent) => (e.data && typeof e.data === 'object' ? (e.data as Record<string, unknown>) : {});
+const dataOf = (e: UsageEvent) =>
+  e.data && typeof e.data === 'object' ? (e.data as Record<string, unknown>) : {};
 
 export function analyseRoom(
   room: { roomId: string; name: string; siteId: string },
@@ -228,16 +248,28 @@ export function analyseRoom(
   const from = o.from.getTime();
   const to = o.to.getTime();
   const sorted = [...events].sort((a, b) => a.at.getTime() - b.at.getTime());
-  const status = holds(sorted, ['room.status'], (e) => {
-    const s = dataOf(e).status;
-    return typeof s === 'string' ? IN_USE.has(s) : undefined;
-  }, from, to);
+  const status = holds(
+    sorted,
+    ['room.status'],
+    (e) => {
+      const s = dataOf(e).status;
+      return typeof s === 'string' ? IN_USE.has(s) : undefined;
+    },
+    from,
+    to,
+  );
   const occupancyEvents = sorted.filter((e) => e.type === 'room.occupancy');
   const hasOccupancy = occupancyEvents.length > 0;
-  const occupied = holds(sorted, ['room.occupancy'], (e) => {
-    const v = dataOf(e).occupied;
-    return typeof v === 'boolean' ? v : undefined;
-  }, from, to);
+  const occupied = holds(
+    sorted,
+    ['room.occupancy'],
+    (e) => {
+      const v = dataOf(e).occupied;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    from,
+    to,
+  );
   const both = intersect(status, occupied);
 
   // Only count from when the room first reported, so a new room is not "unused" before it existed.
@@ -264,7 +296,11 @@ export function analyseRoom(
     counts.set(id, (counts.get(id) ?? 0) + 1);
   }
   const activities = [...counts]
-    .map(([activityId, count]) => ({ activityId, name: activityNames.get(activityId) ?? activityId, count }))
+    .map(([activityId, count]) => ({
+      activityId,
+      name: activityNames.get(activityId) ?? activityId,
+      count,
+    }))
     .sort((a, b) => b.count - a.count);
 
   const lastEnd = status.length ? status[status.length - 1]![1] : null;
@@ -297,13 +333,21 @@ const MIN_DAYS_FOR_UNDERUSED = 3;
 export function insightsFor(rooms: RoomUsage[]): Insight[] {
   const out: Insight[] = [];
   for (const r of rooms) {
-    if (r.hasOccupancy && r.inUseMinutes >= MIN_SIGNAL_MINUTES && r.inUseEmptyMinutes / r.inUseMinutes >= 0.4)
+    if (
+      r.hasOccupancy &&
+      r.inUseMinutes >= MIN_SIGNAL_MINUTES &&
+      r.inUseEmptyMinutes / r.inUseMinutes >= 0.4
+    )
       out.push({
         kind: 'in_use_empty',
         roomId: r.roomId,
         text: `${r.name} was on with nobody in it for ${hours(r.inUseEmptyMinutes)} (${pct(r.inUseEmptyMinutes / r.inUseMinutes)} of the time it was on).`,
       });
-    if (r.hasOccupancy && r.occupiedMinutes >= MIN_SIGNAL_MINUTES && r.occupiedIdleMinutes / r.occupiedMinutes >= 0.5)
+    if (
+      r.hasOccupancy &&
+      r.occupiedMinutes >= MIN_SIGNAL_MINUTES &&
+      r.occupiedIdleMinutes / r.occupiedMinutes >= 0.5
+    )
       out.push({
         kind: 'occupied_idle',
         roomId: r.roomId,
@@ -311,9 +355,17 @@ export function insightsFor(rooms: RoomUsage[]): Insight[] {
       });
     if (r.utilisation !== null && r.coveredMinutes >= MIN_DAYS_FOR_UNDERUSED * 1440) {
       if (r.utilisation < 0.1)
-        out.push({ kind: 'underused', roomId: r.roomId, text: `${r.name} was in use for only ${pct(r.utilisation)} of business hours.` });
+        out.push({
+          kind: 'underused',
+          roomId: r.roomId,
+          text: `${r.name} was in use for only ${pct(r.utilisation)} of business hours.`,
+        });
       else if (r.utilisation > 0.7)
-        out.push({ kind: 'busy', roomId: r.roomId, text: `${r.name} is heavily used: ${pct(r.utilisation)} of business hours.` });
+        out.push({
+          kind: 'busy',
+          roomId: r.roomId,
+          text: `${r.name} is heavily used: ${pct(r.utilisation)} of business hours.`,
+        });
     }
   }
   const rank = { in_use_empty: 0, occupied_idle: 1, underused: 2, busy: 3 } as const;
@@ -345,7 +397,12 @@ export function buildReport(
   const heatmap = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
   const daily = new Map<string, number>();
   const usage = rooms
-    .map((r) => analyseRoom(r, byRoom.get(r.roomId) ?? [], o, activityNames.get(r.roomId) ?? new Map(), { heatmap, daily }))
+    .map((r) =>
+      analyseRoom(r, byRoom.get(r.roomId) ?? [], o, activityNames.get(r.roomId) ?? new Map(), {
+        heatmap,
+        daily,
+      }),
+    )
     .sort((a, b) => (b.utilisation ?? -1) - (a.utilisation ?? -1) || a.name.localeCompare(b.name));
 
   const totals = new Map<string, ActivityCount>();
@@ -364,7 +421,10 @@ export function buildReport(
     businessEndHour: o.businessEndHour,
     rooms: usage,
     heatmap: heatmap.map((row) => row.map((m) => Math.round(m))),
-    daily: eachDate(o.from, o.to, o.tz).map((date) => ({ date, inUseMinutes: Math.round(daily.get(date) ?? 0) })),
+    daily: eachDate(o.from, o.to, o.tz).map((date) => ({
+      date,
+      inUseMinutes: Math.round(daily.get(date) ?? 0),
+    })),
     activities: [...totals.values()].sort((a, b) => b.count - a.count),
     insights: insightsFor(usage),
     truncated,
@@ -383,7 +443,7 @@ export async function loadUsageReport(
   scope: Record<string, unknown> = {},
 ): Promise<UsageReport> {
   const rooms = await db.room.findMany({
-    where: { orgId, ...scope },
+    where: { orgId, ...notStaging, ...scope },
     select: { id: true, name: true, siteId: true },
     orderBy: { name: 'asc' },
   });
@@ -399,12 +459,20 @@ export async function loadUsageReport(
     }),
     // What each room was doing when the range began: the last status and occupancy report before it.
     db.gatewayEvent.findMany({
-      where: { orgId, roomId: { in: ids }, type: { in: ['room.status', 'room.occupancy'] }, at: { lt: o.from } },
+      where: {
+        orgId,
+        roomId: { in: ids },
+        type: { in: ['room.status', 'room.occupancy'] },
+        at: { lt: o.from },
+      },
       distinct: ['roomId', 'type'],
       orderBy: { at: 'desc' },
       select: { roomId: true, type: true, at: true, data: true },
     }),
-    db.roomDraft.findMany({ where: { orgId, roomId: { in: ids } }, select: { roomId: true, model: true } }),
+    db.roomDraft.findMany({
+      where: { orgId, roomId: { in: ids } },
+      select: { roomId: true, model: true },
+    }),
   ]);
   const truncated = inRange.length > MAX_USAGE_EVENTS;
   const events = [...seeds, ...inRange.slice(0, MAX_USAGE_EVENTS)].flatMap((e) =>
@@ -413,7 +481,8 @@ export async function loadUsageReport(
   const names = new Map<string, Map<string, string>>();
   for (const d of drafts) {
     const model = RoomModel.safeParse(d.model);
-    if (model.success) names.set(d.roomId, new Map(model.data.activities.map((a) => [a.id, a.name])));
+    if (model.success)
+      names.set(d.roomId, new Map(model.data.activities.map((a) => [a.id, a.name])));
   }
   return buildReport(
     rooms.map((r) => ({ roomId: r.id, name: r.name, siteId: r.siteId })),
