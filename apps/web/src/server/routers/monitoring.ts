@@ -4,6 +4,7 @@ import { after } from 'next/server';
 import { db } from '@kestrel/db';
 import { deliverAlerts } from '../alerts';
 import { writeAudit } from '../audit';
+import { firmwareReport } from '../firmware-report';
 import { maybeSweep } from '../monitoring';
 import { orgOverview } from '../monitoring-queries';
 import { SITE_SCOPED, siteFilter, type SiteScope } from '../site-scope';
@@ -70,11 +71,19 @@ export const monitoringRouter = router({
           name: d.name,
           online: d.online,
           since: d.since,
+          driver: d.driver ?? null,
+          firmware: d.firmware ?? null,
         })),
         incidents,
         events: events.map((e) => ({ ...e, data: (e.data ?? {}) as Record<string, unknown> })),
       };
     }),
+
+  // The firmware each device reports, across the estate. Read only.
+  firmware: monitoringProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId }))
+    .query(({ ctx }) => firmwareReport(db, ctx.orgId, ctx.siteScope)),
 
   incidents: monitoringProcedure
     .meta(SITE_SCOPED)

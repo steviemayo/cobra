@@ -68,7 +68,8 @@ async function fakeTcp(): Promise<TcpFake> {
         } else if (line.startsWith('VOL ')) {
           state.vol = Number(line.slice(4));
           s.write(`VOL=${state.vol}\r\n`);
-        } else if (line === 'STATUS?') s.write(`POWER=${state.power}\r\nVOL=${state.vol}\r\n`);
+        } else if (line === 'STATUS?')
+          s.write(`POWER=${state.power}\r\nVOL=${state.vol}\r\nFW=2.1.4\r\n`);
         else if (line === 'NOREPLY') return;
         else s.write('ERR\r\n');
       }
@@ -103,6 +104,41 @@ const amp = (keepOpen: boolean) => ({
   },
 });
 
+describe('firmware from a declarative driver', () => {
+  const withFirmware = (keepOpen: boolean) => ({
+    ...amp(keepOpen),
+    feedback: {
+      poll: [{ action: { send: 'STATUS?' }, everyMs: 1000 }],
+      patterns: [
+        ...amp(keepOpen).feedback.patterns,
+        { match: '^FW=(.+)$', set: 'firmware', value: '$1' },
+      ],
+    },
+  });
+
+  it('is read from a pattern that sets it, on a held connection and on one connection per command', async () => {
+    for (const keepOpen of [true, false]) {
+      const dev = await fakeTcp();
+      const d = make(withFirmware(keepOpen), { host: '127.0.0.1', port: dev.port });
+      d.start();
+      await until(() => d.getState().firmware === '2.1.4');
+      expect(d.getState().online).toBe(true);
+    }
+  });
+
+  it('is left unset by a driver that has no such pattern', async () => {
+    const dev = await fakeTcp();
+    const d = make(amp(true), { host: '127.0.0.1', port: dev.port });
+    d.start();
+    await until(() => d.getState().power === 'off');
+    expect(d.getState().firmware).toBeUndefined();
+  });
+
+  it('is accepted by the driver format', () => {
+    expect(DriverSpec.safeParse(withFirmware(true)).success).toBe(true);
+  });
+});
+
 describe('a driver over TCP with a held connection', () => {
   it('goes online, reads feedback the device volunteers, and sends scaled values', async () => {
     const dev = await fakeTcp();
@@ -122,7 +158,9 @@ describe('a driver over TCP with a held connection', () => {
     const d = make(amp(true), { host: '127.0.0.1', port: dev.port });
     d.start();
     await until(() => d.getState().online);
-    await expect(d.send({ type: 'command', name: 'hang', args: {} })).rejects.toThrow('did not answer');
+    await expect(d.send({ type: 'command', name: 'hang', args: {} })).rejects.toThrow(
+      'did not answer',
+    );
     dev.clients.forEach((c) => c.destroy());
     await until(() => !d.getState().online);
     await until(() => d.getState().online, 6000);
@@ -143,14 +181,22 @@ describe('a driver over TCP with a held connection', () => {
     const d = make(amp(true), { host: '127.0.0.1', port: dev.port });
     d.start();
     await until(() => d.getState().online);
-    await expect(d.send({ type: 'mute', muted: true })).rejects.toThrow('does not support "mute.on"');
+    await expect(d.send({ type: 'mute', muted: true })).rejects.toThrow(
+      'does not support "mute.on"',
+    );
   });
 });
 
 describe('a driver over TCP, one connection per command', () => {
   it('checks the reply, and keeps polling for state', async () => {
     const dev = await fakeTcp();
-    const spec = { ...amp(false), feedback: { poll: [{ action: { send: 'STATUS?', expect: '^VOL=' }, everyMs: 1000 }], patterns: amp(false).feedback.patterns } };
+    const spec = {
+      ...amp(false),
+      feedback: {
+        poll: [{ action: { send: 'STATUS?', expect: '^VOL=' }, everyMs: 1000 }],
+        patterns: amp(false).feedback.patterns,
+      },
+    };
     const d = make(spec, { host: '127.0.0.1', port: dev.port });
     d.start();
     await until(() => d.getState().online);
@@ -178,7 +224,8 @@ describe('a driver over TCP, one connection per command', () => {
 // ---- HTTP -------------------------------------------------------------------------------------
 
 async function fakeHttp() {
-  const log: { method: string; url: string; body: string; headers: http.IncomingHttpHeaders }[] = [];
+  const log: { method: string; url: string; body: string; headers: http.IncomingHttpHeaders }[] =
+    [];
   const state = { on: false, level: 30 };
   const server = http.createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -267,7 +314,9 @@ describe('a driver over HTTP', () => {
 });
 
 describe('custom drivers in a release', () => {
-  const pinned: Record<string, PinnedDriver> = { 'custom:acme-amp': { version: 3, spec: DriverSpec.parse(amp(false)) } };
+  const pinned: Record<string, PinnedDriver> = {
+    'custom:acme-amp': { version: 3, spec: DriverSpec.parse(amp(false)) },
+  };
 
   it('is created from the spec pinned in the release, and only from there', () => {
     expect(createDriver(dev({ host: 'h' }), ctx, pinned)).toBeInstanceOf(DeclarativeDriver);
@@ -314,6 +363,8 @@ describe('quick actions in a driver', () => {
     const d = make(amp(true), { host: '127.0.0.1', port: dev.port });
     d.start();
     await until(() => d.getState().online);
-    await expect(d.send({ type: 'blank', on: true })).rejects.toThrow('does not support "blank.on"');
+    await expect(d.send({ type: 'blank', on: true })).rejects.toThrow(
+      'does not support "blank.on"',
+    );
   });
 });

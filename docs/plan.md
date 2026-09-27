@@ -624,7 +624,7 @@ Candidates from the MVP-to-launch review. Only usage and occupancy analytics was
 - **Q. Config diff and history.** What changed between releases, who changed it, one-click revert.
 - **R. Pre-deploy validation and dry run.** Warn before a release goes out if a room will break (for example the driver is missing on its gateway). Extends the engine validator.
 - **S. Device discovery.** The gateway scans its network for known device types and prefills the room model.
-- **T. Firmware and driver update management.** Track device firmware versions; flag out-of-date or vulnerable ones.
+- **T. Firmware and driver update management. Driver half built: #70. Firmware reporting built (read only), see `docs/device-firmware.md`.** Devices report the firmware version they run (PJLink class 2, Biamp Tesira, and any custom driver with a `firmware` pattern); it shows on the room's monitoring page and on a new **Firmware** page (by driver, with a "Mixed versions" flag). Needs migration `20260927150000_device_firmware`. **Not built:** updating firmware (Kestrel never changes a device), alerts on old versions, a known-good version list, a version history, and firmware reporting for the other bundled drivers (each needs its vendor's documented query).
 - **U. Room booking integration.** Current and next meeting on the panel, auto-start, check-in, release no-shows. Goes beyond the existing calendar triggers.
 - **V. Notification and escalation rules.** On-call schedules, quiet hours, repeat alerts until acknowledged. Extends the alert channels.
 - **W. Reporting.** Monthly PDF or email per customer: uptime, usage, tickets. Depends on N.

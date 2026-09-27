@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   BellRing,
   Building2,
+  CircuitBoard,
   ChevronRight,
   Cpu,
   KeyRound,
@@ -269,6 +270,9 @@ export function AppSidebar() {
                   <NavItem href={`${base}/monitoring`} icon={Activity} label="Monitoring" />
                   {canSupport && (
                     <NavItem href={`${base}/incidents`} icon={AlertTriangle} label="Incidents" />
+                  )}
+                  {canSupport && (
+                    <NavItem href={`${base}/firmware`} icon={CircuitBoard} label="Firmware" />
                   )}
                   <NavItem href={`${base}/tickets`} icon={LifeBuoy} label="Support" />
                 </SidebarMenu>

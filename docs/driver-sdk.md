@@ -42,7 +42,7 @@ Custom drivers need the **Pro** plan. Kestrel ships built-in drivers for PJLink,
   - HTTP action: `method`, `path` (starts with `/`), `body`, `expect`.
 - **Placeholders**: `volume` gets `{level}`; `select_input` gets `{input}` `{inputNumber}`; `route` gets `{input}` `{output}` `{inputNumber}` `{outputNumber}`; `preset`, `camera_preset` and `scene` get `{name}`. A port id such as `in2` gives `inputNumber` 2.
 - **`volumeScale`**: maps the room's 0-100 to the device's range, and back when reading feedback.
-- **`feedback`**: `poll` actions run on a timer; `patterns` are regular expressions tried on every line (TCP) or reply body (HTTP). `set` is one of `power`, `muted`, `volume`, `input`, `preset`, `blanked`, `online`; `value` is a literal (`on`, `off`, `true`, `false`) or `$1` for the first group.
+- **`feedback`**: `poll` actions run on a timer; `patterns` are regular expressions tried on every line (TCP) or reply body (HTTP). `set` is one of `power`, `muted`, `volume`, `input`, `preset`, `blanked`, `online`, `firmware` (the device's firmware or software version, shown on the Firmware page; a room with such a driver needs a gateway that reports the `firmware` feature); `value` is a literal (`on`, `off`, `true`, `false`) or `$1` for the first group.
 
 ## Class, features and setting scope
 

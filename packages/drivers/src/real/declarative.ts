@@ -35,7 +35,12 @@ export class DeclarativeDriver extends BaseDriver {
   private readonly patterns: ReturnType<typeof compile>;
   private socket: Socket | null = null;
   private buffer = '';
-  private waiting: { re: RegExp | null; resolve: () => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }[] = [];
+  private waiting: {
+    re: RegExp | null;
+    resolve: () => void;
+    reject: (e: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }[] = [];
   private pollers: ReturnType<typeof setInterval>[] = [];
   private retry: ReturnType<typeof setTimeout> | null = null;
   private retries = 0;
@@ -65,7 +70,9 @@ export class DeclarativeDriver extends BaseDriver {
   }
   private get port() {
     const fromSetting = typeof this.settings.port === 'number' ? this.settings.port : undefined;
-    return fromSetting ?? this.spec.transport.port ?? (this.http?.https ? 443 : this.http ? 80 : 23);
+    return (
+      fromSetting ?? this.spec.transport.port ?? (this.http?.https ? 443 : this.http ? 80 : 23)
+    );
   }
 
   override features(): string[] {
@@ -81,7 +88,10 @@ export class DeclarativeDriver extends BaseDriver {
 
   override start() {
     if (this.missing.length > 0) {
-      this.ctx.log('warn', `Driver ${this.spec.id} is missing settings`, { device: this.device.name, missing: this.missing });
+      this.ctx.log('warn', `Driver ${this.spec.id} is missing settings`, {
+        device: this.device.name,
+        missing: this.missing,
+      });
       return;
     }
     this.closed = false;
@@ -129,7 +139,11 @@ export class DeclarativeDriver extends BaseDriver {
       this.update((s) => {
         switch (p.set) {
           case 'power':
-            s.power = /^(on|1|true)$/i.test(raw) ? 'on' : /^(off|0|false)$/i.test(raw) ? 'off' : s.power;
+            s.power = /^(on|1|true)$/i.test(raw)
+              ? 'on'
+              : /^(off|0|false)$/i.test(raw)
+                ? 'off'
+                : s.power;
             break;
           case 'muted':
             s.muted = /^(on|1|true|muted)$/i.test(raw);
@@ -138,7 +152,10 @@ export class DeclarativeDriver extends BaseDriver {
             const n = Number(raw);
             const sc = this.spec.volumeScale;
             if (Number.isFinite(n))
-              s.volume = Math.max(0, Math.min(100, Math.round(sc ? ((n - sc.min) / (sc.max - sc.min)) * 100 : n)));
+              s.volume = Math.max(
+                0,
+                Math.min(100, Math.round(sc ? ((n - sc.min) / (sc.max - sc.min)) * 100 : n)),
+              );
             break;
           }
           case 'input':
@@ -153,6 +170,14 @@ export class DeclarativeDriver extends BaseDriver {
           case 'online':
             s.online = /^(on|1|true)$/i.test(raw);
             break;
+          case 'firmware': {
+            const version = raw
+              .replace(/[^\x20-\x7e]/g, '')
+              .trim()
+              .slice(0, 100);
+            if (version) s.firmware = version;
+            break;
+          }
         }
       });
     }
@@ -252,7 +277,8 @@ export class DeclarativeDriver extends BaseDriver {
 
   private sendOnSocket(action: DriverAction, values: Values): Promise<void> {
     const socket = this.socket;
-    if (!socket || socket.destroyed) return Promise.reject(new Error(`${this.device.name} is not connected`));
+    if (!socket || socket.destroyed)
+      return Promise.reject(new Error(`${this.device.name} is not connected`));
     const term = this.tcp!.terminator;
     const wait = new Promise<void>((resolve, reject) => {
       if (!action.expect) return resolve();
@@ -282,7 +308,10 @@ export class DeclarativeDriver extends BaseDriver {
         if (err) reject(err);
         else resolve();
       };
-      const timer = setTimeout(() => finish(new Error(`${this.device.name} did not respond`)), t.timeoutMs);
+      const timer = setTimeout(
+        () => finish(new Error(`${this.device.name} did not respond`)),
+        t.timeoutMs,
+      );
       socket.setEncoding('utf8');
       socket.on('error', (e) => finish(new Error(`${this.device.name}: ${e.message}`)));
       socket.on('connect', () => {
@@ -297,7 +326,12 @@ export class DeclarativeDriver extends BaseDriver {
         const replyEnd = t.replyTerminator ?? t.terminator;
         for (const line of buffer.split(replyEnd)) if (line) this.readText(line);
         const lines = buffer.split(replyEnd);
-        if (expect ? lines.some((l) => expect.test(l)) : this.patterns.length > 0 && buffer.includes(replyEnd)) finish();
+        if (
+          expect
+            ? lines.some((l) => expect.test(l))
+            : this.patterns.length > 0 && buffer.includes(replyEnd)
+        )
+          finish();
       });
       socket.on('close', () => {
         if (expect && !buffer.split(t.replyTerminator ?? t.terminator).some((l) => expect.test(l)))
@@ -309,11 +343,20 @@ export class DeclarativeDriver extends BaseDriver {
 
   // ---- HTTP -----------------------------------------------------------------------------------
 
-  private async httpCall(action: Pick<DriverAction, 'method' | 'path' | 'body' | 'expect' | 'headers'>, allowAny = false, values: Values = {}): Promise<string> {
+  private async httpCall(
+    action: Pick<DriverAction, 'method' | 'path' | 'body' | 'expect' | 'headers'>,
+    allowAny = false,
+    values: Values = {},
+  ): Promise<string> {
     const h = this.http!;
     const path = renderTemplate(action.path ?? '/', values, escapePath).replace(/^(?!\/)/, '/');
-    const jsonBody = (action.body ?? '').trimStart().startsWith('{') || (action.body ?? '').trimStart().startsWith('[');
-    const body = action.body === undefined ? undefined : renderTemplate(action.body, values, jsonBody ? escapeJson : escapeLine);
+    const jsonBody =
+      (action.body ?? '').trimStart().startsWith('{') ||
+      (action.body ?? '').trimStart().startsWith('[');
+    const body =
+      action.body === undefined
+        ? undefined
+        : renderTemplate(action.body, values, jsonBody ? escapeJson : escapeLine);
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries({ ...h.headers, ...action.headers }))
       headers[k] = renderTemplate(v, this.baseValues(), escapeLine);
@@ -329,7 +372,8 @@ export class DeclarativeDriver extends BaseDriver {
     });
     const text = (await res.text()).slice(0, MAX_REPLY_BYTES);
     if (!allowAny && !res.ok) throw new Error(`${this.device.name} answered HTTP ${res.status}`);
-    if (action.expect && !new RegExp(action.expect).test(text)) throw new Error(`${this.device.name} sent an unexpected reply`);
+    if (action.expect && !new RegExp(action.expect).test(text))
+      throw new Error(`${this.device.name} sent an unexpected reply`);
     return text;
   }
 
@@ -356,7 +400,8 @@ export class DeclarativeDriver extends BaseDriver {
   }
 
   async send(command: DeviceCommand): Promise<void> {
-    const v = (input: Parameters<typeof commandValues>[2]) => commandValues(this.spec, this.settings, input);
+    const v = (input: Parameters<typeof commandValues>[2]) =>
+      commandValues(this.spec, this.settings, input);
     switch (command.type) {
       case 'power':
         return this.run(`power.${command.on ? 'on' : 'off'}`, v({}), () =>
@@ -390,10 +435,13 @@ export class DeclarativeDriver extends BaseDriver {
           }),
         );
       case 'route':
-        return this.run('route', v({ input: command.inputPortId, output: command.outputPortId }), () =>
-          this.update((s) => {
-            s.routes[command.outputPortId] = command.inputPortId;
-          }),
+        return this.run(
+          'route',
+          v({ input: command.inputPortId, output: command.outputPortId }),
+          () =>
+            this.update((s) => {
+              s.routes[command.outputPortId] = command.inputPortId;
+            }),
         );
       case 'preset':
         return this.run('preset', v({ name: command.name }), () =>
