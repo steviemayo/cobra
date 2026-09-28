@@ -24,6 +24,7 @@ import {
 } from '@/components/common/health';
 import { PageContainer } from '@/components/common/page-header';
 import { orgPath, useOrg } from '@/components/shell/org-context';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
@@ -260,6 +261,23 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
     );
   if (!room || !detail.data) return null;
   const d = detail.data;
+  // A device's open problems: its offline incident, and any watched value that is out of bounds.
+  const openFor = (deviceId: string) =>
+    d.incidents.filter(
+      (i) =>
+        i.status === 'open' &&
+        (i.subject === `${roomId}:${deviceId}` || i.subject.startsWith(`${roomId}:${deviceId}:`)),
+    );
+  // Devices with something wrong first, so the cause of a room's health is at the top.
+  const devices = d.devices
+    .map((dev) => ({ dev, problems: openFor(dev.deviceId) }))
+    .sort(
+      (a, b) =>
+        Number(a.dev.online) - Number(b.dev.online) ||
+        b.problems.length - a.problems.length ||
+        a.dev.name.localeCompare(b.dev.name),
+    );
+  const online = d.devices.filter((x) => x.online).length;
 
   return (
     <PageContainer>
@@ -272,6 +290,7 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
           />
           <p className="text-sm text-muted-foreground">
             {room.health.reasons[0] ?? 'Everything this room reports is fine.'}
+            {d.devices.length > 0 && ` ${online} of ${d.devices.length} devices online.`}
             {room.reportedAt && ` Last heard ${timeAgo(room.reportedAt)}.`}
           </p>
         </div>
@@ -281,18 +300,30 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
       </div>
 
       <Section title="Devices">
-        {d.devices.length === 0 ? (
+        {devices.length === 0 ? (
           <p className="px-4 py-6 text-sm text-muted-foreground">
             No device status yet. It appears once the gateway running this room reports in.
           </p>
         ) : (
           <ul className="divide-y">
-            {d.devices.map((dev) => (
+            {devices.map(({ dev, problems }) => (
               <li key={dev.deviceId} className="flex flex-col gap-1.5 px-4 py-2.5">
                 <div className="flex items-center justify-between gap-3">
                   <span className="inline-flex items-center gap-2.5 text-sm">
                     <OnlineDot online={dev.online} />
                     <span className="font-medium">{dev.name}</span>
+                    {d.shared[dev.deviceId] && (
+                      <Badge
+                        variant="secondary"
+                        title={
+                          d.shared[dev.deviceId]!.otherRooms.length
+                            ? `${d.shared[dev.deviceId]!.name}, also used by ${d.shared[dev.deviceId]!.otherRooms.map((r) => r.name).join(', ')}`
+                            : d.shared[dev.deviceId]!.name
+                        }
+                      >
+                        Shared
+                      </Badge>
+                    )}
                     {dev.firmware && (
                       <span className="text-xs text-muted-foreground">Firmware {dev.firmware}</span>
                     )}
@@ -311,6 +342,33 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
                     )}
                   </span>
                 </div>
+                {problems.length > 0 && (
+                  <ul className="space-y-1 pl-6">
+                    {problems.map((i) => (
+                      <li key={i.id} className="flex flex-wrap items-center gap-2 text-sm">
+                        <SeverityPill severity={i.severity} />
+                        <span>{i.title}</span>
+                        <span className="text-xs text-muted-foreground">{timeAgo(i.openedAt)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {(d.shared[dev.deviceId]?.otherRooms.length ?? 0) > 0 && (
+                  <p className="pl-6 text-xs text-muted-foreground">
+                    Also used by{' '}
+                    {d.shared[dev.deviceId]!.otherRooms.map((r, i) => (
+                      <span key={r.id}>
+                        {i > 0 && ', '}
+                        <Link
+                          href={orgPath(orgId, `/rooms/${r.id}/monitoring`)}
+                          className="underline-offset-4 hover:text-foreground hover:underline"
+                        >
+                          {r.name}
+                        </Link>
+                      </span>
+                    ))}
+                  </p>
+                )}
                 {feedbackChips(dev.feedback).length > 0 && (
                   <div className="flex flex-wrap gap-1.5 pl-6">
                     {feedbackChips(dev.feedback).map((chip) => (

@@ -8,7 +8,7 @@ import { writeAudit } from '../audit';
 import { deviceFeedbackDailyHistory, deviceFeedbackHistory } from '../device-feedback-history';
 import { firmwareReport } from '../firmware-report';
 import { maybeSweep } from '../monitoring';
-import { orgDevices, orgOverview } from '../monitoring-queries';
+import { orgDevices, orgOverview, sharedInRoom } from '../monitoring-queries';
 import { SITE_SCOPED, siteFilter, type SiteScope } from '../site-scope';
 import { featureProcedure, requireRole, router } from '../trpc';
 import { validTimeZone } from '../usage-analytics';
@@ -70,7 +70,7 @@ export const monitoringRouter = router({
         where: { id: input.roomId, orgId: ctx.orgId, ...siteFilter(ctx.siteScope) },
       });
       if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
-      const [devices, incidents, events] = await Promise.all([
+      const [devices, incidents, events, shared] = await Promise.all([
         db.deviceStatus.findMany({
           where: { roomId: room.id, orgId: ctx.orgId },
           orderBy: { name: 'asc' },
@@ -86,8 +86,10 @@ export const monitoringRouter = router({
           take: 40,
           select: { id: true, type: true, at: true, data: true },
         }),
+        sharedInRoom(db, ctx.orgId, room, ctx.siteScope),
       ]);
       return {
+        shared,
         devices: devices.map((d) => ({
           deviceId: d.deviceId,
           name: d.name,
