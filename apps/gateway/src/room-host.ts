@@ -8,6 +8,7 @@ import {
 } from '@kestrel/drivers/real';
 import {
   DEVICE_FEEDBACK_FIELDS,
+  DeviceDetails,
   applyBindings,
   checkWatch,
   type DeviceFeedback,
@@ -29,6 +30,9 @@ import type {
 import type { Logger } from './log';
 import { occupancyTracker } from './occupancy';
 import { SharedDevices } from './shared-devices';
+
+/** How long before device details are sent again even though they have not changed. */
+const DETAILS_REFRESH_MS = 5 * 60_000;
 
 /** Why a command was refused when the plan does not include control. */
 export const CONTROL_NOT_LICENSED = 'Control is not included in this organisation’s plan';
@@ -200,6 +204,8 @@ export function buildBus(
  */
 export class RoomHost {
   private readonly rooms = new Map<string, LoadedRoom>();
+  /** What device details the cloud was last sent, so they go again only when they change or go stale. */
+  private readonly sentDetails = new Map<string, { json: string; at: number }>();
   private readonly reloadListeners = new Set<(roomId: string) => void>();
   private dividerListener: ((dividerId: string, open: boolean) => void) | null = null;
   private resolveActive: (roomId: string) => string = (roomId) => roomId;
@@ -353,6 +359,20 @@ export class RoomHost {
     if (notify) this.notify(roomId);
   }
 
+  /** The details to send for a device now: nothing when the cloud already has them. */
+  private detailsFor(roomId: string, deviceId: string, details: unknown, now = Date.now()) {
+    if (!details) return undefined;
+    // A driver's mistake (too large, wrong shape) must never make the whole heartbeat invalid.
+    const parsed = DeviceDetails.safeParse(details);
+    if (!parsed.success) return undefined;
+    const json = JSON.stringify(parsed.data);
+    const key = `${roomId}:${deviceId}`;
+    const sent = this.sentDetails.get(key);
+    if (sent && sent.json === json && now - sent.at < DETAILS_REFRESH_MS) return undefined;
+    this.sentDetails.set(key, { json, at: now });
+    return parsed.data;
+  }
+
   reports(): RoomReport[] {
     return [...this.rooms.values()].map((r) => ({
       roomId: r.roomId,
@@ -388,6 +408,7 @@ export class RoomHost {
             : [];
         // Everything the driver reports back, monitored room or not: this never touches control.
         const feedback = deviceFeedback(state, d.ports);
+        const details = this.detailsFor(r.roomId, d.id, state?.details);
         return {
           deviceId: d.id,
           name: d.name,
@@ -396,6 +417,7 @@ export class RoomHost {
           ...(state?.firmware && { firmware: state.firmware }),
           ...(watched.length > 0 && { watched }),
           ...(Object.keys(feedback).length > 0 && { feedback }),
+          ...(details && { details }),
         };
       }),
     }));

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
-import { DEVICE_FEEDBACK_FIELDS, DeviceFeedback } from '@kestrel/model';
+import { DEVICE_FEEDBACK_FIELDS, DeviceDetails, DeviceFeedback } from '@kestrel/model';
 import { deliverAlerts } from '../alerts';
 import { writeAudit } from '../audit';
 import { deviceFeedbackDailyHistory, deviceFeedbackHistory } from '../device-feedback-history';
@@ -100,6 +100,8 @@ export const monitoringRouter = router({
           // Stored loosely (Json); parsed here so an old row from before this field existed, or
           // anything unexpected, can't reach the page as something the UI doesn't understand.
           feedback: DeviceFeedback.safeParse(d.feedback ?? {}).data ?? null,
+          // Same care as feedback: only what the page understands, whatever an older row holds.
+          details: DeviceDetails.safeParse(d.details ?? []).data ?? null,
         })),
         incidents,
         events: events.map((e) => ({ ...e, data: (e.data ?? {}) as Record<string, unknown> })),

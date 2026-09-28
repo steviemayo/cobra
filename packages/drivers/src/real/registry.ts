@@ -5,6 +5,8 @@ import { GenericTcpDriver } from './generic-tcp';
 import { genericRestDriver } from './generic-rest';
 import { AVOIP_SWITCHER_IDS } from './avoip';
 import { Crestron4SeriesDriver } from './crestron-4series';
+import { CrestronFlexDriver } from './crestron-flex';
+import { CrestronOccupancyDriver } from './crestron-occupancy';
 import { CrestronTswDriver } from './crestron-tsw';
 import { NvxDriver } from './nvx';
 import { NvxDecoderDriver, NvxEncoderDriver } from './nvx-endpoints';
@@ -55,6 +57,8 @@ const BUILT_IN: Record<string, (device: Device, ctx: DriverContext) => DeviceDri
   'visca-ip': (d, c) => new ViscaDriver(d, c),
   'crestron-4series': (d, c) => new Crestron4SeriesDriver(d, c),
   'crestron-tsw': (d, c) => new CrestronTswDriver(d, c),
+  'crestron-flex': (d, c) => new CrestronFlexDriver(d, c),
+  'crestron-occupancy': (d, c) => new CrestronOccupancyDriver(d, c),
 };
 export const BUILT_IN_DRIVER_IDS = [
   ...Object.keys(BUILT_IN),

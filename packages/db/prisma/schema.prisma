@@ -523,6 +523,8 @@ model DeviceStatus {
   firmwareSince DateTime?
   /// Whatever the driver reports back (power, input, mute, ...), control or not. See DeviceFeedback.
   feedback      Json?
+  /// What the device says about itself (serial, programs, IP table, ...). See DeviceDetails. Kept when a heartbeat leaves it out.
+  details       Json?
   updatedAt     DateTime  @default(now()) @updatedAt
 
   org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)

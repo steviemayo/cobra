@@ -33,6 +33,7 @@ import { timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
+import { DeviceDetailsView } from './device-details';
 import { NewTicketDialog } from './tickets';
 
 type Command = RouterOutputs['command']['list'][number];
@@ -221,6 +222,7 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
   const { orgId, canSupport } = useOrg();
   const [restarting, setRestarting] = useState(false);
   const [raising, setRaising] = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const overview = useQuery({
     ...trpc.monitoring.overview.queryOptions({ orgId }),
     refetchInterval: 5_000,
@@ -311,7 +313,30 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
                 <div className="flex items-center justify-between gap-3">
                   <span className="inline-flex items-center gap-2.5 text-sm">
                     <OnlineDot online={dev.online} />
-                    <span className="font-medium">{dev.name}</span>
+                    <button
+                      type="button"
+                      aria-expanded={!!expanded[dev.deviceId]}
+                      disabled={!dev.details?.length}
+                      onClick={() =>
+                        setExpanded((e) => ({ ...e, [dev.deviceId]: !e[dev.deviceId] }))
+                      }
+                      className="inline-flex items-center gap-1 font-medium enabled:hover:underline"
+                      title={
+                        dev.details?.length
+                          ? 'Show what this device reports'
+                          : 'This device has not reported details'
+                      }
+                    >
+                      {dev.name}
+                      {!!dev.details?.length && (
+                        <ChevronRight
+                          className={cn(
+                            'size-3.5 text-muted-foreground transition-transform duration-200',
+                            expanded[dev.deviceId] && 'rotate-90',
+                          )}
+                        />
+                      )}
+                    </button>
                     {d.shared[dev.deviceId] && (
                       <Badge
                         variant="secondary"
@@ -380,6 +405,11 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
                       </span>
                     ))}
                   </div>
+                )}
+                {!!dev.details?.length && (
+                  <AnimatedCollapse open={!!expanded[dev.deviceId]}>
+                    <DeviceDetailsView details={dev.details} />
+                  </AnimatedCollapse>
                 )}
                 {analytics && (
                   <div className="flex flex-col gap-0.5 pl-6">
