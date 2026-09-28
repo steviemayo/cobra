@@ -127,6 +127,15 @@ model Gateway {
   os                   String?
   /// What the gateway said it can do in its last heartbeat (for example "bindings"). Empty for older gateways.
   features             String[]       @default([])
+  /// When true the portal asks this gateway to update as soon as its channel has a newer version.
+  autoUpdate           Boolean        @default(false)
+  /// An update someone asked for, to `updateVersion`, not before this time. Null when none is waiting.
+  updateNotBefore      DateTime?
+  updateVersion        String?
+  /// How the gateway last said it got on (downloading, staged, applying, failed, unsupported), and why it failed.
+  updateState          String?
+  updateError          String?
+  updateReportedAt     DateTime?
   lastSeenAt           DateTime?
   createdAt            DateTime       @default(now())
 
@@ -137,6 +146,33 @@ model Gateway {
 
   @@index([orgId])
   @@index([siteId])
+}
+
+/// A gateway that is running but has no definition in any organisation: it announced itself, and
+/// staff can give it to the right organisation once they have confirmed with the customer.
+model UnclaimedGateway {
+  id               String    @id @default(uuid()) @db.Uuid
+  /// Random and public, chosen by the install. The secret proves it is the same install later.
+  installId        String    @unique
+  secretHash       String
+  hostname         String?
+  os               String?
+  version          String?
+  localAddresses   String[]  @default([])
+  /// The address the cloud saw the announcement come from, to help tell which customer it is.
+  publicIp         String?
+  /// open, claimed, dismissed.
+  status           String    @default("open")
+  firstSeenAt      DateTime  @default(now())
+  lastSeenAt       DateTime  @default(now())
+  claimedGatewayId String?   @db.Uuid
+  claimedBy        String?   @db.Uuid
+  claimedAt        DateTime?
+  /// The enrolment token of the gateway made from the claim, sealed; handed to the install until it enrols.
+  claimTokenSealed String?
+
+  @@index([status, lastSeenAt])
+  @@index([publicIp, firstSeenAt])
 }
 
 model Room {

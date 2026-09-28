@@ -1,13 +1,16 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Activity, Building2, LifeBuoy, ScrollText, Store, Users } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Activity, Building2, LifeBuoy, Router, ScrollText, Store, Users } from 'lucide-react';
 import { hasStaffRole, type StaffRole } from '@kestrel/model';
 import { cn } from '@/lib/utils';
+import { useTRPC } from '@/trpc/client';
 
 const NAV: { href: string; label: string; icon: typeof Building2; needs?: StaffRole[] }[] = [
   { href: '/staff/orgs', label: 'Organisations', icon: Building2 },
   { href: '/staff/health', label: 'Fleet health', icon: Activity },
+  { href: '/staff/gateways', label: 'Unclaimed gateways', icon: Router },
   { href: '/staff/tickets', label: 'Tickets', icon: LifeBuoy },
   { href: '/staff/marketplace', label: 'Marketplace review', icon: Store },
   { href: '/staff/audit', label: 'Audit trail', icon: ScrollText, needs: ['admin', 'support'] },
@@ -26,6 +29,14 @@ export function StaffShell({
   children: React.ReactNode;
 }) {
   const path = usePathname();
+  const trpc = useTRPC();
+  // How many gateways are waiting to be claimed, so a new one is noticed without opening the page.
+  const unclaimed = useQuery({
+    ...trpc.staff.gateways.unclaimed.queryOptions(),
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const waiting = (unclaimed.data ?? []).filter((g) => g.status === 'open').length;
   return (
     <div className="flex min-h-screen flex-col">
       <header className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b bg-muted/40 px-4 py-2 sm:px-6">
@@ -48,6 +59,11 @@ export function StaffShell({
                 )}
               >
                 <Icon className="size-4" /> {label}
+                {href === '/staff/gateways' && waiting > 0 && (
+                  <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
+                    {waiting}
+                  </span>
+                )}
               </Link>
             ),
           )}

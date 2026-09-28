@@ -12,7 +12,7 @@
     - the gateway, with its own copy of Node, under C:\Program Files\Kestrel Gateway
     - either a Windows service (starts at boot, before anyone logs in) or a system tray app that
       starts at login (-Mode Tray) — either way, it restarts on its own and runs until stopped
-    - a daily scheduled task that updates the gateway from the stable or beta channel
+    - a scheduled task that updates the gateway, run by the gateway when the portal orders it
     - a firewall rule so touch panels on the LAN can reach the panel port
 
   Nothing else on the machine is changed. Data (the gateway's identity, cached room releases and

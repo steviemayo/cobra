@@ -502,3 +502,47 @@ A room deploy was refused by an already-running gateway with `signature check fa
 | R-6 | The Flex driver is **monitoring only** and reports occupied when the room-occupied join **or** the camera's people count says so | The two joins are independent on the hardware (the join has been seen staying off while the camera counted several people). Peripheral health becomes an alert by watching a join as a control point (`{ "join": "S27702" }`, expect "Healthy") through the existing watch machinery, rather than a new alerting path |
 | R-7 | The NVX encoder and decoder show identity, the mode and their HDMI input / stream / route from the same reads they already make plus a cached `DeviceInfo` (every 5 minutes). Fields not previously read are listed as the unit reports them and are **not verified on real NVX hardware**. The legacy one-device `crestron-dm-nvx` virtual matrix has no details (it stands for several endpoints) | No NVX was at hand, and inventing field labels would be wrong; the encoder and decoder drivers are the ones the switcher uses now |
 | R-8 | Gateway bumped to 0.2.4 (driver and report changes) | The `version-bump` rule; the gateway is the piece that reads these devices |
+
+## Step S: the portal decides when a gateway updates (2026-09-28)
+
+**From the user**
+
+If the portal cannot push updates, it needs a way to flag a gateway to update at its next check-in, or at a scheduled time. A daily check is not very useful
+
+**Found while investigating**
+
+- Nothing in the portal could make a gateway update. Docker gateways updated only through Watchtower polling, and Windows gateways through a daily scheduled task whose download (`update.ps1` fetching `github.com/.../releases/download/...` anonymously) cannot work because the repo is private. On this machine the installed gateway was 0.2.0, the update task had **never run** (last run 1999, next run tomorrow 03:45), and 0.2.4 was already published
+- A remote command is the wrong shape: `RemoteCommand` is room-scoped, and a gateway that does not know a command type fails to read its whole heartbeat reply, so a new type can only go to a gateway that says it can
+
+**Made while building**
+
+| ID | Decision | Why |
+| --- | --- | --- |
+| S-1 | An update is **desired state on the gateway**, not a command: `Gateway.updateNotBefore` / `updateVersion` record the request, and the heartbeat reply carries `updateOrder: { version, bundle: { sha256, size } }` once it is due, the gateway is behind, and it advertised the new `self-update` feature. An older gateway is never sent one (and an extra reply key is ignored by its schema, which a test proves) | Idempotent and cancellable, works across restarts, and the scheduled time is just `notBefore` |
+| S-2 | Per-gateway policy, **Manual by default** or **Automatic** (`Gateway.autoUpdate`): Automatic makes the portal create the request itself as soon as the channel has a newer version. The Watchtower polling and the Windows daily trigger are retired, so the portal is the one place that decides. *Update now*, *at a set time*, *cancel* and *update all that are behind* are on the Gateways page (owner/dev, audited) | Chosen with the user: a fleet should not change on its own by default, but should be able to |
+| S-3 | **Windows**: the gateway asks the portal for the bundle (`GET /api/gateway/v1/bundle`), which returns GitHub's short-lived signed asset link plus the digest, so the 47 MB never passes through a function. The gateway downloads it, checks SHA-256 against the digest in the **order**, refuses an order with no digest, stages it with `request.json`, copies its own bundled `update.ps1` over the installed one (an old installed script cannot use a staged bundle), and runs `schtasks /Run` on the existing SYSTEM task, which stops and swaps the service outside the gateway's own process. `update.ps1` uses the staged bundle, keeps the old version and puts it back if `/health` does not answer, and leaves `update/result.json` so the gateway can report the failure | The private repo means the machine itself can never download anonymously; the task already exists because a service cannot replace itself |
+| S-4 | **Docker**: the gateway asks **Watchtower's HTTP API** (`KESTREL_UPDATE_URL`/`KESTREL_UPDATE_TOKEN`, published on 127.0.0.1 only); the compose file no longer polls. Any install with no updater configured (the one-line `docker run`, native installs) reports `unsupported` with a reason, shown as "Can't update itself" | A container cannot replace itself; this reuses the tool the compose file already ships |
+| S-5 | Progress is `downloading` / `staged` / `applying` / `failed` / `unsupported`, reported in the heartbeat. **Success is the reported version reaching the target.** A failure is not retried in a loop (the request stays visible until someone retries or clears it); a gateway that stops reporting mid-update is marked failed after 15 minutes; a gateway stops repeating an in-progress state after 10 minutes so the portal can see it stalled | Retrying a failed 47 MB update every 30 seconds is worse than the failure |
+| S-6 | **Bootstrap**: gateways older than 0.2.5 have no `self-update`, so the first move to 0.2.5 is manual once (Windows: latest installer; Docker: `docker compose pull && up -d` with the new compose settings). The portal says "needs one manual update" rather than sending an order they cannot read. `GITHUB_RELEASE_TOKEN` (read-only contents) must be set on Vercel, which Step N-5 left undone | Unavoidable: the old code cannot learn a new protocol by itself |
+| S-7 | **Trust:** a bundle is installed because the portal reads its digest from the same release it links to, so anyone who can publish to `gateway-stable` can put code on gateways. Independent signing (CI signs the digest with a key the portal does not hold; gateways verify) is the real fix and is **not built** | Named here so it is a decision, not an oversight |
+| S-8 | Setting a gateway's channel in the portal now changes what a portal update installs on Windows (the bundle comes from that channel). For Docker the image tag on the machine still decides, so the channel there must match | Was previously only a note for the portal |
+
+## Step T: unclaimed gateways (2026-09-28)
+
+**From the user**
+
+If a gateway is installed and running but has no definition in the portal, it should be logged somewhere on the staff portal as an "unclaimed" gateway, so staff can assign it to the right organisation once they have confirmed with the customer
+
+**Found while investigating**
+
+A gateway with no enrolment token, a used or expired one, or a deleted record only errored in a loop ("Not enrolled and no KESTREL_ENROLL_TOKEN set") and nothing on the cloud side ever saw it. The Windows installer leaves the token blank by default, so this is the normal state of a fresh install
+
+**Made while building**
+
+| ID | Decision | Why |
+| --- | --- | --- |
+| T-1 | A gateway that cannot enrol **announces itself** (`POST /api/gateway/v1/announce`, no credential) every minute with a random public `installId`, a separate random `installSecret`, hostname, OS, version and its private IPv4 addresses; the cloud adds the public address it saw. The install id and secret are created once and kept in the gateway's store, so a restart is the same install. Staff see it under **Staff > Unclaimed gateways** (count badge in the staff nav) | It has no credential yet, so an unauthenticated announcement is the only way it can say it exists |
+| T-2 | Staff **Assign** it to an organisation, site and name (admin or support, MFA'd staff procedure, written to the staff audit and, as `gateway.claim`, to the organisation's audit). That creates an ordinary pending gateway with an enrolment token; the token is sealed with `KESTREL_SECRETS_KEY` and handed only to the announcement that presents the right secret, **repeatedly until the gateway has enrolled** (a lost reply is not fatal) and never once it has or the token has expired. The gateway then enrols through the existing route. *Take back* removes a claim that never connected; *Dismiss* makes it announce hourly; *Remove* deletes it | Staff confirm with the customer first, then nothing else is needed on the machine. Holding only the public install id gets nothing, which is why the secret exists |
+| T-3 | **Guardrails for an endpoint anyone can reach:** strictly bounded payload (4 KB, zod length limits), only a status comes back, the secret is stored hashed, at most 500 rows are held and one public address can add 10 new installs a day (counted in the database, because in-memory limits do not survive serverless), and rows not seen for 30 days (claimed ones after 7) are deleted by the existing daily retention cron | The list must not be a way to fill the database, or to learn anything about the platform |
+| T-4 | A gateway with a token that works never announces. One whose token is refused (used, expired, wrong) falls back to announcing instead of erroring for ever; one that is waiting to be claimed is not counted as a failure and logs once | Keeps today's behaviour for every configured install, and turns the stuck case into something visible |
+| T-5 | Unclaimed gateways cannot be updated from the portal (no organisation owns them); once claimed and enrolled they update like any other | The update request lives on the organisation's gateway record |

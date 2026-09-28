@@ -300,6 +300,76 @@ export type GroupConfig = z.infer<typeof GroupConfig>;
 export const DividerReport = z.object({ id: z.string().uuid(), open: z.boolean() });
 export type DividerReport = z.infer<typeof DividerReport>;
 
+// ---- Announcing an unclaimed gateway -------------------------------------------------------------
+
+/**
+ * What a gateway sends when it is running but cannot enrol (no token, or a token that is used up or
+ * expired): who it is, so staff can see it and give it to the right organisation. Nothing secret
+ * but `secret`, which only proves later that it is the same install, and is stored hashed.
+ */
+export const AnnounceRequest = z.object({
+  protocol: z.literal(PROTOCOL_VERSION),
+  /** Random and stable for this install; public. */
+  installId: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/),
+  secret: z.string().min(20).max(100),
+  gatewayVersion: z.string().max(50),
+  hostname: z.string().max(100).optional(),
+  os: z.string().max(100).optional(),
+  /** The machine's own private addresses, to help tell where it is. */
+  localAddresses: z.array(z.string().max(45)).max(8).default([]),
+});
+export type AnnounceRequest = z.infer<typeof AnnounceRequest>;
+
+export const AnnounceResponse = z.object({
+  /** `claimed` carries the enrolment token (until the gateway has enrolled with it). */
+  status: z.enum(['unclaimed', 'claimed', 'dismissed']),
+  enrollToken: z.string().max(200).optional(),
+  /** When to ask again. */
+  retrySeconds: z.number().int().min(5).max(86_400),
+});
+export type AnnounceResponse = z.infer<typeof AnnounceResponse>;
+
+// ---- Gateway updates ---------------------------------------------------------------------------
+
+/** How far a gateway got with an update the portal asked for. Success is the version changing. */
+export const UpdateState = z.enum(['downloading', 'staged', 'applying', 'failed', 'unsupported']);
+export type UpdateState = z.infer<typeof UpdateState>;
+
+export const GatewayUpdateReport = z.object({
+  state: UpdateState,
+  /** The version this attempt was for. */
+  version: z.string().max(50).optional(),
+  /** In plain words, for `failed` and `unsupported`. */
+  error: z.string().max(300).optional(),
+});
+export type GatewayUpdateReport = z.infer<typeof GatewayUpdateReport>;
+
+/**
+ * The portal asking a gateway to update to `version` now. Sent only to a gateway that said it can
+ * ('self-update') and only once the requested time has come. `bundle` is the release the gateway
+ * must fetch (from `/api/gateway/v1/bundle`) and check against `sha256` before it acts on it; a
+ * gateway refuses an order for a bundle that has no digest.
+ */
+export const GatewayUpdateOrder = z.object({
+  version: z.string().max(50),
+  bundle: z
+    .object({
+      sha256: z.string().regex(/^[0-9a-f]{64}$/),
+      size: z.number().int().positive().optional(),
+    })
+    .optional(),
+});
+export type GatewayUpdateOrder = z.infer<typeof GatewayUpdateOrder>;
+
+/** Where a gateway downloads its update bundle from: a short-lived link straight to the release asset. */
+export const BundleLocation = z.object({
+  url: z.string().url().max(2000),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  size: z.number().int().positive().optional(),
+  version: z.string().max(50),
+});
+export type BundleLocation = z.infer<typeof BundleLocation>;
+
 export const HeartbeatRequest = z.object({
   protocol: z.literal(PROTOCOL_VERSION),
   gatewayVersion: z.string().max(50),
@@ -312,6 +382,8 @@ export const HeartbeatRequest = z.object({
   dividers: z.array(DividerReport).max(500).default([]),
   /** What this gateway can do beyond the basics (see GATEWAY_FEATURES). Older gateways send none. */
   features: z.array(z.string().max(40)).max(20).default([]),
+  /** Progress on an update the portal asked for. Absent when there is none in hand. */
+  updateReport: GatewayUpdateReport.optional(),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
 
@@ -334,6 +406,8 @@ export const HeartbeatResponse = z.object({
   update: z
     .object({ channel: z.enum(['stable', 'beta']), latest: z.string().max(50).nullable() })
     .optional(),
+  /** Update to this version now. Only ever sent to a gateway that advertised 'self-update'. */
+  updateOrder: GatewayUpdateOrder.optional(),
   /** Today's bookings for the rooms whose calendars were read recently. Sent only to a gateway that says it shows them. */
   schedules: z.array(RoomMeetings).max(200).default([]),
 });

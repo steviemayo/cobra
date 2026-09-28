@@ -1,6 +1,10 @@
-# Updates the gateway from its release channel. Run daily by the "Kestrel Gateway Update" scheduled
-# task (registered for both Service and Tray installs by configure.ps1), or by hand. Keeps the
-# previous version and puts it back if the new one does not come up healthy.
+# Updates the gateway. Run by the "Kestrel Gateway Update" scheduled task (registered for both
+# Service and Tray installs by configure.ps1), which the gateway starts when the portal orders an
+# update; or by hand. The gateway has already downloaded the bundle and checked it against the
+# portal's digest (<data>\update\request.json names it), so this uses it as it is. With no such
+# request it looks at the release channel directly, which only works while that is reachable.
+# Keeps the previous version and puts it back if the new one does not come up healthy, leaving
+# <data>\update\result.json so the gateway can tell the portal what happened.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
@@ -20,27 +24,61 @@ function Note($m) { Add-Content -Path $log -Value "$(Get-Date -Format s) $m" }
 
 $app = Join-Path $root 'app'
 $current = (Get-Content (Join-Path $app 'VERSION') -ErrorAction SilentlyContinue | Select-Object -First 1)
-try {
-  $latest = ((Invoke-WebRequest -Uri "$base/VERSION" -UseBasicParsing).Content).Trim()
-} catch {
-  Note "Could not check for updates: $($_.Exception.Message)"
-  exit 0
+
+$updateDir = Join-Path $dataDir 'update'
+$request = Join-Path $updateDir 'request.json'
+$resultFile = Join-Path $updateDir 'result.json'
+function Report($ok, $version, $message) {
+  New-Item -ItemType Directory -Force -Path $updateDir | Out-Null
+  @{ ok = $ok; version = "$version"; error = "$message" } | ConvertTo-Json | Set-Content -Path $resultFile -Encoding ASCII
 }
-if (-not $latest -or $latest -eq $current) { exit 0 }
+function Forget-Request {
+  Remove-Item -Force $request -ErrorAction SilentlyContinue
+  if ($staged -and $staged.zip) { Remove-Item -Force $staged.zip -ErrorAction SilentlyContinue }
+}
+
+$staged = $null
+if (Test-Path $request) {
+  try { $staged = Get-Content $request -Raw | ConvertFrom-Json } catch { Remove-Item -Force $request -ErrorAction SilentlyContinue }
+}
+
+if ($staged) {
+  $latest = "$($staged.version)".Trim()
+} else {
+  try {
+    $latest = ((Invoke-WebRequest -Uri "$base/VERSION" -UseBasicParsing).Content).Trim()
+  } catch {
+    Note "Could not check for updates: $($_.Exception.Message)"
+    exit 0
+  }
+}
+if (-not $latest -or $latest -eq $current) { Forget-Request; exit 0 }
 
 Note "Updating $current -> $latest ($channel, $mode mode)"
-$zip = Join-Path ([IO.Path]::GetTempPath()) "kestrel-gateway-$([Guid]::NewGuid().ToString('N')).zip"
+Remove-Item -Force $resultFile -ErrorAction SilentlyContinue
 $stage = Join-Path $root 'app.new'
+$ownsZip = $false
+$zip = $null
 try {
-  Invoke-WebRequest -Uri "$base/kestrel-gateway-win-x64.zip" -OutFile $zip -UseBasicParsing
+  if ($staged) {
+    $zip = "$($staged.zip)"
+    if (-not (Test-Path $zip)) { throw 'The staged bundle is missing' }
+    $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLower()
+    if ($actual -ne "$($staged.sha256)".ToLower()) { throw 'The staged bundle does not match its digest' }
+  } else {
+    $zip = Join-Path ([IO.Path]::GetTempPath()) "kestrel-gateway-$([Guid]::NewGuid().ToString('N')).zip"
+    $ownsZip = $true
+    Invoke-WebRequest -Uri "$base/kestrel-gateway-win-x64.zip" -OutFile $zip -UseBasicParsing
+  }
   if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
   Expand-Archive -Path $zip -DestinationPath $stage -Force
   if (-not (Test-Path (Join-Path $stage 'runtime\node.exe'))) { throw 'The download is not a gateway bundle' }
 } catch {
-  Note "Download failed, keeping $current : $($_.Exception.Message)"
+  Note "Could not prepare $latest, keeping $current : $($_.Exception.Message)"
+  if ($staged) { Report $false $latest "Could not prepare the update: $($_.Exception.Message)"; Forget-Request; exit 1 }
   exit 0
 } finally {
-  Remove-Item -Force $zip -ErrorAction SilentlyContinue
+  if ($ownsZip -and $zip) { Remove-Item -Force $zip -ErrorAction SilentlyContinue }
 }
 
 function Stop-Gateway {
@@ -86,10 +124,13 @@ if ($healthy) {
     if (Test-Path $fresh) { Copy-Item -Force $fresh (Join-Path $root $name) }
   }
   Note "Updated to $latest"
+  Forget-Request
   exit 0
 }
 
 Note "$latest did not start; putting $current back"
+Report $false $latest "$latest did not start, so $current was put back."
+Forget-Request
 Stop-Gateway
 Remove-Item -Recurse -Force $app
 Move-Item -Path $old -Destination $app

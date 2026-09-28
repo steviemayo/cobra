@@ -1,11 +1,15 @@
-// Gateways update themselves from their own release channel (a container tag that Watchtower or the
-// Windows service follows), separately from room programs. The cloud does not push an update; it
-// records which channel a gateway follows and tells the portal whether it is behind.
+// Gateways follow a release channel, separately from room programs. The portal records which channel
+// a gateway follows and whether it is behind, and asks a gateway to update by putting an order in
+// its heartbeat reply once someone has requested it (or its policy is Automatic). The gateway does
+// the work; it never accepts an inbound connection.
 export type Channel = 'stable' | 'beta';
 
 /** The newest version published on each channel, set by whoever releases the gateway. */
-export function latestVersions(env: Record<string, string | undefined> = process.env): Record<Channel, string | null> {
-  const clean = (v: string | undefined) => (v && /^\d+(\.\d+){0,2}/.test(v.trim()) ? v.trim() : null);
+export function latestVersions(
+  env: Record<string, string | undefined> = process.env,
+): Record<Channel, string | null> {
+  const clean = (v: string | undefined) =>
+    v && /^\d+(\.\d+){0,2}/.test(v.trim()) ? v.trim() : null;
   return { stable: clean(env.GATEWAY_LATEST_STABLE), beta: clean(env.GATEWAY_LATEST_BETA) };
 }
 
@@ -34,5 +38,73 @@ export function updateStatus(
 ): { status: UpdateStatus; latest: string | null } {
   const newest = latest[gateway.channel];
   if (!gateway.version || !newest) return { status: 'unknown', latest: newest };
-  return { status: compareVersions(gateway.version, newest) < 0 ? 'behind' : 'current', latest: newest };
+  return {
+    status: compareVersions(gateway.version, newest) < 0 ? 'behind' : 'current',
+    latest: newest,
+  };
+}
+
+// ---- Asking a gateway to update ----------------------------------------------------------------
+
+/** A gateway that stops reporting mid-update for this long is treated as having failed. */
+export const UPDATE_STALE_MS = 15 * 60_000;
+const IN_PROGRESS = ['downloading', 'staged', 'applying'];
+
+/** Only a gateway that says it can update itself is ever sent an order (an older one fails to read it). */
+export const canSelfUpdate = (features: string[] | null | undefined) =>
+  !!features?.includes('self-update');
+
+export interface UpdateInputs {
+  /** The version this heartbeat reported. */
+  reportedVersion: string;
+  features: string[];
+  autoUpdate: boolean;
+  request: {
+    notBefore: Date | null;
+    version: string | null;
+    state: string | null;
+    reportedAt: Date | null;
+  };
+  /** What is published on the gateway's channel now, when the portal could read it. */
+  release: { version: string | null } | null;
+  now: Date;
+}
+
+export type UpdateAction =
+  | { kind: 'none' }
+  /** Done, or nothing left to do: forget the request. */
+  | { kind: 'clear' }
+  /** The Automatic policy asks for the update itself. */
+  | { kind: 'request'; version: string; notBefore: Date }
+  | { kind: 'fail'; error: string }
+  | { kind: 'order'; version: string };
+
+/** What a heartbeat should do about updates. Pure, so the rules can be tested without a database. */
+export function planUpdate(i: UpdateInputs): UpdateAction {
+  const can = canSelfUpdate(i.features);
+  const { request } = i;
+  if (request.version && compareVersions(i.reportedVersion, request.version) >= 0)
+    return { kind: 'clear' };
+
+  if (!request.notBefore) {
+    const newest = i.release?.version;
+    if (i.autoUpdate && can && newest && compareVersions(i.reportedVersion, newest) < 0)
+      return { kind: 'request', version: newest, notBefore: i.now };
+    return { kind: 'none' };
+  }
+
+  if (!can || request.notBefore.getTime() > i.now.getTime()) return { kind: 'none' };
+  // A failure stays visible until someone retries or cancels; it is not retried in a loop.
+  if (request.state === 'failed' || request.state === 'unsupported') return { kind: 'none' };
+  if (
+    IN_PROGRESS.includes(request.state ?? '') &&
+    request.reportedAt &&
+    i.now.getTime() - request.reportedAt.getTime() > UPDATE_STALE_MS
+  )
+    return { kind: 'fail', error: 'The update did not finish. Try again.' };
+
+  const newest = i.release?.version;
+  if (!newest) return { kind: 'none' };
+  if (compareVersions(i.reportedVersion, newest) >= 0) return { kind: 'clear' };
+  return { kind: 'order', version: newest };
 }
