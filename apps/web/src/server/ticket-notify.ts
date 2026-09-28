@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import type { PrismaClient } from '@kestrel/db';
-import { assertPublicUrl, portalLink } from './alerts';
+import { portalLink } from './alerts';
+import { pinnedFetch, postJson, type Lookup } from './outbound';
 
 // Tickets tell people when something needs them: Kestrel staff when a ticket is escalated to them,
 // and the organisation when Kestrel replies or changes its status. Through Teams, webhooks and
@@ -22,10 +23,10 @@ export interface TicketEvent {
 
 export interface NotifyDeps {
   fetch: typeof fetch;
-  resolve?: Parameters<typeof assertPublicUrl>[1];
+  resolve?: Lookup;
   env: Record<string, string | undefined>;
 }
-export const realDeps = (): NotifyDeps => ({ fetch, env: process.env });
+export const realDeps = (): NotifyDeps => ({ fetch: pinnedFetch, env: process.env });
 
 const HEADLINE: Record<TicketEventKind, (e: TicketEvent) => string> = {
   escalated: (e) =>
@@ -52,23 +53,15 @@ function body(e: TicketEvent, url: string | null) {
 }
 
 export async function post(d: NotifyDeps, rawUrl: string, payload: unknown, secret?: string) {
-  const url = await assertPublicUrl(rawUrl, d.resolve);
   const text = JSON.stringify(payload);
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  const headers: Record<string, string> = {};
   if (secret) {
     const ts = String(Math.floor(Date.now() / 1000));
     headers['x-kestrel-timestamp'] = ts;
     headers['x-kestrel-signature'] =
       `sha256=${createHmac('sha256', secret).update(`${ts}.${text}`).digest('hex')}`;
   }
-  const res = await d.fetch(url, {
-    method: 'POST',
-    redirect: 'manual',
-    headers,
-    body: text,
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`The destination answered HTTP ${res.status}`);
+  await postJson(d, rawUrl, text, headers);
 }
 
 const EMAIL = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/;

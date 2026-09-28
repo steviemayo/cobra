@@ -1,6 +1,6 @@
 # Kestrel — Workflow & Pipeline Diagrams (Mermaid)
 
-> Draft. Assumptions marked **[A]** — confirm/adjust. Renders in GitHub/VS Code Mermaid preview.
+> Brought up to date with what is built on 2026-09-28 (sections 2, 3, 4, 8, 9, 23 and 25 were rewritten; 27 to 30 are new). **[A]** marks an assumption or something not built. Renders in GitHub/VS Code Mermaid preview. Decisions behind each diagram: `docs/decisions.md`; build status: `docs/plan.md`.
 
 ## 1. System Components
 
@@ -28,29 +28,45 @@ flowchart LR
   API --> STRIPE
   STRIPE -- webhooks --> API
   GW -- outbound HTTPS/WSS only --> API
-  GW <-- WSS [A] --> RT
+  GW <-. WSS push [A, not built] .-> RT
   GW --> STORE
   GW --- RUN --- DEV
   GW --- UI
+  GW --- LOCAL[Gateway pages<br/>status + admin code]
   PANEL -- HTTP/WS on LAN --> UI
+  TECH[Person on site] -- HTTP on LAN --> LOCAL
   UI --> RUN
 ```
 
 ## 2. Gateway Enrollment (provisioning)
 
+Two ways in. Both end with the ordinary one-time-token enrolment; the second exists so an install with no token is visible instead of silently failing (`docs/decisions.md` T-1 to T-5).
+
 ```mermaid
 sequenceDiagram
   actor Admin
+  actor Staff
   participant Portal
   participant API
   participant GW as Gateway (new)
+  Note over Admin,GW: A. The customer has a token
   Admin->>Portal: Create gateway in Site
   Portal->>API: gateway.create
-  API-->>Portal: one-time enrollment token
-  Admin->>GW: Install container + set token (env)
-  GW->>API: enroll(token, hw info, pubkey)
-  API->>API: validate token, bind to tenant/site, burn token
-  API-->>GW: gateway_id + long-lived credential + config
+  API-->>Portal: one-time enrolment token
+  Admin->>GW: Install + set token (env, installer or /admin page)
+  GW->>API: enroll(token, hostname, version)
+  API->>API: validate token, bind to org/site, burn token
+  API-->>GW: gateway id + long-lived credential + public keys
+  Note over Admin,GW: B. Installed with no token (or a used or expired one)
+  GW->>API: announce(installId, secret, hostname, os, local IPs) every minute
+  API->>API: store as unclaimed, hash the secret, note the public IP
+  Staff->>Portal: Staff > Unclaimed gateways, confirm with the customer
+  Staff->>API: assign to org, site and name (staff audit + org audit)
+  API->>API: make a pending gateway and a sealed enrolment token
+  GW->>API: announce again (same install secret)
+  API-->>GW: token, repeated until the gateway has enrolled
+  GW->>API: enroll(token) as in A
+  Note over Admin,GW: Either way
   GW->>API: heartbeat (status=online)
   API-->>Portal: gateway shows Online
 ```
@@ -73,34 +89,36 @@ sequenceDiagram
   API->>Store: upload bundle
   Dev->>Portal: Deploy release to Room/Gateway (opt: channel/schedule)
   Portal->>API: deployment.create (status=pending)
-  API-->>GW: notify (Realtime push, or next heartbeat)
+  API-->>GW: next heartbeat reply (WSS push is not built)
   GW->>Store: download bundle
   GW->>GW: verify hash + signature
   GW->>GW: stage alongside current version
   GW->>RT: start new runtime (staged)
   GW->>GW: health check (device connect, self-test)
-  alt healthy
+  alt room starts (unreachable devices only warn: they become a monitoring incident)
     GW->>RT: switch traffic, stop old runtime
-    GW->>API: report deployment=succeeded
-  else failed / timeout
-    GW->>GW: keep/rollback to previous version
-    GW->>API: report deployment=failed + logs
+    GW->>API: report deployment=active
+  else bad signature or hash, missing addresses, gateway too old, room cannot start
+    GW->>GW: keep the previous version
+    GW->>API: report deployment=failed or rolled_back + reason
   end
   API-->>Portal: status + logs shown to Dev
 ```
 
 ## 4. Deployment State Machine
 
+The gateway reports `downloading`, `verifying`, `staging`, `health_check`, `active`, `failed` and `rolled_back` (`DeploymentStage`); the cloud adds the states that need no gateway.
+
 ```mermaid
 stateDiagram-v2
   [*] --> Pending
-  Pending --> Downloading: gateway acks
+  Pending --> Downloading: gateway takes it (next heartbeat)
   Downloading --> Verifying
-  Verifying --> Staging: hash+sig ok
-  Verifying --> Failed: bad hash/sig
+  Verifying --> Staging: hash + signature ok
+  Verifying --> Failed: bad hash/sig, missing addresses, gateway too old
   Staging --> HealthCheck
-  HealthCheck --> Active: pass
-  HealthCheck --> RolledBack: fail/timeout
+  HealthCheck --> Active: room starts (devices that did not answer only raise an incident)
+  HealthCheck --> RolledBack: room cannot start, previous release kept
   Pending --> Cancelled: user cancels
   Pending --> Expired: gateway offline > TTL
   Active --> Superseded: newer deploy active
@@ -158,8 +176,10 @@ sequenceDiagram
   API-->>Portal: live status (Realtime subscription)
   Note over GW,Buf: Cloud unreachable → buffer locally, replay on reconnect. Rooms keep running.
   API->>API: threshold breach → incident
-  API-->>Portal: alert (email/Teams/webhook) [A]
+  API-->>Portal: alert (email/Teams/webhook/ITSM stub)
 ```
+
+What a heartbeat carries per device: online, driver, **feedback** (power, input, mute, ... each change also logged for the history chart), **firmware**, and **details** (see 30). A gateway is never sent a reply it cannot read: it advertises `features` in the heartbeat (`bindings`, `self-update`, ...).
 
 ## 7. Remote Command / Diagnostics
 
@@ -177,44 +197,60 @@ sequenceDiagram
   API-->>Portal: result shown
 ```
 
-## 8. Core Domain Model (draft)
+A gateway **update** is not a command (commands are room-scoped and an older gateway cannot read new types): it is desired state on the gateway record, see 27.
+
+## 8. Core Domain Model (main entities as built)
 
 ```mermaid
 erDiagram
   ORG ||--o{ MEMBER : has
   ORG ||--o{ SITE : owns
-  ORG ||--|| SUBSCRIPTION : billed_by
+  ORG ||--|| ORG_BILLING : billed_by
   SITE ||--o{ GATEWAY : hosts
   SITE ||--o{ ROOM : contains
-  ROOM ||--o{ DEVICE : has
+  SITE ||--o{ SITE_DEVICE : shares
   GATEWAY ||--o{ ROOM : runs
-  PROGRAM ||--o{ RELEASE : versions
-  PROGRAM }o--|| ORG : authored_in
+  ROOM ||--o{ ROOM_DRAFT : edited_as
+  ROOM ||--o{ RELEASE : versions
   RELEASE ||--o{ DEPLOYMENT : deployed_as
   ROOM ||--o{ DEPLOYMENT : targets
-  GATEWAY ||--o{ DEPLOYMENT : executes
-  DEVICE ||--o{ DEVICE_STATE : reports
-  DEVICE ||--o{ EVENT : emits
-  EVENT }o--o| INCIDENT : groups
-  ORG ||--o{ DRIVER : uses
-  GATEWAY ||--o{ COMMAND : receives
+  DEPLOYMENT ||--o{ DEPLOYMENT_EVENT : stages
+  ROOM ||--o{ DEVICE_STATUS : reports
+  GATEWAY ||--o{ GATEWAY_EVENT : emits
+  ROOM ||--o{ INCIDENT : raises
+  INCIDENT ||--o{ ALERT_DELIVERY : notifies
+  ORG ||--o{ ALERT_CHANNEL : configures
+  GATEWAY ||--o{ REMOTE_COMMAND : receives
+  ROOM_GROUP ||--o{ ROOM : joins
+  ROOM_GROUP ||--o{ ROOM_DIVIDER : has
+  ORG ||--o{ TICKET : opens
   ORG ||--o{ AUDIT_LOG : records
+  ORG ||--o{ MSP_GRANT : grants_to_provider
+  UNCLAIMED_GATEWAY }o--o| GATEWAY : claimed_as
+  STAFF_USER ||--o{ STAFF_AUDIT : writes
+  ORG ||--o{ JOIN_REQUEST : receives
+  ORG ||--o{ CUSTOM_DRIVER : owns
 ```
+
+Devices, ports, connections, groups and activities live inside the room's draft and signed release (the model, diagram 12), not as tables.
 
 ## 9. Kestrel's Own CI/CD (Vercel + Supabase + Gateway image)
 
 ```mermaid
 flowchart LR
   PR[Feature branch PR] --> CI[CI: lint, typecheck, test, prisma validate]
-  CI --> PREV[Vercel Preview Deploy<br/>+ Supabase preview branch [A]]
+  CI --> PREV["Vercel Preview Deploy<br/>+ Supabase preview branch [A]"]
   PREV --> REVIEW[Review] --> MERGE[Merge to main]
-  MERGE --> MIG[Prisma migrate deploy<br/>to prod Supabase]
+  MERGE --> MIG[prisma migrate deploy run by hand<br/>never in the Vercel build]
   MIG --> PROD[Vercel Production]
-  MERGE --> IMG[Build gateway image<br/>GitHub Actions]
-  IMG --> REG[(Container Registry<br/>GHCR)]
+  MERGE --> BUMP[version-bump check:<br/>gateway, panel or bundled package changed<br/>means GATEWAY_VERSION changed]
+  BUMP --> IMG[Build gateway image + Windows bundle<br/>GitHub Actions]
+  IMG --> REG[(GHCR image + release asset)]
   REG --> CH[Gateway release channel<br/>stable / beta]
-  CH --> GWUP[Gateways self-update<br/>pull + swap + rollback]
+  CH --> GWUP[Portal orders the update<br/>see 27]
 ```
+
+Deploy the web app before gateways. Gateway image and bundle builds skip changes that only touch `packages/db`.
 
 ## 10. Billing Flow
 
@@ -483,24 +519,25 @@ stateDiagram-v2
 
 ## 23. Combined Rooms
 
-> **Redesign planned, not built.** Combining will be defined when a room group is created: the large all-combined room plus each independent room, with every combination of 2-5 rooms, so each room is state-aware. The diagram below is the current implementation. See `docs/panel-ui-requirements.md` (Room Linking).
+Built as room groups with movable walls (`docs/room-groups.md`, decisions C-1 to C-14). A combined room is an ordinary room with its own program; the gateway decides which one runs.
 
 ```mermaid
 stateDiagram-v2
   [*] --> Separate
-  Separate --> Combined: combine trigger (tap / sensor / schedule)
-  Combined --> Separate: uncombine
+  Separate --> Combined: a wall opens (panel "Link rooms", portal, sensor later)
+  Combined --> Separate: the wall closes
   state Combined {
-    [*] --> Primary_Secondary
-    Primary_Secondary: Primary drives; Secondary per config
-    Primary_Secondary: video follows | blanks
-    Primary_Secondary: audio follows | blanks
+    [*] --> Live
+    Live: the combined room runs, members suspended
+    Live: each wall has open and close settings
+    Live: off, on, follow or restore
   }
-  Separate --> Off_Reverted: on uncombine, secondary reverts to Off
+  Combined --> Combined: another wall moves, a different combined room runs
 ```
 
-- Combination config lives on the room set: roles, follow/blank per signal type, revert-to-off flag
-- Secondary panel UIs mirror primary or show "Room combined — use {Primary}"
+- The gateway owns which walls are open (saved locally, works with no cloud); the cloud sends the group in the config and the heartbeat reports open walls
+- Every member's panel mirrors the live combined room; a group deploys as one action; the browser simulator runs the same `GroupController`
+- Not built: sensors, disconnecting a suspended room's devices, keeping "restore" across restarts
 
 ## 24. Panel Access
 
@@ -518,16 +555,20 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  TR[Trial<br/>5 rooms · 30d · control+monitoring] -->|expires| BA
+  TR[Trial<br/>5 rooms · 30 days · control + monitoring] -->|ends| BA
   TR -->|upgrade| PRO
-  BA[Basic<br/>per room · control only<br/>buy marketplace templates] -->|upgrade| PRO
-  PRO[Pro<br/>per room · control + monitoring<br/>publish to marketplace · driver creation]
-  ENT{{Entitlement check<br/>tRPC middleware + gateway config}} --- BA
+  BA[Basic<br/>per room · monitoring only<br/>email alerts · up to 500 rooms] -->|upgrade| PRO
+  PRO[Pro<br/>per room · control + monitoring<br/>all alert channels · marketplace · custom drivers]
+  PRO -->|lapses| BA
+  ENT{{Entitlement check<br/>tRPC middleware}} --- BA
   ENT --- PRO
   ENT --- TR
+  ENT -->|control flag in every heartbeat reply| GATE[Gateway ControlGate<br/>refuses every command when control is off]
 ```
 
-- Monitoring off ⇒ gateway stops sending/cloud stops ingesting for that room; control unaffected
+- Without control a room is a monitored room: devices, bindings, watch points and alert rules; publishing and deploying stay open so monitoring can start (TM-14, TM-15)
+- An ended trial is monitoring only: no alerts, no analytics, no new rooms (TM-5)
+- Control is enforced on the gateway, not only hidden in the portal
 
 ## 26. Simulator (browser)
 
@@ -539,4 +580,104 @@ flowchart LR
   SIM --> VIZ[Signal-flow / device state visualiser]
   PUI -. user taps .-> ENG
   VIZ -. inject faults: no signal, device offline .-> SIM
+```
+
+---
+
+# Gateway operations
+
+## 27. Portal-driven Gateway Update
+
+Decisions S-1 to S-8. An update is desired state on the gateway record (`updateNotBefore`, `updateVersion`, `autoUpdate`), not a command.
+
+```mermaid
+sequenceDiagram
+  actor Owner as Owner / dev
+  participant Portal
+  participant API
+  participant GW as Gateway (0.2.5+)
+  participant Host as Release host (GitHub)
+  participant Inst as Installer (Windows task or Watchtower)
+  Owner->>Portal: Update now, at a time, cancel, or policy Automatic
+  Portal->>API: store the request (audited)
+  Note over API: Automatic makes the request itself when the channel has a newer version
+  GW->>API: heartbeat (features include self-update)
+  API-->>GW: updateOrder {version, bundle sha256 + size} once due and behind
+  alt Windows
+    GW->>API: GET /bundle
+    API-->>GW: short-lived signed asset link + digest + CI's signature
+    GW->>Host: download (GitHub storage or the cloud only)
+    GW->>GW: check SHA-256, then the signature against the release key built into the gateway, and that the version is newer
+    GW->>GW: stage bundle + signature, refresh update.ps1
+    GW->>Inst: schtasks /Run
+    Inst->>Inst: check the signature again with the installed gateway's own key
+    Inst->>Inst: stop service, swap, start, wait for /health
+    Inst-->>GW: result (old version put back if it does not answer)
+  else Docker
+    GW->>Inst: Watchtower HTTP API (localhost)
+  else no updater configured
+    GW->>API: state=unsupported with a reason
+  end
+  GW->>API: progress in heartbeats: downloading, staged, applying, failed
+  Note over API: success = the reported version reaches the target, a failure is not retried in a loop
+```
+
+- Older than 0.2.5: one manual update first ("needs one manual update"). Manual by default, so a fleet never changes unasked
+- The signature is made in CI with a key only the workflow holds, so the portal cannot make a gateway install code (decision V-6). Gateways older than 0.3.0 and Docker installs (Watchtower) do not check it yet
+
+## 28. Unclaimed Gateway
+
+The state machine behind diagram 2, path B (decisions T-1 to T-5).
+
+```mermaid
+stateDiagram-v2
+  [*] --> Open: first announcement
+  Open --> Claimed: staff assign org, site and name
+  Claimed --> Open: staff take back (never connected)
+  Open --> Dismissed: staff dismiss (announces hourly)
+  Claimed --> Enrolled: gateway presents its secret, gets the token, enrols
+  Open --> Removed: staff remove, or not seen for 30 days
+  Claimed --> Removed: enrolled claims are deleted after 7 days
+  Enrolled --> [*]
+```
+
+- Guardrails on an endpoint anyone can reach: 4 KB payload, secret stored hashed, 500 rows at most, 10 new installs a day per public address
+- Unclaimed gateways cannot be updated from the portal: no organisation owns them (T-5)
+
+## 29. Gateway Local Pages
+
+Decisions U-1 to U-6. Served by the gateway on its panel port; plain HTML, no scripts.
+
+```mermaid
+flowchart TD
+  ANY[Anyone on the LAN] --> ST["/ status page<br/>connected or not, version, last contact,<br/>rooms with panel links, install ID if unclaimed"]
+  ADM[Person on site] --> CODE{"/admin: admin code<br/>(admin-code.txt in the data folder)"}
+  CODE -->|5 wrong: locked 1 min| CODE
+  CODE -->|right| SESS[30 minute session]
+  SESS --> TOK[Enter enrolment token]
+  SESS --> RST[Reset: type RESET]
+  TOK --> TRY{Cloud accepts it?}
+  TRY -->|no| KEEP[Nothing changes, reason shown]
+  TRY -->|yes| WIPE
+  RST --> WIPE[Forget the old organisation:<br/>rooms, releases, addresses, phone secrets,<br/>groups, unsent events]
+  WIPE --> NEWID[Reset only: new install ID] --> ANN[Announce as unclaimed, diagram 28]
+  WIPE --> ENR[Token path: enrolled in the new organisation]
+```
+
+## 30. Device Details, Feedback and Firmware
+
+Decisions R-1 to R-8, TM-18 to TM-20 and the firmware step.
+
+```mermaid
+flowchart LR
+  DRV[Driver read-backs<br/>power, input, mute, level, occupancy] --> HB
+  DRV --> DET[Details: titled sections, rows, tables<br/>serial, MAC, program, IP table, stream status]
+  DRV --> FW[Firmware version]
+  DET -->|on change and every 5 min, dropped if invalid| HB[Heartbeat]
+  FW --> HB
+  HB --> API[API keeps the last details, feedback and firmware<br/>DeviceStatus]
+  HB -->|each change| EV[device.feedback event, 90 day retention]
+  API --> ROOMMON[Room monitoring page: click a device to expand]
+  API --> FWPAGE[Firmware page: mixed versions flagged]
+  EV --> HIST[History chart: minutes per value per day]
 ```

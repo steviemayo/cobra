@@ -4,11 +4,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { generateKeyPair } from '@kestrel/crypto';
 import type { GatewayUpdateOrder, GatewayUpdateReport } from '@kestrel/model';
 import { CloudClient } from './cloud';
 import type { GatewayConfig } from './config';
 import { Gateway } from './gateway';
 import { silentLogger } from './log';
+import { signBundle } from './release-signature';
 import { RoomHost } from './room-host';
 import { Store } from './store';
 import { FakeCloud, ENROLL_TOKEN } from './test-support/fake-cloud';
@@ -22,7 +24,9 @@ import {
   takeUpdateResult,
   updateDir,
   windowsLayout,
+  bundleHostAllowed,
   type Updater,
+  type UpdateDeps,
   type UpdateIo,
 } from './updater';
 
@@ -49,6 +53,17 @@ afterEach(async () => {
 
 const BYTES = Buffer.from('pretend this is a zip of the new gateway');
 const VERSION = '9.9.9';
+// The release key: CI holds the private half, the gateway ships the public half.
+const releaseKeys = generateKeyPair();
+const signed = (version = VERSION, bytes = BYTES) =>
+  signBundle(releaseKeys.privateKeyPem, version, sha(bytes));
+/** What a WindowsUpdater needs beyond how to run programs: the trusted key and the cloud's address. */
+const trust = (over: Partial<UpdateDeps> = {}): UpdateDeps => ({
+  releaseKey: releaseKeys.publicKeyPem,
+  cloudOrigin: cloud.url,
+  currentVersion: '0.2.7',
+  ...over,
+});
 
 /** A Windows install laid out on disk: <root>\\app\\runtime\\node.exe, update.ps1, gateway.env. */
 function install(root: string, opts: { bundledScript?: boolean } = {}) {
@@ -73,11 +88,12 @@ function io(bundle: () => Promise<Awaited<ReturnType<UpdateIo['bundle']>>>) {
 }
 
 const location =
-  (over: Partial<{ sha256: string; version: string }> = {}) =>
+  (over: Partial<{ sha256: string; version: string; signature: string | null; url: string }> = {}) =>
   async () => ({
-    url: `${cloud.url}/asset/bundle.zip`,
+    url: over.url ?? `${cloud.url}/asset/bundle.zip`,
     sha256: over.sha256 ?? sha(BYTES),
     version: over.version ?? VERSION,
+    ...(over.signature === null ? {} : { signature: over.signature ?? signed() }),
   });
 
 describe('updating a Windows gateway', () => {
@@ -91,7 +107,7 @@ describe('updating a Windows gateway', () => {
     cloud.bundle = { bytes: BYTES, version: VERSION };
     const layout = install(join(dir, 'install'));
     const runs: string[][] = [];
-    const u = new WindowsUpdater(dir, layout, { run: async (f, a) => void runs.push([f, ...a]) });
+    const u = new WindowsUpdater(dir, layout, trust({ run: async (f, a) => void runs.push([f, ...a]) }));
     const p = io(location());
     await u.apply(order(), p.io);
 
@@ -111,7 +127,7 @@ describe('updating a Windows gateway', () => {
     cloud.bundle = { bytes: Buffer.from('something else entirely'), version: VERSION };
     const layout = install(join(dir, 'install'));
     const runs: string[][] = [];
-    const u = new WindowsUpdater(dir, layout, { run: async (f, a) => void runs.push([f, ...a]) });
+    const u = new WindowsUpdater(dir, layout, trust({ run: async (f, a) => void runs.push([f, ...a]) }));
     // The portal's order and its bundle link agree on a digest that the served bytes do not match.
     const p = io(location({ sha256: sha(BYTES) }));
     await expect(u.apply(order(), p.io)).rejects.toThrow('does not match its digest');
@@ -126,7 +142,7 @@ describe('updating a Windows gateway', () => {
     cloud.bundle = { bytes: BYTES, version: VERSION };
     const layout = install(join(dir, 'install'));
     let asked = 0;
-    const u = new WindowsUpdater(dir, layout, { run: async () => undefined });
+    const u = new WindowsUpdater(dir, layout, trust({ run: async () => undefined }));
     await expect(
       u.apply({ version: VERSION }, io(async () => (asked++, location()())).io),
     ).rejects.toThrow('no digest');
@@ -136,7 +152,7 @@ describe('updating a Windows gateway', () => {
   it('refuses a bundle that is not the version or digest that was ordered', async () => {
     cloud.bundle = { bytes: BYTES, version: VERSION };
     const layout = install(join(dir, 'install'));
-    const u = new WindowsUpdater(dir, layout, { run: async () => undefined });
+    const u = new WindowsUpdater(dir, layout, trust({ run: async () => undefined }));
     await expect(u.apply(order(), io(location({ version: '1.0.0' })).io)).rejects.toThrow(
       'not the version',
     );
@@ -148,14 +164,124 @@ describe('updating a Windows gateway', () => {
   it('says the task could not be started, and leaves the stage in place for a retry', async () => {
     cloud.bundle = { bytes: BYTES, version: VERSION };
     const layout = install(join(dir, 'install'));
-    const u = new WindowsUpdater(dir, layout, {
-      run: async () => {
-        throw new Error('Access is denied');
-      },
-    });
+    const u = new WindowsUpdater(
+      dir,
+      layout,
+      trust({
+        run: async () => {
+          throw new Error('Access is denied');
+        },
+      }),
+    );
     await expect(u.apply(order(), io(location()).io)).rejects.toThrow(
       'Could not start the update task: Access is denied',
     );
+  });
+
+  // ---- What the portal cannot do: make the gateway install code Kestrel did not sign -----------
+
+  describe('code that Kestrel did not sign', () => {
+    const attempt = async (loc: ReturnType<typeof location>, deps: Partial<UpdateDeps> = {}) => {
+      cloud.bundle = { bytes: BYTES, version: VERSION };
+      const layout = install(join(dir, 'install'));
+      const runs: string[][] = [];
+      const u = new WindowsUpdater(
+        dir,
+        layout,
+        trust({ run: async (f, a) => void runs.push([f, ...a]), ...deps }),
+      );
+      const result = await u.apply(order(), io(loc).io).then(
+        () => 'installed',
+        (e: Error) => e.message,
+      );
+      return { result, runs, layout };
+    };
+    const nothingStaged = (r: Awaited<ReturnType<typeof attempt>>) => {
+      expect(r.runs).toEqual([]);
+      expect(existsSync(join(updateDir(dir), 'bundle.zip'))).toBe(false);
+      expect(existsSync(join(updateDir(dir), 'request.json'))).toBe(false);
+      expect(readFileSync(r.layout.installed, 'utf8')).toBe('OLD SCRIPT');
+    };
+
+    it('refuses a release that carries no signature', async () => {
+      const r = await attempt(location({ signature: null }));
+      expect(r.result).toContain('not signed by Kestrel');
+      nothingStaged(r);
+    });
+
+    it('refuses a signature made with some other key', async () => {
+      const other = generateKeyPair();
+      const r = await attempt(location({ signature: signBundle(other.privateKeyPem, VERSION, sha(BYTES)) }));
+      expect(r.result).toContain('not signed by Kestrel');
+      nothingStaged(r);
+    });
+
+    it('refuses bytes that are not the ones the signature covers, even when the portal digest matches them', async () => {
+      // The portal names a digest for what it serves; only the signature ties it to Kestrel.
+      const forged = Buffer.from('code the portal made up');
+      cloud.bundle = { bytes: forged, version: VERSION };
+      const layout = install(join(dir, 'install'));
+      const runs: string[][] = [];
+      const u = new WindowsUpdater(dir, layout, trust({ run: async (f, a) => void runs.push([f, ...a]) }));
+      const result = await u
+        .apply(
+          { version: VERSION, bundle: { sha256: sha(forged) } },
+          io(location({ sha256: sha(forged), signature: signed(VERSION, BYTES) })).io,
+        )
+        .then(
+          () => 'installed',
+          (e: Error) => e.message,
+        );
+      expect(result).toContain('not signed by Kestrel');
+      expect(runs).toEqual([]);
+      expect(existsSync(join(updateDir(dir), 'bundle.zip'))).toBe(false);
+    });
+
+    it('refuses a signed bundle passed off as a different version', async () => {
+      const r = await attempt(location({ signature: signed('1.0.0') }));
+      expect(r.result).toContain('not signed by Kestrel');
+      nothingStaged(r);
+    });
+
+    it('refuses an order that is not newer than what is running', async () => {
+      const same = await attempt(location(), { currentVersion: VERSION });
+      expect(same.result).toContain('not newer');
+      nothingStaged(same);
+      const older = await attempt(location(), { currentVersion: '10.0.0' });
+      expect(older.result).toContain('not newer');
+    });
+
+    it('refuses a bundle offered from somewhere Kestrel does not publish', async () => {
+      const r = await attempt(location({ url: 'https://evil.example/bundle.zip' }));
+      expect(r.result).toContain('does not publish');
+      nothingStaged(r);
+    });
+
+    it('records the signature next to the staged bundle for update.ps1 to check again', async () => {
+      const r = await attempt(location());
+      expect(r.result).toBe('installed');
+      expect(readFileSync(join(updateDir(dir), 'bundle.zip.sig'), 'utf8')).toBe(signed());
+    });
+  });
+
+  it('only fetches bundles from GitHub storage or the cloud it already talks to', () => {
+    const cloudOrigin = 'https://kestrel.example';
+    for (const ok of [
+      'https://github.com/o/r/releases/download/x/y.zip',
+      'https://objects.githubusercontent.com/abc',
+      'https://release-assets.githubusercontent.com/abc?sig=1',
+      'https://kestrel.example/bundle.zip',
+    ])
+      expect(bundleHostAllowed(ok, cloudOrigin), ok).toBe(true);
+    for (const bad of [
+      'http://github.com/x',
+      'https://github.com.evil.example/x',
+      'https://evilgithubusercontent.com/x',
+      'https://evil.example/x',
+      'http://kestrel.example/x',
+      'not a url',
+    ])
+      expect(bundleHostAllowed(bad, cloudOrigin), bad).toBe(false);
   });
 });
 

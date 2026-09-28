@@ -5,6 +5,8 @@ import type { Channel } from './gateway-updates';
 // token that only the portal holds. The gateway never talks to GitHub: it asks the portal.
 
 export const BUNDLE_ASSET = 'kestrel-gateway-win-x64.zip';
+/** CI's signature over the bundle (see apps/gateway/src/release-signature.ts). */
+export const SIGNATURE_ASSET = `${BUNDLE_ASSET}.sig`;
 const CACHE_MS = 5 * 60_000;
 
 export interface ReleaseAsset {
@@ -110,10 +112,28 @@ export async function bundleLocation(
   const location =
     res && res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
   if (!location) return null;
+  // Passed on as it is: the gateway checks it against a key the portal does not hold.
+  const signature = await releaseSignature(release, fetcher, env);
   return {
     url: location,
     sha256: digest.sha256,
     ...(digest.size ? { size: digest.size } : {}),
     version: release.version,
+    ...(signature ? { signature } : {}),
   };
+}
+
+async function releaseSignature(
+  release: ChannelRelease,
+  fetcher: Fetch,
+  env: ReleaseEnv,
+): Promise<string | null> {
+  const asset = release.assets.find((a) => a.name === SIGNATURE_ASSET);
+  if (!asset) return null;
+  const res = await fetcher(asset.url, {
+    headers: { ...githubHeaders(env), Accept: 'application/octet-stream' },
+    cache: 'no-store',
+  }).catch(() => null);
+  const text = res?.ok ? (await res.text()).trim() : '';
+  return /^[A-Za-z0-9+/=]{60,300}$/.test(text) ? text : null;
 }

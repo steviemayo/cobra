@@ -59,11 +59,11 @@ How it works (see `docs/decisions.md`, C-1 to C-14):
 - `RoomDivider`: id, groupId, name, roomIds (2 or more)
 - `Room` gains: `groupId` (nullable), `kind` ("standard" or "combined"), `memberRoomIds` (for combined rooms)
 - Billing and trial limits count `kind = standard` rooms only: combined rooms are derived and are not billed
-- The old `RoomCombination` table stays until the new version is deployed everywhere, then a follow-up migration drops it. Dropping it in the same release would break the running production code, which shares the database with previews
+- The old `RoomCombination` table was kept until the new version ran everywhere, then dropped by migration `20260926160000_drop_room_combination` (applied). Dropping it in the same release would have broken the running production code, which shares the database with previews
 
 ## Slices (status)
 
-Slices 1 and 2 are built (migration `room_groups` applied to `kestrel-dev`). Slice 3 is built: runtime, protocol and per-wall settings (the migration `divider_actions` still has to be applied), the Link rooms menu, group deploy, and the browser group simulator. Slice 4: the old feature's code is removed; dropping the `RoomCombination` table is a follow-up migration once production runs this version (step D in `docs/plan.md`).
+Slices 1 and 2 are built (migration `room_groups` applied to `kestrel-dev`). Slice 3 is built: runtime, protocol and per-wall settings (migration `divider_actions` applied), the Link rooms menu, group deploy, and the browser group simulator. Slice 4: the old feature's code is removed; the `RoomCombination` table is dropped (step D in `docs/plan.md`).
 
 - **Deploy group** (group editor): checks every room and combined room first (design valid, gateway assigned, combined rooms created), then publishes a release only where the design changed and deploys all of them, members first. Any problem stops the whole thing and is listed. Code: `apps/web/src/server/group-deploy.ts`
 - **Simulate** (group editor): runs every room of the group in the browser against simulated equipment with the same `GroupController` as the gateway (`packages/engine/src/groups/controller.ts`); a panel stands in a chosen room and follows the room that is running its space

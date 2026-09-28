@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import WebSocket from 'ws';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateKeyPair, hashPin, signManifest, verifyAccess } from '@kestrel/crypto';
 import { PanelServerMessage, STARTER_TEMPLATES, type PanelAccess } from '@kestrel/model';
 import { silentLogger } from './log';
@@ -257,6 +257,94 @@ describe('serving the built panel app', () => {
     });
     expect(res.statusCode).toBe(404);
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('reaching the panel from elsewhere', () => {
+  const connect = (origin?: string) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/${ROOM}`, origin ? { origin } : undefined);
+    clients.push(ws);
+    const state = { closed: null as number | null, messages: [] as string[] };
+    ws.on('message', (d) => state.messages.push(d.toString()));
+    ws.on('close', (code) => (state.closed = code));
+    ws.on('error', () => undefined);
+    return { ws, state };
+  };
+
+  it('refuse a WebSocket opened by a page from another site', async () => {
+    await start();
+    const evil = connect('http://evil.example');
+    await until(() => evil.state.closed !== null);
+    expect(evil.state.closed).toBe(1008);
+    expect(evil.state.messages.join()).toContain('not allowed');
+    // Nothing reached the room.
+    expect(host.get(ROOM)!.runtime.getSnapshot().status).toBe('off');
+  });
+
+  it('accept a page the gateway served itself, and a client that sends no origin', async () => {
+    await start();
+    const own = connect(`http://127.0.0.1:${port}`);
+    const none = connect();
+    await until(() => own.state.messages.length > 0 && none.state.messages.length > 0);
+    expect(own.state.closed).toBeNull();
+    expect(none.state.closed).toBeNull();
+  });
+
+  it('refuse a name the gateway is not meant to be reached by (DNS rebinding)', async () => {
+    await start(undefined, '/nonexistent', { machineName: 'av-gateway-1' });
+    const asked = (hostHeader: string) =>
+      app.inject({ url: `/room/${ROOM}`, headers: { host: hostHeader } });
+    expect((await asked('attacker.example.com')).statusCode).toBe(421);
+    expect((await asked('attacker.example.com:8080')).statusCode).toBe(421);
+    for (const ok of ['127.0.0.1:8080', '10.20.0.4', '[fd00::1]:8080', 'localhost:8080', 'av-gateway-1', 'av-gateway-1.local', 'intranet', 'gw.school.lan'])
+      expect((await asked(ok)).statusCode, ok).toBe(200);
+    // The health check is never refused.
+    expect((await app.inject({ url: '/health', headers: { host: 'attacker.example.com' } })).statusCode).toBe(200);
+  });
+
+  it('let the operator add real names', async () => {
+    await start(undefined, '/nonexistent', { allowedHosts: ['gw.school.edu', '*.av.example.org'] });
+    const asked = (h: string) => app.inject({ url: `/room/${ROOM}`, headers: { host: h } });
+    expect((await asked('gw.school.edu')).statusCode).toBe(200);
+    expect((await asked('room1.av.example.org:8080')).statusCode).toBe(200);
+    expect((await asked('other.school.edu')).statusCode).toBe(421);
+  });
+
+  it('send the panel page with headers that stop framing, sniffing and outside scripts', async () => {
+    await start();
+    const res = await app.inject({ url: `/room/${ROOM}`, headers: { host: '127.0.0.1' } });
+    expect(res.headers['x-frame-options']).toBe('SAMEORIGIN');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['content-security-policy']).toContain("script-src 'self'");
+    expect(res.headers['content-security-policy']).toContain("frame-ancestors 'self'");
+  });
+
+  it('move one thing at a time and record who asked', async () => {
+    const logs: { message: string; extra?: Record<string, unknown> }[] = [];
+    host = new RoomHost('all', silentLogger, () => undefined);
+    host.load(signedRoom());
+    app = await createPanelServer({
+      host,
+      panelDir: '/nonexistent',
+      log: (_level, message, extra) => logs.push({ message, extra }),
+    });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    port = (app.server.address() as AddressInfo).port;
+    const dispatch = vi.spyOn(host.get(ROOM)!.runtime, 'dispatch');
+    const p = new Panel();
+    await until(() => !!p.last);
+    const move = { t: 'intent', intent: { type: 'mover.run', deviceId: 'screen1', action: 'down' } };
+    p.send(move);
+    p.send(move);
+    p.send(move);
+    await wait(150);
+    // Three asks in a row: one move goes through.
+    expect(dispatch.mock.calls.filter(([i]) => (i as { type: string }).type === 'mover.run')).toHaveLength(1);
+    expect(logs.filter((l) => l.message.includes('asked for something to move'))).toHaveLength(1);
+    expect(logs.find((l) => l.message.includes('asked for something to move'))?.extra).toMatchObject({
+      roomId: ROOM,
+      intent: 'mover.run',
+    });
   });
 });
 

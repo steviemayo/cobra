@@ -15,6 +15,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { BundleLocation, GatewayUpdateOrder, GatewayUpdateReport } from '@kestrel/model';
 import type { GatewayConfig } from './config';
+import { compareVersions, releasePublicKey, verifyBundleSignature } from './release-signature';
 
 // Carrying out an update the portal ordered. The portal decides when; the gateway does the work,
 // and only after it has checked the bundle against the digest in the order. How it is done depends
@@ -53,6 +54,12 @@ export interface UpdateDeps {
   run?: (file: string, args: string[]) => Promise<void>;
   platform?: NodeJS.Platform;
   execPath?: string;
+  /** The key bundles must be signed with. Defaults to the one built into the gateway. */
+  releaseKey?: string;
+  /** The cloud's address: the one place besides GitHub a bundle may be fetched from. */
+  cloudOrigin?: string;
+  /** The version running now: an order for this one or an older one is refused. */
+  currentVersion?: string;
 }
 
 const DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
@@ -78,6 +85,20 @@ export function windowsLayout(execPath: string) {
 
 export type WindowsLayout = ReturnType<typeof windowsLayout>;
 
+/** Where a bundle may be fetched from: GitHub's release storage, or the cloud this gateway already talks to. */
+export function bundleHostAllowed(rawUrl: string, cloudOrigin?: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (cloudOrigin && url.origin === new URL(cloudOrigin).origin) return true;
+  if (url.protocol !== 'https:') return false;
+  const host = url.hostname.toLowerCase();
+  return host === 'github.com' || host === 'githubusercontent.com' || host.endsWith('.githubusercontent.com');
+}
+
 /** The folder where an update is staged and where update.ps1 leaves its verdict. */
 export const updateDir = (dataDir: string) => join(dataDir, 'update');
 
@@ -100,6 +121,18 @@ export class WindowsUpdater implements Updater {
     const location = await io.bundle();
     if (location.sha256 !== order.bundle.sha256 || location.version !== order.version)
       throw new UpdateError('The bundle on offer is not the version that was ordered.');
+    // Code that runs as the system: it must be signed by Kestrel's release key (which the portal
+    // does not hold), come from a place Kestrel publishes to, and be newer than what is running.
+    if (!location.signature)
+      throw new UpdateError('The release is not signed by Kestrel, so it was not installed.');
+    if (!bundleHostAllowed(location.url, this.deps.cloudOrigin))
+      throw new UpdateError('The bundle is offered from a place Kestrel does not publish to.');
+    if (this.deps.currentVersion) {
+      const order2 = compareVersions(order.version, this.deps.currentVersion);
+      if (order2 === null || order2 <= 0)
+        throw new UpdateError(`Version ${order.version} is not newer than ${this.deps.currentVersion}.`);
+    }
+    const releaseKey = this.deps.releaseKey ?? releasePublicKey();
 
     const dir = updateDir(this.dataDir);
     mkdirSync(dir, { recursive: true });
@@ -123,14 +156,20 @@ export class WindowsUpdater implements Updater {
         },
         createWriteStream(part),
       );
-      if (hash.digest('hex') !== order.bundle.sha256)
+      const actual = hash.digest('hex');
+      if (actual !== order.bundle.sha256)
         throw new UpdateError('The download does not match its digest, so it was thrown away.');
+      // The check that matters: the signature is over the file just downloaded, not over a digest the portal gave.
+      if (!verifyBundleSignature(releaseKey, order.version, actual, location.signature))
+        throw new UpdateError('The download is not signed by Kestrel, so it was thrown away.');
       renameSync(part, zip);
     } catch (e) {
       rmSync(part, { force: true });
       throw e;
     }
 
+    // update.ps1 checks the signature again with the installed gateway's own key before it swaps anything.
+    writeFileSync(`${zip}.sig`, location.signature);
     writeFileSync(
       join(dir, 'request.json'),
       JSON.stringify({ version: order.version, sha256: order.bundle.sha256, zip }),
@@ -185,14 +224,19 @@ export class NoUpdater implements Updater {
 
 /** The way this install can update itself, or one that says why it cannot. */
 export function createUpdater(
-  cfg: Pick<GatewayConfig, 'dataDir' | 'updateUrl' | 'updateToken'>,
+  cfg: Pick<GatewayConfig, 'dataDir' | 'updateUrl' | 'updateToken'> &
+    Partial<Pick<GatewayConfig, 'cloudUrl' | 'version'>>,
   deps: UpdateDeps = {},
 ): Updater {
   const platform = deps.platform ?? process.platform;
   if (platform === 'win32') {
     const layout = windowsLayout(deps.execPath ?? process.execPath);
     return existsSync(layout.installed) && existsSync(layout.settings)
-      ? new WindowsUpdater(cfg.dataDir, layout, deps)
+      ? new WindowsUpdater(cfg.dataDir, layout, {
+          cloudOrigin: cfg.cloudUrl,
+          currentVersion: cfg.version,
+          ...deps,
+        })
       : new NoUpdater('This is not an installed Windows gateway, so it cannot update itself.');
   }
   if (cfg.updateUrl) return new WatchtowerUpdater(cfg.updateUrl, cfg.updateToken, deps);

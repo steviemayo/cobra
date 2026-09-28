@@ -1,12 +1,11 @@
 import { createHmac } from 'node:crypto';
-import { lookup as dnsLookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import { z } from 'zod';
 import type { PrismaClient } from '@kestrel/db';
 import { alertChannelAllowed } from '@kestrel/model';
 import { ChannelRules, dueNow, hasRules } from './alert-rules';
 import { getEntitlements, type EntitlementDb } from './billing';
 import { SEVERITY_RANK, type AlertJob, type Severity } from './monitoring';
+import { pinnedFetch, postJson, resolveAll, type Lookup } from './outbound';
 
 export type AlertDb = Pick<PrismaClient, 'alertChannel' | 'alertDelivery' | 'incident' | 'room'>;
 
@@ -53,66 +52,6 @@ export interface AlertMessage {
 /** The destination isn't set up, so nothing was tried. Recorded as skipped, not failed. */
 export class NotConfigured extends Error {}
 
-// ---- Outbound safety ---------------------------------------------------------------------------
-
-export function isPrivateAddress(ip: string): boolean {
-  const v6 = ip.toLowerCase();
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v6);
-  if (mapped) return isPrivateAddress(mapped[1]!);
-  if (isIP(ip) === 4) {
-    const [a, b] = ip.split('.').map(Number) as [number, number];
-    return (
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      a >= 224
-    );
-  }
-  return (
-    v6 === '::' ||
-    v6 === '::1' ||
-    v6.startsWith('fc') ||
-    v6.startsWith('fd') ||
-    /^fe[89ab]/.test(v6)
-  );
-}
-
-type Lookup = (host: string) => Promise<string[]>;
-const resolveAll: Lookup = async (host) =>
-  (await dnsLookup(host, { all: true })).map((a) => a.address);
-
-/**
- * Alert destinations are typed in by users, so they must not be able to point Kestrel at its own
- * network. Only https, only public addresses.
- */
-export async function assertPublicUrl(raw: string, resolve: Lookup = resolveAll): Promise<URL> {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error('That is not a valid URL');
-  }
-  if (url.protocol !== 'https:') throw new Error('The URL must start with https://');
-  if (url.username || url.password)
-    throw new Error('The URL must not contain a username or password');
-  const host = url.hostname.replace(/^\[|\]$/g, '');
-  if (
-    host === 'localhost' ||
-    host.endsWith('.localhost') ||
-    host.endsWith('.local') ||
-    host.endsWith('.internal')
-  )
-    throw new Error('The URL must point at a public address');
-  const addresses = isIP(host) ? [host] : await resolve(host).catch(() => []);
-  if (addresses.length === 0) throw new Error('That address could not be found');
-  if (addresses.some(isPrivateAddress)) throw new Error('The URL must point at a public address');
-  return url;
-}
-
 // ---- Senders -----------------------------------------------------------------------------------
 
 export type Sender = (config: ChannelConfig, msg: AlertMessage) => Promise<void>;
@@ -124,7 +63,7 @@ export interface Senders {
   allowed?: (db: AlertDb, orgId: string, type: string) => Promise<boolean>;
 }
 const realSenders = (): Senders => ({
-  fetch,
+  fetch: pinnedFetch,
   resolve: resolveAll,
   env: process.env,
   // The real client carries the billing tables; AlertDb only names the ones alerts need.
@@ -143,23 +82,8 @@ const headline = (m: AlertMessage) =>
         ? `Test alert: ${m.incident.title}`
         : m.incident.title;
 
-async function post(
-  s: Senders,
-  rawUrl: string,
-  body: string,
-  headers: Record<string, string> = {},
-) {
-  const url = await assertPublicUrl(rawUrl, s.resolve);
-  // Redirects are not followed: they could lead somewhere the check above never saw.
-  const res = await s.fetch(url, {
-    method: 'POST',
-    redirect: 'manual',
-    headers: { 'content-type': 'application/json', ...headers },
-    body,
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`The destination answered HTTP ${res.status}`);
-}
+const post = (s: Senders, rawUrl: string, body: string, headers: Record<string, string> = {}) =>
+  postJson(s, rawUrl, body, headers);
 
 function payload(m: AlertMessage) {
   return { event: m.event, incident: m.incident, portalUrl: m.portalUrl };

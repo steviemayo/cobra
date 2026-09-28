@@ -9,6 +9,12 @@ import type { WebSocket } from 'ws';
 import { localAdmin, type LocalAdminOptions } from './local-admin';
 import type { Logger } from './log';
 import type { PhoneLinks } from './phone';
+import {
+  ACTUATOR_INTENTS,
+  ACTUATOR_MIN_INTERVAL_MS,
+  makeHostCheck,
+  sameOrigin,
+} from './request-guard';
 import type { ScheduleStore } from './schedule';
 import type { RoomHost } from './room-host';
 
@@ -31,7 +37,15 @@ export interface PanelServerOptions {
   schedule?: ScheduleStore;
   /** When set, the gateway's own status page (`/`) and admin page (`/admin`) are served. */
   admin?: Omit<LocalAdminOptions, 'host' | 'log'>;
+  /** Extra names the gateway may be reached by (KESTREL_ALLOWED_HOSTS); see makeHostCheck. */
+  allowedHosts?: string[];
+  /** The machine's own name, for the host check. Tests set it. */
+  machineName?: string;
 }
+
+/** What the panel page may load: itself, and pictures (a logo may live anywhere). */
+const PANEL_CSP =
+  "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'self'; base-uri 'none'; form-action 'none'";
 
 const PLACEHOLDER_PAGE = `<!doctype html><meta charset="utf-8"><title>Kestrel panel</title>
 <body style="font-family:system-ui;padding:2rem"><h1>Panel app not built</h1>
@@ -48,6 +62,27 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
 
   const failures = new Map<string, { count: number; until: number }>();
   const sockets = new Map<string, Set<WebSocket>>();
+  const lastActuator = new Map<string, number>();
+
+  // Only names the gateway is meant to be reached by (a rebinding page uses a public-looking one).
+  const hostAllowed = makeHostCheck(opts.allowedHosts, opts.machineName);
+  app.addHook('onRequest', async (req, reply) => {
+    if (req.url === '/health' || hostAllowed(req.host)) return;
+    log('warn', 'Refused a request for a name this gateway is not meant to be reached by', {
+      host: req.host,
+      hint: 'Add it to KESTREL_ALLOWED_HOSTS if it is a real name for this gateway',
+    });
+    return reply
+      .code(421)
+      .type('text/plain')
+      .send('This gateway is not reached by that name. Use its address, or ask whoever runs it.');
+  });
+  app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Referrer-Policy', 'same-origin');
+    reply.header('X-Frame-Options', 'SAMEORIGIN');
+    return payload;
+  });
 
   // When a room's release is replaced or removed, drop its panels so they reconnect to the new one.
   host.onReload((roomId) => {
@@ -84,6 +119,8 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
   app.get<{ Params: { roomId: string } }>('/room/:roomId', async (req, reply) => {
     if (!UUID.test(req.params.roomId) || !host.get(req.params.roomId))
       return reply.code(404).type('text/plain').send('This room is not running on this gateway.');
+    reply.header('Content-Security-Policy', PANEL_CSP);
+    reply.header('Cache-Control', 'no-cache');
     if (!built) return reply.type('text/html').send(PLACEHOLDER_PAGE);
     return reply.sendFile('index.html', dir);
   });
@@ -99,6 +136,16 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
     const send = (m: PanelServerMessage) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(m));
     };
+    // A page from somewhere else (any site open in a browser on this network) must not drive a room.
+    if (!sameOrigin(req.headers.origin, req.host)) {
+      log('warn', 'Refused a panel connection from another site', {
+        origin: req.headers.origin,
+        ip: req.ip,
+      });
+      send({ t: 'error', message: 'This page is not allowed to control the room.' });
+      socket.close(1008, 'bad origin');
+      return;
+    }
     if (!room) {
       send({ t: 'error', message: 'This room is not running on this gateway.' });
       socket.close(1008, 'unknown room');
@@ -199,6 +246,13 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
         intents = 0;
       }
       if (++intents > MAX_INTENTS_PER_SECOND) return; // a runaway panel; ignore the flood
+      const kind = msg.data.intent.type;
+      if (ACTUATOR_INTENTS.has(kind)) {
+        // Walls, lifts and screens: one move at a time per room, and a record of who asked.
+        if (now - (lastActuator.get(roomId) ?? 0) < ACTUATOR_MIN_INTERVAL_MS) return;
+        lastActuator.set(roomId, now);
+        log('info', 'A panel asked for something to move', { roomId, intent: kind, ip });
+      }
       shown.runtime.dispatch(msg.data.intent);
     });
 

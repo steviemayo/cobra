@@ -61,7 +61,7 @@
 
 ## Phase 6 — Billing & Customer Portal
 
-- Stripe: per-room subscription, Trial (5 rooms/30d) → downgrade logic, Basic, Pro; webhooks; entitlements middleware
+- Stripe: per-room subscription, Trial (5 rooms/30d) → downgrade logic, Basic, Pro; webhooks; entitlements middleware (as built since 2026-09-27: Basic = monitoring only, Pro = control + monitoring; see "Built between the roadmap and step N")
 - Customer viewer role + customer dashboard (status, control, tickets)
 - Org theming (logo/colours), language packs
 
@@ -110,6 +110,7 @@ Words used below:
 - All phases are built and merged to `dev` and `main` (PRs #9, #10 and the phases 5 to 7 PR). CI on them is green. What follows is setup and real-world checks that need you.
 - Use `docs/phase-4-preread.md` as the status source, and `.env.example` as the list of every env var.
 - **Status check on 2026-09-25** (checked with the Vercel, Supabase, GitHub and Prisma CLIs; secret values were not read). Production URL until a domain exists: `https://kestrel-lovat.vercel.app`. There is one database, `kestrel-dev`, used by Production and Preview alike.
+- **Refresh 2026-09-28:** everything is on `main` (release PR #103); `dev` and `main` are identical. `prisma migrate status` reports all 36 migrations applied, none pending. The gateway is at 0.2.7. Build steps N to U (Windows installer through the gateway's own pages) are recorded in "Later build steps N to U" at the end of the build steps below and in `docs/decisions.md`. Still not done by a person: the browser pass, real-hardware runs, `GITHUB_RELEASE_TOKEN` on Vercel, the sending domain and Resend, Stripe live, and the launch-readiness list. A security review was run on 2026-09-28 (`docs/security-audit-2026-09-28.md`): the critical and high findings are fixed (decisions Step V); the medium and low ones are pending ("Security review: pending issues" below). One step is the user's: set the `GATEWAY_RELEASE_SIGNING_KEY` repository secret (decision V-9).
 
 | Step | Status | Notes |
 |---|---|---|
@@ -196,7 +197,7 @@ Note: Vercel's free (Hobby) plan is for non-commercial use. Before real customer
 
 ### 3. Apply the new database migrations
 
-The dev database (`kestrel-dev`) already has all 13 migrations because I ran them there. Any **other** database, especially the one production uses, needs them applied. Never do this in a Vercel build.
+The dev database (`kestrel-dev`) already has every migration (13 when this was written, 36 on 2026-09-28) because they were run there. Any **other** database, especially the one production uses, needs them applied. Never do this in a Vercel build.
 
 1. Check which database Vercel production points at: Vercel > Settings > Environment Variables > `DIRECT_URL` (the host tells you which Supabase project).
 2. If it is a different project from `kestrel-dev`, apply them from your machine, pointing at that database only for this one command (`DIRECT_URL` is the **session pooler** URL, port 5432, from Supabase > **Connect**; URL-encode special characters in the password, `/` becomes `%2F`, `@` becomes `%40`):
@@ -296,7 +297,7 @@ One-time setup:
 
 1. **Make the image pullable.** GitHub profile > **Packages** > `kestrel-gateway` > **Package settings** > **Change visibility**. Public is simplest; if private, machines need `docker login ghcr.io` with a token that has `read:packages` (https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 2. **Windows bundle releases need the repo to allow workflow writes**: GitHub repo > **Settings** > **Actions** > **General** > **Workflow permissions** > "Read and write permissions". The bundle workflow only runs once on `main`/`dev` after the merge in step 0; check the **Actions** tab shows "Gateway Windows bundle" green, then **Releases** shows `gateway-stable`.
-3. **Each time you release a new gateway version:** bump `GATEWAY_VERSION` in `apps/gateway/src/config.ts` (and `apps/gateway/package.json` to match), merge, and set `GATEWAY_LATEST_STABLE` (or `_BETA`) on Vercel to the same number. The portal uses that to show "Update available" on older gateways, and the Windows installer's daily update task uses it to know a new bundle exists at all — CI now fails a PR that touches the gateway, the panel or a bundled package without bumping it (`.github/workflows/gateway-image.yml`, job `version-bump`), since a mismatch here is exactly how an already-installed gateway ends up unable to parse a room's manifest (`invalid_manifest`, `docs/decisions.md` Step P)
+3. **Each time you release a new gateway version:** bump `GATEWAY_VERSION` in `apps/gateway/src/config.ts` (and `apps/gateway/package.json` to match), merge, and set `GATEWAY_LATEST_STABLE` (or `_BETA`) on Vercel to the same number. The portal uses that to show "Update available" on older gateways and to decide what an update order installs (the portal now orders updates, `docs/decisions.md` S-1 to S-8; the old daily Windows task and Watchtower polling are retired) — CI now fails a PR that touches the gateway, the panel or a bundled package without bumping it (`.github/workflows/gateway-image.yml`, job `version-bump`), since a mismatch here is exactly how an already-installed gateway ends up unable to parse a room's manifest (`invalid_manifest`, `docs/decisions.md` Step P)
 
 ### 10. Try a gateway on a real machine
 
@@ -310,15 +311,11 @@ Do the **Docker** route first, on any Linux or Windows machine with Docker on th
    KESTREL_CHANNEL=stable
    KESTREL_IMAGE=ghcr.io/steviemayo/kestrel-gateway
    ```
-   then `docker compose up -d`. This also starts Watchtower, which updates the gateway automatically.
+   then `docker compose up -d`. This also starts Watchtower, which the gateway asks to update it when the portal orders an update (decisions S-4).
 3. Working when: the gateway shows **Online** in the portal within about a minute, and `docker compose logs gateway` shows "Enrolled with the cloud". Assign a room to it, deploy a release, and open `http://<machine>:8080/room/<room id>` on a tablet on the same network to see the panel.
 4. If it does not connect: `docker compose logs gateway` prints the reason. A wrong `KESTREL_CLOUD_URL` or an expired token are the usual causes (use **Re-enrol** in the gateway's **...** menu for a new token).
 
-**Windows** route (test once on a clean Windows VM or spare PC, since I could only syntax-check these scripts): needs step 9 done so the `gateway-stable` release exists. In an **administrator** PowerShell, after downloading `install.ps1` from the repo's `apps/gateway/windows` folder:
-```powershell
-.\install.ps1 -CloudUrl https://<app> -EnrollToken <token>
-```
-Working when: the gateway shows Online, `Get-ScheduledTask "Kestrel Gateway*"` lists two tasks, and logs appear in `C:\ProgramData\Kestrel Gateway\logs\gateway.log`. Undo with `& "C:\Program Files\Kestrel Gateway\uninstall.ps1"`. If something fails, send Claude the error and the log.
+**Windows** route: download `KestrelGatewaySetup.exe` from the Gateways page (needs step 9 done so the `gateway-stable` release exists, and `GITHUB_RELEASE_TOKEN` set so the portal can fetch it from the private repo). The wizard asks for the cloud URL and enrolment token and lets you choose a Windows service or a tray icon (`docs/decisions.md` N-1 to N-6). For scripted installs, in an **administrator** PowerShell: `.\install.ps1 -CloudUrl https://<app> -EnrollToken <token> [-Mode Tray]`. No token? The gateway announces itself and staff can claim it (T-1 to T-5). Working when: the gateway shows Online, `Get-Service "Kestrel Gateway"` (service mode) or the tray icon is present, `http://127.0.0.1:8080/` shows the gateway's status page (U-1), and logs appear in `C:\ProgramData\Kestrel Gateway\logs\gateway.log`. Undo with `& "C:\Program Files\Kestrel Gateway\uninstall.ps1"`. If something fails, send Claude the error and the log.
 
 ### 11. Test with real room hardware
 
@@ -357,8 +354,11 @@ I have never opened these while signed in. Use a test org and click through, and
 - **Settings > Billing** `/o/<org>/settings/billing` (choose plan, Stripe test card, trial banner)
 - **Marketplace** `/o/<org>/marketplace`, **Templates** (publish), `/staff/marketplace` (approve)
 - **Drivers** `/o/<org>/drivers` (create a custom driver from the example; Pro only), and the driver picker in a room's **Devices**
-- **Combinations** `/o/<org>/combinations`, then a room's **Control** page for the join/split bar
-- **Gateways** `/o/<org>/gateways` (channel badge, "Follow the beta channel" in the **...** menu)
+- **Room groups** `/o/<org>/groups` (walls, derived combined rooms, deploy group, simulate), then a panel's **Link rooms** menu
+- **Gateways** `/o/<org>/gateways` (channel badge, "Follow the beta channel" and the update controls in the **...** menu: now, at a time, cancel, automatic)
+- **Staff > Unclaimed gateways** (a gateway installed with no token appears here; Assign gives it an organisation)
+- A gateway's own pages: `http://<gateway>:8080/` (status and panel links) and `/admin` (admin code from `admin-code.txt`)
+- **Room monitoring**: click a device to expand its details; **Devices**, **Firmware**, **Usage**, **Reports**, and the history chart
 - **Monitoring**, **Incidents**, **Alerts**, **Tickets**, room **Control**, **Settings** (theme, language, calendars)
 - **Phone control**: on a running gateway's panel, tap the phone button bottom-left, scan the QR code with a phone, and control the room from it (needs `KESTREL_SECRETS_KEY` set on Vercel, step 1).
 
@@ -382,7 +382,8 @@ Written 2026-09-26. Everything above this line is set-up and verification for wh
 - **Driver classes slice 2**: apply migration `20260926180000_bindings_and_credentials` (two new tables, `Gateway.features`, `Room.reportedBindingsVersion`) with `prisma migrate deploy` **before** the release to `main`. Set `KESTREL_SECRETS_KEY` on the server if it is not already (logins cannot be stored without it). Update gateways to use binding-only releases; older gateways keep getting the merged values
 - **Driver classes slice 6**: apply migration `20260926200000_site_devices` (new `SiteDevice` table and `Release.siteDeviceIds`) the same way, **before** the release to `main`
 - ~~**D part 2**: drop the `RoomCombination` table~~ done (migration `20260926160000_drop_room_combination`, table was empty)
-- **L**: needs your decision on who pays (the provider, the customer, or per customer)
+- **L**: decided 2026-09-27: the customer always pays Kestrel directly; white label (look only) is built (AA below)
+- **N to U** (built 2026-09-28, after this list was written): see the Order table and "Later build steps N to U" below
 - **M**: WSS push needs a host that can hold connections (Vercel functions cannot), Stripe Connect needs a Stripe account and payout rules, third-party drivers and sandboxed hooks each need a security design first
 - Left out on purpose in F: camera auto-tracking and a separate recorder page. Left out in K: notifications as a target nears, per-organisation targets, business hours
 
@@ -421,6 +422,16 @@ Working rules that apply to all of them:
 | L | Provider billing and white label | large | a business decision on who pays |
 | M | Earlier candidates: WSS push, Stripe Connect payouts, third-party drivers, sandboxed logic hooks | large each | see `docs/phase-4-preread.md` |
 | N | Windows service/tray installer, Windows/Linux/Docker install instructions on the Gateways page | medium | **built** (decisions in `docs/decisions.md`, N-1 to N-6). Fixes the 2026-09-26 404 by proxying the download through the portal (`/api/gateway/download`); needs `GITHUB_RELEASE_TOKEN` set (a repo-scoped PAT with Contents: Read) since the release lives in a private repo |
+| O | Crestron 4-series and TSW/TS panel drivers, monitoring only | medium | **built** (O-1 to O-5), checked against a real RMC4 and TS-1070 |
+| P | Gateway version enforcement (`GATEWAY_VERSION` bump check in CI) | small | **built** (P-1 to P-3) |
+| Q | Monitoring-forward estate and deploys; non-blocking device reachability; per-room monitor only | large | **built** (Q-1 to Q-8); migration `room_monitor_only` applied |
+| R | Device details, Crestron Flex and occupancy drivers, one Crestron session | large | **built** (R-1 to R-8); migration `device_details` applied; occupancy and NVX details not verified on real units |
+| S | The portal decides when a gateway updates (now, scheduled, automatic) | large | **built** (S-1 to S-8); migration `gateway_updates` applied; needs `GITHUB_RELEASE_TOKEN`; not run on a real Windows or Docker gateway end to end |
+| T | Unclaimed gateways for staff to claim and assign | medium | **built** (T-1 to T-5); migration `unclaimed_gateways` applied |
+| U | The gateway's own pages (status, panel links, admin code, token, reset) | medium | **built** (U-1 to U-6); no migration; not run on a real Windows or Docker machine |
+| V | Security review: critical and high findings fixed (Data API closed, outbound URL check, panel origin and host checks, Windows data protection, signed updates and built-in keys) | large | **built** (V-1 to V-10); migration `close_data_api` applied; **needs the `GATEWAY_RELEASE_SIGNING_KEY` secret set before the next Windows release**; gateway 0.3.0 |
+
+The letters N to AC in the "Post-launch roadmap" further down are that list's own; they are different work from steps N to U here.
 
 Do A first: nothing from the last round has been clicked through while signed in. Then B and C are the highest value.
 
@@ -492,7 +503,7 @@ Depends on: nothing. Done when, in the simulator with fake devices: opening a wa
 
 ### D. Remove the old combinations code and table
 
-**Status: part 1 built** (every reader and writer, the panel intent and bar, the protocol fields, the model schema and the tests are gone; the `RoomCombination` model stays in `schema.prisma` with a comment). **Part 2 is yours, after the release to `main` is live:** add a migration dropping the table (`DROP TABLE "RoomCombination"`), remove the model from `schema.prisma`, and check `grep -ri roomcombination` finds only migration history. The protocol version stays 1 (decision D-1 in `docs/decisions.md`). The text below is the original brief.
+**Status: built, both parts.** Part 1 removed every reader and writer, the panel intent and bar, the protocol fields, the model schema and the tests. Part 2 is migration `20260926160000_drop_room_combination` (applied; the model is out of `schema.prisma`). The protocol version stays 1 (decision D-1 in `docs/decisions.md`). The text below is the original brief.
 
 Why: the first combined-rooms design was wrong and is being replaced (C). Its code and table are still there.
 
@@ -614,6 +625,8 @@ From the MVP-to-launch review. Legal items need a lawyer; the rest are build or 
 
 ### Post-launch roadmap (added 2026-09-26; built and merged to `dev` 2026-09-27, PRs #59-#74)
 
+> The letters N to AC below belong to this roadmap only. The build steps N to U in the Order table (Windows installer through the gateway's own pages) are different work, listed in "Later build steps N to U".
+
 Candidates from the MVP-to-launch review. Only usage and occupancy analytics was kept from the "big value adds"; predictive health, AI room design, the marketplace and simulator sharing were dropped (the marketplace stays under M as before). Each item below says what was built, in which PR, and what was left out. **Nothing here has had a browser pass or a real-hardware test.**
 
 **After merging: migrations and deploy order**
@@ -642,8 +655,63 @@ Candidates from the MVP-to-launch review. Only usage and occupancy analytics was
 - **AB. SSO (SAML/OIDC). Sign-in side built: #71.** "Sign in with single sign-on" on the login page and `docs/sso.md` for the per-company Supabase setup. **Not run end to end** (needs a real identity provider and a paid Supabase project). Not built: forcing SSO-only for a company, SCIM, and role mapping from provider groups.
 - **AC. Sign-up choice, duplicate organisations, one trial each. Built (branch `feat/signup-choice-and-join-requests`).** Set-up now starts with two cards (my own rooms, or I look after other organisations); `/signup?as=provider` preselects the provider card. Before an organisation is created, colleagues' organisations (same company domain, confirmed email) and similar names are checked; a colleague can **request to join** and the owners approve (choosing a role) or decline from Team, and are told by Teams/webhook/email channels and an email to each owner. Each person, mailbox and company domain gets one free trial for a customer organisation. Needs migration `20260927160000_join_requests_trial_claims`. **Not clicked through in a browser** (needs the migration on the dev database). Decisions AC-1 to AC-15 in `docs/decisions.md`.
 
+### Built between the roadmap and step N (2026-09-26 to 2026-09-27; decisions in `docs/decisions.md`)
+
+These were built from conversations rather than from a step letter, so they had no plan entry. Their decisions are in `docs/decisions.md` under the headings shown.
+
+| What | Where the decisions are | PRs / doc | Migration | Left over |
+|---|---|---|---|---|
+| **Tiers swapped to monitoring first:** Basic = monitoring only (about 10 per room per month, not final), Pro = control plus monitoring, trial 5 rooms then monitoring only, lapsed Pro falls back to Basic; the gateway's `ControlGate` refuses commands when control is off; monitored rooms and watch points; publish and deploy open to every plan; grouped sidebar | "Tiers: monitoring first" (TM-1 to TM-17, SB-1 to SB-5) | #78, #79 | none | Point value history, staff control override (needs a migration), the panel saying control is off, watch points for devices with no control points |
+| **Device feedback and history:** every driver's read-back reported to the cloud and logged per change; a history chart page per room | "Device feedback" and "Device history" (TM-18 to TM-20) | #80, #81 | `device_feedback` | A dedicated per-device query cap for large gateways; JSON path filtering in Postgres (the read scans up to 3000 rows a room) |
+| **Sign-up choice, colleague join requests, one trial each** | Roadmap item AC (AC-1 to AC-15) | #77 | `join_requests_trial_claims` | Not clicked through in a browser |
+| **Driver classes (slices 1 to 8):** bindings and credentials kept apart from releases, bulk create, display extras, mics, control points, shared site devices, AVoIP; LG and Kramer | `docs/driver-classes.md`, "Driver classes" (DX-1 onward) | many, see the doc | `bindings_and_credentials`, `site_devices` | Slice 8 is partial: the rest of the vendors are listed in DX-5 and each needs its vendor's documentation |
+
+### Later build steps N to U (built 2026-09-28; every decision is in `docs/decisions.md`)
+
+Written 2026-09-28. All merged to `dev` and released to `main` (PRs #83 to #103). Nothing here has had a browser pass or a run on real Windows or Docker gateways, except where a row says otherwise. The migrations were applied to `kestrel-dev` with `prisma migrate deploy`.
+
+| Step | What was built | PRs | Migration | Not built or not verified |
+|---|---|---|---|---|
+| N | Real Windows installer (`KestrelGatewaySetup.exe`): WinSW service or tray icon, wizard for cloud URL and token; Windows/Linux/Docker instructions on the Gateways page; installer downloaded through `/api/gateway/download` | #83, fix #90 (re-enrol on a dead credential, service logging) | none | `GITHUB_RELEASE_TOKEN` must be set on Vercel. Never run on a real Windows machine end to end. No native (non-Docker) Linux install |
+| O | Crestron 4-series (RMC4, MC4, CP4) and TSW/TS panel drivers, monitoring only, point-based over the CresNext REST API | #86 | none | Linking an IP table entry to the Kestrel device it stands for, and an alert on "the processor disagrees with the device" (O-4) |
+| P | `GATEWAY_VERSION` was stuck at 0.1.0, so no gateway ever saw an update; bumped and CI now fails a PR that changes the gateway, panel or a bundled package without bumping it | #88 | none | The portal's one-line `docker run` still has no Watchtower (P-3; see S-4 for how updates now reach Docker) |
+| Q | Live health (not design lint) on Estate, Overview and the sidebar; Monitoring is rooms first with a Devices tab and recent faults; a device that does not answer on deploy is a warning, not a refusal; per-room Monitor only | #92, #94 | `room_monitor_only` | Design health and live health still share the words "warning" and "orange" in places; no browser pass |
+| R | Device details (serial, MAC, program, IP table, stream status) as a generic structure shown on room monitoring; one shared CresNext session for NVX, 4-series, panel and occupancy sensor; Crestron Flex (Teams Room) and occupancy sensor drivers | #96, #101 (Flex protocol reference, `docs/uc-crestron-flex.driver.js`, not loaded by Kestrel) | `device_details` | Occupancy sensor and NVX details not verified on real units; Flex checked against one real unit's console only |
+| S | The portal orders gateway updates (now, at a set time, cancel, automatic, update all behind); Windows downloads the bundle through a short-lived signed link and checks its SHA-256; Docker asks Watchtower's HTTP API; progress shown in the portal | #98 | `gateway_updates` | Independent signing of bundles (S-7). Gateways older than 0.2.5 need one manual update. Not run end to end on a real machine |
+| T | A gateway with no working token announces itself; staff see it under Staff > Unclaimed gateways and assign it to an organisation, site and name; the gateway then enrols itself | #99 | `unclaimed_gateways` | Unclaimed gateways cannot be updated from the portal (T-5). Not clicked through in a browser |
+| U | `/` status page with panel links (open on the LAN) and `/admin` behind an admin code to enter a new token or reset; tray menu items; gateway 0.2.7 | #102 | none | Local device discovery, changing the cloud URL or restarting from the page, a QR code on the status page (U-6). Windows tray items and `docker exec` route not run on real machines |
+
+Also merged in this period: Stripe's own error message shown on `billing.subscribe` failures (#84).
+
+Where the status of a step lives: this table for what and what is left, `docs/decisions.md` (Step N to Step U, IDs N-1 to U-6) for why, `docs/diagrams.md` sections 2, 3, 4, 27, 28, 29 and 30 for the flows.
+
+### Security review: pending issues (2026-09-28)
+
+The critical and high findings are fixed (`docs/decisions.md` Step V). These are the **medium** ones, agreed to be done later; the evidence and the recommended fix for each is in `docs/security-audit-2026-09-28.md`. The low ones (L1 to L10) are listed there too. When one is picked up, fix every instance the report lists, with a test that fails if a new instance skips it.
+
+| # | Pending issue | Instances to fix together |
+|---|---|---|
+| M1 | Open redirect after sign-in: `safeNext` accepts `/\t/evil.com` | `lib/auth-redirect.ts` and every reader of `next`: login form, signup form, invite accept, SSO redirect, auth callback |
+| M2 | No security headers on the portal (CSP, frame-ancestors, nosniff, Permissions-Policy) | `next.config.ts` `headers()` for the whole web app |
+| M3 | No effective rate limiting (the one limiter is per process and runs after authentication) | enrolment, announce, `invite.preview`, webhook hooks, phone join, API-key authentication, `org.create`, `join-request.create` |
+| M4 | Panel PIN: per-address lockout, short PINs, PIN hash inside manifests readable by org members; rooms default to open | `panel-server.ts`, `panel-settings.ts`, the manifest's `panel.access` |
+| M5 | Phone-control sessions last 2 hours, cannot be revoked, allow every panel action including walls and lifts | `phone-control.ts`, `control-service.ts` |
+| M6 | Alert emails go to unverified addresses with user-controlled text (a relay from Kestrel's sending domain) | `alerts.ts` email sender, the three Resend senders (also the DRY sweep) |
+| M7 | Dependencies: `@fastify/static` in the gateway (traversal was tested and blocked); no `pnpm audit`, Dependabot or CodeQL in CI | gateway `package.json`, `.github/workflows` |
+| M8 | CI and supply chain: actions pinned by tag, no `permissions` on `ci.yml`, unsigned installer and Docker images, mutable rolling releases, Watchtower (unmaintained) with the Docker socket, Docker updates not verified | all three workflows, `docker-compose.yml`, `setup.iss` |
+| M9 | Custom-driver regexes are only syntax-checked (ReDoS stalls a gateway) | `driver-spec.ts`, `declarative.ts`, `generic-tcp.ts`, `serial.ts`, `driver-example.ts` |
+| M10 | Gateway local admin page over plain HTTP on the LAN; status page lists room ids | `local-admin.ts` |
+| M11 | Announce endpoint can be filled to its cap (blocks real installs); address taken from a forwarded header; size check trusts `content-length` | `gateway-announce.ts`, the announce route |
+| M12 | A dev-role user can point a gateway at any address, including loopback and link-local | `commands.ts` (test device, verify point), the generic TCP and REST drivers |
+
+Also still open from Step V: a first-run PIN for rooms with walls or lifts (V-4), key rotation statements and anti-rollback for room releases, code signing for the installer, and the DRY sweep, which waits until these are done.
+
 ### Small fixes to fit in anywhere
 
 - One gateway test (`apps/gateway/src/panel-server.test.ts`, "greet the panel and stream the room state") failed once in a full run and passed twice on rerun: make it deterministic
 - `KESTREL_ADMIN_EMAILS` is gone from code; make sure it is deleted from Vercel
-- The old `docs/staff-portal-plan` branch on GitHub can be deleted
+- The old `docs/staff-portal-plan`, `docs/launch-readiness-roadmap` and `feat/phase-3-gateway` branches on GitHub are superseded (their work is on `main`) and can be deleted
+- `pnpm` on the developer machine fails with "the global target of the pnpm shim points back at the shim"; fix it before the next dependency change (tools were run directly from `node_modules/.bin` in the meantime)
+- Set `GITHUB_RELEASE_TOKEN` on Vercel (Contents: Read) so the Windows installer download and portal-ordered Windows updates work (decisions N-5, S-3)
+- Set the repository secret `GATEWAY_RELEASE_SIGNING_KEY` (decision V-9); until it is set the Windows workflow will not publish a bundle. Keep a copy of the key in a password manager
+- Security review: medium and low findings pending, see the next section
