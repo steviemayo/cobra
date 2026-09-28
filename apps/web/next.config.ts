@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import { securityHeaders } from './src/lib/security-headers';
 
 const config: NextConfig = {
   transpilePackages: [
@@ -12,6 +13,9 @@ const config: NextConfig = {
   serverExternalPackages: ['pg'],
   async redirects() {
     return [{ source: '/dashboard', destination: '/', permanent: false }];
+  },
+  async headers() {
+    return [{ source: '/:path*', headers: securityHeaders() }];
   },
 };
 
