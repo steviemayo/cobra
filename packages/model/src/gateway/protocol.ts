@@ -5,7 +5,7 @@ import { TransitionAction } from '../room/groups';
 import { RoomModel } from '../room/room-model';
 import { Meetings, RoomMeetings } from '../schedule';
 import { PanelIntent, PanelViewModel, RoomStatus } from '../runtime/panel';
-import { PowerState } from '../runtime/device';
+import { DeviceDetails, PowerState } from '../runtime/device';
 
 // Gateway <-> cloud protocol, version 1. The gateway only ever makes outbound HTTPS requests.
 export const PROTOCOL_VERSION = 1;
@@ -241,6 +241,11 @@ export const DeviceReport = z.object({
   watched: z.array(WatchedPoint).max(100).optional(),
   /** Whatever the driver reports back, control or not. Absent when it has nothing to say. */
   feedback: DeviceFeedback.optional(),
+  /**
+   * What the device says about itself (serial, programs, IP table, ...). Sent when it changes and
+   * now and then as a refresh, so absent means "same as last time", not "none".
+   */
+  details: DeviceDetails.optional(),
 });
 export type DeviceReport = z.infer<typeof DeviceReport>;
 

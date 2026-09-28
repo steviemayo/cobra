@@ -9,6 +9,8 @@ export * from './qsys';
 export * from './crestron-cws';
 export * from './crestron-4series';
 export * from './crestron-tsw';
+export * from './crestron-flex';
+export * from './crestron-occupancy';
 export * from './declarative';
 export * from './generic-rest';
 export * from './serial';

@@ -55,6 +55,51 @@ export const PowerState = z.enum(['off', 'warming', 'on', 'cooling']);
 export type PowerState = z.infer<typeof PowerState>;
 
 // Feedback snapshot. Drivers report what they know; unknown fields stay undefined.
+/** How a detail should read at a glance: fine, worth a look, or wrong. Absent means plain information. */
+export const DetailStatus = z.enum(['ok', 'warning', 'bad']);
+export type DetailStatus = z.infer<typeof DetailStatus>;
+
+/**
+ * What a device says about itself beyond its power and input: model, serial, a control system's
+ * running program, an IP table. A driver fills in whichever sections its device has and the portal
+ * shows them as they are, so a new driver needs no new screen. Bounded, and never for secrets:
+ * a driver lists the fields it means to show rather than passing a whole reply through.
+ */
+export const DeviceDetailSection = z.object({
+  title: z.string().max(60),
+  rows: z
+    .array(
+      z.object({
+        label: z.string().max(60),
+        value: z.string().max(200),
+        status: DetailStatus.optional(),
+      }),
+    )
+    .max(40)
+    .default([]),
+  table: z
+    .object({
+      columns: z.array(z.string().max(40)).min(1).max(8),
+      rows: z
+        .array(
+          z.object({
+            cells: z.array(z.string().max(120)).max(8),
+            status: DetailStatus.optional(),
+          }),
+        )
+        .max(128),
+    })
+    .optional(),
+});
+export type DeviceDetailSection = z.infer<typeof DeviceDetailSection>;
+
+export const MAX_DETAILS_BYTES = 30_000;
+export const DeviceDetails = z
+  .array(DeviceDetailSection)
+  .max(16)
+  .refine((d) => JSON.stringify(d).length <= MAX_DETAILS_BYTES, 'details are too large');
+export type DeviceDetails = z.infer<typeof DeviceDetails>;
+
 export const DeviceState = z.object({
   online: z.boolean().default(true),
   power: PowerState.optional(),
@@ -83,6 +128,8 @@ export const DeviceState = z.object({
   signal: z.record(z.string(), z.boolean()).default({}),
   /** The firmware or software version the device reported about itself, as it wrote it. Read only: nothing here changes it. */
   firmware: z.string().max(100).optional(),
+  /** Everything else the device says about itself, for the portal's device page. See DeviceDetails. */
+  details: DeviceDetails.optional(),
 });
 export type DeviceState = z.infer<typeof DeviceState>;
 
@@ -102,7 +149,15 @@ export interface DeviceBus {
   /** The optional features of this device's driver class that its driver supports (see driver-classes). Absent means none. */
   features?(deviceId: string): string[];
   /** Read one control point from the device, to check it exists and learn its range. Rejects if it cannot. */
-  readPoint?(deviceId: string, point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>): Promise<PointReading>;
+  readPoint?(
+    deviceId: string,
+    point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>,
+  ): Promise<PointReading>;
 }
 
-export const defaultDeviceState = (): DeviceState => ({ online: true, routes: {}, signal: {}, points: {} });
+export const defaultDeviceState = (): DeviceState => ({
+  online: true,
+  routes: {},
+  signal: {},
+  points: {},
+});
