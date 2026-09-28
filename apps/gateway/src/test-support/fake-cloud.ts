@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { generateKeyPair, signBindings, signManifest } from '@kestrel/crypto';
 import {
+  AnnounceRequest,
   EnrollRequest,
   HeartbeatRequest,
   PROTOCOL_VERSION,
@@ -40,6 +41,16 @@ export class FakeCloud {
   schedules: { roomId: string; meetings: unknown[] }[] = [];
   /** Rooms the fake portal is "controlling": the gateway is told to poll fast for them. */
   watching: string[] = [];
+  /** What gateways that announced themselves have said, and what the fake portal answers them. */
+  readonly announces: AnnounceRequest[] = [];
+  announceReply: {
+    status: 'unclaimed' | 'claimed' | 'dismissed';
+    enrollToken?: string;
+    retrySeconds: number;
+  } = {
+    status: 'unclaimed',
+    retrySeconds: 60,
+  };
   /** An update order handed to the gateway in every heartbeat response until cleared. */
   updateOrder: unknown;
   /** The update bundle the fake portal offers (its download link points back at this server). */
@@ -190,6 +201,12 @@ export class FakeCloud {
     const path = url.pathname.replace('/api/gateway/v1', '');
     const authed = req.headers.authorization === `Bearer ${CREDENTIAL}` && !this.revoked;
 
+    if (req.method === 'POST' && path === '/announce') {
+      const parsed = AnnounceRequest.safeParse(await this.body(req));
+      if (!parsed.success) return this.json(res, 400, { error: 'bad request' });
+      this.announces.push(parsed.data);
+      return this.json(res, 200, this.announceReply);
+    }
     if (req.method === 'POST' && path === '/enroll') {
       const parsed = EnrollRequest.safeParse(await this.body(req));
       if (!parsed.success) return this.json(res, 400, { error: 'bad request' });

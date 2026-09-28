@@ -300,6 +300,35 @@ export type GroupConfig = z.infer<typeof GroupConfig>;
 export const DividerReport = z.object({ id: z.string().uuid(), open: z.boolean() });
 export type DividerReport = z.infer<typeof DividerReport>;
 
+// ---- Announcing an unclaimed gateway -------------------------------------------------------------
+
+/**
+ * What a gateway sends when it is running but cannot enrol (no token, or a token that is used up or
+ * expired): who it is, so staff can see it and give it to the right organisation. Nothing secret
+ * but `secret`, which only proves later that it is the same install, and is stored hashed.
+ */
+export const AnnounceRequest = z.object({
+  protocol: z.literal(PROTOCOL_VERSION),
+  /** Random and stable for this install; public. */
+  installId: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/),
+  secret: z.string().min(20).max(100),
+  gatewayVersion: z.string().max(50),
+  hostname: z.string().max(100).optional(),
+  os: z.string().max(100).optional(),
+  /** The machine's own private addresses, to help tell where it is. */
+  localAddresses: z.array(z.string().max(45)).max(8).default([]),
+});
+export type AnnounceRequest = z.infer<typeof AnnounceRequest>;
+
+export const AnnounceResponse = z.object({
+  /** `claimed` carries the enrolment token (until the gateway has enrolled with it). */
+  status: z.enum(['unclaimed', 'claimed', 'dismissed']),
+  enrollToken: z.string().max(200).optional(),
+  /** When to ask again. */
+  retrySeconds: z.number().int().min(5).max(86_400),
+});
+export type AnnounceResponse = z.infer<typeof AnnounceResponse>;
+
 // ---- Gateway updates ---------------------------------------------------------------------------
 
 /** How far a gateway got with an update the portal asked for. Success is the version changing. */

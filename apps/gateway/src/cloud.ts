@@ -1,11 +1,13 @@
 import type { z } from 'zod';
 import {
+  AnnounceResponse,
   BundleLocation,
   ConfigResponse,
   EnrollResponse,
   HeartbeatResponse,
   PROTOCOL_VERSION,
   PollResponse,
+  type AnnounceRequest,
   type EnrollRequest,
   type HeartbeatRequest,
   type PollRequest,
@@ -79,6 +81,11 @@ export class CloudClient {
 
   enroll(body: EnrollRequest) {
     return this.request('POST', '/enroll', EnrollResponse, { body });
+  }
+
+  /** Says this gateway is here but cannot enrol, so staff can claim it. No credential: it has none yet. */
+  announce(body: AnnounceRequest) {
+    return this.request('POST', '/announce', AnnounceResponse, { body });
   }
 
   heartbeat(credential: string, body: HeartbeatRequest) {

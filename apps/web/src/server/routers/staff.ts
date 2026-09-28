@@ -16,6 +16,15 @@ import {
 } from '../staff-team';
 import { StaffRole } from '@kestrel/model';
 import { orgDetail, orgDirectory, recordStaffAudit, mfaRequired } from '../staff';
+import {
+  AnnounceError,
+  claimUnclaimed,
+  deleteUnclaimed,
+  dismissUnclaimed,
+  listUnclaimed,
+  releaseClaim,
+  reopenUnclaimed,
+} from '../gateway-announce';
 import { fleetHealth } from '../fleet-health';
 import { notifyOrg } from '../ticket-notify';
 import {
@@ -54,6 +63,7 @@ import {
 
 function asTrpc(e: unknown): never {
   if (
+    e instanceof AnnounceError ||
     e instanceof LicenceError ||
     e instanceof SessionError ||
     e instanceof TicketError ||
@@ -417,6 +427,114 @@ export const staffRouter = router({
           orgId: input.orgId,
         });
         return detail;
+      }),
+  }),
+
+  // Gateways that are running but have no definition in any organisation. Staff confirm with the
+  // customer, then give one to the right organisation and site.
+  gateways: router({
+    unclaimed: staffProcedure.query(() => listUnclaimed(db)),
+
+    // For the picker when assigning: organisation names, then the sites of the one chosen.
+    orgs: staffProcedure.query(() =>
+      db.org.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    ),
+    sites: staffProcedure.input(z.object({ orgId: z.string().uuid() })).query(({ input }) =>
+      db.site.findMany({
+        where: { orgId: input.orgId },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      }),
+    ),
+
+    claim: staffProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          orgId: z.string().uuid(),
+          siteId: z.string().uuid(),
+          name: z.string().trim().min(1).max(100),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireAnyStaffRole(ctx.staff, ['admin', 'support']);
+        try {
+          const res = await claimUnclaimed(
+            db,
+            { ...input, staffUserId: ctx.staff.userId },
+            process.env.KESTREL_SECRETS_KEY || undefined,
+          );
+          await recordStaffAudit(db, {
+            staffUserId: ctx.staff.userId,
+            action: 'gateway.claim',
+            orgId: input.orgId,
+            target: res.gatewayId,
+            meta: { unclaimedId: input.id, name: input.name },
+          });
+          return res;
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    dismiss: staffProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        requireAnyStaffRole(ctx.staff, ['admin', 'support']);
+        try {
+          await dismissUnclaimed(db, input.id);
+          await recordStaffAudit(db, {
+            staffUserId: ctx.staff.userId,
+            action: 'gateway.unclaimed.dismiss',
+            target: input.id,
+          });
+          return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    reopen: staffProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        requireAnyStaffRole(ctx.staff, ['admin', 'support']);
+        await reopenUnclaimed(db, input.id);
+        await recordStaffAudit(db, {
+          staffUserId: ctx.staff.userId,
+          action: 'gateway.unclaimed.reopen',
+          target: input.id,
+        });
+        return { ok: true };
+      }),
+
+    release: staffProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        requireAnyStaffRole(ctx.staff, ['admin', 'support']);
+        try {
+          await releaseClaim(db, input.id);
+          await recordStaffAudit(db, {
+            staffUserId: ctx.staff.userId,
+            action: 'gateway.unclaimed.release',
+            target: input.id,
+          });
+          return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    delete: staffProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        requireAnyStaffRole(ctx.staff, ['admin', 'support']);
+        await deleteUnclaimed(db, input.id);
+        await recordStaffAudit(db, {
+          staffUserId: ctx.staff.userId,
+          action: 'gateway.unclaimed.delete',
+          target: input.id,
+        });
+        return { ok: true };
       }),
   }),
 });

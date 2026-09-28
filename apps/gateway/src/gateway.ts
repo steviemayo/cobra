@@ -1,4 +1,5 @@
-import { hostname, platform, release as osRelease } from 'node:os';
+import { randomBytes } from 'node:crypto';
+import { hostname, networkInterfaces, platform, release as osRelease } from 'node:os';
 import { ANY_KEY_ID, verifyBindings, verifyManifest } from '@kestrel/crypto';
 import {
   GATEWAY_FEATURES,
@@ -33,6 +34,7 @@ const KEY_IDENTITY = 'identity';
 const KEY_PUBLIC_KEYS = 'publicKeys';
 const KEY_CONFIG_VERSION = 'configVersion';
 const KEY_CONTROL = 'control';
+const KEY_INSTALL = 'install';
 const BINDINGS_PREFIX = 'bindings:';
 const keyBindings = (roomId: string) => `${BINDINGS_PREFIX}${roomId}`;
 const MAX_BACKOFF_MS = 60_000;
@@ -55,6 +57,25 @@ type DeployOutcome = 'applied' | 'refused' | 'retry';
 /** An update is not started again for the same version this soon: an attempt that has reached the installer is left to finish. */
 const UPDATE_RETRY_MS = 20 * 60_000;
 const UPDATE_REPORT_MS = 10 * 60_000;
+
+/** This gateway cannot enrol yet and has said so: nothing is wrong, it is waiting for staff to claim it. */
+/** The machine's own private IPv4 addresses, to help tell where an unclaimed gateway is. */
+function localAddresses(): string[] {
+  return Object.values(networkInterfaces())
+    .flatMap((list) => list ?? [])
+    .filter((a) => a.family === 'IPv4' && !a.internal)
+    .map((a) => a.address)
+    .slice(0, 8);
+}
+
+class WaitingToBeClaimed extends Error {
+  constructor(
+    readonly status: 'unclaimed' | 'dismissed' | 'claimed',
+    readonly retrySeconds: number,
+  ) {
+    super(`Waiting to be claimed (${status})`);
+  }
+}
 
 interface Identity {
   gatewayId: string;
@@ -108,6 +129,11 @@ export class Gateway {
   private updateReport: GatewayUpdateReport | undefined;
   private updateReportSince = 0;
   private updating = false;
+  /** An enrolment token staff handed over by claiming this gateway, and one from the settings that the cloud refused. */
+  private claimedToken: string | null = null;
+  private configTokenRefused = false;
+  private announcedStatus: string | null = null;
+  private announceHoldUntil = 0;
   private lastUpdateAttempt: { version: string; at: number } | null = null;
 
   private readonly groups: GroupCoordinator;
@@ -273,6 +299,21 @@ export class Gateway {
       this.failures = 0;
       this.schedule((this.identity?.heartbeatSeconds ?? 30) * 1000);
     } catch (e) {
+      if (e instanceof WaitingToBeClaimed) {
+        // Not a fault: say it once, then check again when the cloud asked us to.
+        if (this.announcedStatus !== e.status) {
+          this.announcedStatus = e.status;
+          this.log(
+            'info',
+            'Not set up in any organisation yet: staff can claim this gateway in the portal',
+            {
+              status: e.status,
+            },
+          );
+        }
+        this.schedule(e.retrySeconds * 1000);
+        return;
+      }
       this.failures++;
       const unreachable = e instanceof CloudError && e.unreachable;
       if (e instanceof CloudError && e.unauthorised) this.forgetCredential();
@@ -305,11 +346,66 @@ export class Gateway {
 
   private async ensureEnrolled(): Promise<void> {
     if (this.store.get(KEY_CREDENTIAL)) return;
-    if (!this.cfg.enrollToken)
-      throw new CloudError('Not enrolled and no KESTREL_ENROLL_TOKEN set', 401);
+    // The token from the settings, until the cloud refuses it; or one staff handed over by claiming this gateway.
+    const token = this.claimedToken ?? (this.configTokenRefused ? undefined : this.cfg.enrollToken);
+    if (token) {
+      try {
+        await this.enrollWith(token);
+        this.claimedToken = null;
+        return;
+      } catch (e) {
+        if (!(e instanceof CloudError && e.unauthorised)) throw e;
+        // Used up, expired or never valid: fall back to announcing, so this does not go unseen.
+        if (this.claimedToken) this.claimedToken = null;
+        else this.configTokenRefused = true;
+        this.log('warn', 'The enrolment token was refused; announcing this gateway instead');
+      }
+    }
+    await this.announceSelf();
+  }
+
+  /** Says this gateway is here, and enrols with the token staff hand back once they have claimed it. */
+  private async announceSelf(): Promise<void> {
+    if (Date.now() < this.announceHoldUntil)
+      throw new WaitingToBeClaimed(
+        (this.announcedStatus as 'unclaimed' | 'dismissed' | 'claimed') ?? 'unclaimed',
+        Math.ceil((this.announceHoldUntil - Date.now()) / 1000),
+      );
+    const install = this.installIdentity();
+    const res = await this.cloud.announce({
+      protocol: PROTOCOL_VERSION,
+      installId: install.id,
+      secret: install.secret,
+      gatewayVersion: this.cfg.version,
+      hostname: hostname(),
+      os: `${platform()} ${osRelease()}`,
+      localAddresses: localAddresses(),
+    });
+    this.announceHoldUntil = Date.now() + res.retrySeconds * 1000;
+    if (res.status === 'claimed' && res.enrollToken) {
+      this.claimedToken = res.enrollToken;
+      this.announceHoldUntil = 0;
+      return this.ensureEnrolled();
+    }
+    throw new WaitingToBeClaimed(res.status, res.retrySeconds);
+  }
+
+  /** Random and kept for the life of the install: the id is public, the secret proves it is the same install. */
+  private installIdentity(): { id: string; secret: string } {
+    const existing = this.store.getJson<{ id: string; secret: string }>(KEY_INSTALL);
+    if (existing?.id && existing.secret) return existing;
+    const made = {
+      id: randomBytes(12).toString('base64url'),
+      secret: randomBytes(24).toString('base64url'),
+    };
+    this.store.setJson(KEY_INSTALL, made);
+    return made;
+  }
+
+  private async enrollWith(token: string): Promise<void> {
     const res: EnrollResponse = await this.cloud.enroll({
       protocol: PROTOCOL_VERSION,
-      token: this.cfg.enrollToken,
+      token,
       hostname: hostname(),
       gatewayVersion: this.cfg.version,
       os: `${platform()} ${osRelease()}`,
@@ -322,6 +418,7 @@ export class Gateway {
       name: res.name,
       heartbeatSeconds: res.heartbeatSeconds,
     } satisfies Identity);
+    this.announcedStatus = null;
     this.log('info', 'Enrolled with the cloud', { gatewayId: res.gatewayId, name: res.name });
   }
 

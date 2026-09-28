@@ -1,6 +1,7 @@
 import { db } from '@kestrel/db';
 import { cronAuthorised } from '@/server/cron-auth';
 import { pruneAudit } from '@/server/audit-retention';
+import { pruneUnclaimed } from '@/server/gateway-announce';
 import { runReportSchedules } from '@/server/report-delivery';
 import { pruneOldData } from '@/server/retention';
 
@@ -20,5 +21,9 @@ export async function GET(req: Request) {
   const reports = await runReportSchedules(db).catch((e: unknown) => ({
     error: e instanceof Error ? e.message : String(e),
   }));
-  return Response.json({ ...res, cutoff: res.cutoff.toISOString(), audit, reports });
+  // Unclaimed gateways that have gone quiet, so an open endpoint cannot make the list grow for ever.
+  const unclaimed = await pruneUnclaimed(db).catch((e: unknown) => ({
+    error: e instanceof Error ? e.message : String(e),
+  }));
+  return Response.json({ ...res, cutoff: res.cutoff.toISOString(), audit, reports, unclaimed });
 }
