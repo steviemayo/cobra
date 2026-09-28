@@ -11,11 +11,15 @@ import {
 } from '../index';
 
 describe('catalog', () => {
-  it('covers every category with a label and capabilities', () => {
+  it('covers every category with a label and capabilities, except pure monitoring infrastructure', () => {
+    // A control processor or touch panel gives the room nothing to route or trigger on: it is
+    // watched, not a source, sink or control surface, so it has no capability to declare.
+    const noCapability: DeviceCategory[] = ['control_processor', 'touch_panel'];
     for (const category of DeviceCategory.options) {
       const info = DEVICE_CATALOG[category];
       expect(info.label).not.toBe('');
-      expect(info.capabilities.length).toBeGreaterThan(0);
+      if (noCapability.includes(category)) expect(info.capabilities).toEqual([]);
+      else expect(info.capabilities.length).toBeGreaterThan(0);
     }
   });
 

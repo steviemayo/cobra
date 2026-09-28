@@ -8,6 +8,7 @@ const COLUMN: Record<string, number> = {
   matrix: 1,
   destination: 2,
   environment: 3,
+  infrastructure: 3,
 };
 
 export function autoLayout(

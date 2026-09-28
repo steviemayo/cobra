@@ -100,7 +100,7 @@ export const DRIVER_CLASSES: Record<DriverClass, DriverClassInfo> = {
   },
   point_based: {
     label: 'Point-based device (DSP and similar)',
-    categories: ['audio_matrix', 'lighting', 'hvac'],
+    categories: ['audio_matrix', 'lighting', 'hvac', 'control_processor', 'touch_panel'],
     features: {
       level: 'Level control points',
       mute: 'Mute control points',
@@ -227,7 +227,10 @@ export const CLASS_CONTRACT: Partial<
     },
   },
   video_switching: { commands: ['route'], features: { output_mute: ['command.output_mute'] } },
-  camera: { commands: [], features: { preset: ['camera_preset'], standby: ['power.on', 'power.off'] } },
+  camera: {
+    commands: [],
+    features: { preset: ['camera_preset'], standby: ['power.on', 'power.off'] },
+  },
   conference_system: {
     commands: [],
     features: {
@@ -238,11 +241,17 @@ export const CLASS_CONTRACT: Partial<
       dial: ['command.dial'],
     },
   },
-  reinforcement_mic: { commands: [], features: { mute: ['mute.on', 'mute.off'], volume: ['volume'] } },
+  reinforcement_mic: {
+    commands: [],
+    features: { mute: ['mute.on', 'mute.off'], volume: ['volume'] },
+  },
   conferencing_mic: { commands: [], features: { privacy_mute: ['mute.on', 'mute.off'] } },
   recorder: { commands: [], features: { start_stop: ['record.on', 'record.off'] } },
   environmental: { commands: [], features: { scene: ['scene'] } },
-  relay: { commands: [], features: { up_down: ['command.up', 'command.down'], on_off: ['power.on', 'power.off'] } },
+  relay: {
+    commands: [],
+    features: { up_down: ['command.up', 'command.down'], on_off: ['power.on', 'power.off'] },
+  },
 };
 
 /** Problems with a driver's declared class and features, as plain sentences. Empty when fine. */
