@@ -123,6 +123,20 @@ if ($healthy) {
     $fresh = Join-Path $app "windows\$name"
     if (Test-Path $fresh) { Copy-Item -Force $fresh (Join-Path $root $name) }
   }
+  # Installs made before the data folder was locked down get that now. Service installs only: the
+  # account a tray install runs as is not known here.
+  try {
+    $protect = Join-Path $app 'windows\protect-data.ps1'
+    if (($mode -eq 'Service') -and (Test-Path $protect)) {
+      . $protect
+      $runAs = Get-KestrelServiceAccount
+      Protect-KestrelFolder -Path $dataDir -Modify @($runAs)
+      Protect-KestrelFile -Path (Join-Path $root 'KestrelGatewayService.xml') -Read @($runAs)
+      Protect-KestrelFile -Path (Join-Path $root 'gateway.env')
+    }
+  } catch {
+    Note "Could not tighten the permissions on the data folder: $($_.Exception.Message)"
+  }
   Note "Updated to $latest"
   Forget-Request
   exit 0
