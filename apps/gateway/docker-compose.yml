@@ -33,7 +33,9 @@ services:
       com.centurylinklabs.watchtower.enable: 'true'
 
   watchtower:
-    image: containrrr/watchtower:latest
+    # Pinned, not :latest: an update to this pulls in whatever the image's author put there on that
+    # day. Bump the tag by hand (or let Dependabot's docker updates on this folder do it).
+    image: containrrr/watchtower:1.7.1
     container_name: kestrel-watchtower
     restart: unless-stopped
     volumes:

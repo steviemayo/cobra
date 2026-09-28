@@ -27,6 +27,11 @@ on:
       - '.github/workflows/gateway-windows.yml'
   workflow_dispatch:
 
+# The bundle job needs contents: write to create and upload release assets on a push; a pull
+# request never gets past `if: github.event_name != 'pull_request'` to use it.
+permissions:
+  contents: read
+
 jobs:
   bundle:
     runs-on: windows-latest
@@ -36,9 +41,9 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -78,9 +83,14 @@ jobs:
       - name: Bundle the service wrapper (WinSW, MIT licensed)
         run: |
           # Runs as a real Windows service. The plain .NET-Framework build needs no runtime install
-          # (Framework 4 ships with Windows), unlike the newer .NET-based v3 builds.
-          Invoke-WebRequest "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET4.exe" `
-            -OutFile bundle/app/windows/KestrelGatewayService.exe
+          # (Framework 4 ships with Windows), unlike the newer .NET-based v3 builds. Checked against
+          # the digest of this exact release so a compromised download cannot land in every bundle;
+          # bump both the version and this hash together when WinSW is updated.
+          $dest = 'bundle/app/windows/KestrelGatewayService.exe'
+          Invoke-WebRequest "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET4.exe" -OutFile $dest
+          $expected = '923111c7142b3dc783a3c722b19b8a21bcb78222d7a136ac33f0ca8a29f4cb66'
+          $actual = (Get-FileHash -Algorithm SHA256 -Path $dest).Hash.ToLower()
+          if ($actual -ne $expected) { throw "WinSW.NET4.exe does not match the expected digest (got $actual)" }
       - name: Build the installer (KestrelGatewaySetup.exe)
         run: |
           $version = Get-Content VERSION
@@ -92,12 +102,12 @@ jobs:
             apps/gateway/windows/setup.iss
       # A pull request only needs to prove the bundle and installer build; nothing downloads these,
       # so uploading them would just spend the org's Actions artifact storage for no reason.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: github.event_name != 'pull_request'
         with:
           name: kestrel-gateway-win-x64
           path: kestrel-gateway-win-x64.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: github.event_name != 'pull_request'
         with:
           name: KestrelGatewaySetup
