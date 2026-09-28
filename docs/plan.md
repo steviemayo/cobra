@@ -296,7 +296,7 @@ One-time setup:
 
 1. **Make the image pullable.** GitHub profile > **Packages** > `kestrel-gateway` > **Package settings** > **Change visibility**. Public is simplest; if private, machines need `docker login ghcr.io` with a token that has `read:packages` (https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 2. **Windows bundle releases need the repo to allow workflow writes**: GitHub repo > **Settings** > **Actions** > **General** > **Workflow permissions** > "Read and write permissions". The bundle workflow only runs once on `main`/`dev` after the merge in step 0; check the **Actions** tab shows "Gateway Windows bundle" green, then **Releases** shows `gateway-stable`.
-3. **Each time you release a new gateway version:** bump `GATEWAY_VERSION` in `apps/gateway/src/config.ts`, merge, and set `GATEWAY_LATEST_STABLE` (or `_BETA`) on Vercel to the same number. The portal uses that to show "Update available" on older gateways.
+3. **Each time you release a new gateway version:** bump `GATEWAY_VERSION` in `apps/gateway/src/config.ts` (and `apps/gateway/package.json` to match), merge, and set `GATEWAY_LATEST_STABLE` (or `_BETA`) on Vercel to the same number. The portal uses that to show "Update available" on older gateways, and the Windows installer's daily update task uses it to know a new bundle exists at all — CI now fails a PR that touches the gateway, the panel or a bundled package without bumping it (`.github/workflows/gateway-image.yml`, job `version-bump`), since a mismatch here is exactly how an already-installed gateway ends up unable to parse a room's manifest (`invalid_manifest`, `docs/decisions.md` Step P)
 
 ### 10. Try a gateway on a real machine
 
