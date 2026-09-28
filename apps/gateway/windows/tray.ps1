@@ -66,7 +66,9 @@ $notify.Visible = $true
 $notify.Text = 'Kestrel Gateway'
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
-$openItem = $menu.Items.Add('Open panel')
+$openItem = $menu.Items.Add('Open gateway page')
+$adminItem = $menu.Items.Add('Open admin page')
+$codeItem = $menu.Items.Add('Show admin code')
 $logsItem = $menu.Items.Add('Open logs folder')
 $reconfigureItem = $menu.Items.Add('Change cloud URL...')
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
@@ -77,6 +79,17 @@ $exitItem = $menu.Items.Add('Exit')
 $notify.ContextMenuStrip = $menu
 
 $openItem.add_Click({ Start-Process "http://127.0.0.1:$port/" }.GetNewClosure())
+$adminItem.add_Click({ Start-Process "http://127.0.0.1:$port/admin" }.GetNewClosure())
+# The gateway writes this file the first time it starts; it unlocks the admin page.
+$codeItem.add_Click({
+  $codeFile = Join-Path $dataDir 'admin-code.txt'
+  $text = if (Test-Path $codeFile) { (Get-Content $codeFile -Raw).Trim() } else { $null }
+  if ($text) {
+    [void][System.Windows.Forms.MessageBox]::Show("Admin code: $text`n`nEnter it on the gateway's admin page (Open admin page).", 'Kestrel Gateway')
+  } else {
+    [void][System.Windows.Forms.MessageBox]::Show('The gateway has not made its admin code yet. Wait a few seconds after it starts and try again.', 'Kestrel Gateway')
+  }
+}.GetNewClosure())
 $logsItem.add_Click({ Start-Process $logDir }.GetNewClosure())
 # reconfigure.ps1 self-elevates (UAC) and restarts the gateway itself once applied.
 $reconfigureItem.add_Click({ Start-Process powershell.exe -ArgumentList `

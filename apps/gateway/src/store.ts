@@ -149,6 +149,10 @@ export class Store {
     this.db.prepare('DELETE FROM telemetry WHERE sent = 1').run();
   }
 
+  clearTelemetry() {
+    this.db.prepare('DELETE FROM telemetry').run();
+  }
+
   unsentCount(): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM telemetry WHERE sent = 0').get() as { n: number }).n;
   }

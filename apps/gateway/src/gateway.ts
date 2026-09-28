@@ -68,6 +68,28 @@ function localAddresses(): string[] {
     .slice(0, 8);
 }
 
+/** What the local status page shows about this gateway. */
+export interface LocalStatus {
+  version: string;
+  cloudHost: string;
+  installId: string | null;
+  enrolment: 'enrolled' | 'unclaimed' | 'dismissed' | 'claimed' | 'refused' | 'connecting';
+  name: string | null;
+  lastContactAt: string | null;
+  problem: string | null;
+  control: boolean;
+  bufferedEvents: number;
+  update: { state: string; version?: string; error?: string } | null;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 class WaitingToBeClaimed extends Error {
   constructor(
     readonly status: 'unclaimed' | 'dismissed' | 'claimed',
@@ -132,8 +154,13 @@ export class Gateway {
   /** An enrolment token staff handed over by claiming this gateway, and one from the settings that the cloud refused. */
   private claimedToken: string | null = null;
   private configTokenRefused = false;
-  private announcedStatus: string | null = null;
+  private announcedStatus: 'unclaimed' | 'dismissed' | 'claimed' | null = null;
   private announceHoldUntil = 0;
+  private current: Promise<void> | null = null;
+  /** While set, no cloud round trip starts: someone is changing who this gateway belongs to. */
+  private hold = false;
+  private lastContactAt: Date | null = null;
+  private lastProblem: string | null = null;
   private lastUpdateAttempt: { version: string; at: number } | null = null;
 
   private readonly groups: GroupCoordinator;
@@ -157,6 +184,103 @@ export class Gateway {
 
   get identity(): Identity | null {
     return this.store.getJson<Identity>(KEY_IDENTITY);
+  }
+
+  /** What the local status page shows. Nothing secret: no credential, token or admin code. */
+  status(): LocalStatus {
+    const enrolled = !!this.store.get(KEY_CREDENTIAL);
+    return {
+      version: this.cfg.version,
+      cloudHost: hostOf(this.cfg.cloudUrl),
+      installId: this.store.getJson<{ id: string }>(KEY_INSTALL)?.id ?? null,
+      enrolment: enrolled
+        ? 'enrolled'
+        : (this.announcedStatus ?? (this.configTokenRefused ? 'refused' : 'connecting')),
+      name: this.identity?.name ?? null,
+      lastContactAt: this.lastContactAt?.toISOString() ?? null,
+      problem: this.lastProblem,
+      control: this.host.control,
+      bufferedEvents: this.store.unsentCount(),
+      update: this.updateReport
+        ? {
+            state: this.updateReport.state,
+            version: this.updateReport.version,
+            ...(this.updateReport.error ? { error: this.updateReport.error } : {}),
+          }
+        : null,
+    };
+  }
+
+  /**
+   * Join an organisation with a token typed on this machine. The token is tried first, so a wrong
+   * one changes nothing; a right one replaces whatever this gateway belonged to before.
+   */
+  enrolWithToken(token: string): Promise<{ ok: true; name: string } | { ok: false; message: string }> {
+    const clean = token.trim();
+    if (!clean || clean.length > 300)
+      return Promise.resolve({ ok: false, message: 'Enter the enrolment token from the portal.' });
+    return this.exclusive(async () => {
+      try {
+        await this.enrollWith(clean);
+        this.claimedToken = null;
+        this.lastProblem = null;
+        this.log('warn', 'Enrolled from the local admin page');
+        return { ok: true as const, name: this.identity?.name ?? '' };
+      } catch (e) {
+        this.log('warn', 'A token typed on the local admin page did not work', {
+          error: e instanceof Error ? e.message : String(e),
+        });
+        return {
+          ok: false as const,
+          message:
+            e instanceof CloudError && e.unreachable
+              ? 'The cloud cannot be reached from this machine, so the token could not be checked.'
+              : e instanceof CloudError && e.unauthorised
+                ? 'The portal did not accept that token. It may have been used already or have expired.'
+                : 'The token could not be used. Check it and try again.',
+        };
+      }
+    });
+  }
+
+  /** Forget the organisation and start again as an unclaimed gateway. Rooms stop running. */
+  reset(): Promise<void> {
+    return this.exclusive(() => {
+      this.forgetOrganisation();
+      // A new install id, so staff see a fresh unclaimed gateway rather than a claim that was already used.
+      this.store.delete(KEY_INSTALL);
+      this.claimedToken = null;
+      this.configTokenRefused = true;
+      this.announcedStatus = null;
+      this.announceHoldUntil = 0;
+      this.log('warn', 'Reset from the local admin page: forgot the organisation, will announce as unclaimed');
+    });
+  }
+
+  /** Everything that belongs to the organisation this gateway was in: rooms, releases, addresses, credential. */
+  private forgetOrganisation() {
+    for (const id of new Set([...this.host.ids(), ...this.deploymentRoomIds()])) this.host.unload(id);
+    for (const { roomId } of this.store.loadManifests()) this.store.deleteManifest(roomId);
+    for (const prefix of [BINDINGS_PREFIX, DEPLOYMENT_PREFIX, 'phone:'])
+      for (const key of this.store.keysWithPrefix(prefix)) this.store.delete(key);
+    for (const key of [
+      KEY_CREDENTIAL,
+      KEY_IDENTITY,
+      KEY_PUBLIC_KEYS,
+      KEY_CONFIG_VERSION,
+      KEY_CONTROL,
+    ])
+      this.store.delete(key);
+    this.groups.setConfig([]);
+    // Events the old organisation never received must not be filed under the new one.
+    this.store.clearTelemetry();
+    this.roomErrors.clear();
+    this.inbox.length = 0;
+    this.pendingResults.length = 0;
+    this.updateReport = undefined;
+    this.watch = new Set();
+    this.host.setControl(true);
+    this.lastContactAt = null;
   }
 
   record(event: Omit<TelemetryEvent, 'at'> & { at?: string }) {
@@ -286,17 +410,59 @@ export class Gateway {
   // ---- Control loop ---------------------------------------------------------------------------
 
   private schedule(ms: number) {
-    if (this.stopped) return;
+    if (this.stopped || this.hold) return;
+    if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.tick(), ms);
   }
 
-  async tick(): Promise<void> {
-    if (this.stopped) return;
+  /** Check in with the cloud now instead of waiting for the next beat. */
+  wake() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    void this.tick();
+  }
+
+  /**
+   * Runs a change to who this gateway belongs to with no cloud round trip in flight and none
+   * started, so a late reply for the old credential cannot undo it.
+   */
+  private async exclusive<T>(fn: () => Promise<T> | T): Promise<T> {
+    this.hold = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    try {
+      await this.current?.catch(() => undefined);
+      return await fn();
+    } finally {
+      this.hold = false;
+      this.wake();
+    }
+  }
+
+  tick(): Promise<void> {
+    if (this.stopped || this.hold) return Promise.resolve();
+    // One round trip at a time: a check-in asked for while one is in flight runs after it.
+    const before = this.current;
+    const next: Promise<void> = (async () => {
+      await before;
+      if (this.stopped || this.hold) return;
+      await this.runTick();
+    })().finally(() => {
+      if (this.current === next) this.current = null;
+    });
+    this.current = next;
+    return next;
+  }
+
+  private async runTick(): Promise<void> {
+    const used = this.store.get(KEY_CREDENTIAL);
     try {
       await this.ensureEnrolled();
       await this.heartbeat();
       await this.flushTelemetry();
       this.failures = 0;
+      this.lastContactAt = new Date();
+      this.lastProblem = null;
       this.schedule((this.identity?.heartbeatSeconds ?? 30) * 1000);
     } catch (e) {
       if (e instanceof WaitingToBeClaimed) {
@@ -316,7 +482,12 @@ export class Gateway {
       }
       this.failures++;
       const unreachable = e instanceof CloudError && e.unreachable;
-      if (e instanceof CloudError && e.unauthorised) this.forgetCredential();
+      this.lastProblem = unreachable
+        ? 'The cloud cannot be reached from this machine.'
+        : e instanceof Error
+          ? e.message.slice(0, 200)
+          : 'The cloud sync failed.';
+      if (e instanceof CloudError && e.unauthorised) this.forgetCredential(used);
       this.log(unreachable ? 'warn' : 'error', 'Cloud sync failed', {
         error: e instanceof Error ? e.message : String(e),
         attempt: this.failures,
@@ -333,8 +504,10 @@ export class Gateway {
    * next tick re-enrols from `KESTREL_ENROLL_TOKEN` instead of retrying a dead credential forever;
    * with no token configured, `ensureEnrolled` will raise that specific error instead.
    */
-  private forgetCredential() {
-    if (!this.store.get(KEY_CREDENTIAL)) return;
+  private forgetCredential(rejected: string | null) {
+    // Only the credential that was refused: a new one may have been saved while the call was out.
+    const current = this.store.get(KEY_CREDENTIAL);
+    if (!current || current !== rejected) return;
     this.store.delete(KEY_CREDENTIAL);
     this.store.delete(KEY_IDENTITY);
     this.store.delete(KEY_PUBLIC_KEYS);
@@ -410,6 +583,8 @@ export class Gateway {
       gatewayVersion: this.cfg.version,
       os: `${platform()} ${osRelease()}`,
     });
+    // Joining another organisation: nothing of the old one may keep running or be reported as the new one's.
+    if (this.store.get(KEY_CREDENTIAL)) this.forgetOrganisation();
     this.store.set(KEY_CREDENTIAL, res.credential);
     this.store.setJson(KEY_PUBLIC_KEYS, res.publicKeys);
     this.store.setJson(KEY_IDENTITY, {
@@ -576,7 +751,7 @@ export class Gateway {
       // Something just changed, so report it back quickly.
       if (res.intents.length > 0) next = 250;
     } catch (e) {
-      if (e instanceof CloudError && e.unauthorised) this.forgetCredential();
+      if (e instanceof CloudError && e.unauthorised) this.forgetCredential(credential);
       this.log('warn', 'Portal control poll failed', {
         error: e instanceof Error ? e.message : String(e),
       });
