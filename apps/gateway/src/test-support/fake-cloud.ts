@@ -61,7 +61,14 @@ export class FakeCloud {
   private server: Server | null = null;
   /** When false the cloud answers 503 to everything. */
   up = true;
+  /** Simulates the gateway's record being deleted/recreated: its old credential is dead. */
+  revoked = false;
   url = '';
+
+  /** The cloud no longer recognises the credential it once issued (its record was deleted). */
+  revoke() {
+    this.revoked = true;
+  }
 
   setGroups(list: unknown[]) {
     this.groups = list;
@@ -177,13 +184,14 @@ export class FakeCloud {
     if (!this.up) return this.json(res, 503, { error: 'down for maintenance' });
     const url = new URL(req.url ?? '/', this.url);
     const path = url.pathname.replace('/api/gateway/v1', '');
-    const authed = req.headers.authorization === `Bearer ${CREDENTIAL}`;
+    const authed = req.headers.authorization === `Bearer ${CREDENTIAL}` && !this.revoked;
 
     if (req.method === 'POST' && path === '/enroll') {
       const parsed = EnrollRequest.safeParse(await this.body(req));
       if (!parsed.success) return this.json(res, 400, { error: 'bad request' });
       if (parsed.data.token !== ENROLL_TOKEN)
         return this.json(res, 401, { error: 'Invalid or used token' });
+      this.revoked = false;
       this.enrols.push(parsed.data);
       return this.json(res, 200, {
         gatewayId: GATEWAY_ID,

@@ -152,6 +152,25 @@ describe('enrolment and sync', () => {
     expect(store.get('credential')).toBeNull();
   });
 
+  it('forgets a credential the cloud no longer recognises and re-enrols on its own', async () => {
+    cloud.assign(ROOM, model());
+    const { gateway, host, store } = boot();
+    gateway.start();
+    await until(() => host.ids().includes(ROOM));
+    expect(store.get('credential')).toBe(CREDENTIAL);
+
+    // The gateway's record was deleted and recreated in the portal: the old credential is dead,
+    // but KESTREL_ENROLL_TOKEN is still configured from the reinstall.
+    cloud.revoke();
+    await gateway.tick();
+    expect(store.get('credential')).toBeNull();
+    expect(gateway.identity).toBeNull();
+
+    await gateway.tick();
+    expect(store.get('credential')).toBe(CREDENTIAL);
+    expect(cloud.enrols.length).toBeGreaterThanOrEqual(2);
+  });
+
   it('picks up rotated public keys from the config', async () => {
     cloud.assign(ROOM, model());
     const { gateway, host, store } = boot();

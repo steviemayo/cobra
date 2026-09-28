@@ -103,6 +103,7 @@ if ($Mode -eq 'Service') {
 Copy-Item -Force (Join-Path $app 'windows\update.ps1') (Join-Path $InstallDir 'update.ps1')
 Copy-Item -Force (Join-Path $app 'windows\uninstall.ps1') (Join-Path $InstallDir 'uninstall.ps1')
 Copy-Item -Force (Join-Path $app 'windows\configure.ps1') (Join-Path $InstallDir 'configure.ps1')
+Copy-Item -Force (Join-Path $app 'windows\reconfigure.ps1') (Join-Path $InstallDir 'reconfigure.ps1')
 
 if (-not $NoFirewall) {
   Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue | Remove-NetFirewallRule
