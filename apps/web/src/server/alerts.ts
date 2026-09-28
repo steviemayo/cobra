@@ -186,7 +186,15 @@ export async function send(s: Senders, config: ChannelConfig, m: AlertMessage): 
 
 /** No channel is sent more than this many alerts an hour; the rest are recorded as suppressed. */
 export const MAX_ALERTS_PER_CHANNEL_HOUR = 30;
+/**
+ * Email can reach anyone, not just the destination an org itself controls (a webhook or Teams URL
+ * always belongs to whoever set it up); this bounds how much of Kestrel's own sending reputation
+ * one organisation can spend in a day, across every email channel it has, so making several
+ * channels does not multiply the hourly cap above.
+ */
+export const MAX_EMAIL_ALERTS_PER_ORG_PER_DAY = 200;
 const HOUR_MS = 3_600_000;
+const DAY_MS = 24 * HOUR_MS;
 
 function parseChannel(row: { type: string; config: unknown }): ChannelConfig | null {
   const parsed = ChannelConfig.safeParse({ ...(row.config as object), type: row.type });
@@ -224,6 +232,25 @@ export async function deliverToChannel(
     });
     if (recent >= MAX_ALERTS_PER_CHANNEL_HOUR) {
       await record('suppressed', 'Too many alerts in the last hour');
+      return { status: 'suppressed' };
+    }
+  }
+  // Unlike the per-channel hourly cap, this applies to a test send too: email can reach anyone,
+  // so it is the one channel type where "let me test it right away" must not mean "unlimited".
+  if (channel.type === 'email') {
+    const emailChannels = await db.alertChannel.findMany({
+      where: { orgId: channel.orgId, type: 'email' },
+      select: { id: true },
+    });
+    const sentToday = await db.alertDelivery.count({
+      where: {
+        channelId: { in: emailChannels.map((c) => c.id) },
+        status: 'sent',
+        at: { gte: new Date(now.getTime() - DAY_MS) },
+      },
+    });
+    if (sentToday >= MAX_EMAIL_ALERTS_PER_ORG_PER_DAY) {
+      await record('suppressed', 'Too many alert emails from this organisation today');
       return { status: 'suppressed' };
     }
   }

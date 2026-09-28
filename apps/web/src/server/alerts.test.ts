@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CHANNEL_NOT_IN_PLAN,
   MAX_ALERTS_PER_CHANNEL_HOUR,
+  MAX_EMAIL_ALERTS_PER_ORG_PER_DAY,
   deliverAlerts,
   deliverToChannel,
   type AlertDb,
@@ -208,6 +209,56 @@ describe('delivery', () => {
     await deliverAlerts(w.db, [{ incidentId: INC, event: 'opened' }], s, T0);
     expect(calls).toHaveLength(0);
     expect(w.alertDelivery.rows.at(-1)).toMatchObject({ status: 'suppressed' });
+  });
+
+  it('caps how many alert emails one organisation sends a day, across every email channel it has', async () => {
+    // c1 is nowhere near its own hourly cap; the org's other email channel (c0) has already used
+    // up the daily one, spread out enough that c0 is not over its own hourly cap either.
+    const w = world([
+      { type: 'email', config: { to: ['ops@acme.test'] } },
+      { type: 'email', config: { to: ['it@acme.test'] } },
+    ]);
+    for (let i = 0; i < MAX_EMAIL_ALERTS_PER_ORG_PER_DAY; i++)
+      w.alertDelivery.rows.push({
+        channelId: 'c0',
+        // Spread across the last ~23 hours, at most a handful per hour, so c0 stays under its own
+        // hourly cap while the org-wide total for the day is exactly at the daily one.
+        at: new Date(T0.getTime() - 3_600_000 - i * 400_000),
+        status: 'sent',
+      });
+    const { s, calls } = senders(200, { RESEND_API_KEY: 'k', ALERT_FROM_EMAIL: 'alerts@kestrel.example' });
+    const ch = w.alertChannel.rows[1] as { id: string; orgId: string; type: string; config: unknown };
+    expect(await deliverToChannel(w.db, ch, msg, null, s, T0)).toEqual({ status: 'suppressed' });
+    expect(calls).toHaveLength(0);
+    expect(w.alertDelivery.rows.at(-1)).toMatchObject({
+      status: 'suppressed',
+      error: expect.stringContaining('organisation'),
+    });
+  });
+
+  it('does not let an email channel’s test send bypass the daily cap', async () => {
+    const w = world([{ type: 'email', config: { to: ['ops@acme.test'] } }]);
+    for (let i = 0; i < MAX_EMAIL_ALERTS_PER_ORG_PER_DAY; i++)
+      w.alertDelivery.rows.push({ channelId: 'c0', status: 'sent', at: T0 });
+    const { s, calls } = senders(200, { RESEND_API_KEY: 'k', ALERT_FROM_EMAIL: 'alerts@kestrel.example' });
+    const ch = w.alertChannel.rows[0] as { id: string; orgId: string; type: string; config: unknown };
+    expect(await deliverToChannel(w.db, ch, { ...msg, event: 'test' }, null, s, T0)).toEqual({
+      status: 'suppressed',
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('does not count a webhook or Teams channel’s sends against another organisation’s email cap', async () => {
+    const w = world([
+      { type: 'webhook', config: { url: 'https://hooks.example.com/x' } },
+      { type: 'email', config: { to: ['ops@acme.test'] } },
+    ]);
+    // The webhook channel is well past what would be the email cap, if it were shared.
+    for (let i = 0; i < MAX_EMAIL_ALERTS_PER_ORG_PER_DAY + 10; i++)
+      w.alertDelivery.rows.push({ channelId: 'c0', status: 'sent', at: new Date(T0.getTime() - 60_000) });
+    const { s } = senders(200, { RESEND_API_KEY: 'k', ALERT_FROM_EMAIL: 'alerts@kestrel.example' });
+    const ch = w.alertChannel.rows[1] as { id: string; orgId: string; type: string; config: unknown };
+    expect((await deliverToChannel(w.db, ch, msg, null, s, T0)).status).toBe('sent');
   });
 
   it('never throws, and test messages ignore the hourly cap', async () => {
