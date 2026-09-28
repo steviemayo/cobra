@@ -28,6 +28,10 @@ Gateways follow a release channel, separately from room programs. `main` publish
 
 The portal shows each gateway's version, its channel, and "Update available" when it is behind. That comparison uses the newest version per channel from the server's `GATEWAY_LATEST_STABLE` and `GATEWAY_LATEST_BETA` settings, so set them when you release, and bump `GATEWAY_VERSION` in `src/config.ts` (CI fails a PR that changes the gateway, the panel or a bundled package without it — see `docs/plan.md`, step 9). A gateway checks a release's manifest against its own installed copy of the room model, so a gateway that never sees a version change never re-downloads, and can end up rejecting a release it genuinely cannot parse (`invalid_manifest`).
 
+### A gateway that is not set up in the portal yet
+
+If a gateway is running but cannot enrol (no `KESTREL_ENROLL_TOKEN`, or one that is used up or expired), it announces itself instead of failing quietly. Kestrel staff see it under **Staff > Unclaimed gateways** and, once the customer has confirmed it is theirs, assign it to the right organisation and site; the gateway then enrols by itself within a minute. Nothing needs changing on the machine.
+
 ## Configuration
 
 | Variable                                       | Default        | Purpose                                                                                       |

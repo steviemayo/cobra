@@ -526,3 +526,23 @@ If the portal cannot push updates, it needs a way to flag a gateway to update at
 | S-6 | **Bootstrap**: gateways older than 0.2.5 have no `self-update`, so the first move to 0.2.5 is manual once (Windows: latest installer; Docker: `docker compose pull && up -d` with the new compose settings). The portal says "needs one manual update" rather than sending an order they cannot read. `GITHUB_RELEASE_TOKEN` (read-only contents) must be set on Vercel, which Step N-5 left undone | Unavoidable: the old code cannot learn a new protocol by itself |
 | S-7 | **Trust:** a bundle is installed because the portal reads its digest from the same release it links to, so anyone who can publish to `gateway-stable` can put code on gateways. Independent signing (CI signs the digest with a key the portal does not hold; gateways verify) is the real fix and is **not built** | Named here so it is a decision, not an oversight |
 | S-8 | Setting a gateway's channel in the portal now changes what a portal update installs on Windows (the bundle comes from that channel). For Docker the image tag on the machine still decides, so the channel there must match | Was previously only a note for the portal |
+
+## Step T: unclaimed gateways (2026-09-28)
+
+**From the user**
+
+If a gateway is installed and running but has no definition in the portal, it should be logged somewhere on the staff portal as an "unclaimed" gateway, so staff can assign it to the right organisation once they have confirmed with the customer
+
+**Found while investigating**
+
+A gateway with no enrolment token, a used or expired one, or a deleted record only errored in a loop ("Not enrolled and no KESTREL_ENROLL_TOKEN set") and nothing on the cloud side ever saw it. The Windows installer leaves the token blank by default, so this is the normal state of a fresh install
+
+**Made while building**
+
+| ID | Decision | Why |
+| --- | --- | --- |
+| T-1 | A gateway that cannot enrol **announces itself** (`POST /api/gateway/v1/announce`, no credential) every minute with a random public `installId`, a separate random `installSecret`, hostname, OS, version and its private IPv4 addresses; the cloud adds the public address it saw. The install id and secret are created once and kept in the gateway's store, so a restart is the same install. Staff see it under **Staff > Unclaimed gateways** (count badge in the staff nav) | It has no credential yet, so an unauthenticated announcement is the only way it can say it exists |
+| T-2 | Staff **Assign** it to an organisation, site and name (admin or support, MFA'd staff procedure, written to the staff audit and, as `gateway.claim`, to the organisation's audit). That creates an ordinary pending gateway with an enrolment token; the token is sealed with `KESTREL_SECRETS_KEY` and handed only to the announcement that presents the right secret, **repeatedly until the gateway has enrolled** (a lost reply is not fatal) and never once it has or the token has expired. The gateway then enrols through the existing route. *Take back* removes a claim that never connected; *Dismiss* makes it announce hourly; *Remove* deletes it | Staff confirm with the customer first, then nothing else is needed on the machine. Holding only the public install id gets nothing, which is why the secret exists |
+| T-3 | **Guardrails for an endpoint anyone can reach:** strictly bounded payload (4 KB, zod length limits), only a status comes back, the secret is stored hashed, at most 500 rows are held and one public address can add 10 new installs a day (counted in the database, because in-memory limits do not survive serverless), and rows not seen for 30 days (claimed ones after 7) are deleted by the existing daily retention cron | The list must not be a way to fill the database, or to learn anything about the platform |
+| T-4 | A gateway with a token that works never announces. One whose token is refused (used, expired, wrong) falls back to announcing instead of erroring for ever; one that is waiting to be claimed is not counted as a failure and logs once | Keeps today's behaviour for every configured install, and turns the stuck case into something visible |
+| T-5 | Unclaimed gateways cannot be updated from the portal (no organisation owns them); once claimed and enrolled they update like any other | The update request lives on the organisation's gateway record |

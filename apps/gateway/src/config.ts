@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const GATEWAY_VERSION = '0.2.5';
+export const GATEWAY_VERSION = '0.2.6';
 
 const Env = z.object({
   /** Base URL of the Kestrel cloud, e.g. https://app.kestrel.example */
