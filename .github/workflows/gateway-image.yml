@@ -26,6 +26,28 @@ env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/kestrel-gateway
 
 jobs:
+  # A gateway build ships whatever @kestrel/model version is current, but a gateway only ever
+  # updates itself when it sees a *different* GATEWAY_VERSION (the Windows installer's update.ps1
+  # compares it directly; Docker/Watchtower updates on image digest regardless, but the Gateways
+  # page's "Update available" badge also reads it). Forgetting to bump it means a room's manifest
+  # can silently outgrow what an already-installed gateway can parse ("invalid_manifest").
+  version-bump:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: GATEWAY_VERSION must change alongside the gateway
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --depth=1 origin "$BASE_SHA"
+          if git diff "$BASE_SHA" -- apps/gateway/src/config.ts | grep -q '^[+-].*GATEWAY_VERSION'; then
+            echo "GATEWAY_VERSION was bumped."
+          else
+            echo "::error file=apps/gateway/src/config.ts::This PR changes the gateway, the panel or a package it bundles, but GATEWAY_VERSION was not bumped. Bump it in apps/gateway/src/config.ts (and apps/gateway/package.json to match) so already-installed gateways detect this release and update."
+            exit 1
+          fi
+
   image:
     runs-on: ubuntu-latest
     permissions:
