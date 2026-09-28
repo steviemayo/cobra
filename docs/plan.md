@@ -110,7 +110,7 @@ Words used below:
 - All phases are built and merged to `dev` and `main` (PRs #9, #10 and the phases 5 to 7 PR). CI on them is green. What follows is setup and real-world checks that need you.
 - Use `docs/phase-4-preread.md` as the status source, and `.env.example` as the list of every env var.
 - **Status check on 2026-09-25** (checked with the Vercel, Supabase, GitHub and Prisma CLIs; secret values were not read). Production URL until a domain exists: `https://kestrel-lovat.vercel.app`. There is one database, `kestrel-dev`, used by Production and Preview alike.
-- **Refresh 2026-09-28:** everything is on `main` (release PR #103); `dev` and `main` are identical. `prisma migrate status` reports all 36 migrations applied, none pending. The gateway is at 0.2.7. Build steps N to U (Windows installer through the gateway's own pages) are recorded in "Later build steps N to U" at the end of the build steps below and in `docs/decisions.md`. Still not done by a person: the browser pass, real-hardware runs, `GITHUB_RELEASE_TOKEN` on Vercel, the sending domain and Resend, Stripe live, and the launch-readiness list. A security review is planned (scope and plan to be agreed first); nothing of it is done yet.
+- **Refresh 2026-09-28:** everything is on `main` (release PR #103); `dev` and `main` are identical. `prisma migrate status` reports all 36 migrations applied, none pending. The gateway is at 0.2.7. Build steps N to U (Windows installer through the gateway's own pages) are recorded in "Later build steps N to U" at the end of the build steps below and in `docs/decisions.md`. Still not done by a person: the browser pass, real-hardware runs, `GITHUB_RELEASE_TOKEN` on Vercel, the sending domain and Resend, Stripe live, and the launch-readiness list. A security review was run on 2026-09-28 (`docs/security-audit-2026-09-28.md`): the critical and high findings are fixed (decisions Step V); the medium and low ones are pending ("Security review: pending issues" below). One step is the user's: set the `GATEWAY_RELEASE_SIGNING_KEY` repository secret (decision V-9).
 
 | Step | Status | Notes |
 |---|---|---|
@@ -429,6 +429,7 @@ Working rules that apply to all of them:
 | S | The portal decides when a gateway updates (now, scheduled, automatic) | large | **built** (S-1 to S-8); migration `gateway_updates` applied; needs `GITHUB_RELEASE_TOKEN`; not run on a real Windows or Docker gateway end to end |
 | T | Unclaimed gateways for staff to claim and assign | medium | **built** (T-1 to T-5); migration `unclaimed_gateways` applied |
 | U | The gateway's own pages (status, panel links, admin code, token, reset) | medium | **built** (U-1 to U-6); no migration; not run on a real Windows or Docker machine |
+| V | Security review: critical and high findings fixed (Data API closed, outbound URL check, panel origin and host checks, Windows data protection, signed updates and built-in keys) | large | **built** (V-1 to V-10); migration `close_data_api` applied; **needs the `GATEWAY_RELEASE_SIGNING_KEY` secret set before the next Windows release**; gateway 0.3.0 |
 
 The letters N to AC in the "Post-launch roadmap" further down are that list's own; they are different work from steps N to U here.
 
@@ -684,6 +685,27 @@ Also merged in this period: Stripe's own error message shown on `billing.subscri
 
 Where the status of a step lives: this table for what and what is left, `docs/decisions.md` (Step N to Step U, IDs N-1 to U-6) for why, `docs/diagrams.md` sections 2, 3, 4, 27, 28, 29 and 30 for the flows.
 
+### Security review: pending issues (2026-09-28)
+
+The critical and high findings are fixed (`docs/decisions.md` Step V). These are the **medium** ones, agreed to be done later; the evidence and the recommended fix for each is in `docs/security-audit-2026-09-28.md`. The low ones (L1 to L10) are listed there too. When one is picked up, fix every instance the report lists, with a test that fails if a new instance skips it.
+
+| # | Pending issue | Instances to fix together |
+|---|---|---|
+| M1 | Open redirect after sign-in: `safeNext` accepts `/\t/evil.com` | `lib/auth-redirect.ts` and every reader of `next`: login form, signup form, invite accept, SSO redirect, auth callback |
+| M2 | No security headers on the portal (CSP, frame-ancestors, nosniff, Permissions-Policy) | `next.config.ts` `headers()` for the whole web app |
+| M3 | No effective rate limiting (the one limiter is per process and runs after authentication) | enrolment, announce, `invite.preview`, webhook hooks, phone join, API-key authentication, `org.create`, `join-request.create` |
+| M4 | Panel PIN: per-address lockout, short PINs, PIN hash inside manifests readable by org members; rooms default to open | `panel-server.ts`, `panel-settings.ts`, the manifest's `panel.access` |
+| M5 | Phone-control sessions last 2 hours, cannot be revoked, allow every panel action including walls and lifts | `phone-control.ts`, `control-service.ts` |
+| M6 | Alert emails go to unverified addresses with user-controlled text (a relay from Kestrel's sending domain) | `alerts.ts` email sender, the three Resend senders (also the DRY sweep) |
+| M7 | Dependencies: `@fastify/static` in the gateway (traversal was tested and blocked); no `pnpm audit`, Dependabot or CodeQL in CI | gateway `package.json`, `.github/workflows` |
+| M8 | CI and supply chain: actions pinned by tag, no `permissions` on `ci.yml`, unsigned installer and Docker images, mutable rolling releases, Watchtower (unmaintained) with the Docker socket, Docker updates not verified | all three workflows, `docker-compose.yml`, `setup.iss` |
+| M9 | Custom-driver regexes are only syntax-checked (ReDoS stalls a gateway) | `driver-spec.ts`, `declarative.ts`, `generic-tcp.ts`, `serial.ts`, `driver-example.ts` |
+| M10 | Gateway local admin page over plain HTTP on the LAN; status page lists room ids | `local-admin.ts` |
+| M11 | Announce endpoint can be filled to its cap (blocks real installs); address taken from a forwarded header; size check trusts `content-length` | `gateway-announce.ts`, the announce route |
+| M12 | A dev-role user can point a gateway at any address, including loopback and link-local | `commands.ts` (test device, verify point), the generic TCP and REST drivers |
+
+Also still open from Step V: a first-run PIN for rooms with walls or lifts (V-4), key rotation statements and anti-rollback for room releases, code signing for the installer, and the DRY sweep, which waits until these are done.
+
 ### Small fixes to fit in anywhere
 
 - One gateway test (`apps/gateway/src/panel-server.test.ts`, "greet the panel and stream the room state") failed once in a full run and passed twice on rerun: make it deterministic
@@ -691,4 +713,5 @@ Where the status of a step lives: this table for what and what is left, `docs/de
 - The old `docs/staff-portal-plan`, `docs/launch-readiness-roadmap` and `feat/phase-3-gateway` branches on GitHub are superseded (their work is on `main`) and can be deleted
 - `pnpm` on the developer machine fails with "the global target of the pnpm shim points back at the shim"; fix it before the next dependency change (tools were run directly from `node_modules/.bin` in the meantime)
 - Set `GITHUB_RELEASE_TOKEN` on Vercel (Contents: Read) so the Windows installer download and portal-ordered Windows updates work (decisions N-5, S-3)
-- Security review: scope and plan still to be agreed with the owner (also covers exposed-secrets and information-leak checks); not started
+- Set the repository secret `GATEWAY_RELEASE_SIGNING_KEY` (decision V-9); until it is set the Windows workflow will not publish a bundle. Keep a copy of the key in a password manager
+- Security review: medium and low findings pending, see the next section

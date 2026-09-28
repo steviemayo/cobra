@@ -605,10 +605,12 @@ sequenceDiagram
   API-->>GW: updateOrder {version, bundle sha256 + size} once due and behind
   alt Windows
     GW->>API: GET /bundle
-    API-->>GW: short-lived signed asset link + digest
-    GW->>Host: download
-    GW->>GW: check SHA-256 against the order, stage, refresh update.ps1
+    API-->>GW: short-lived signed asset link + digest + CI's signature
+    GW->>Host: download (GitHub storage or the cloud only)
+    GW->>GW: check SHA-256, then the signature against the release key built into the gateway, and that the version is newer
+    GW->>GW: stage bundle + signature, refresh update.ps1
     GW->>Inst: schtasks /Run
+    Inst->>Inst: check the signature again with the installed gateway's own key
     Inst->>Inst: stop service, swap, start, wait for /health
     Inst-->>GW: result (old version put back if it does not answer)
   else Docker
@@ -621,7 +623,7 @@ sequenceDiagram
 ```
 
 - Older than 0.2.5: one manual update first ("needs one manual update"). Manual by default, so a fleet never changes unasked
-- Trust gap (S-7): whoever can publish to `gateway-stable` can put code on gateways. Independent signing is not built
+- The signature is made in CI with a key only the workflow holds, so the portal cannot make a gateway install code (decision V-6). Gateways older than 0.3.0 and Docker installs (Watchtower) do not check it yet
 
 ## 28. Unclaimed Gateway
 
