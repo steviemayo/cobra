@@ -1,6 +1,6 @@
 # Decisions log
 
-Decisions made while building the "Next build steps" in `docs/plan.md`, newest last. Each says who decided (user = the product owner; build = made while building, open to change).
+Decisions made while building the "Next build steps" in `docs/plan.md`, newest last. Status of each step (what is built, migrations, what is left) is in `docs/plan.md`: the Order table and, for steps N to U, "Later build steps N to U". The flows are drawn in `docs/diagrams.md`. Step letters here run C to U; the "Post-launch roadmap" letters in the plan (N to AC) are a separate list, whose decisions are under "Roadmap features built 2026-09-27" below. Each says who decided (user = the product owner; build = made while building, open to change).
 
 ## Step C: room groups, gateway runtime (2026-09-26)
 
@@ -488,7 +488,7 @@ A room deploy was refused by an already-running gateway with `signature check fa
 - **Long poll is session-wide on these units**: `GET /Device/Longpoll` and every object-level path tried (`/Device/Programs/Longpoll`, `/Device/Display/Longpoll`, ...) behave identically, answering within about a second with the device clock (`SystemClock.CurrentTime`) as the only change. So it cannot tell a program or IP table change from the clock without filtering, and hammering it on every panel and processor would be a request every second or two per unit for nothing
 - The NVX driver had its own copy of the session code that only logged in again on 401/403, missing the 301/302-to-`/userlogin.html` that 4-series units and panels use (verified in Step O). Same login POST, same cookies
 - There was **no Crestron occupancy sensor driver** at all, only the generic sensor category, so there was nothing to "update": it is new
-- The Flex console: TLS 1.2 on 41797, banner-less, `Login:` then `Password:` then `UC-ENGINE>`; `version` answers `UC-ENGINE Unified Collaboration System [v1.22.00.405,...] @E-<mac>`; joins answer `Digital Join 27767, Value 0`. `docs/uc-crestron-flex.driver.js` is a driver from another product, used only as a reference for the join numbers; it carries that product's branding, so it is **not** committed and none of its code was copied
+- The Flex console: TLS 1.2 on 41797, banner-less, `Login:` then `Password:` then `UC-ENGINE>`; `version` answers `UC-ENGINE Unified Collaboration System [v1.22.00.405,...] @E-<mac>`; joins answer `Digital Join 27767, Value 0`. `docs/uc-crestron-flex.driver.js` is a driver from another product, used only as a reference for the join numbers; it carried that product's branding, so none of its code was copied. It was later committed (PR #101) rebranded and marked reference only, and Kestrel does not load it
 
 **Made while building**
 
