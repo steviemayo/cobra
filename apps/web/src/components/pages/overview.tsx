@@ -164,7 +164,7 @@ export function OverviewView() {
       (a, b) =>
         HEALTH_ORDER[live.get(a.id)!.health.level] - HEALTH_ORDER[live.get(b.id)!.health.level],
     );
-  const designIssues = rooms.filter((r) => designHealth(r.draft) !== 'ok');
+  const designIssues = rooms.filter((r) => !r.monitorOnly && designHealth(r.draft) !== 'ok');
   const hasDesign = rooms.some((r) => r.draft);
   const onboarding = !isPending && (!sites.length || !rooms.length || !hasDesign);
 
@@ -334,7 +334,7 @@ export function OverviewView() {
                               {r.site.name}
                             </span>
                           </span>
-                          <DesignBadge draft={r.draft} />
+                          <DesignBadge draft={r.draft} monitorOnly={r.monitorOnly} />
                         </Link>
                       </li>
                     ))}

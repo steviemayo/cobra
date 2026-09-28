@@ -35,7 +35,7 @@ export function RoomsView() {
         (!q || r.name.toLowerCase().includes(q) || r.site.name.toLowerCase().includes(q)) &&
         (site === ALL || r.siteId === site) &&
         (type === ALL || r.type === type) &&
-        (design === ALL || designHealth(r.draft) === design) &&
+        (design === ALL || designHealth(r.draft, r.monitorOnly) === design) &&
         (status === ALL || live.get(r.id)?.health.level === status),
     );
   }, [rooms, query, site, type, design, status, live]);
@@ -127,6 +127,7 @@ export function RoomsView() {
                 { value: 'warnings', label: 'Has warnings' },
                 { value: 'errors', label: 'Has errors' },
                 { value: 'none', label: 'No design yet' },
+                { value: 'ignored', label: 'Monitor only' },
               ]}
             />
             {filtering && (

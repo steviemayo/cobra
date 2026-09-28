@@ -1,4 +1,6 @@
 import type { PrismaClient } from '@kestrel/db';
+import { RoomModel } from '@kestrel/model';
+import { sharedRefs } from './bindings';
 import { effectiveStatus } from './gateway-status';
 import { roomHealth, type Health } from './monitoring';
 import { incidentVisible, inScope, type SiteScope } from './site-scope';
@@ -25,48 +27,130 @@ export interface RoomLive {
   openIncidents: number;
 }
 
+/** One physical device. A shared site device used by several rooms is one entry listing them all. */
 export interface DeviceLive {
-  deviceId: string;
+  key: string;
   name: string;
   online: boolean;
   since: Date;
-  roomId: string;
-  roomName: string;
   siteId: string;
   siteName: string;
+  rooms: { id: string; name: string }[];
+  shared: boolean;
 }
 
-export type DevicesDb = Pick<PrismaClient, 'room' | 'site' | 'deviceStatus'>;
+export type DevicesDb = Pick<
+  PrismaClient,
+  'room' | 'site' | 'deviceStatus' | 'roomDraft' | 'siteDevice'
+>;
 
-/** Every device across the org's in-scope rooms, flattened for the org-wide monitoring list. */
+/**
+ * Every device across the org's in-scope rooms, each physical device once. Status is stored per
+ * room, so a shared site device (one connection, several rooms) has a row for each room that uses
+ * it; the room designs say which rows are the same device.
+ */
 export async function orgDevices(
   db: DevicesDb,
   orgId: string,
   scope: SiteScope = null,
 ): Promise<DeviceLive[]> {
-  const [rooms, sites, devices] = await Promise.all([
+  const [rooms, sites, statuses] = await Promise.all([
     db.room.findMany({ where: { orgId } }),
     db.site.findMany({ where: { orgId } }),
     db.deviceStatus.findMany({ where: { orgId }, orderBy: { name: 'asc' } }),
   ]);
-  const inScopeRooms = rooms.filter((r) => inScope(scope, r.siteId));
-  const roomById = new Map(inScopeRooms.map((r) => [r.id, r]));
+  const roomById = new Map(rooms.filter((r) => inScope(scope, r.siteId)).map((r) => [r.id, r]));
   const siteName = new Map(sites.map((s) => [s.id, s.name]));
-  const out: DeviceLive[] = [];
-  for (const d of devices) {
-    const room = roomById.get(d.roomId);
-    if (!room) continue;
-    out.push({
-      deviceId: d.deviceId,
-      name: d.name,
-      online: d.online,
-      since: d.since,
-      roomId: room.id,
-      roomName: room.name,
-      siteId: room.siteId,
-      siteName: siteName.get(room.siteId) ?? '',
-    });
+  const rows = statuses.filter((d) => roomById.has(d.roomId));
+
+  const roomIds = [...new Set(rows.map((d) => d.roomId))];
+  const drafts = roomIds.length
+    ? await db.roomDraft.findMany({ where: { orgId, roomId: { in: roomIds } } })
+    : [];
+  const siteDeviceOf = new Map<string, string>();
+  for (const draft of drafts) {
+    const model = RoomModel.safeParse(draft.model);
+    if (!model.success) continue;
+    for (const ref of sharedRefs(model.data))
+      siteDeviceOf.set(`${draft.roomId}:${ref.deviceId}`, ref.siteDeviceId);
   }
+  const siteDeviceIds = [...new Set(siteDeviceOf.values())];
+  const siteDevices = siteDeviceIds.length
+    ? await db.siteDevice.findMany({ where: { orgId, id: { in: siteDeviceIds } } })
+    : [];
+  const sharedName = new Map(siteDevices.map((d) => [d.id, d.name]));
+
+  const out = new Map<string, DeviceLive>();
+  for (const d of rows) {
+    const room = roomById.get(d.roomId)!;
+    const shared = siteDeviceOf.get(`${d.roomId}:${d.deviceId}`);
+    const key = shared ? `shared:${shared}` : `${d.roomId}:${d.deviceId}`;
+    const seen = out.get(key);
+    if (!seen) {
+      out.set(key, {
+        key,
+        name: (shared && sharedName.get(shared)) || d.name,
+        online: d.online,
+        since: d.since,
+        siteId: room.siteId,
+        siteName: siteName.get(room.siteId) ?? '',
+        rooms: [{ id: room.id, name: room.name }],
+        shared: !!shared,
+      });
+      continue;
+    }
+    seen.rooms.push({ id: room.id, name: room.name });
+    // One connection, so the rows should agree; if they don't, offline is the safer thing to say.
+    if (seen.online !== d.online) {
+      seen.online = false;
+      seen.since = d.online ? seen.since : d.since;
+    }
+  }
+  return [...out.values()];
+}
+
+export interface SharedInRoom {
+  name: string;
+  /** The other rooms (in scope) whose designs use the same shared device. */
+  otherRooms: { id: string; name: string }[];
+}
+
+export type SharedDb = Pick<PrismaClient, 'room' | 'roomDraft' | 'siteDevice'>;
+
+/** This room's devices that are a shared site device, and which other rooms use the same one. */
+export async function sharedInRoom(
+  db: SharedDb,
+  orgId: string,
+  room: { id: string; siteId: string },
+  scope: SiteScope = null,
+): Promise<Record<string, SharedInRoom>> {
+  const siteRooms = (await db.room.findMany({ where: { orgId, siteId: room.siteId } })).filter(
+    (r) => inScope(scope, r.siteId),
+  );
+  const drafts = await db.roomDraft.findMany({
+    where: { orgId, roomId: { in: siteRooms.map((r) => r.id) } },
+  });
+  const refsOf = (roomId: string) => {
+    const draft = drafts.find((d) => d.roomId === roomId);
+    const model = draft ? RoomModel.safeParse(draft.model) : null;
+    return model?.success ? sharedRefs(model.data) : [];
+  };
+  const mine = refsOf(room.id);
+  if (mine.length === 0) return {};
+  const siteDevices = await db.siteDevice.findMany({
+    where: { orgId, id: { in: mine.map((r) => r.siteDeviceId) } },
+  });
+  const name = new Map(siteDevices.map((d) => [d.id, d.name]));
+  const out: Record<string, SharedInRoom> = {};
+  for (const ref of mine)
+    out[ref.deviceId] = {
+      name: name.get(ref.siteDeviceId) ?? ref.siteDeviceId,
+      otherRooms: siteRooms
+        .filter(
+          (r) => r.id !== room.id && refsOf(r.id).some((x) => x.siteDeviceId === ref.siteDeviceId),
+        )
+        .map((r) => ({ id: r.id, name: r.name })),
+    };
   return out;
 }
 

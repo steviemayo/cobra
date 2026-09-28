@@ -110,7 +110,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
               <span aria-hidden className="text-muted-foreground/50">
                 ·
               </span>
-              <DesignBadge draft={room.draft} />
+              <DesignBadge draft={room.draft} monitorOnly={room.monitorOnly} />
               {deploy.data && room.gateway && (
                 <>
                   <span aria-hidden className="text-muted-foreground/50">
