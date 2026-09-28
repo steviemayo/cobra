@@ -8,7 +8,9 @@
 - Git flow: `feat/*`/`fix/*` from `dev` → PR to `dev` → **user merges** → PR `dev` → `main` (user merges). Never commit to `main`/`dev` directly. Trailer: `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`
 - Never push/PR/merge unasked. Never commit `.env*`. Multiple sessions have worked in this repo — always check `git log`, branches, `gh pr list` before assuming state
 
-## Status (as of 2026-09-26)
+## Status (as of 2026-09-28)
+
+Everything below the phase table, up to and including build steps N to U (Windows installer, Crestron drivers, live-health monitoring, device details, portal-ordered gateway updates, unclaimed gateways, gateway local pages), is on `main`; all 36 migrations are applied. **The table below stops at phase 7 and the first post-phase-7 round; the later work is in `docs/plan.md` (Order table and "Later build steps N to U") and `docs/decisions.md`.**
 
 | Phase | State |
 |---|---|
@@ -19,15 +21,15 @@
 | 3 Gateway | Done, merged (PR #9) |
 | 4 Releases & deployments | Done, merged (PR #10), verified in Docker |
 | 5 Monitoring & support | Merged with 6 and 7 (`feat/phase-5-monitoring`): health, incidents, alerts (email/Teams/webhook/ITSM stub), allowlisted remote commands + audit, tickets, 90-day retention. Verified end-to-end in Docker + Chrome |
-| 6 Billing & customer portal | Merged (same PR): plans/entitlements (trial/basic/pro), Stripe checkout + webhooks, plan gating (never gates control), portal control, customer dashboard, org theme, language packs (es/fr/de) |
+| 6 Billing & customer portal | Merged (same PR): plans/entitlements (trial/basic/pro), Stripe checkout + webhooks, plan gating (since 2026-09-27: Basic is monitoring only, Pro is control plus monitoring, and the gateway's `ControlGate` enforces it; see `docs/decisions.md` TM-1..20), portal control, customer dashboard, org theme, language packs (es/fr/de) |
 | 7 Expansion | Merged (same PR): schedule/occupancy/webhook/calendar (M365, Google) triggers, combined rooms, marketplace (publish/review/buy), driver SDK (custom declarative drivers, Pro) + bundled library, serial/REST/VISCA drivers, DM-NVX + Q-SYS drivers, QR-to-phone control, gateway update channels + compose/Watchtower, Windows bundle + installer |
-| After phase 7 (merged to `dev` and `main`) | Panel UI redesign (`docs/panel-ui-requirements.md`), room groups in the portal (`docs/room-groups.md`; gateway runtime NOT built), staff portal: directory, licences, support sessions, ticket queue, fleet health, marketplace review (`docs/staff-portal-and-msp.md`), service providers (MSPs) incl. site-limited grants. Verified by unit tests, `next build` and `apps/web/scripts/e2e-staff-msp.mts` (70 checks); **not yet clicked through in a browser while signed in** |
+| After phase 7 (merged to `dev` and `main`) | Panel UI redesign (`docs/panel-ui-requirements.md`), room groups (`docs/room-groups.md`; portal and gateway runtime built), staff portal: directory, licences, support sessions, ticket queue, fleet health, marketplace review (`docs/staff-portal-and-msp.md`), service providers (MSPs) incl. site-limited grants. Verified by unit tests, `next build` and `apps/web/scripts/e2e-staff-msp.mts` (70 checks); **not yet clicked through in a browser while signed in** |
 
 ### What is verified vs only unit-tested
 
 - **Verified against the real thing:** phases 4 and 5 (Docker gateway image + local cloud, Chrome for the monitoring UI)
 - **Unit/integration tests only** (fake clouds, fake devices, in-memory DB helper): billing/Stripe, calendar (Graph/Google), marketplace, combined rooms, driver SDK, NVX, Q-SYS, serial, VISCA, phone control, update channels, Phase 6/7 UI (not opened in a browser)
-- **Not run at all:** Windows installer/updater scripts (only parse-checked; the bundle layout was round-tripped with PowerShell 5.1), the Windows CI workflow, the Watchtower compose file (only `config`-validated), the Step N rework (WinSW service, `tray.ps1`'s NotifyIcon, the Inno Setup wizard) — none of it has run on a real Windows machine yet (`docs/decisions.md`, N-1 to N-6)
+- **Not run at all:** the portal-ordered update path on a real Windows or Docker gateway (decisions S-3, S-4), the gateway's local admin page on Windows or Docker (U-2), the Windows installer/updater scripts (only parse-checked; the bundle layout was round-tripped with PowerShell 5.1), the Windows CI workflow, the Watchtower compose file (only `config`-validated), the Step N rework (WinSW service, `tray.ps1`'s NotifyIcon, the Inno Setup wizard) — none of it has run on a real Windows machine yet (`docs/decisions.md`, N-1 to N-6)
 - Never tested on real hardware: DM-NVX, Q-SYS, PJLink, serial, VISCA, Extron/Cisco/Lutron/Shelly
 
 ### Known limitations
@@ -37,7 +39,7 @@
 - Gateway-offline detection and calendar polling need an external scheduler (see Ops). Vercel Hobby cron is daily only, so `vercel.json` only has retention
 - Calendar triggers use meeting starts only; combined "follow" mirrors activity ids (no cross-room routing model)
 - Phone sessions are stateless two-hour tokens: they cannot be revoked, only expire
-- Windows update script does not replace itself (the installer does); `GATEWAY_VERSION` must be bumped by hand per release along with `GATEWAY_LATEST_STABLE/BETA` on the server
+- Windows update script does not replace itself (the gateway copies its bundled one over the installed one before each update, S-3); `GATEWAY_VERSION` must be bumped per release (CI enforces it) along with `GATEWAY_LATEST_STABLE/BETA` on the server
 
 ## Repo map (added since Phase 0)
 

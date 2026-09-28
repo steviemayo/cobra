@@ -30,6 +30,7 @@ async function main() {
     phone: gateway.phone,
     schedule: gateway.bookings,
     admin: { gateway, adminCode: admin.code },
+    allowedHosts: cfg.allowedHosts,
   });
   await panel.listen({ port: cfg.panelPort, host: cfg.panelHost });
   log('info', 'Panel server listening', { port: cfg.panelPort });

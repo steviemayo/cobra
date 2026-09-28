@@ -3,10 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CHANNEL_NOT_IN_PLAN,
   MAX_ALERTS_PER_CHANNEL_HOUR,
-  assertPublicUrl,
   deliverAlerts,
   deliverToChannel,
-  isPrivateAddress,
   type AlertDb,
   type AlertMessage,
   type Senders,
@@ -79,49 +77,6 @@ function world(channels: Record<string, unknown>[] = [], severity = 'warning') {
   };
 }
 
-describe('outbound safety', () => {
-  it('recognises private and special addresses', () => {
-    for (const ip of [
-      '10.0.0.1',
-      '127.0.0.1',
-      '169.254.169.254',
-      '172.16.5.5',
-      '192.168.1.1',
-      '100.64.0.1',
-      '0.0.0.0',
-      '::1',
-      'fd00::1',
-      'fe80::1',
-      '::ffff:10.1.1.1',
-    ])
-      expect(isPrivateAddress(ip), ip).toBe(true);
-    for (const ip of ['93.184.216.34', '8.8.8.8', '172.32.0.1', '2606:4700::1111'])
-      expect(isPrivateAddress(ip), ip).toBe(false);
-  });
-
-  it('only accepts https URLs that resolve to public addresses', async () => {
-    await expect(assertPublicUrl('https://hooks.example.com/x', publicDns)).resolves.toBeInstanceOf(
-      URL,
-    );
-    await expect(assertPublicUrl('http://hooks.example.com/x', publicDns)).rejects.toThrow('https');
-    await expect(assertPublicUrl('https://localhost/x', publicDns)).rejects.toThrow('public');
-    await expect(assertPublicUrl('https://printer.local/x', publicDns)).rejects.toThrow('public');
-    await expect(assertPublicUrl('https://169.254.169.254/latest', publicDns)).rejects.toThrow(
-      'public',
-    );
-    await expect(assertPublicUrl('https://[::1]/x', publicDns)).rejects.toThrow('public');
-    await expect(assertPublicUrl('https://user:pw@hooks.example.com/x', publicDns)).rejects.toThrow(
-      'username',
-    );
-    await expect(
-      assertPublicUrl('https://sneaky.example.com/x', async () => ['10.0.0.5']),
-    ).rejects.toThrow('public');
-    await expect(assertPublicUrl('https://gone.example.com/x', async () => [])).rejects.toThrow(
-      'found',
-    );
-    await expect(assertPublicUrl('not a url', publicDns)).rejects.toThrow('valid');
-  });
-});
 
 describe('delivery', () => {
   it('signs webhooks so the receiver can check they came from Kestrel', async () => {

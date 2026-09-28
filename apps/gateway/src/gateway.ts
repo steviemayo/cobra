@@ -289,12 +289,40 @@ export class Gateway {
 
   // ---- Offline boot ---------------------------------------------------------------------------
 
+  /**
+   * The keys a release or a set of bindings must be signed with. A gateway with keys built in
+   * (every real one) trusts those and nothing the cloud sends, unless told to: keys that came from
+   * the same server that hands out releases would protect nothing against that server.
+   */
   private trustedKeys(): PublicKey[] {
-    const keys = this.store.getJson<PublicKey[]>(KEY_PUBLIC_KEYS) ?? [];
+    const builtIn = this.cfg.trustedKeys ?? [];
+    const fromCloud =
+      builtIn.length === 0 || this.cfg.trustCloudKeys
+        ? (this.store.getJson<PublicKey[]>(KEY_PUBLIC_KEYS) ?? [])
+        : [];
+    const keys = [...builtIn, ...fromCloud];
     if (this.cfg.pinnedPublicKey)
       keys.push({ keyId: ANY_KEY_ID, publicKeyPem: this.cfg.pinnedPublicKey });
     return keys;
   }
+
+  /** Says so once when the cloud signs with a key this gateway does not trust: the usual sign of an unfinished rotation. */
+  private noteUntrustedCloudKeys(offered: PublicKey[]) {
+    const builtIn = this.cfg.trustedKeys ?? [];
+    if (builtIn.length === 0 || this.cfg.trustCloudKeys) return;
+    const unknown = offered
+      .filter((k) => !builtIn.some((b) => b.keyId === k.keyId && b.publicKeyPem.trim() === k.publicKeyPem.trim()))
+      .map((k) => k.keyId)
+      .sort()
+      .join(',');
+    if (!unknown || unknown === this.untrustedKeysSeen) return;
+    this.untrustedKeysSeen = unknown;
+    this.log('warn', 'The cloud offered signing keys this gateway does not trust and will not use', {
+      keys: unknown,
+      hint: 'A gateway update that includes them is needed before releases signed with them can run',
+    });
+  }
+  private untrustedKeysSeen = '';
 
   private bootFromCache() {
     const keys = this.trustedKeys();
@@ -846,6 +874,7 @@ export class Gateway {
   private async syncConfig(credential: string): Promise<boolean> {
     const config: ConfigResponse = await this.cloud.config(credential);
     if (config.publicKeys.length) this.store.setJson(KEY_PUBLIC_KEYS, config.publicKeys);
+    this.noteUntrustedCloudKeys(config.publicKeys);
     this.groups.setConfig(config.groups);
     this.phone.setSecrets(config.rooms);
     const keys = this.trustedKeys();

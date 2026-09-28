@@ -367,6 +367,12 @@ export const BundleLocation = z.object({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   size: z.number().int().positive().optional(),
   version: z.string().max(50),
+  /**
+   * CI's signature over this version and the zip's SHA-256 (base64). The gateway checks it against
+   * the release key built into it, so it does not have to take the portal's word for the bundle.
+   * Absent on releases made before bundles were signed.
+   */
+  signature: z.string().max(300).optional(),
 });
 export type BundleLocation = z.infer<typeof BundleLocation>;
 

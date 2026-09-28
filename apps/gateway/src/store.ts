@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { SignedManifest, TelemetryEvent } from '@kestrel/model';
@@ -13,8 +13,10 @@ export class Store {
   private readonly db: DatabaseSync;
 
   constructor(path: string) {
-    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+    // The credential and the room's device logins live in here: private to the account running the gateway.
+    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path);
+    if (path !== ':memory:' && process.platform !== 'win32') chmodSync(path, 0o600);
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);

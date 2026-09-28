@@ -4,7 +4,6 @@ import { db, type Prisma } from '@kestrel/db';
 import { alertChannelAllowed } from '@kestrel/model';
 import {
   ChannelConfig,
-  assertPublicUrl,
   channelRules,
   deliverToChannel,
   portalLink,
@@ -13,6 +12,7 @@ import {
 import { ChannelRules, describeRules, hasRules } from '../alert-rules';
 import { writeAudit } from '../audit';
 import { getEntitlements, planRequired } from '../billing';
+import { assertPublicUrl } from '../outbound';
 import { featureProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();

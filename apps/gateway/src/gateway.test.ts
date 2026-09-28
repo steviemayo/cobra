@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createServer, type Server } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { generateKeyPair } from '@kestrel/crypto';
 import { STARTER_TEMPLATES, addAvoipSystem, type RoomModel } from '@kestrel/model';
 import { CloudClient } from './cloud';
 import type { GatewayConfig } from './config';
@@ -88,6 +89,66 @@ describe('enrolment and sync', () => {
     gateway.start();
     await until(() => host.ids().includes(ROOM));
     expect(store.loadManifests().map((m) => m.roomId)).toEqual([ROOM]);
+  });
+
+  describe('which signing keys a gateway trusts', () => {
+    it('runs a release signed with a key built into it', async () => {
+      cloud.assign(ROOM, model());
+      const { gateway, host } = boot({
+        trustedKeys: [{ keyId: cloud.keyId, publicKeyPem: cloud.keys.publicKeyPem }],
+      });
+      gateway.start();
+      await until(() => host.ids().includes(ROOM));
+    });
+
+    it('does not take the cloud’s word for a key: a release signed with one it merely sent is refused', async () => {
+      cloud.assign(ROOM, model());
+      // The gateway was built to trust some other key; the cloud offers (and signs with) its own.
+      const built = [{ keyId: cloud.keyId, publicKeyPem: generateKeyPair().publicKeyPem }];
+      const { gateway, host } = boot({ trustedKeys: built });
+      gateway.start();
+      await gateway.tick();
+      await gateway.tick();
+      expect(host.ids()).toEqual([]);
+      const reported = cloud.heartbeats.at(-1)!.rooms.find((r) => r.roomId === ROOM);
+      expect(reported?.error).toBeTruthy();
+    });
+
+    it('never starts a cached release from a key it does not trust after a restart', async () => {
+      cloud.assign(ROOM, model());
+      const first = boot();
+      first.gateway.start();
+      await until(() => first.host.ids().includes(ROOM));
+      first.gateway.stop();
+      first.host.shutdown();
+      first.store.close();
+      running.length = 0;
+      // Now built to trust a different key, and the cloud is unreachable: the cached release must not run.
+      const second = boot({ trustedKeys: [{ keyId: cloud.keyId, publicKeyPem: generateKeyPair().publicKeyPem }] }, 'http://127.0.0.1:9');
+      second.gateway.start();
+      await wait(150);
+      expect(second.host.ids()).toEqual([]);
+    });
+
+    it('accepts the cloud’s keys as well when told to, for a cloud it was not built for', async () => {
+      cloud.assign(ROOM, model());
+      const { gateway, host } = boot({
+        trustedKeys: [{ keyId: 'someone-else', publicKeyPem: generateKeyPair().publicKeyPem }],
+        trustCloudKeys: true,
+      });
+      gateway.start();
+      await until(() => host.ids().includes(ROOM));
+    });
+
+    it('still honours a key pinned by the operator', async () => {
+      cloud.assign(ROOM, model());
+      const { gateway, host } = boot({
+        trustedKeys: [{ keyId: 'someone-else', publicKeyPem: generateKeyPair().publicKeyPem }],
+        pinnedPublicKey: cloud.keys.publicKeyPem,
+      });
+      gateway.start();
+      await until(() => host.ids().includes(ROOM));
+    });
   });
 
   it('reports what is running in the next heartbeat', async () => {

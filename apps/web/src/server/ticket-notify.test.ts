@@ -34,7 +34,7 @@ function fakeFetch(status = 200) {
   }) as typeof fetch;
   return { f, calls };
 }
-const publicDns = async () => ['203.0.113.10'];
+const publicDns = async () => ['93.184.216.34'];
 const deps = (f: typeof fetch, env: Record<string, string | undefined> = {}) => ({
   fetch: f,
   resolve: publicDns,
