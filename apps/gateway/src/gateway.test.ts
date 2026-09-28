@@ -451,7 +451,7 @@ describe('staged deployments', () => {
     expect(reportFor()?.deployment?.stage).toBe('active');
   });
 
-  it('keeps the running release when the new one cannot reach its devices, and reports rolled_back', async () => {
+  it('activates a release that replaces a running one even when it cannot reach one of its devices', async () => {
     cloud.assign(ROOM, plain(), { name: 'Good v1' });
     const { gateway, host } = boot({ healthTimeoutMs: 500 }, cloud.url, 'missing');
     await gateway.tick();
@@ -459,34 +459,35 @@ describe('staged deployments', () => {
 
     cloud.assign(ROOM, withDsp(await deadPort()), { name: 'Bad v2' });
     await gateway.tick();
-    expect(host.get(ROOM)!.runtime).toBe(v1);
-    expect(host.get(ROOM)!.runtime.getSnapshot().roomName).toBe('Good v1');
+    // A device not answering is a monitoring problem, not a reason to refuse the release: it swaps
+    // in and goes active, and the usual device_offline incident picks up the DSP once it reports.
+    expect(host.get(ROOM)!.runtime).not.toBe(v1);
+    expect(host.get(ROOM)!.runtime.getSnapshot().roomName).toBe('Bad v2');
     const d = reportFor()!.deployment!;
-    expect(d.stage).toBe('rolled_back');
+    expect(d.stage).toBe('active');
     expect(d.history.map((h) => h.stage)).toEqual([
       'downloading',
       'verifying',
       'staging',
       'health_check',
-      'rolled_back',
+      'active',
     ]);
-    expect(d.error).toMatch(/Release 2 rejected: could not reach DSP/);
-    expect(reportFor()!.releaseId).toBe(host.get(ROOM)!.releaseId);
+    expect(d.error).toBeUndefined();
   });
 
-  it('reports failed when the very first release cannot reach its devices', async () => {
+  it('activates the very first release even when it cannot reach its devices', async () => {
     cloud.assign(ROOM, withDsp(await deadPort()));
     const { gateway, host } = boot({ healthTimeoutMs: 300 }, cloud.url, 'missing');
     await gateway.tick();
-    expect(host.ids()).toEqual([]);
-    expect(reportFor()?.deployment?.stage).toBe('failed');
+    expect(host.ids()).toEqual([ROOM]);
+    expect(reportFor()?.deployment?.stage).toBe('active');
   });
 
   it('does not retry a refused deployment, but does retry when the cloud starts a new one', async () => {
     cloud.assign(ROOM, plain(), { name: 'Good v1' });
-    const { gateway } = boot({ healthTimeoutMs: 200 }, cloud.url, 'missing');
+    const { gateway } = boot();
     await gateway.tick();
-    cloud.assign(ROOM, withDsp(await deadPort()), { name: 'Bad v2' });
+    cloud.assign(ROOM, plain(), { name: 'Bad v2', tamper: true });
     await gateway.tick();
     const fetched = cloud.manifestFetches.length;
     await gateway.tick();
@@ -501,9 +502,9 @@ describe('staged deployments', () => {
 
   it('remembers a refused deployment across a restart', async () => {
     cloud.assign(ROOM, plain(), { name: 'Good v1' });
-    const first = boot({ healthTimeoutMs: 200 }, cloud.url, 'missing');
+    const first = boot();
     await first.gateway.tick();
-    cloud.assign(ROOM, withDsp(await deadPort()), { name: 'Bad v2' });
+    cloud.assign(ROOM, plain(), { name: 'Bad v2', tamper: true });
     await first.gateway.tick();
     const fetched = cloud.manifestFetches.length;
     first.gateway.stop();
@@ -511,7 +512,7 @@ describe('staged deployments', () => {
     first.store.close();
     running.length = 0;
 
-    const second = boot({ enrollToken: undefined, healthTimeoutMs: 200 }, cloud.url, 'missing');
+    const second = boot({ enrollToken: undefined }, cloud.url, 'missing');
     second.gateway.start();
     await second.gateway.tick();
     expect(cloud.manifestFetches).toHaveLength(fetched);
@@ -642,7 +643,7 @@ describe('bindings', () => {
     expect(reportFor()!.error).toMatch(/signature check.*hash_mismatch/);
   });
 
-  it('applies a changed address with no new release, keeping the old one if the new one is dead', async () => {
+  it('applies a changed address with no new release, even when the new one cannot be reached', async () => {
     const first = await listening();
     cloud.assign(ROOM, design(), { external: true });
     cloud.setBindings(ROOM, dspAt(first));
@@ -655,15 +656,15 @@ describe('bindings', () => {
     servers.pop()!.close();
     cloud.setBindings(ROOM, dspAt(dead));
     await gateway.tick();
-    expect(host.get(ROOM)!.runtime).toBe(v1);
-    expect(host.get(ROOM)!.bindings?.version).toBe(1);
+    // A dead address is a monitoring problem, not a reason to refuse the rebind: it applies anyway.
+    expect(host.get(ROOM)!.runtime).not.toBe(v1);
+    expect(host.get(ROOM)!.bindings?.version).toBe(2);
     await gateway.tick();
-    expect(reportFor()!.error).toMatch(/New addresses rejected: could not reach DSP/);
+    expect(reportFor()!.error).toBeUndefined();
 
     const second = await listening();
     cloud.setBindings(ROOM, dspAt(second));
     await gateway.tick();
-    expect(host.get(ROOM)!.runtime).not.toBe(v1);
     expect(host.get(ROOM)!.bindings?.version).toBe(3);
     expect(cloud.manifestFetches).toHaveLength(fetched); // no new release was needed
     await gateway.tick();

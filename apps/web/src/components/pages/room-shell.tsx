@@ -12,7 +12,7 @@ import { NavTabs } from '@/components/common/nav-tabs';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/common/page-header';
 import { SyncBadge } from '@/components/common/deploy-status';
-import { HealthBadge } from '@/components/common/status';
+import { DesignBadge } from '@/components/common/status';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
@@ -110,7 +110,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
               <span aria-hidden className="text-muted-foreground/50">
                 ·
               </span>
-              <HealthBadge draft={room.draft} />
+              <DesignBadge draft={room.draft} />
               {deploy.data && room.gateway && (
                 <>
                   <span aria-hidden className="text-muted-foreground/50">

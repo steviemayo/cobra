@@ -5,7 +5,7 @@ import { validateRoomModel } from '@kestrel/engine';
 import { useMemo } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { PageContainer } from '@/components/common/page-header';
-import { HealthBadge } from '@/components/common/status';
+import { DesignBadge } from '@/components/common/status';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { buttonVariants } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -90,7 +90,7 @@ export function RoomOverview({ roomId }: { roomId: string }) {
             ) : (
               <dl className="divide-y">
                 <Row label="Status">
-                  <HealthBadge draft={room.draft} />
+                  <DesignBadge draft={room.draft} />
                 </Row>
                 <Row label="Devices">
                   <span className="tabular">{room.draft.devices}</span>

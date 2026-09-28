@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
 import { useBilling } from '@/components/common/plan-gate';
-import { StatusDot, roomHealth } from '@/components/common/status';
+import { StatusDot, designHealth } from '@/components/common/status';
 import {
   Sidebar,
   SidebarContent,
@@ -186,7 +186,7 @@ function EstateTree() {
                         isActive={pathname === href || pathname.startsWith(`${href}/`)}
                         render={<Link href={href} />}
                       >
-                        <StatusDot health={roomHealth(r.draft)} />
+                        <StatusDot health={designHealth(r.draft)} />
                         <span>{r.name}</span>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
