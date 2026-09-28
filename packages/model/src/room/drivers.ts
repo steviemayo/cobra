@@ -45,6 +45,19 @@ const NVX_ENDPOINT_SETTINGS: DriverSettingInfo[] = [
   { key: 'password', label: 'NVX password', scope: 'secret', required: true },
 ];
 
+const CRESTRON_CWS_SETTINGS: DriverSettingInfo[] = [
+  { key: 'host', label: 'Address', scope: 'binding', required: true },
+  { key: 'username', label: 'Logon name', scope: 'binding', required: true },
+  { key: 'password', label: 'Password', scope: 'secret', required: true },
+];
+const CRESTRON_CWS_PATH = [
+  {
+    key: 'path',
+    label:
+      'Property path (dotted, starting with "Device.", e.g. Device.Programs.ProgramInstanceLibrary.DeviceSlot1.Status)',
+  },
+];
+
 export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   'visca-ip': {
     name: 'PTZ camera (VISCA over IP)',
@@ -94,12 +107,18 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'lib:cisco-roomos': {
     name: 'Cisco RoomOS video conferencing',
-    description: 'Cisco Room and Board devices: standby, microphone mute, volume and hang up, over the HTTP API.',
+    description:
+      'Cisco Room and Board devices: standby, microphone mute, volume and hang up, over the HTTP API.',
     class: 'conference_system',
     features: ['standby', 'mic_mute', 'volume', 'hangup'],
     settings: [
       { key: 'host', label: 'Codec address', scope: 'binding', required: true },
-      { key: 'credentials', label: 'Credentials (base64 of user:password)', scope: 'secret', required: true },
+      {
+        key: 'credentials',
+        label: 'Credentials (base64 of user:password)',
+        scope: 'secret',
+        required: true,
+      },
     ],
     categories: ['conference_system'],
     example: { host: '<codec IP>', credentials: '<base64 of user:password>' },
@@ -116,11 +135,16 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
       { key: 'apps', label: 'Apps to offer (list of id and name)', scope: 'design' },
     ],
     categories: ['display', 'video_destination'],
-    example: { host: '<display IP>', psk: '<pre-shared key>', apps: [{ id: '<app uri>', name: 'Netflix' }] },
+    example: {
+      host: '<display IP>',
+      psk: '<pre-shared key>',
+      apps: [{ id: '<app uri>', name: 'Netflix' }],
+    },
   },
   'lib:lg-signage': {
     name: 'LG signage display',
-    description: 'LG signage and professional displays: power, HDMI 1 and 2, volume, mute and screen blank, over the network port. Turn on network control on the display.',
+    description:
+      'LG signage and professional displays: power, HDMI 1 and 2, volume, mute and screen blank, over the network port. Turn on network control on the display.',
     class: 'display',
     features: ['blank', 'builtin_audio'],
     settings: [
@@ -132,7 +156,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'lib:kramer-p3000': {
     name: 'Kramer matrix switcher (Protocol 3000)',
-    description: 'Kramer matrix switchers over Protocol 3000 (TCP 5000). Routing ties an input to an output.',
+    description:
+      'Kramer matrix switchers over Protocol 3000 (TCP 5000). Routing ties an input to an output.',
     class: 'video_switching',
     features: ['route'],
     settings: [{ key: 'host', label: 'Switcher address', scope: 'binding', required: true }],
@@ -167,7 +192,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-nvx-encoder': {
     name: 'Crestron NVX encoder',
-    description: 'A Crestron NVX encoder (E30, E20 and similar) as a device in the room. Reports the location of its stream and whether its input has a signal. Needs the NVX logon.',
+    description:
+      'A Crestron NVX encoder (E30, E20 and similar) as a device in the room. Reports the location of its stream and whether its input has a signal. Needs the NVX logon.',
     class: 'avoip_encoder',
     features: ['stream_location', 'signal_detect'],
     family: 'crestron-nvx',
@@ -177,7 +203,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-nvx-decoder': {
     name: 'Crestron NVX decoder',
-    description: 'A Crestron NVX decoder (D30, DM-NVX-351 and similar) as a device in the room. Pointed at an encoder stream by its switcher. Needs the NVX logon.',
+    description:
+      'A Crestron NVX decoder (D30, DM-NVX-351 and similar) as a device in the room. Pointed at an encoder stream by its switcher. Needs the NVX logon.',
     class: 'avoip_decoder',
     features: ['set_stream', 'stream_state'],
     family: 'crestron-nvx',
@@ -187,7 +214,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-nvx-switcher': {
     name: 'Crestron NVX virtual switcher',
-    description: 'The routing logic for NVX encoders and decoders that are devices in the room. It has no address of its own: routing reads the encoder stream, points the decoder at it and waits until the decoder is receiving.',
+    description:
+      'The routing logic for NVX encoders and decoders that are devices in the room. It has no address of its own: routing reads the encoder stream, points the decoder at it and waits until the decoder is receiving.',
     class: 'avoip_switching',
     features: ['route', 'signal_detect'],
     family: 'crestron-nvx',
@@ -204,8 +232,18 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     settings: [
       { key: 'username', label: 'NVX logon name', scope: 'binding', required: true },
       { key: 'password', label: 'NVX password', scope: 'secret', required: true },
-      { key: 'inputs', label: 'Encoders (input port to address)', scope: 'binding', required: true },
-      { key: 'outputs', label: 'Decoders (output port to address)', scope: 'binding', required: true },
+      {
+        key: 'inputs',
+        label: 'Encoders (input port to address)',
+        scope: 'binding',
+        required: true,
+      },
+      {
+        key: 'outputs',
+        label: 'Decoders (output port to address)',
+        scope: 'binding',
+        required: true,
+      },
     ],
     categories: ['video_matrix'],
     example: {
@@ -246,6 +284,36 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
       muteControl: 'mute',
       minDb: -40,
       maxDb: 0,
+    },
+  },
+  'crestron-4series': {
+    name: 'Crestron 4-series control processor',
+    description:
+      'Monitoring only, over the same CresNext REST API as DM-NVX: reports firmware, and any control point named by a dotted path into the unit’s /Device tree. Most useful for a program slot’s own status, or one of its IP table entries (ONLINE/OFFLINE) — the processor’s own view of whether it can reach a device on the network.',
+    class: 'point_based',
+    features: ['generic'],
+    settings: CRESTRON_CWS_SETTINGS,
+    points: { generic: CRESTRON_CWS_PATH },
+    categories: ['control_processor'],
+    example: {
+      host: '<processor IP>',
+      username: 'admin',
+      password: '<password>',
+    },
+  },
+  'crestron-tsw': {
+    name: 'Crestron TSW / TS touch panel',
+    description:
+      'Monitoring only: the panel keeps running its own Crestron program and UI. Reports firmware, the screen’s awake/asleep state and the running app, over the same CresNext REST API as DM-NVX. Any other field (proximity, Bluetooth, ...) is available as a control point named by a dotted path into the panel’s /Device tree.',
+    class: 'point_based',
+    features: ['generic'],
+    settings: CRESTRON_CWS_SETTINGS,
+    points: { generic: CRESTRON_CWS_PATH },
+    categories: ['touch_panel'],
+    example: {
+      host: '<panel IP>',
+      username: 'admin',
+      password: '<password>',
     },
   },
 };

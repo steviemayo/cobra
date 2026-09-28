@@ -27,6 +27,8 @@ export const DeviceCategory = z.enum([
   'lifter',
   'screen',
   'occupancy_sensor',
+  'control_processor',
+  'touch_panel',
 ]);
 export type DeviceCategory = z.infer<typeof DeviceCategory>;
 
@@ -43,7 +45,10 @@ export const VIDEO_DESTINATION_CATEGORIES: readonly DeviceCategory[] = [
   'projector',
 ];
 /** The endpoints of an AVoIP system. Signal passes through them; the virtual switcher does the routing. */
-export const AVOIP_ENDPOINT_CATEGORIES: readonly DeviceCategory[] = ['avoip_encoder', 'avoip_decoder'];
+export const AVOIP_ENDPOINT_CATEGORIES: readonly DeviceCategory[] = [
+  'avoip_encoder',
+  'avoip_decoder',
+];
 export const isAvoipEndpoint = (category: DeviceCategory): boolean =>
   AVOIP_ENDPOINT_CATEGORIES.includes(category);
 
@@ -59,7 +64,15 @@ export interface PortTemplate {
 
 export interface CategoryInfo {
   label: string;
-  section: 'source' | 'camera' | 'mic' | 'conference' | 'matrix' | 'destination' | 'environment';
+  section:
+    | 'source'
+    | 'camera'
+    | 'mic'
+    | 'conference'
+    | 'matrix'
+    | 'destination'
+    | 'environment'
+    | 'infrastructure';
   capabilities: Capability[];
   /** Sources like a laptop input have nothing to control, so no driver is needed. */
   controllable: boolean;
@@ -260,6 +273,20 @@ export const DEVICE_CATALOG: Record<DeviceCategory, CategoryInfo> = {
     section: 'environment',
     capabilities: ['mechanical'],
     controllable: true,
+    defaultPorts: [],
+  },
+  control_processor: {
+    label: 'Control processor',
+    section: 'infrastructure',
+    capabilities: [],
+    controllable: false,
+    defaultPorts: [],
+  },
+  touch_panel: {
+    label: 'Touch panel',
+    section: 'infrastructure',
+    capabilities: [],
+    controllable: false,
     defaultPorts: [],
   },
 };

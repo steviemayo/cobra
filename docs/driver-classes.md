@@ -148,6 +148,15 @@ The mental model, agreed in outline: a virtual switcher that reads the streams t
 - The same shape suits lighting processors, BACnet, Modbus and KNX group addresses. The class is Point-based; DSP is its main member
 - Not built: importing a component list from a file
 
+### Crestron 4-series and TSW/TS touch panels (built 2026-09-28)
+
+Two new device categories, `control_processor` and `touch_panel`, monitoring only (`controllable: false`, no default ports, no capability of their own — see `docs/decisions.md` Step O). Rather than the Infrastructure class's SNMP/HTTP-health idea above, they were built as **Point-based**, reusing the generic point type: every RMC4 and TSW/TS unit exposes its whole configuration as one JSON tree at `GET /Device` (the CresNext CWS REST API, the same one DM-NVX uses), so a control point's address is just a dotted `path` into that tree.
+
+- `crestron-4series`: firmware, plus any control point (a program slot's own `Status`, or one of its IP table entries' `Status`, ONLINE/OFFLINE — the processor's own view of whether it can reach a device on the network, watchable with `expect: "ONLINE"` alongside that device's own monitoring)
+- `crestron-tsw`: firmware, the screen's awake/asleep state (`power`) and the running app/project (`activeApp`), plus any other field as a point the same way
+- Verified against a real RMC4 and TS-1070: the login POST needs `Origin`/`Referer` headers set to the unit's own URL (403 without them, unlike NVX's driver which already always sends them), and an expired session shows up as a 301/302 redirect back to `/userlogin.html` rather than NVX's 401
+- **Not built:** a UI to pick a program slot/IP table entry from a discovered list (someone reads the path off the unit's own `/Device/Programs` today) — the raw capability is there; a friendlier picker is a natural follow-up
+
 ## Microphones: reinforcement and conferencing
 
 Two classes, because they are used by different people for different reasons. Both share the monitoring basics (mute state, battery, RF, fault).
