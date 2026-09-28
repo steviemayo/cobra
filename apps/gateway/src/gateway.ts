@@ -10,6 +10,8 @@ import {
   type DeploymentReport,
   type DeploymentStage,
   type EnrollResponse,
+  type GatewayUpdateOrder,
+  type GatewayUpdateReport,
   type GatewayCommand,
   type RoomReport,
   type SignedManifest,
@@ -18,6 +20,7 @@ import {
 import { CloudClient, CloudError } from './cloud';
 import type { GatewayConfig } from './config';
 import { PhoneLinks } from './phone';
+import { createUpdater, takeUpdateResult, UpdateError, type Updater } from './updater';
 import { ScheduleStore } from './schedule';
 import { GroupCoordinator } from './groups';
 import { runCommand } from './commands';
@@ -48,6 +51,10 @@ interface DeploymentRecord {
 }
 
 type DeployOutcome = 'applied' | 'refused' | 'retry';
+
+/** An update is not started again for the same version this soon: an attempt that has reached the installer is left to finish. */
+const UPDATE_RETRY_MS = 20 * 60_000;
+const UPDATE_REPORT_MS = 10 * 60_000;
 
 interface Identity {
   gatewayId: string;
@@ -84,6 +91,7 @@ export class Gateway {
     private readonly cloud: CloudClient,
     private readonly host: RoomHost,
     private readonly log: Logger,
+    private readonly updater: Updater = createUpdater(cfg),
   ) {
     // What the plan said last time, so a restart while offline does not start accepting commands.
     host.setControl(store.get(KEY_CONTROL) !== 'off');
@@ -96,6 +104,11 @@ export class Gateway {
   /** Today's bookings for each room, as the cloud last sent them. */
   readonly bookings = new ScheduleStore();
   private announcedUpdate: string | null = null;
+  /** How an update the portal ordered is going: sent in each heartbeat until it is settled. */
+  private updateReport: GatewayUpdateReport | undefined;
+  private updateReportSince = 0;
+  private updating = false;
+  private lastUpdateAttempt: { version: string; at: number } | null = null;
 
   private readonly groups: GroupCoordinator;
 
@@ -104,6 +117,8 @@ export class Gateway {
   /** Start rooms from the local cache immediately, then begin talking to the cloud. */
   start() {
     this.bootFromCache();
+    // If the installer had to put the old version back, say so once the cloud is reachable.
+    this.updateReport = takeUpdateResult(this.cfg.dataDir);
     this.record({ type: 'gateway.started', data: { version: this.cfg.version } });
     void this.tick();
   }
@@ -323,6 +338,15 @@ export class Gateway {
   }
 
   private async sendHeartbeat(credential: string) {
+    // Progress that never turns into a new version stops being reported, so the portal can see it
+    // has stalled instead of being told "applying" for ever.
+    if (
+      this.updateReport &&
+      this.updateReport.state !== 'failed' &&
+      this.updateReport.state !== 'unsupported' &&
+      Date.now() - this.updateReportSince > UPDATE_REPORT_MS
+    )
+      this.updateReport = undefined;
     const results = this.pendingResults.slice(0, 50);
     const res = await this.cloud
       .heartbeat(credential, {
@@ -334,6 +358,7 @@ export class Gateway {
         commandResults: results,
         dividers: this.groups.report(),
         features: [...GATEWAY_FEATURES],
+        ...(this.updateReport ? { updateReport: this.updateReport } : {}),
       })
       .catch((e: unknown) => {
         if (e instanceof CloudError && e.unauthorised)
@@ -341,6 +366,10 @@ export class Gateway {
         throw e;
       });
     this.pendingResults.splice(0, results.length);
+    // A failure only needs telling once; progress is repeated until it settles.
+    if (this.updateReport?.state === 'failed' || this.updateReport?.state === 'unsupported')
+      this.updateReport = undefined;
+    if (res.updateOrder) this.startUpdate(credential, res.updateOrder);
     this.inbox.push(...res.commands);
     if (res.control !== this.host.control) this.store.set(KEY_CONTROL, res.control ? 'on' : 'off');
     this.host.setControl(res.control);
@@ -365,6 +394,43 @@ export class Gateway {
       if (!this.fastTimer) this.scheduleFast(0);
     }
     return res;
+  }
+
+  // ---- Updates the portal ordered -------------------------------------------------------------
+
+  private startUpdate(credential: string, order: GatewayUpdateOrder) {
+    if (this.updating || order.version === this.cfg.version) return;
+    const last = this.lastUpdateAttempt;
+    if (last && last.version === order.version && Date.now() - last.at < UPDATE_RETRY_MS) return;
+    this.updating = true;
+    this.lastUpdateAttempt = { version: order.version, at: Date.now() };
+    this.log('info', 'The portal asked this gateway to update', {
+      from: this.cfg.version,
+      to: order.version,
+      how: this.updater.kind,
+    });
+    void this.updater
+      .apply(order, {
+        bundle: () => this.cloud.bundle(credential),
+        progress: (r) => {
+          this.updateReport = r;
+          this.updateReportSince = Date.now();
+        },
+      })
+      .catch((e: unknown) => {
+        const unsupported = e instanceof UpdateError && e.unsupported;
+        const error = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+        this.log('warn', 'The update did not go ahead', { error });
+        this.updateReport = {
+          state: unsupported ? 'unsupported' : 'failed',
+          version: order.version,
+          error,
+        };
+        this.updateReportSince = Date.now();
+      })
+      .finally(() => {
+        this.updating = false;
+      });
   }
 
   // ---- Control from the portal ----------------------------------------------------------------

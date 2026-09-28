@@ -127,6 +127,15 @@ model Gateway {
   os                   String?
   /// What the gateway said it can do in its last heartbeat (for example "bindings"). Empty for older gateways.
   features             String[]       @default([])
+  /// When true the portal asks this gateway to update as soon as its channel has a newer version.
+  autoUpdate           Boolean        @default(false)
+  /// An update someone asked for, to `updateVersion`, not before this time. Null when none is waiting.
+  updateNotBefore      DateTime?
+  updateVersion        String?
+  /// How the gateway last said it got on (downloading, staged, applying, failed, unsupported), and why it failed.
+  updateState          String?
+  updateError          String?
+  updateReportedAt     DateTime?
   lastSeenAt           DateTime?
   createdAt            DateTime       @default(now())
 

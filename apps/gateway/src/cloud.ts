@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import {
+  BundleLocation,
   ConfigResponse,
   EnrollResponse,
   HeartbeatResponse,
@@ -82,6 +83,11 @@ export class CloudClient {
 
   heartbeat(credential: string, body: HeartbeatRequest) {
     return this.request('POST', '/heartbeat', HeartbeatResponse, { body, credential });
+  }
+
+  /** Where to download the update bundle from, once the portal has ordered an update. */
+  bundle(credential: string) {
+    return this.request('GET', '/bundle', BundleLocation, { credential });
   }
 
   poll(credential: string, body: PollRequest) {

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Check,
+  Clock,
   Copy,
   Download,
   MoreHorizontal,
@@ -98,6 +99,12 @@ export function GatewaysView() {
   const [renaming, setRenaming] = useState<Gateway | null>(null);
   const [reenrolling, setReenrolling] = useState<Gateway | null>(null);
   const [deleting, setDeleting] = useState<Gateway | null>(null);
+  const [updating, setUpdating] = useState<Gateway | null>(null);
+  const [updatingAll, setUpdatingAll] = useState(false);
+  // Behind, able to take a portal update, and nothing already asked of it.
+  const updatable = (gateways.data ?? []).filter(
+    (g) => g.update.status === 'behind' && g.canSelfUpdate && !g.updateVersion,
+  );
 
   const refresh = () => qc.invalidateQueries({ queryKey: trpc.gateway.list.queryKey() });
   const reenrol = useMutation(
@@ -125,6 +132,41 @@ export function GatewaysView() {
       onError: (e) => toast.error(e.message),
     }),
   );
+  const requestUpdate = useMutation(
+    trpc.gateway.requestUpdate.mutationOptions({
+      onSuccess: async (_res, vars) => {
+        await refresh();
+        toast.success(
+          vars.at
+            ? 'Update scheduled. The gateway starts it at its first check-in after that time.'
+            : 'Update requested. The gateway starts it at its next check-in.',
+        );
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const cancelUpdate = useMutation(
+    trpc.gateway.cancelUpdate.mutationOptions({
+      onSuccess: async () => {
+        await refresh();
+        toast.success('Update cancelled');
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const setAutoUpdate = useMutation(
+    trpc.gateway.setAutoUpdate.mutationOptions({
+      onSuccess: async (_res, vars) => {
+        await refresh();
+        toast.success(
+          vars.on
+            ? 'Automatic updates on. The portal asks it to update as soon as a newer version is published.'
+            : 'Automatic updates off. It only updates when you ask.',
+        );
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
   const del = useMutation(
     trpc.gateway.delete.mutationOptions({
       onSuccess: async () => {
@@ -145,6 +187,12 @@ export function GatewaysView() {
             <Button variant="outline" size="sm" onClick={() => setInstallOpen(true)}>
               <Download data-icon="inline-start" /> Install a gateway
             </Button>
+            {canEdit && updatable.length > 0 && (
+              <Button variant="outline" size="sm" onClick={() => setUpdatingAll(true)}>
+                <RefreshCw data-icon="inline-start" /> Update {updatable.length} that{' '}
+                {updatable.length === 1 ? 'is' : 'are'} behind
+              </Button>
+            )}
             {canEdit && (
               <Button size="sm" onClick={() => setAdding(true)}>
                 <Plus data-icon="inline-start" /> Add gateway
@@ -201,14 +249,15 @@ export function GatewaysView() {
                     <span className="inline-flex items-center gap-2">
                       {g.version ?? '—'}
                       {g.channel === 'beta' && <Badge variant="outline">beta</Badge>}
-                      {g.update.status === 'behind' && (
+                      {g.autoUpdate && (
                         <Badge
-                          variant="secondary"
-                          title={`Version ${g.update.latest} is available on the ${g.channel} channel`}
+                          variant="outline"
+                          title="Updates itself as soon as a newer version is published"
                         >
-                          Update available
+                          auto
                         </Badge>
                       )}
+                      <UpdateChip g={g} />
                     </span>
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground">
@@ -246,6 +295,32 @@ export function GatewaysView() {
                               ? 'Follow the stable channel'
                               : 'Follow the beta channel'}
                           </DropdownMenuItem>
+                          {g.updateVersion ? (
+                            <DropdownMenuItem
+                              onClick={() => cancelUpdate.mutate({ orgId, gatewayId: g.id })}
+                            >
+                              <Clock className="size-4" />{' '}
+                              {g.updateState === 'failed' || g.updateState === 'unsupported'
+                                ? 'Clear the update'
+                                : 'Cancel the update'}
+                            </DropdownMenuItem>
+                          ) : null}
+                          {g.update.status === 'behind' &&
+                            (!g.updateVersion || g.updateState === 'failed') && (
+                              <DropdownMenuItem onClick={() => setUpdating(g)}>
+                                <RefreshCw className="size-4" /> Update to {g.update.latest}…
+                              </DropdownMenuItem>
+                            )}
+                          <DropdownMenuItem
+                            onClick={() =>
+                              setAutoUpdate.mutate({ orgId, gatewayId: g.id, on: !g.autoUpdate })
+                            }
+                          >
+                            <Clock className="size-4" />{' '}
+                            {g.autoUpdate
+                              ? 'Turn off automatic updates'
+                              : 'Turn on automatic updates'}
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => setReenrolling(g)}>
                             <RefreshCw className="size-4" /> Re-enrol on a new machine
                           </DropdownMenuItem>
@@ -275,6 +350,35 @@ export function GatewaysView() {
       <InstallDialog open={installOpen} onOpenChange={setInstallOpen} />
       <TokenDialog token={token} onClose={() => setToken(null)} />
       <RenameDialog gateway={renaming} onClose={() => setRenaming(null)} onDone={refresh} />
+      {updating && (
+        <UpdateDialog
+          gateway={updating}
+          busy={requestUpdate.isPending}
+          onClose={() => setUpdating(null)}
+          onSubmit={(at) =>
+            requestUpdate.mutate(
+              { orgId, gatewayId: updating.id, ...(at ? { at } : {}) },
+              { onSuccess: () => setUpdating(null) },
+            )
+          }
+        />
+      )}
+      <ConfirmDialog
+        open={updatingAll}
+        onOpenChange={setUpdatingAll}
+        title={`Update ${plural(updatable.length, 'gateway')}?`}
+        description="Each one is asked at its next check-in and restarts once it has the new version. Rooms keep running from their cached releases while it restarts."
+        confirmLabel="Update them"
+        onConfirm={async () => {
+          for (const g of updatable) {
+            try {
+              await requestUpdate.mutateAsync({ orgId, gatewayId: g.id });
+            } catch {
+              // the toast says why; carry on with the rest
+            }
+          }
+        }}
+      />
       <ConfirmDialog
         open={!!reenrolling}
         onOpenChange={(o) => !o && setReenrolling(null)}
@@ -556,6 +660,124 @@ function RenameDialog({
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** What is happening with the update someone asked for on this gateway, or that one is available. */
+function UpdateChip({ g }: { g: Gateway }) {
+  if (g.updateVersion) {
+    const state = g.updateState;
+    if (state === 'failed')
+      return (
+        <Badge variant="destructive" title={g.updateError ?? 'The update did not complete'}>
+          Update failed
+        </Badge>
+      );
+    if (state === 'unsupported')
+      return (
+        <Badge variant="outline" title={g.updateError ?? undefined}>
+          Can’t update itself
+        </Badge>
+      );
+    if (state === 'downloading' || state === 'staged' || state === 'applying')
+      return <Badge variant="secondary">Updating to {g.updateVersion}…</Badge>;
+    const due = g.updateNotBefore && new Date(g.updateNotBefore).getTime() > Date.now();
+    return (
+      <Badge variant="secondary">
+        {due
+          ? `Update to ${g.updateVersion} at ${new Date(g.updateNotBefore!).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`
+          : `Update to ${g.updateVersion} requested`}
+      </Badge>
+    );
+  }
+  if (g.update.status !== 'behind') return null;
+  return (
+    <Badge
+      variant="secondary"
+      title={
+        g.canSelfUpdate
+          ? `Version ${g.update.latest} is available on the ${g.channel} channel`
+          : `Version ${g.update.latest} is available. This gateway needs one manual update before the portal can update it.`
+      }
+    >
+      Update available
+    </Badge>
+  );
+}
+
+function UpdateDialog({
+  gateway,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  gateway: Gateway;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (at: Date | null) => void;
+}) {
+  const [when, setWhen] = useState<'now' | 'later'>('now');
+  const [local, setLocal] = useState('');
+  const at = when === 'later' && local ? new Date(local) : null;
+  const invalid =
+    when === 'later' && (!at || Number.isNaN(at.getTime()) || at.getTime() < Date.now());
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            Update {gateway.name} to {gateway.update.latest}
+          </DialogTitle>
+          <DialogDescription>
+            {gateway.canSelfUpdate
+              ? 'The gateway picks this up at a check-in, downloads the new version, restarts, and puts the old one back if the new one does not start. Rooms keep running from their cached releases while it restarts.'
+              : 'This gateway is too old for the portal to update it. Install the latest version on that machine once by hand; after that the portal can do it.'}
+          </DialogDescription>
+        </DialogHeader>
+        {gateway.canSelfUpdate && (
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={when === 'now' ? 'default' : 'outline'}
+                onClick={() => setWhen('now')}
+              >
+                At its next check-in
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={when === 'later' ? 'default' : 'outline'}
+                onClick={() => setWhen('later')}
+              >
+                <Clock data-icon="inline-start" /> At a set time
+              </Button>
+            </div>
+            {when === 'later' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="update-at">Not before (your local time)</Label>
+                <Input
+                  id="update-at"
+                  type="datetime-local"
+                  value={local}
+                  onChange={(e) => setLocal(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={!gateway.canSelfUpdate || busy || invalid} onClick={() => onSubmit(at)}>
+            {busy && <Spinner />}
+            {when === 'later' ? 'Schedule the update' : 'Update'}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

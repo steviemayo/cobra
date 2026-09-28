@@ -3,7 +3,8 @@ import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { writeAudit } from '../audit';
 import { effectiveStatus, newEnrollToken } from '../gateway-service';
-import { latestVersions, updateStatus } from '../gateway-updates';
+import { cancelUpdate, requestUpdate, setAutoUpdate } from '../gateway-update-service';
+import { canSelfUpdate, latestVersions, updateStatus } from '../gateway-updates';
 import { SITE_SCOPED, siteFilter } from '../site-scope';
 import { orgProcedure, requireRole, router } from '../trpc';
 
@@ -23,6 +24,12 @@ const safe = {
   enrolledAt: true,
   lastSeenAt: true,
   createdAt: true,
+  features: true,
+  autoUpdate: true,
+  updateNotBefore: true,
+  updateVersion: true,
+  updateState: true,
+  updateError: true,
   site: { select: { id: true, name: true } },
   rooms: { select: { id: true, name: true }, orderBy: { name: 'asc' } },
 } as const;
@@ -44,10 +51,12 @@ export const gatewayRouter = router({
         select: safe,
       });
       const latest = latestVersions();
-      return gateways.map((g) => ({
+      return gateways.map(({ features, ...g }) => ({
         ...g,
         status: effectiveStatus(g),
         update: updateStatus(g, latest),
+        // Whether the portal can update it. An older gateway needs one manual update first.
+        canSelfUpdate: canSelfUpdate(features),
       }));
     }),
 
@@ -137,6 +146,53 @@ export const gatewayRouter = router({
         target: gw.id,
         meta: { name: gw.name, from: gw.channel, to: input.channel },
       });
+      return { ok: true };
+    }),
+
+  // Ask a gateway to update at its next check-in (now) or from a later time. It does the work; the
+  // portal only records the request and puts an order in the heartbeat reply once it is due.
+  requestUpdate: orgProcedure
+    .input(z.object({ orgId, gatewayId, at: z.coerce.date().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      await findGateway(ctx.orgId, input.gatewayId);
+      const r = await requestUpdate(db, {
+        orgId: ctx.orgId,
+        gatewayId: input.gatewayId,
+        when: input.at ?? null,
+        userId: ctx.user.id,
+      });
+      if (!r.ok) throw new TRPCError({ code: 'BAD_REQUEST', message: r.error });
+      return { ok: true };
+    }),
+
+  cancelUpdate: orgProcedure
+    .input(z.object({ orgId, gatewayId }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      await findGateway(ctx.orgId, input.gatewayId);
+      const r = await cancelUpdate(db, {
+        orgId: ctx.orgId,
+        gatewayId: input.gatewayId,
+        userId: ctx.user.id,
+      });
+      if (!r.ok) throw new TRPCError({ code: 'BAD_REQUEST', message: r.error });
+      return { ok: true };
+    }),
+
+  // Automatic: the portal asks the gateway to update as soon as its channel has a newer version.
+  setAutoUpdate: orgProcedure
+    .input(z.object({ orgId, gatewayId, on: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      await findGateway(ctx.orgId, input.gatewayId);
+      const r = await setAutoUpdate(db, {
+        orgId: ctx.orgId,
+        gatewayId: input.gatewayId,
+        on: input.on,
+        userId: ctx.user.id,
+      });
+      if (!r.ok) throw new TRPCError({ code: 'BAD_REQUEST', message: r.error });
       return { ok: true };
     }),
 

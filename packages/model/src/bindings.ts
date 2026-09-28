@@ -245,6 +245,7 @@ export const GATEWAY_FEATURES = [
   'schedule',
   'discovery',
   'firmware',
+  'self-update',
 ] as const;
 export type GatewayFeature = (typeof GATEWAY_FEATURES)[number];
 

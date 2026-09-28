@@ -111,14 +111,14 @@ if (-not $NoFirewall) {
     -Action Allow -Profile Domain, Private | Out-Null
 }
 
-# Both modes update the same way: a daily SYSTEM task checks the channel and swaps the app folder.
+# Both modes update the same way: a SYSTEM task swaps the app folder. It has no schedule of its own:
+# the gateway starts it when the portal orders an update (see docs/decisions.md, Step S).
 $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $system = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $upd = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $InstallDir 'update.ps1')`""
-$updTrigger = New-ScheduledTaskTrigger -Daily -At '03:30' -RandomDelay (New-TimeSpan -Minutes 30)
 $updSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 Register-ScheduledTask -TaskName 'Kestrel Gateway Update' -Force -Principal $system -Settings $updSettings `
-  -Action $upd -Trigger $updTrigger -Description "Updates the Kestrel gateway from the $Channel channel." | Out-Null
+  -Action $upd -Description "Updates the Kestrel gateway when the portal orders it (the $Channel channel)." | Out-Null
 
 $version = (Get-Content (Join-Path $app 'VERSION') -ErrorAction SilentlyContinue | Select-Object -First 1)
 Write-Host ''
