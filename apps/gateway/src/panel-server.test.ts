@@ -55,8 +55,8 @@ class Panel {
   readonly messages: PanelServerMessage[] = [];
   closed: { code: number } | null = null;
   ws: WebSocket;
-  constructor(roomId = ROOM) {
-    this.ws = new WebSocket(`ws://127.0.0.1:${port}/ws/${roomId}`);
+  constructor(roomId = ROOM, headers?: Record<string, string>) {
+    this.ws = new WebSocket(`ws://127.0.0.1:${port}/ws/${roomId}`, headers ? { headers } : undefined);
     clients.push(this.ws);
     this.ws.on('message', (d) =>
       this.messages.push(PanelServerMessage.parse(JSON.parse(d.toString()))),
@@ -190,6 +190,23 @@ describe('PIN-protected panels', () => {
     await until(() => p.of('error').length >= 6);
     expect(p.of('error').at(-1)!.message).toContain('Too many attempts');
     expect(p.of('snapshot')).toHaveLength(0);
+  });
+
+  it('locks the room itself after enough wrong guesses, even spread across many addresses', async () => {
+    await start(pinAccess(), '/nonexistent', { trustProxy: true });
+    for (let i = 0; i < 20; i++) {
+      // A fresh address each time, so the per-address lockout (5 attempts) never has a chance to fire.
+      const p = new Panel(ROOM, { 'x-forwarded-for': `10.0.0.${i}` });
+      await until(() => p.of('hello').length > 0);
+      p.send({ t: 'auth', pin: '0000' });
+      await until(() => p.of('error').length > 0);
+    }
+    // Now even the right PIN, from a brand new address, is refused: the room itself is locked.
+    const last = new Panel(ROOM, { 'x-forwarded-for': '10.0.1.1' });
+    await until(() => last.of('hello').length > 0);
+    last.send({ t: 'auth', pin: '4821' });
+    await until(() => last.of('error').length > 0);
+    expect(last.of('error')[0]!.message).toContain('Too many attempts on this room');
   });
 
   it('let trusted IPs straight in', async () => {

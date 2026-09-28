@@ -20,6 +20,12 @@ import type { RoomHost } from './room-host';
 
 const MAX_PIN_FAILURES = 5;
 const LOCKOUT_MS = 60_000;
+// A per-room lockout on top of the per-address one: an attacker spread across many addresses
+// (or many phones on the same office network sharing one) is still bounded by how many wrong
+// guesses the room itself accepts, with the lockout growing the longer it keeps happening.
+const MAX_ROOM_PIN_FAILURES = 20;
+const ROOM_LOCKOUT_MS = 60_000;
+const MAX_ROOM_LOCKOUT_MS = 30 * 60_000;
 const MAX_INTENTS_PER_SECOND = 20;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -61,6 +67,7 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
   await app.register(fastifyWebsocket, { options: { maxPayload: 4096 } });
 
   const failures = new Map<string, { count: number; until: number }>();
+  const roomFailures = new Map<string, { count: number; until: number; lockouts: number }>();
   const sockets = new Map<string, Set<WebSocket>>();
   const lastActuator = new Map<string, number>();
 
@@ -221,19 +228,30 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
 
       if (msg.data.t === 'auth') {
         if (authed) return;
+        const now = Date.now();
         const lock = failures.get(ip);
-        if (lock && lock.count >= MAX_PIN_FAILURES && Date.now() < lock.until) {
+        const roomLock = roomFailures.get(roomId);
+        if (lock && lock.count >= MAX_PIN_FAILURES && now < lock.until) {
           send({ t: 'error', message: 'Too many attempts. Try again in a minute.' });
+          return;
+        }
+        if (roomLock && roomLock.count >= MAX_ROOM_PIN_FAILURES && now < roomLock.until) {
+          send({ t: 'error', message: 'Too many attempts on this room. Try again later.' });
           return;
         }
         if (access.pinHash && verifyPin(msg.data.pin, access.pinHash)) {
           failures.delete(ip);
+          roomFailures.delete(roomId);
           authed = true;
           startStreaming();
         } else {
-          const count = (lock && Date.now() < lock.until ? lock.count : 0) + 1;
-          failures.set(ip, { count, until: Date.now() + LOCKOUT_MS });
-          log('warn', 'Wrong panel PIN', { roomId, ip, attempts: count });
+          const count = (lock && now < lock.until ? lock.count : 0) + 1;
+          failures.set(ip, { count, until: now + LOCKOUT_MS });
+          const roomCount = (roomLock && now < roomLock.until ? roomLock.count : 0) + 1;
+          const lockouts = roomCount >= MAX_ROOM_PIN_FAILURES ? (roomLock?.lockouts ?? 0) + 1 : (roomLock?.lockouts ?? 0);
+          const roomLockoutMs = Math.min(MAX_ROOM_LOCKOUT_MS, ROOM_LOCKOUT_MS * 2 ** Math.min(lockouts, 5));
+          roomFailures.set(roomId, { count: roomCount, until: now + roomLockoutMs, lockouts });
+          log('warn', 'Wrong panel PIN', { roomId, ip, attempts: count, roomAttempts: roomCount });
           send({ t: 'error', message: 'Wrong PIN.' });
         }
         return;

@@ -158,14 +158,14 @@ export function PanelSettings({ roomId }: { roomId: string }) {
         </div>
         {mode === 'pin' && (
           <div className="space-y-2">
-            <Label htmlFor="panel-pin">PIN (4 to 8 digits)</Label>
+            <Label htmlFor="panel-pin">PIN (6 to 8 digits)</Label>
             <Input
               id="panel-pin"
               inputMode="numeric"
               autoComplete="off"
               maxLength={8}
               placeholder={
-                current.data?.hasPin ? 'Leave blank to keep the current PIN' : 'e.g. 4821'
+                current.data?.hasPin ? 'Leave blank to keep the current PIN' : 'e.g. 482193'
               }
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
