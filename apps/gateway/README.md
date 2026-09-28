@@ -16,6 +16,11 @@ The token is only needed the first time. After enrolment the credential lives in
 
 Panels open `http://<gateway>:8080/room/<room id>`. Use `:beta` for the beta channel.
 
+### The gateway's own pages
+
+- `http://<gateway>:8080/` is a **status page** anyone on the network can read: whether the gateway is connected, its version, and every room with its panel link (nothing secret). An unclaimed gateway shows its install ID there, for staff to match in the portal.
+- `http://<gateway>:8080/admin` is behind an **admin code**: enter an enrolment token (moves the gateway to another organisation: its rooms stop and the new ones replace them) or reset it to an unclaimed gateway. The code is made on first start in `admin-code.txt` in the data folder (`docker exec <container> cat /data/admin-code.txt`; on Windows, "Show admin code" in the tray menu, or the file in `C:\ProgramData\Kestrel Gateway`). Delete the file and restart for a new one. Anyone who can read that folder can read the code.
+
 ### Updates
 
 Gateways follow a release channel, separately from room programs. `main` publishes `stable` and `dev` publishes `beta`. A room keeps running from its cached release while the gateway restarts.
