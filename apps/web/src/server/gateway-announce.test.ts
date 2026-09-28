@@ -212,7 +212,8 @@ describe('claiming an unclaimed gateway', () => {
 
   it('does not offer a token that has expired', async () => {
     const { w } = await claimed();
-    const r = (await announce(w.db, hello(), ctx, at(25 * 3_600_000))) as {
+    // The token's expiry comes from the real clock (newEnrollToken), so so does "later" here.
+    const r = (await announce(w.db, hello(), ctx, new Date(Date.now() + 25 * 3_600_000))) as {
       body: { enrollToken?: string };
     };
     expect(r.body.enrollToken).toBeUndefined();
