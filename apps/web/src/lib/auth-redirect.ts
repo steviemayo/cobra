@@ -14,6 +14,7 @@ const SANDBOX_ORIGIN = 'https://kestrel-safe-next.invalid';
  * browser or the URL parser cannot read it differently than this function did.
  */
 export function safeNext(next: string | null | undefined, fallback = '/'): string {
+  // eslint-disable-next-line no-control-regex -- catching control characters is the point
   if (!next || !next.startsWith('/') || next.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(next))
     return fallback;
   let url: URL;

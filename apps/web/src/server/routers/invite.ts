@@ -4,10 +4,14 @@ import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { OrgRole } from '@kestrel/model';
 import { writeAudit } from '../audit';
+import { makeRateLimiter } from '../rate-limit';
 import { authedProcedure, orgProcedure, publicProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
 const INVITE_DAYS = 7;
+// The token is 24 random bytes, so guessing one is infeasible; this only keeps a script from
+// hammering the database with attempts.
+const byAddress = makeRateLimiter(20, 60_000);
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
@@ -85,7 +89,10 @@ export const inviteRouter = router({
   // Shown on the accept page before sign-in. Reveals only what the token holder needs.
   preview: publicProcedure
     .input(z.object({ token: z.string().min(10).max(200) }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      const limit = byAddress(ctx.ip);
+      if (limit.ok === false)
+        throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: 'Try again shortly' });
       const invite = await findUsable(input.token);
       return { orgName: invite.org.name, email: invite.email, role: invite.role };
     }),

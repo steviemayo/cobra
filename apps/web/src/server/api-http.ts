@@ -1,9 +1,12 @@
 import { db } from '@kestrel/db';
-import { authenticateApiKey, makeRateLimiter } from './api-keys';
+import { REQUESTS_PER_MINUTE, authenticateApiKey } from './api-keys';
 import { getEntitlements } from './billing';
 import type { PublicApiDb } from './public-api';
+import { clientIp, makeRateLimiter, tooManyRequests } from './rate-limit';
 
-const limiter = makeRateLimiter();
+const byKey = makeRateLimiter(REQUESTS_PER_MINUTE, 60_000);
+/** Before a key is even checked, so a script guessing at keys cannot hammer the database. */
+const byAddress = makeRateLimiter(60, 60_000);
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { 'cache-control': 'no-store', ...headers } });
@@ -17,11 +20,12 @@ export async function withApiKey(
   req: Request,
   handler: (ctx: { orgId: string; db: PublicApiDb }) => Promise<Response | { status?: number; body: unknown }>,
 ): Promise<Response> {
+  const early = byAddress(clientIp(req));
+  if (!early.ok) return tooManyRequests(early.retryAfterSeconds);
   const auth = await authenticateApiKey(db, req.headers.get('authorization'));
   if (!auth.ok) return json({ error: auth.error }, auth.status, { 'www-authenticate': 'Bearer' });
-  const limit = limiter(auth.keyId);
-  if (!limit.ok)
-    return json({ error: 'Too many requests. Try again shortly.' }, 429, { 'retry-after': String(limit.retryAfterSeconds) });
+  const limit = byKey(auth.keyId);
+  if (!limit.ok) return tooManyRequests(limit.retryAfterSeconds);
   if (!(await getEntitlements(db, auth.orgId)).monitoring)
     return json({ error: 'The API is included with plans that have monitoring.' }, 402);
   const out = await handler({ orgId: auth.orgId, db });

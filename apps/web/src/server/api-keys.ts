@@ -97,26 +97,3 @@ export async function authenticateApiKey(
   return { ok: true, orgId: row.orgId, keyId: row.id };
 }
 
-// ---- Rate limit ----------------------------------------------------------------------------------
-
-/**
- * A simple per-key limit, counted in this server process. On a host that runs several copies each
- * counts on its own, so the real limit can be a few times higher; it is there to stop a runaway
- * script, not to be exact.
- */
-export function makeRateLimiter(limit = REQUESTS_PER_MINUTE, windowMs = 60_000) {
-  const seen = new Map<string, { start: number; count: number }>();
-  return (key: string, now = Date.now()): { ok: boolean; retryAfterSeconds: number } => {
-    if (seen.size > 5000)
-      for (const [k, v] of seen) if (now - v.start >= windowMs) seen.delete(k);
-    const cur = seen.get(key);
-    if (!cur || now - cur.start >= windowMs) {
-      seen.set(key, { start: now, count: 1 });
-      return { ok: true, retryAfterSeconds: 0 };
-    }
-    cur.count++;
-    return cur.count > limit
-      ? { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((cur.start + windowMs - now) / 1000)) }
-      : { ok: true, retryAfterSeconds: 0 };
-  };
-}
