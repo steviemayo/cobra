@@ -11,6 +11,7 @@ import {
 } from '@kestrel/model';
 import { signedBindingsFor } from './bindings';
 import { applyCommandResults, takePendingCommands } from './commands';
+import { updateStep } from './gateway-update-service';
 import { applyReport, promoteDue } from './deployment-service';
 import { deliverAlerts } from './alerts';
 import { getEntitlements } from './billing';
@@ -242,6 +243,13 @@ export async function heartbeat(
   await applyCommandResults(db, gw.id, parsed.data.commandResults, now);
   jobs.push(...(await maybeSweep(db, now)));
   const commands = await takePendingCommands(db, gw.id, now);
+  const updateOrder = await updateStep(
+    db,
+    gw,
+    parsed.data.gatewayVersion,
+    parsed.data.updateReport,
+    now,
+  );
   return {
     status: 200,
     body: {
@@ -256,6 +264,7 @@ export async function heartbeat(
       pollNow: await hasWaitingIntents(db, gw.id, now),
       control: entitlements.control,
       update: { channel: gw.channel, latest: latestVersions()[gw.channel] },
+      ...(updateOrder ? { updateOrder } : {}),
       // Only a gateway that says it shows bookings is sent them; an older one has no use for them.
       schedules: parsed.data.features.includes('schedule')
         ? await schedulesForGateway(db, gw, now)

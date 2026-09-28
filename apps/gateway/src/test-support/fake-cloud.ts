@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { generateKeyPair, signBindings, signManifest } from '@kestrel/crypto';
 import {
@@ -40,6 +40,10 @@ export class FakeCloud {
   schedules: { roomId: string; meetings: unknown[] }[] = [];
   /** Rooms the fake portal is "controlling": the gateway is told to poll fast for them. */
   watching: string[] = [];
+  /** An update order handed to the gateway in every heartbeat response until cleared. */
+  updateOrder: unknown;
+  /** The update bundle the fake portal offers (its download link points back at this server). */
+  bundle: { bytes: Buffer; version: string } | null = null;
   /** Room groups the fake cloud reports in the gateway's config. */
   groups: unknown[] = [];
   readonly queuedIntents: { id: string; roomId: string; intent: unknown }[] = [];
@@ -202,7 +206,21 @@ export class FakeCloud {
         publicKeys: this.publicKeys,
       });
     }
+    // The release host's signed link: no credential, as with the real one.
+    if (req.method === 'GET' && path === '/asset/bundle.zip' && this.bundle) {
+      res.writeHead(200, { 'content-type': 'application/zip' });
+      return void res.end(this.bundle.bytes);
+    }
     if (!authed) return this.json(res, 401, { error: 'Unauthorised' });
+    if (req.method === 'GET' && path === '/bundle') {
+      if (!this.bundle) return this.json(res, 502, { error: 'no bundle' });
+      return this.json(res, 200, {
+        url: `${this.url}/asset/bundle.zip`,
+        sha256: createHash('sha256').update(this.bundle.bytes).digest('hex'),
+        size: this.bundle.bytes.length,
+        version: this.bundle.version,
+      });
+    }
 
     if (req.method === 'POST' && path === '/heartbeat') {
       const parsed = HeartbeatRequest.safeParse(await this.body(req));
@@ -215,6 +233,7 @@ export class FakeCloud {
         watch: this.watching,
         pollNow: this.queuedIntents.length > 0,
         schedules: this.schedules,
+        ...(this.updateOrder ? { updateOrder: this.updateOrder } : {}),
       });
     }
     if (req.method === 'POST' && path === '/poll') {

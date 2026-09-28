@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const GATEWAY_VERSION = '0.2.4';
+export const GATEWAY_VERSION = '0.2.5';
 
 const Env = z.object({
   /** Base URL of the Kestrel cloud, e.g. https://app.kestrel.example */
@@ -22,6 +22,12 @@ const Env = z.object({
   KESTREL_PUBLIC_KEY: z.string().optional(),
   /** How long a new release gets to reach its devices before it is refused and the old one kept. */
   KESTREL_HEALTH_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(300).default(15),
+  /**
+   * Container installs only: where the updater (Watchtower's HTTP API) can be asked to update this
+   * gateway, and the token it expects. Without them a container cannot update itself.
+   */
+  KESTREL_UPDATE_URL: z.string().url().optional(),
+  KESTREL_UPDATE_TOKEN: z.string().optional(),
   KESTREL_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
@@ -37,6 +43,8 @@ export interface GatewayConfig {
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   version: string;
   healthTimeoutMs?: number;
+  updateUrl?: string;
+  updateToken?: string;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): GatewayConfig {
@@ -58,5 +66,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     logLevel: e.KESTREL_LOG_LEVEL,
     version: GATEWAY_VERSION,
     healthTimeoutMs: e.KESTREL_HEALTH_TIMEOUT_SECONDS * 1000,
+    updateUrl: e.KESTREL_UPDATE_URL,
+    updateToken: e.KESTREL_UPDATE_TOKEN,
   };
 }
