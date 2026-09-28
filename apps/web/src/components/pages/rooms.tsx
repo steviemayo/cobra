@@ -6,7 +6,8 @@ import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { RoomsTable } from '@/components/common/rooms-table';
 import { SimpleSelect } from '@/components/common/simple-select';
-import { roomHealth, type RoomHealth } from '@/components/common/status';
+import { designHealth, type DesignHealth } from '@/components/common/status';
+import type { HealthLevel } from '@/components/common/health';
 import { useDialogs } from '@/components/shell/dialogs';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
@@ -20,11 +21,12 @@ const ALL = 'all';
 export function RoomsView() {
   const { orgId, canEdit } = useOrg();
   const { openNewRoom } = useDialogs();
-  const { sites, rooms, isPending } = useEstate();
+  const { sites, rooms, live, isPending } = useEstate();
   const [query, setQuery] = useState('');
   const [site, setSite] = useState(ALL);
   const [type, setType] = useState(ALL);
-  const [health, setHealth] = useState<RoomHealth | typeof ALL>(ALL);
+  const [design, setDesign] = useState<DesignHealth | typeof ALL>(ALL);
+  const [status, setStatus] = useState<HealthLevel | typeof ALL>(ALL);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -33,11 +35,12 @@ export function RoomsView() {
         (!q || r.name.toLowerCase().includes(q) || r.site.name.toLowerCase().includes(q)) &&
         (site === ALL || r.siteId === site) &&
         (type === ALL || r.type === type) &&
-        (health === ALL || roomHealth(r.draft) === health),
+        (design === ALL || designHealth(r.draft) === design) &&
+        (status === ALL || live.get(r.id)?.health.level === status),
     );
-  }, [rooms, query, site, type, health]);
+  }, [rooms, query, site, type, design, status, live]);
 
-  const filtering = query || site !== ALL || type !== ALL || health !== ALL;
+  const filtering = query || site !== ALL || type !== ALL || design !== ALL || status !== ALL;
 
   return (
     <PageContainer>
@@ -47,7 +50,11 @@ export function RoomsView() {
         actions={
           canEdit && (
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" render={<Link href={orgPath(orgId, '/rooms/bulk')} />}>
+              <Button
+                size="sm"
+                variant="outline"
+                render={<Link href={orgPath(orgId, '/rooms/bulk')} />}
+              >
                 <Rows3 data-icon="inline-start" /> Create many
               </Button>
               <Button size="sm" onClick={() => openNewRoom()}>
@@ -101,8 +108,19 @@ export function RoomsView() {
               ]}
             />
             <SimpleSelect
-              value={health}
-              onValueChange={setHealth}
+              value={status}
+              onValueChange={setStatus}
+              options={[
+                { value: ALL, label: 'Any live status' },
+                { value: 'healthy', label: 'Healthy' },
+                { value: 'degraded', label: 'Degraded' },
+                { value: 'down', label: 'Down' },
+                { value: 'unknown', label: 'Unknown' },
+              ]}
+            />
+            <SimpleSelect
+              value={design}
+              onValueChange={setDesign}
               options={[
                 { value: ALL, label: 'Any design status' },
                 { value: 'ok', label: 'Design valid' },
@@ -119,7 +137,8 @@ export function RoomsView() {
                   setQuery('');
                   setSite(ALL);
                   setType(ALL);
-                  setHealth(ALL);
+                  setDesign(ALL);
+                  setStatus(ALL);
                 }}
               >
                 Clear
@@ -136,7 +155,7 @@ export function RoomsView() {
               description="Try a different search or filter."
             />
           ) : (
-            <RoomsTable rooms={filtered} />
+            <RoomsTable rooms={filtered} live={live} />
           )}
         </>
       )}

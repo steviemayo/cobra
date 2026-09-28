@@ -1,24 +1,26 @@
 import type { RouterOutputs } from '@/trpc/types';
 import { cn } from '@/lib/utils';
 
-export type RoomHealth = 'none' | 'errors' | 'warnings' | 'ok';
+// This is the *design* validity of a room's draft (lint errors/warnings), not its live monitoring
+// state. See `HealthLevel`/`HealthPill` in `./health` for how a room is actually doing right now.
+export type DesignHealth = 'none' | 'errors' | 'warnings' | 'ok';
 export type DraftSummary = RouterOutputs['room']['overview'][number]['draft'];
 
-export function roomHealth(draft: DraftSummary): RoomHealth {
+export function designHealth(draft: DraftSummary): DesignHealth {
   if (!draft) return 'none';
   if (draft.errors > 0) return 'errors';
   if (draft.warnings > 0) return 'warnings';
   return 'ok';
 }
 
-const TONE: Record<RoomHealth, string> = {
+const TONE: Record<DesignHealth, string> = {
   none: 'bg-muted-foreground/35',
   errors: 'bg-destructive',
   warnings: 'bg-warning',
   ok: 'bg-success',
 };
 
-export function healthLabel(health: RoomHealth, draft: DraftSummary): string {
+export function designHealthLabel(health: DesignHealth, draft: DraftSummary): string {
   switch (health) {
     case 'none':
       return 'No design yet';
@@ -31,7 +33,7 @@ export function healthLabel(health: RoomHealth, draft: DraftSummary): string {
   }
 }
 
-export function StatusDot({ health, className }: { health: RoomHealth; className?: string }) {
+export function StatusDot({ health, className }: { health: DesignHealth; className?: string }) {
   return (
     <span
       aria-hidden
@@ -40,13 +42,13 @@ export function StatusDot({ health, className }: { health: RoomHealth; className
   );
 }
 
-export function HealthBadge({ draft }: { draft: DraftSummary }) {
-  const health = roomHealth(draft);
+export function DesignBadge({ draft }: { draft: DraftSummary }) {
+  const health = designHealth(draft);
   return (
     <span className="inline-flex items-center gap-2 text-sm">
       <StatusDot health={health} />
       <span className={cn(health === 'none' && 'text-muted-foreground')}>
-        {healthLabel(health, draft)}
+        {designHealthLabel(health, draft)}
       </span>
     </span>
   );

@@ -8,7 +8,7 @@ import { writeAudit } from '../audit';
 import { deviceFeedbackDailyHistory, deviceFeedbackHistory } from '../device-feedback-history';
 import { firmwareReport } from '../firmware-report';
 import { maybeSweep } from '../monitoring';
-import { orgOverview } from '../monitoring-queries';
+import { orgDevices, orgOverview } from '../monitoring-queries';
 import { SITE_SCOPED, siteFilter, type SiteScope } from '../site-scope';
 import { featureProcedure, requireRole, router } from '../trpc';
 import { validTimeZone } from '../usage-analytics';
@@ -54,6 +54,13 @@ export const monitoringRouter = router({
       if (jobs.length) after(() => deliverAlerts(db, jobs));
       return orgOverview(db, ctx.orgId, new Date(), ctx.siteScope);
     }),
+
+  // Every device across the org, flattened, for the org-wide "Devices" list. Polled the same as
+  // overview.
+  devices: monitoringProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId }))
+    .query(({ ctx }) => orgDevices(db, ctx.orgId, ctx.siteScope)),
 
   room: monitoringProcedure
     .meta(SITE_SCOPED)
