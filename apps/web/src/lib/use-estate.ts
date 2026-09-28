@@ -3,6 +3,9 @@ import { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useOrg } from '@/components/shell/org-context';
 import { useTRPC } from '@/trpc/client';
+import type { RouterOutputs } from '@/trpc/types';
+
+export type RoomLive = RouterOutputs['monitoring']['overview']['rooms'][number];
 
 // Shared, cached estate queries: the sidebar tree, breadcrumbs, palette and pages all read these.
 export function useSites() {
@@ -17,9 +20,32 @@ export function useRoomsOverview() {
   return useQuery({ ...trpc.room.overview.queryOptions({ orgId }), staleTime: 30_000 });
 }
 
+/**
+ * Live monitoring state per room (gateway/device/incident health), keyed by room id. Separate from
+ * `room.overview`'s design-draft data — a room can be a perfectly valid design and still be down,
+ * or have design warnings and be fully online. `retry: false` because an org with no monitoring
+ * entitlement gets FORBIDDEN here, not a transient failure: callers should just show "unknown".
+ */
+export function useRoomsLive() {
+  const trpc = useTRPC();
+  const { orgId } = useOrg();
+  const overview = useQuery({
+    ...trpc.monitoring.overview.queryOptions({ orgId }),
+    staleTime: 15_000,
+    refetchInterval: 15_000,
+    retry: false,
+  });
+  const byId = useMemo(
+    () => new Map((overview.data?.rooms ?? []).map((r) => [r.id, r])),
+    [overview.data],
+  );
+  return { byId, isPending: overview.isPending, isAvailable: !overview.isError };
+}
+
 export function useEstate() {
   const sites = useSites();
   const rooms = useRoomsOverview();
+  const live = useRoomsLive();
   const roomsBySite = useMemo(() => {
     const map = new Map<string, NonNullable<typeof rooms.data>>();
     for (const r of rooms.data ?? []) map.set(r.siteId, [...(map.get(r.siteId) ?? []), r]);
@@ -29,6 +55,8 @@ export function useEstate() {
     sites: sites.data ?? [],
     rooms: rooms.data ?? [],
     roomsBySite,
+    live: live.byId,
+    liveAvailable: live.isAvailable,
     isPending: sites.isPending || rooms.isPending,
   };
 }

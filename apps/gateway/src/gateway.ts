@@ -652,10 +652,13 @@ export class Gateway {
         `health check failed (${e instanceof Error ? e.message : String(e)})`,
       );
     }
-    if (unreachable.length > 0) {
-      staged.close();
-      return this.refuse(rec, assigned, `could not reach ${unreachable.join(', ')}`);
-    }
+    // A device not answering yet is a monitoring problem, not a reason to refuse the whole release:
+    // it deploys anyway and the usual device_offline incident picks it up once heartbeats resume.
+    if (unreachable.length > 0)
+      this.log('warn', `Deploying with ${unreachable.length} device(s) not answering`, {
+        roomId,
+        devices: unreachable,
+      });
 
     this.host.activate(staged);
     this.store.saveManifest(result.signed);
@@ -704,10 +707,11 @@ export class Gateway {
       staged.close();
       return fail(`health check failed (${e instanceof Error ? e.message : String(e)})`);
     }
-    if (unreachable.length > 0) {
-      staged.close();
-      return fail(`could not reach ${unreachable.join(', ')}`);
-    }
+    if (unreachable.length > 0)
+      this.log('warn', `Rebinding with ${unreachable.length} device(s) not answering`, {
+        roomId,
+        devices: unreachable,
+      });
     this.host.activate(staged);
     this.store.setJson(keyBindings(roomId), got.raw);
     this.roomErrors.delete(roomId);

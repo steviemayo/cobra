@@ -6,7 +6,8 @@ import { ActivityFeed } from '@/components/common/activity-feed';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader, Stagger, StaggerItem } from '@/components/common/page-header';
 import { RoomsTable } from '@/components/common/rooms-table';
-import { HealthBadge, roomHealth } from '@/components/common/status';
+import { HEALTH_ORDER, HealthPill } from '@/components/common/health';
+import { DesignBadge, designHealth } from '@/components/common/status';
 import { useDialogs } from '@/components/shell/dialogs';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -146,17 +147,24 @@ export function OverviewView() {
   const trpc = useTRPC();
   const { org, orgId, canEdit, canSeeTeam } = useOrg();
   const { openNewSite, openNewRoom } = useDialogs();
-  const { sites, rooms, roomsBySite, isPending } = useEstate();
+  const { sites, rooms, roomsBySite, live, isPending } = useEstate();
   const activity = useQuery({
     ...trpc.audit.list.queryOptions({ orgId, limit: 8 }),
     enabled: canSeeTeam,
     retry: false,
   });
 
-  const devices = rooms.reduce((n, r) => n + (r.draft?.devices ?? 0), 0);
-  const attention = rooms
-    .filter((r) => roomHealth(r.draft) !== 'ok')
-    .sort((a, b) => Number(!!a.draft) - Number(!!b.draft));
+  // Live problems first: this is "what's actually broken right now", not a lint pass over designs.
+  const liveIssues = rooms
+    .filter((r) => {
+      const level = live.get(r.id)?.health.level;
+      return level === 'degraded' || level === 'down';
+    })
+    .sort(
+      (a, b) =>
+        HEALTH_ORDER[live.get(a.id)!.health.level] - HEALTH_ORDER[live.get(b.id)!.health.level],
+    );
+  const designIssues = rooms.filter((r) => designHealth(r.draft) !== 'ok');
   const hasDesign = rooms.some((r) => r.draft);
   const onboarding = !isPending && (!sites.length || !rooms.length || !hasDesign);
 
@@ -187,11 +195,19 @@ export function OverviewView() {
             <div className="grid grid-cols-2 divide-x divide-y overflow-hidden rounded-lg border sm:grid-cols-4 sm:divide-y-0">
               <Stat label="Sites" value={sites.length} />
               <Stat label="Rooms" value={rooms.length} />
-              <Stat label="Devices modelled" value={devices} />
               <Stat
-                label="Need attention"
-                value={attention.length}
-                hint={attention.length ? 'Errors or no design yet' : 'All designs valid'}
+                label="Live issues"
+                value={liveIssues.length}
+                hint={
+                  liveIssues.length ? 'Degraded or down right now' : 'Everything reporting is fine'
+                }
+              />
+              <Stat
+                label="Needs design work"
+                value={designIssues.length}
+                hint={
+                  designIssues.length ? 'Errors, warnings or no design yet' : 'All designs valid'
+                }
               />
             </div>
           </StaggerItem>
@@ -260,7 +276,7 @@ export function OverviewView() {
                               No rooms in this site yet.
                             </p>
                           ) : (
-                            <RoomsTable rooms={siteRooms} showSite={false} />
+                            <RoomsTable rooms={siteRooms} live={live} showSite={false} />
                           )}
                         </div>
                       );
@@ -271,14 +287,41 @@ export function OverviewView() {
             </div>
 
             <div className="space-y-6">
-              <Section title="Needs attention">
-                {attention.length === 0 ? (
+              <Section title="Live issues">
+                {liveIssues.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    {rooms.length ? 'Every room has a valid design.' : 'Nothing to review yet.'}
+                    Nothing is degraded or down right now.
                   </p>
                 ) : (
                   <ul className="divide-y rounded-lg border">
-                    {attention.slice(0, 6).map((r) => (
+                    {liveIssues.slice(0, 6).map((r) => (
+                      <li key={r.id}>
+                        <Link
+                          href={orgPath(orgId, `/rooms/${r.id}/monitoring`)}
+                          className="flex items-center gap-3 px-3 py-2.5 text-sm transition-colors hover:bg-muted/50"
+                        >
+                          <DoorOpen className="size-4 text-muted-foreground" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-medium">{r.name}</span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {r.site.name}
+                            </span>
+                          </span>
+                          <HealthPill
+                            level={live.get(r.id)!.health.level}
+                            reasons={live.get(r.id)!.health.reasons}
+                          />
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Section>
+
+              {designIssues.length > 0 && (
+                <Section title="Needs design work">
+                  <ul className="divide-y rounded-lg border">
+                    {designIssues.slice(0, 6).map((r) => (
                       <li key={r.id}>
                         <Link
                           href={orgPath(orgId, `/rooms/${r.id}`)}
@@ -291,13 +334,13 @@ export function OverviewView() {
                               {r.site.name}
                             </span>
                           </span>
-                          <HealthBadge draft={r.draft} />
+                          <DesignBadge draft={r.draft} />
                         </Link>
                       </li>
                     ))}
                   </ul>
-                )}
-              </Section>
+                </Section>
+              )}
 
               {canSeeTeam && (
                 <Section

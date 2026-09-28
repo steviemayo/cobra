@@ -25,6 +25,51 @@ export interface RoomLive {
   openIncidents: number;
 }
 
+export interface DeviceLive {
+  deviceId: string;
+  name: string;
+  online: boolean;
+  since: Date;
+  roomId: string;
+  roomName: string;
+  siteId: string;
+  siteName: string;
+}
+
+export type DevicesDb = Pick<PrismaClient, 'room' | 'site' | 'deviceStatus'>;
+
+/** Every device across the org's in-scope rooms, flattened for the org-wide monitoring list. */
+export async function orgDevices(
+  db: DevicesDb,
+  orgId: string,
+  scope: SiteScope = null,
+): Promise<DeviceLive[]> {
+  const [rooms, sites, devices] = await Promise.all([
+    db.room.findMany({ where: { orgId } }),
+    db.site.findMany({ where: { orgId } }),
+    db.deviceStatus.findMany({ where: { orgId }, orderBy: { name: 'asc' } }),
+  ]);
+  const inScopeRooms = rooms.filter((r) => inScope(scope, r.siteId));
+  const roomById = new Map(inScopeRooms.map((r) => [r.id, r]));
+  const siteName = new Map(sites.map((s) => [s.id, s.name]));
+  const out: DeviceLive[] = [];
+  for (const d of devices) {
+    const room = roomById.get(d.roomId);
+    if (!room) continue;
+    out.push({
+      deviceId: d.deviceId,
+      name: d.name,
+      online: d.online,
+      since: d.since,
+      roomId: room.id,
+      roomName: room.name,
+      siteId: room.siteId,
+      siteName: siteName.get(room.siteId) ?? '',
+    });
+  }
+  return out;
+}
+
 export interface GatewayLive {
   id: string;
   name: string;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { orgOverview, type OverviewDb } from './monitoring-queries';
+import { orgDevices, orgOverview, type OverviewDb } from './monitoring-queries';
 import { table } from './test-db';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
@@ -44,8 +44,16 @@ function world() {
     },
   ]);
   const deviceStatus = table([
-    { id: 'd1', orgId: ORG, roomId: 'r1', online: true },
-    { id: 'd2', orgId: ORG, roomId: 'r2', online: false },
+    {
+      id: 'd1',
+      orgId: ORG,
+      roomId: 'r1',
+      deviceId: 'projector',
+      name: 'Projector',
+      online: true,
+      since: NOW,
+    },
+    { id: 'd2', orgId: ORG, roomId: 'r2', deviceId: 'mic', name: 'Mic', online: false, since: NOW },
   ]);
   const incident = table([
     { id: 'i1', orgId: ORG, status: 'open', roomId: 'r1', gatewayId: 'g1', severity: 'warning' },
@@ -93,5 +101,33 @@ describe('the live overview', () => {
     expect(o.rooms).toEqual([]);
     expect(o.gateways).toEqual([]);
     expect(o.incidents).toEqual({ open: 0, critical: 0 });
+  });
+});
+
+describe('the flat device list', () => {
+  it('joins every device with its room and site', async () => {
+    const d = await orgDevices(world(), ORG);
+    expect(d).toHaveLength(2);
+    expect(d.find((x) => x.deviceId === 'projector')).toMatchObject({
+      name: 'Projector',
+      online: true,
+      roomName: 'Boardroom',
+      siteName: 'Head office',
+    });
+    expect(d.find((x) => x.deviceId === 'mic')).toMatchObject({
+      name: 'Mic',
+      online: false,
+      roomName: 'Dock office',
+      siteName: 'Warehouse',
+    });
+  });
+
+  it('a site-limited provider sees only its site’s devices', async () => {
+    const d = await orgDevices(world(), ORG, ['s1']);
+    expect(d.map((x) => x.deviceId)).toEqual(['projector']);
+  });
+
+  it('a scope with no sites sees no devices', async () => {
+    expect(await orgDevices(world(), ORG, [])).toEqual([]);
   });
 });
