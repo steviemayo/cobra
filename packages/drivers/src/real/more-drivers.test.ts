@@ -122,6 +122,24 @@ describe('generic serial driver', () => {
   it('is what a generic serial device gets', () => {
     expect(createDriver(device('dsp', { kind: 'generic', protocol: 'serial' }, settings), ctx)).toBeInstanceOf(SerialDriver);
   });
+
+  it('never runs an "expect" pattern that could hang the gateway', async () => {
+    const logs: unknown[][] = [];
+    const loggingCtx: DriverContext = { log: (...a) => void logs.push(a) };
+    const f = fakeSerial();
+    const d = new SerialDriver(
+      device('dsp', { kind: 'generic', protocol: 'serial' }, { ...settings, expect: '(a+)+$' }),
+      loggingCtx,
+      async () => f.port,
+    );
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    // With the unsafe pattern never applied there is nothing to wait for, so this resolves at once.
+    await d.send({ type: 'power', on: true });
+    expect(d.getState().power).toBe('on');
+    expect(logs.some((l) => String(l[1]).includes('could hang the gateway'))).toBe(true);
+  });
 });
 
 // ---- Generic REST -----------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import {
   escapeJson,
   escapeLine,
   escapePath,
+  hasCatastrophicBacktracking,
   renderTemplate,
   resolveSettings,
   type Device,
@@ -24,9 +25,35 @@ const MAX_BACKOFF_MS = 15_000;
 
 type Values = Record<string, string | number | boolean>;
 
-/** Only the patterns that read feedback out of a line of text or a reply body. */
-function compile(spec: DriverSpec) {
-  return spec.feedback.patterns.map((p) => ({ ...p, re: new RegExp(p.match) }));
+/**
+ * Only the patterns that read feedback out of a line of text or a reply body. Saving a driver
+ * already refuses a pattern shaped for catastrophic backtracking (driver-spec.ts), but a release
+ * signed before that check existed could still carry one, so it is checked again here: skipped
+ * (never run) rather than left free to hang the gateway on a line that almost, but does not
+ * quite, match.
+ */
+function compile(spec: DriverSpec, log: DriverContext['log']) {
+  return spec.feedback.patterns.flatMap((p) => {
+    if (hasCatastrophicBacktracking(p.match)) {
+      log('error', `Feedback pattern "${p.match}" could hang the gateway and was not loaded`, {
+        driver: spec.id,
+      });
+      return [];
+    }
+    return [{ ...p, re: new RegExp(p.match) }];
+  });
+}
+
+/** A safe `expect` regex, or null (never matches, never runs) for one that could hang the gateway. */
+function safeExpect(source: string | undefined, spec: DriverSpec, log: DriverContext['log']): RegExp | null {
+  if (!source) return null;
+  if (hasCatastrophicBacktracking(source)) {
+    log('error', `"expect" pattern "${source}" could hang the gateway and was not used`, {
+      driver: spec.id,
+    });
+    return null;
+  }
+  return new RegExp(source);
 }
 
 export class DeclarativeDriver extends BaseDriver {
@@ -55,7 +82,7 @@ export class DeclarativeDriver extends BaseDriver {
     const r = resolveSettings(spec, device.settings);
     this.settings = r.values;
     this.missing = r.missing;
-    this.patterns = compile(spec);
+    this.patterns = compile(spec, ctx.log);
     this.state.online = false;
   }
 
@@ -286,7 +313,7 @@ export class DeclarativeDriver extends BaseDriver {
         this.waiting = this.waiting.filter((w) => w.timer !== timer);
         reject(new Error(`${this.device.name} did not answer`));
       }, this.tcp!.timeoutMs);
-      this.waiting.push({ re: new RegExp(action.expect), resolve, reject, timer });
+      this.waiting.push({ re: safeExpect(action.expect, this.spec, this.ctx.log), resolve, reject, timer });
     });
     socket.write(this.text(action, values) + term);
     return wait;
@@ -297,7 +324,7 @@ export class DeclarativeDriver extends BaseDriver {
     const t = this.tcp!;
     return new Promise((resolve, reject) => {
       const socket = connect({ host: this.host, port: this.port });
-      const expect = action?.expect ? new RegExp(action.expect) : null;
+      const expect = safeExpect(action?.expect, this.spec, this.ctx.log);
       let buffer = '';
       let done = false;
       const finish = (err?: Error) => {
@@ -372,7 +399,8 @@ export class DeclarativeDriver extends BaseDriver {
     });
     const text = (await res.text()).slice(0, MAX_REPLY_BYTES);
     if (!allowAny && !res.ok) throw new Error(`${this.device.name} answered HTTP ${res.status}`);
-    if (action.expect && !new RegExp(action.expect).test(text))
+    const expect = safeExpect(action.expect, this.spec, this.ctx.log);
+    if (expect && !expect.test(text))
       throw new Error(`${this.device.name} sent an unexpected reply`);
     return text;
   }

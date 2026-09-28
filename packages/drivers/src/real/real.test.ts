@@ -350,6 +350,22 @@ describe('generic TCP driver', () => {
     expect(d.getState().online).toBe(false);
   });
 
+  it('never runs an "expect" pattern that could hang the gateway, typed straight into the device settings', async () => {
+    const logs: unknown[][] = [];
+    const loggingCtx: DriverContext = { log: (...a) => void logs.push(a) };
+    // No feedback channel here, so with nothing to wait for it sends and resolves at once,
+    // exactly as if no "expect" had been set at all.
+    const dev = await tcpDevice();
+    const d = new GenericTcpDriver(
+      dsp({ host: '127.0.0.1', port: dev.port, commands, expect: '(a+)+$' }),
+      loggingCtx,
+    );
+    drivers.push(d);
+    await d.send({ type: 'power', on: true });
+    expect(d.getState().power).toBe('on');
+    expect(logs.some((l) => String(l[1]).includes('could hang the gateway'))).toBe(true);
+  });
+
   it('checks the device is reachable when started, so a release can tell a wrong address', async () => {
     const dev = await tcpDevice();
     const up = new GenericTcpDriver(dsp({ host: '127.0.0.1', port: dev.port, commands }), ctx);

@@ -1,5 +1,5 @@
 import { connect, type Socket } from 'node:net';
-import type { Device, DeviceCommand } from '@kestrel/model';
+import { hasCatastrophicBacktracking, type Device, type DeviceCommand } from '@kestrel/model';
 import { BaseDriver } from './base';
 import { renderGenericCommand } from './generic-commands';
 import type { DriverContext } from './types';
@@ -70,7 +70,16 @@ export class GenericTcpDriver extends BaseDriver {
     const terminator = this.setting<string>('terminator', '\r\n');
     const timeoutMs = this.setting<number>('timeoutMs', 2000);
     const expectSource = this.setting<string | undefined>('expect', undefined);
-    const expect = expectSource ? new RegExp(expectSource) : null;
+    // Typed straight into the device's settings, so never checked at authoring time the way a
+    // driver's own patterns are: skip (never matches) rather than risk a hung gateway.
+    let expect: RegExp | null = null;
+    if (expectSource) {
+      if (hasCatastrophicBacktracking(expectSource))
+        this.ctx.log('error', `"expect" pattern "${expectSource}" could hang the gateway and was not used`, {
+          device: this.device.id,
+        });
+      else expect = new RegExp(expectSource);
+    }
     return new Promise((resolve, reject) => {
       const socket = connect({ host, port });
       let reply = '';

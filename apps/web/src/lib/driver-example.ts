@@ -3,6 +3,7 @@ import {
   commandValues,
   escapeLine,
   escapePath,
+  hasCatastrophicBacktracking,
   renderTemplate,
   resolveSettings,
 } from '@kestrel/model';
@@ -71,6 +72,9 @@ export function readFeedback(raw: unknown, line: string): FeedbackReading[] {
   const spec = parsed.data;
   const out: FeedbackReading[] = [];
   for (const p of spec.feedback.patterns) {
+    // Saving already refuses a pattern shaped like this (driver-spec.ts), but this preview runs
+    // against whatever is typed into the editor before that check has had a chance to run.
+    if (hasCatastrophicBacktracking(p.match)) continue;
     let m: RegExpExecArray | null;
     try {
       m = new RegExp(p.match).exec(line);

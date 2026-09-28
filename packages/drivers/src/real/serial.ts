@@ -1,4 +1,4 @@
-import type { Device, DeviceCommand } from '@kestrel/model';
+import { hasCatastrophicBacktracking, type Device, type DeviceCommand } from '@kestrel/model';
 import { BaseDriver } from './base';
 import { renderGenericCommand } from './generic-commands';
 import type { DriverContext } from './types';
@@ -141,8 +141,12 @@ export class SerialDriver extends BaseDriver {
     const port = this.port;
     if (!port?.isOpen) this.fail('the serial port is not open');
     const expectSource = this.setting<string | undefined>('expect', undefined);
+    if (expectSource && hasCatastrophicBacktracking(expectSource))
+      this.ctx.log('error', `"expect" pattern "${expectSource}" could hang the gateway and was not used`, {
+        device: this.device.id,
+      });
     const wait = new Promise<void>((resolve, reject) => {
-      if (!expectSource) return resolve();
+      if (!expectSource || hasCatastrophicBacktracking(expectSource)) return resolve();
       const timer = setTimeout(() => {
         this.waiting = this.waiting.filter((w) => w.timer !== timer);
         reject(new Error(`${this.device.name} did not respond`));

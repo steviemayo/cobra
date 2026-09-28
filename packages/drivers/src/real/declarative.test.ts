@@ -139,6 +139,50 @@ describe('firmware from a declarative driver', () => {
   });
 });
 
+describe('a feedback or "expect" pattern that could hang the gateway', () => {
+  const withBadPattern = {
+    ...amp(true),
+    feedback: {
+      poll: [{ action: { send: 'STATUS?' }, everyMs: 1000 }],
+      patterns: [...amp(true).feedback.patterns, { match: '(a+)+$', set: 'firmware', value: '1' }],
+    },
+  };
+
+  it('is never loaded, but every other feedback pattern still works', async () => {
+    const logs: unknown[][] = [];
+    const loggingCtx: DriverContext = { log: (...a) => void logs.push(a) };
+    const tcp = await fakeTcp();
+    const d = new DeclarativeDriver(
+      dev({ host: '127.0.0.1', port: tcp.port }),
+      loggingCtx,
+      DriverSpec.parse(withBadPattern),
+    );
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().power === 'off');
+    expect(d.getState().firmware).toBeUndefined();
+    expect(logs.some((l) => String(l[1]).includes('could hang the gateway'))).toBe(true);
+  });
+
+  it('is never used for a command’s "expect" either', async () => {
+    const logs: unknown[][] = [];
+    const loggingCtx: DriverContext = { log: (...a) => void logs.push(a) };
+    const tcp = await fakeTcp();
+    const withBadExpect = { ...amp(true), commands: { ...amp(true).commands, 'power.on': { send: 'PWR ON', expect: '(a+)+$' } } };
+    const d = new DeclarativeDriver(
+      dev({ host: '127.0.0.1', port: tcp.port }),
+      loggingCtx,
+      DriverSpec.parse(withBadExpect),
+    );
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    // With no safe "expect" to wait for, the command resolves as soon as it is written.
+    await d.send({ type: 'power', on: true });
+    expect(logs.some((l) => String(l[1]).includes('could hang the gateway'))).toBe(true);
+  });
+});
+
 describe('a driver over TCP with a held connection', () => {
   it('goes online, reads feedback the device volunteers, and sends scaled values', async () => {
     const dev = await fakeTcp();
