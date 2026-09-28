@@ -6,6 +6,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { verifyPin } from '@kestrel/crypto';
 import { PanelClientMessage, type PanelServerMessage } from '@kestrel/model';
 import type { WebSocket } from 'ws';
+import { localAdmin, type LocalAdminOptions } from './local-admin';
 import type { Logger } from './log';
 import type { PhoneLinks } from './phone';
 import type { ScheduleStore } from './schedule';
@@ -28,6 +29,8 @@ export interface PanelServerOptions {
   qrRefreshMs?: number;
   /** When set, panels are sent the room's bookings from its calendar. */
   schedule?: ScheduleStore;
+  /** When set, the gateway's own status page (`/`) and admin page (`/admin`) are served. */
+  admin?: Omit<LocalAdminOptions, 'host' | 'log'>;
 }
 
 const PLACEHOLDER_PAGE = `<!doctype html><meta charset="utf-8"><title>Kestrel panel</title>
@@ -70,6 +73,8 @@ export async function createPanelServer(opts: PanelServerOptions): Promise<Fasti
   // serve:false decorates reply.sendFile without exposing the whole directory over HTTP;
   // only the routes below hand files out.
   if (built) await app.register(fastifyStatic, { root: dir, serve: false });
+
+  if (opts.admin) await app.register(localAdmin, { host, log, ...opts.admin });
 
   app.get('/health', async () => ({
     ok: true,

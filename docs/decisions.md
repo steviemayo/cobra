@@ -546,3 +546,24 @@ A gateway with no enrolment token, a used or expired one, or a deleted record on
 | T-3 | **Guardrails for an endpoint anyone can reach:** strictly bounded payload (4 KB, zod length limits), only a status comes back, the secret is stored hashed, at most 500 rows are held and one public address can add 10 new installs a day (counted in the database, because in-memory limits do not survive serverless), and rows not seen for 30 days (claimed ones after 7) are deleted by the existing daily retention cron | The list must not be a way to fill the database, or to learn anything about the platform |
 | T-4 | A gateway with a token that works never announces. One whose token is refused (used, expired, wrong) falls back to announcing instead of erroring for ever; one that is waiting to be claimed is not counted as a failure and logs once | Keeps today's behaviour for every configured install, and turns the stuck case into something visible |
 | T-5 | Unclaimed gateways cannot be updated from the portal (no organisation owns them); once claimed and enrolled they update like any other | The update request lives on the organisation's gateway record |
+
+## Step U: the gateway's own pages (2026-09-28)
+
+**From the user**
+
+Plan out whether local gateways need a UI: panel links, reset / enter a new token, discovery and so on
+
+**Found while investigating**
+
+The gateway served only `/health`, `/room/:id` and the panel socket. Nobody on site could find a panel link, and a new token meant editing `gateway.env` (or the Windows tray's "Change cloud URL"). With claiming from the portal (T) the token is rarely needed, so what was missing is visibility and recovery
+
+**Made while building**
+
+| ID | Decision | Why |
+| --- | --- | --- |
+| U-1 | **`/` is a status page, open on the network:** connected or not, version, last contact, control on/off, update state, and each room with its panel link. No token, credential or code. An unclaimed gateway shows its install ID. Server-rendered HTML with no scripts (CSP `default-src 'none'`), refreshing every 30s | Panels are already open on the LAN, so the room list gives little away; it works offline and needs no build |
+| U-2 | **`/admin` is behind an admin code** in `admin-code.txt` in the data folder (`XXXX-XXXX`, made on first start, never logged). Five wrong codes lock that address for a minute; a session lasts 30 minutes, cookie `HttpOnly` + `SameSite=Strict`; forms from another origin are refused. Not loopback-only, because a published Docker port arrives from the bridge address | Needs no setup, works the same for Docker and Windows, and the file is readable only by someone with access to the machine (on Windows the folder's ACL is the default, so any local user can read it) |
+| U-3 | **Enter a token** tries it with the cloud first: a wrong token changes nothing and says why. A good one on an already-enrolled gateway **moves it**: the old organisation's rooms, releases, addresses, phone secrets, groups and unsent events are removed before the new credential is saved | The old organisation's events must not be filed under the new one, and its rooms must not keep running |
+| U-4 | **Reset** (type RESET) does the same wipe, forgets the install id (a new one is made, so staff see a fresh unclaimed gateway rather than a claim that was already used) and does not use the token from the settings again. Devices are not touched. Both are in the gateway log | Recovery without touching files |
+| U-5 | Cloud round trips are now queued one at a time, and a change of organisation holds them off (`exclusive`); a refused credential is forgotten only if it is still the one that was refused | A late reply for the old credential must not delete the new one or reload the old rooms |
+| U-6 | **Not built:** local device discovery (the portal's "Find devices" already does it, and it only matters when the gateway is offline), changing the cloud URL or restarting from the page (the tray and compose file do it), a QR code on the status page (needs a new dependency) |  |
