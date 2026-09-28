@@ -260,6 +260,7 @@ export class Gateway {
     } catch (e) {
       this.failures++;
       const unreachable = e instanceof CloudError && e.unreachable;
+      if (e instanceof CloudError && e.unauthorised) this.forgetCredential();
       this.log(unreachable ? 'warn' : 'error', 'Cloud sync failed', {
         error: e instanceof Error ? e.message : String(e),
         attempt: this.failures,
@@ -267,6 +268,24 @@ export class Gateway {
       // Back off, but never stop trying, and never touch running rooms.
       this.schedule(Math.min(MAX_BACKOFF_MS, 5000 * 2 ** Math.min(this.failures - 1, 4)));
     }
+  }
+
+  /**
+   * The cloud rejects this credential on every authenticated call and always will (it does a plain
+   * lookup by credential hash - see `authenticateGateway` - so 401 here means the gateway's record
+   * was deleted or its credential otherwise invalidated, not a transient blip). Forget it so the
+   * next tick re-enrols from `KESTREL_ENROLL_TOKEN` instead of retrying a dead credential forever;
+   * with no token configured, `ensureEnrolled` will raise that specific error instead.
+   */
+  private forgetCredential() {
+    if (!this.store.get(KEY_CREDENTIAL)) return;
+    this.store.delete(KEY_CREDENTIAL);
+    this.store.delete(KEY_IDENTITY);
+    this.store.delete(KEY_PUBLIC_KEYS);
+    this.store.delete(KEY_CONFIG_VERSION);
+    this.log('warn', 'Credential no longer valid; forgetting it and will try to re-enrol', {
+      hasEnrollToken: !!this.cfg.enrollToken,
+    });
   }
 
   private async ensureEnrolled(): Promise<void> {
@@ -394,6 +413,7 @@ export class Gateway {
       // Something just changed, so report it back quickly.
       if (res.intents.length > 0) next = 250;
     } catch (e) {
+      if (e instanceof CloudError && e.unauthorised) this.forgetCredential();
       this.log('warn', 'Portal control poll failed', {
         error: e instanceof Error ? e.message : String(e),
       });
