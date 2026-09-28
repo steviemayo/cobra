@@ -1,5 +1,6 @@
 import { db } from '@kestrel/db';
 import { announce } from '@/server/gateway-announce';
+import { readJson } from '@/server/gateway-http';
 import { clientIp, makeRateLimiter, tooManyRequests } from '@/server/rate-limit';
 
 export const dynamic = 'force-dynamic';
@@ -17,14 +18,8 @@ export async function POST(req: Request) {
   const ip = clientIp(req);
   const limit = byAddress(ip);
   if (!limit.ok) return tooManyRequests(limit.retryAfterSeconds);
-  const length = Number(req.headers.get('content-length') ?? 0);
-  if (length > MAX_BODY) return Response.json({ error: 'Too large' }, { status: 400 });
-  let raw: unknown;
-  try {
-    raw = await req.json();
-  } catch {
-    raw = undefined;
-  }
+  // Checked against the bytes actually sent, not the content-length header a client could lie about.
+  const raw = await readJson(req, MAX_BODY);
   const r = await announce(db, raw, {
     ip: ip === 'unknown' ? null : ip,
     key: process.env.KESTREL_SECRETS_KEY || undefined,

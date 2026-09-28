@@ -139,6 +139,45 @@ describe('firmware from a declarative driver', () => {
   });
 });
 
+describe('a device address that is really the cloud, not a device', () => {
+  it('never connects, and never starts polling for feedback', async () => {
+    const logs: unknown[][] = [];
+    const loggingCtx: DriverContext = { log: (...a) => void logs.push(a) };
+    const d = new DeclarativeDriver(
+      dev({ host: '169.254.169.254', port: 80 }),
+      loggingCtx,
+      DriverSpec.parse(amp(true)),
+    );
+    drivers.push(d);
+    d.start();
+    await wait(100);
+    expect(d.getState().online).toBe(false);
+    expect(logs.some((l) => String(l[1]).includes('cloud metadata'))).toBe(true);
+  });
+
+  it('refuses a command too, and is not fooled by an IPv6 spelling of it', async () => {
+    const d = new DeclarativeDriver(
+      dev({ host: '[::ffff:169.254.169.254]', port: 80 }),
+      ctx,
+      DriverSpec.parse(amp(false)),
+    );
+    drivers.push(d);
+    await expect(d.send({ type: 'power', on: true })).rejects.toThrow('cloud metadata');
+  });
+
+  it('is allowed through when the device settings say so explicitly', async () => {
+    // Nothing is actually listening on 169.254.169.254:1 here, so this only proves the address
+    // check itself steps aside; the connection then fails for the ordinary reason.
+    const d = new DeclarativeDriver(
+      dev({ host: '169.254.169.254', port: 1, allowLocalAddress: true }),
+      ctx,
+      DriverSpec.parse(amp(false)),
+    );
+    drivers.push(d);
+    await expect(d.send({ type: 'power', on: true })).rejects.not.toThrow('cloud metadata');
+  });
+});
+
 describe('a feedback or "expect" pattern that could hang the gateway', () => {
   const withBadPattern = {
     ...amp(true),

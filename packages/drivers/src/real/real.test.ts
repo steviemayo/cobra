@@ -366,6 +366,28 @@ describe('generic TCP driver', () => {
     expect(logs.some((l) => String(l[1]).includes('could hang the gateway'))).toBe(true);
   });
 
+  it('never connects to a cloud metadata address, at start or on a command, unless the device settings allow it', async () => {
+    const logs: unknown[][] = [];
+    const loggingCtx: DriverContext = { log: (...a) => void logs.push(a) };
+    const meta = new GenericTcpDriver(dsp({ host: '169.254.169.254', port: 80, commands }), loggingCtx);
+    drivers.push(meta);
+    meta.start();
+    await wait(100);
+    expect(meta.getState().online).toBe(false);
+    expect(logs.some((l) => String(l[1]).includes('cloud metadata'))).toBe(true);
+
+    await expect(meta.send({ type: 'power', on: true })).rejects.toThrow('cloud metadata');
+
+    // Nothing is listening on 169.254.169.254:1, so this only proves the check steps aside; the
+    // connection then fails for the ordinary reason.
+    const allowed = new GenericTcpDriver(
+      dsp({ host: '169.254.169.254', port: 1, commands, allowLocalAddress: true }),
+      ctx,
+    );
+    drivers.push(allowed);
+    await expect(allowed.send({ type: 'power', on: true })).rejects.not.toThrow('cloud metadata');
+  });
+
   it('checks the device is reachable when started, so a release can tell a wrong address', async () => {
     const dev = await tcpDevice();
     const up = new GenericTcpDriver(dsp({ host: '127.0.0.1', port: dev.port, commands }), ctx);

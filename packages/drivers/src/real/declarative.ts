@@ -13,6 +13,7 @@ import {
   type DriverSpec,
   type QuickActionId,
 } from '@kestrel/model';
+import { isLinkLocal, localAddressAllowed } from './address-guard';
 import { BaseDriver } from './base';
 import type { DriverContext } from './types';
 
@@ -95,6 +96,12 @@ export class DeclarativeDriver extends BaseDriver {
   private get host() {
     return String(this.settings.host ?? '');
   }
+  /** True if `host` is the gateway's own address and this device's settings do not allow that. */
+  private blockedAddress(): boolean {
+    // The escape hatch is read from the device's raw settings, not `this.settings`: only settings
+    // the driver's own spec declares survive resolveSettings, and no driver declares this one.
+    return !!this.host && isLinkLocal(this.host) && !localAddressAllowed(this.device.settings);
+  }
   private get port() {
     const fromSetting = typeof this.settings.port === 'number' ? this.settings.port : undefined;
     return (
@@ -119,6 +126,14 @@ export class DeclarativeDriver extends BaseDriver {
         device: this.device.name,
         missing: this.missing,
       });
+      return;
+    }
+    if (this.blockedAddress()) {
+      this.ctx.log(
+        'error',
+        `${this.device.name}'s address (${this.host}) is a cloud metadata address, not a device, and was refused`,
+        { device: this.device.name, hint: 'Add "allowLocalAddress": true to this device’s settings if this is deliberate' },
+      );
       return;
     }
     this.closed = false;
@@ -410,6 +425,10 @@ export class DeclarativeDriver extends BaseDriver {
   private async run(key: string, values: Values, apply: () => void): Promise<void> {
     const action = this.spec.commands[key];
     if (!action) this.fail(`does not support "${key}"`);
+    if (this.blockedAddress())
+      this.fail(
+        `${this.host} is a cloud metadata address, not a device (add "allowLocalAddress": true to allow it)`,
+      );
     try {
       if (this.tcp) {
         if (this.tcp.keepOpen) await this.sendOnSocket(action, values);
