@@ -23,6 +23,8 @@ const GW = '22222222-2222-4222-8222-222222222222';
 const T0 = new Date('2026-09-28T10:00:00Z');
 const at = (ms: number) => new Date(T0.getTime() + ms);
 const SHA = 'a'.repeat(64);
+/** What CI's signature file looks like: base64 of an Ed25519 signature (64 bytes). */
+const SIGNATURE = Buffer.alloc(64, 7).toString('base64');
 
 const release = (version: string | null = '0.2.5'): ChannelRelease => ({
   channel: 'stable',
@@ -332,6 +334,7 @@ describe('reading the release', () => {
     assets: unknown[],
     versionText = '0.2.5\n',
     redirect: string | null = 'https://objects.example/signed',
+    signatureText = SIGNATURE,
   ) => {
     const calls: string[] = [];
     const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -340,6 +343,7 @@ describe('reading the release', () => {
       if (url.includes('/releases/tags/'))
         return new Response(JSON.stringify({ assets }), { status: 200 });
       if (url.endsWith('/asset/1')) return new Response(versionText, { status: 200 });
+      if (url.endsWith('/asset/3')) return new Response(`${signatureText}\n`, { status: 200 });
       if (url.endsWith('/asset/2') && init?.redirect === 'manual')
         return redirect
           ? new Response(null, { status: 302, headers: { location: redirect } })
@@ -348,7 +352,8 @@ describe('reading the release', () => {
     }) as typeof fetch;
     return { fetcher, calls };
   };
-  const assets = release().assets;
+  const signatureAsset = { name: 'kestrel-gateway-win-x64.zip.sig', url: 'https://api.example/asset/3' };
+  const assets = [...release().assets, signatureAsset];
 
   it('reads the version and the bundle digest, and caches for a few minutes', async () => {
     const g = github(assets);
@@ -377,7 +382,22 @@ describe('reading the release', () => {
       sha256: SHA,
       size: 1234,
       version: '0.2.5',
+      signature: SIGNATURE,
     });
+  });
+
+  it('passes CI’s signature on untouched, for the gateway to check with a key the portal does not hold', async () => {
+    const g = github(assets);
+    const loc = await bundleLocation('stable', { fetcher: g.fetcher, env: {} });
+    expect(loc?.signature).toBe(SIGNATURE);
+  });
+
+  it('offers the bundle without a signature when the release has none, or a malformed one', async () => {
+    const without = github(assets.filter((a) => a.name !== 'kestrel-gateway-win-x64.zip.sig'));
+    expect((await bundleLocation('stable', { fetcher: without.fetcher, env: {} }))?.signature).toBeUndefined();
+    clearReleaseCache();
+    const garbled = github(assets, '0.2.5\n', 'https://objects.example/signed', '<html>not a signature</html>');
+    expect((await bundleLocation('stable', { fetcher: garbled.fetcher, env: {} }))?.signature).toBeUndefined();
   });
 
   it('says so when the release cannot be read', async () => {

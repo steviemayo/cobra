@@ -60,6 +60,21 @@ jobs:
           Copy-Item "node-extract/node-$node-win-x64/node.exe" bundle/app/runtime/node.exe
           Compress-Archive -Path bundle/app/* -DestinationPath kestrel-gateway-win-x64.zip
           Copy-Item bundle/app/VERSION VERSION
+      - name: Sign the bundle (the release key exists only in this workflow's secrets)
+        if: github.event_name != 'pull_request'
+        env:
+          GATEWAY_RELEASE_SIGNING_KEY: ${{ secrets.GATEWAY_RELEASE_SIGNING_KEY }}
+        run: |
+          # Gateways install a bundle only if this signature checks out, so an unsigned one is never published.
+          if (-not $env:GATEWAY_RELEASE_SIGNING_KEY) {
+            Write-Error 'GATEWAY_RELEASE_SIGNING_KEY is not set, so the bundle cannot be signed and will not be published.'
+            exit 1
+          }
+          $version = (Get-Content VERSION).Trim()
+          pnpm --filter @kestrel/gateway exec tsx scripts/sign-release.ts "$PWD/kestrel-gateway-win-x64.zip" $version
+          # The same check update.ps1 makes on the gateway, against the public key committed in the repo:
+          # catches a secret that does not belong to it before gateways find out.
+          pnpm --filter @kestrel/gateway exec node --disable-warning=ExperimentalWarning --import tsx windows/verify-bundle.ts "$PWD/kestrel-gateway-win-x64.zip" "$PWD/kestrel-gateway-win-x64.zip.sig" $version
       - name: Bundle the service wrapper (WinSW, MIT licensed)
         run: |
           # Runs as a real Windows service. The plain .NET-Framework build needs no runtime install
@@ -100,5 +115,7 @@ jobs:
           }
           # VERSION goes last: the update task reads it first, so it must never point at a missing bundle.
           gh release upload $tag kestrel-gateway-win-x64.zip --clobber
+          # The signature goes straight after the bundle it belongs to.
+          gh release upload $tag kestrel-gateway-win-x64.zip.sig --clobber
           gh release upload $tag KestrelGatewaySetup.exe --clobber
           gh release upload $tag VERSION --clobber

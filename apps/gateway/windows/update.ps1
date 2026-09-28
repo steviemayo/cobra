@@ -1,8 +1,11 @@
-# Updates the gateway. Run by the "Kestrel Gateway Update" scheduled task (registered for both
-# Service and Tray installs by configure.ps1), which the gateway starts when the portal orders an
-# update; or by hand. The gateway has already downloaded the bundle and checked it against the
-# portal's digest (<data>\update\request.json names it), so this uses it as it is. With no such
-# request it looks at the release channel directly, which only works while that is reachable.
+# Updates the gateway. Run as the system by the "Kestrel Gateway Update" scheduled task (registered
+# for both Service and Tray installs by configure.ps1), which the gateway starts when the portal
+# orders an update. The gateway has already downloaded the bundle and staged it in <data>\update
+# with its signature. Before anything is swapped this checks that signature again, using the
+# installed gateway's own node and release key (windows\verify-bundle.ts), so a bundle that Kestrel
+# did not sign for this exact file and version, or one that is not newer, is never installed, and
+# neither the portal nor anyone who can write to the staging folder can change that. The path of the
+# zip is fixed here, not read from request.json.
 # Keeps the previous version and puts it back if the new one does not come up healthy, leaving
 # <data>\update\result.json so the gateway can tell the portal what happened.
 $ErrorActionPreference = 'Stop'
@@ -13,11 +16,9 @@ foreach ($line in Get-Content (Join-Path $root 'gateway.env')) {
   if ($line -match '^\s*([A-Z0-9_]+)=(.*)$') { $settings[$Matches[1]] = $Matches[2] }
 }
 $channel = $settings['KESTREL_CHANNEL']; if (-not $channel) { $channel = 'stable' }
-$repo = $settings['KESTREL_REPO']; if (-not $repo) { $repo = 'steviemayo/cobra' }
 $port = $settings['KESTREL_PANEL_PORT']; if (-not $port) { $port = '8080' }
 $mode = $settings['KESTREL_RUN_MODE']; if (-not $mode) { $mode = 'Service' }
 $dataDir = $settings['KESTREL_DATA_DIR']
-$base = "https://github.com/$repo/releases/download/gateway-$channel"
 $log = Join-Path $dataDir 'logs\update.log'
 $updateLock = Join-Path $dataDir 'update.lock'
 function Note($m) { Add-Content -Path $log -Value "$(Get-Date -Format s) $m" }
@@ -28,13 +29,15 @@ $current = (Get-Content (Join-Path $app 'VERSION') -ErrorAction SilentlyContinue
 $updateDir = Join-Path $dataDir 'update'
 $request = Join-Path $updateDir 'request.json'
 $resultFile = Join-Path $updateDir 'result.json'
+# Where the gateway stages the bundle and its signature: fixed, whatever request.json says.
+$zip = Join-Path $updateDir 'bundle.zip'
+$zipSignature = "$zip.sig"
 function Report($ok, $version, $message) {
   New-Item -ItemType Directory -Force -Path $updateDir | Out-Null
   @{ ok = $ok; version = "$version"; error = "$message" } | ConvertTo-Json | Set-Content -Path $resultFile -Encoding ASCII
 }
 function Forget-Request {
-  Remove-Item -Force $request -ErrorAction SilentlyContinue
-  if ($staged -and $staged.zip) { Remove-Item -Force $staged.zip -ErrorAction SilentlyContinue }
+  Remove-Item -Force $request, $zip, $zipSignature -ErrorAction SilentlyContinue
 }
 
 $staged = $null
@@ -42,43 +45,56 @@ if (Test-Path $request) {
   try { $staged = Get-Content $request -Raw | ConvertFrom-Json } catch { Remove-Item -Force $request -ErrorAction SilentlyContinue }
 }
 
-if ($staged) {
-  $latest = "$($staged.version)".Trim()
-} else {
-  try {
-    $latest = ((Invoke-WebRequest -Uri "$base/VERSION" -UseBasicParsing).Content).Trim()
-  } catch {
-    Note "Could not check for updates: $($_.Exception.Message)"
-    exit 0
-  }
+# Updates are ordered from the portal and staged by the gateway. There is no other way in: a bundle
+# fetched here on its own would have nothing to check it against.
+if (-not $staged) {
+  Note 'Nothing was staged, so there is nothing to update. Updates are ordered from the portal.'
+  exit 0
 }
+$latest = "$($staged.version)".Trim()
 if (-not $latest -or $latest -eq $current) { Forget-Request; exit 0 }
 
 Note "Updating $current -> $latest ($channel, $mode mode)"
 Remove-Item -Force $resultFile -ErrorAction SilentlyContinue
 $stage = Join-Path $root 'app.new'
-$ownsZip = $false
-$zip = $null
 try {
-  if ($staged) {
-    $zip = "$($staged.zip)"
-    if (-not (Test-Path $zip)) { throw 'The staged bundle is missing' }
-    $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLower()
-    if ($actual -ne "$($staged.sha256)".ToLower()) { throw 'The staged bundle does not match its digest' }
+  if (-not (Test-Path $zip)) { throw 'The staged bundle is missing' }
+  $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLower()
+  if ($actual -ne "$($staged.sha256)".ToLower()) { throw 'The staged bundle does not match its digest' }
+
+  # The check that matters, made by code that is already installed (in a folder only administrators
+  # can change), against the release key that shipped with it. A staged file and a staged digest
+  # prove nothing on their own: anyone who could write one could write the other.
+  $verifier = Join-Path $app 'windows\verify-bundle.ts'
+  $nodeExe = Join-Path $app 'runtime\node.exe'
+  if (Test-Path $verifier) {
+    if (-not (Test-Path $zipSignature)) { throw 'The staged bundle has no signature' }
+    Push-Location $app
+    # Windows PowerShell 5.1 turns a native program's stderr into an error under 'Stop'; only its exit code counts here.
+    $before = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+      $verdict = & $nodeExe --disable-warning=ExperimentalWarning --import tsx $verifier $zip $zipSignature $latest $current 2>&1
+      $verified = ($LASTEXITCODE -eq 0)
+    } finally {
+      $ErrorActionPreference = $before
+      Pop-Location
+    }
+    if (-not $verified) { throw "The staged bundle was refused: $($verdict | Out-String)".Trim() }
+    Note "The bundle is signed by Kestrel for $latest"
   } else {
-    $zip = Join-Path ([IO.Path]::GetTempPath()) "kestrel-gateway-$([Guid]::NewGuid().ToString('N')).zip"
-    $ownsZip = $true
-    Invoke-WebRequest -Uri "$base/kestrel-gateway-win-x64.zip" -OutFile $zip -UseBasicParsing
+    # This install is older than signed updates, so it has nothing to check with. Only the first
+    # signed release is installed this way; from then on every update is checked.
+    Note 'This install predates signed updates: installing without a signature check (one time only)'
   }
   if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
   Expand-Archive -Path $zip -DestinationPath $stage -Force
   if (-not (Test-Path (Join-Path $stage 'runtime\node.exe'))) { throw 'The download is not a gateway bundle' }
 } catch {
   Note "Could not prepare $latest, keeping $current : $($_.Exception.Message)"
-  if ($staged) { Report $false $latest "Could not prepare the update: $($_.Exception.Message)"; Forget-Request; exit 1 }
-  exit 0
-} finally {
-  if ($ownsZip -and $zip) { Remove-Item -Force $zip -ErrorAction SilentlyContinue }
+  Report $false $latest "Could not prepare the update: $($_.Exception.Message)"
+  Forget-Request
+  exit 1
 }
 
 function Stop-Gateway {

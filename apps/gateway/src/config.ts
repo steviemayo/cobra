@@ -1,6 +1,8 @@
 import { z } from 'zod';
+import type { PublicKey } from '@kestrel/model';
+import { BUILT_IN_MANIFEST_KEYS } from './trusted-keys';
 
-export const GATEWAY_VERSION = '0.2.7';
+export const GATEWAY_VERSION = '0.3.0';
 
 const Env = z.object({
   /** Base URL of the Kestrel cloud, e.g. https://app.kestrel.example */
@@ -34,6 +36,12 @@ const Env = z.object({
    * allows anything (which turns off the protection against DNS rebinding).
    */
   KESTREL_ALLOWED_HOSTS: z.string().optional(),
+  /**
+   * Trust the signing keys the cloud sends, in addition to the ones built into this gateway. Only
+   * for a gateway that talks to a Kestrel other than the one it was built for (a self-hosted
+   * cloud with its own signing key); it removes the protection against a hijacked cloud.
+   */
+  KESTREL_TRUST_CLOUD_KEYS: z.enum(['true', 'false']).default('false'),
   KESTREL_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
@@ -52,6 +60,10 @@ export interface GatewayConfig {
   updateUrl?: string;
   updateToken?: string;
   allowedHosts?: string[];
+  /** Signing keys this gateway trusts for releases and bindings. Empty or absent: trust what the cloud sends (tests, demos). */
+  trustedKeys?: PublicKey[];
+  /** Also trust keys the cloud sends, on top of `trustedKeys`. */
+  trustCloudKeys?: boolean;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): GatewayConfig {
@@ -79,5 +91,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       .split(',')
       .map((h) => h.trim())
       .filter(Boolean),
+    trustedKeys: BUILT_IN_MANIFEST_KEYS,
+    trustCloudKeys: e.KESTREL_TRUST_CLOUD_KEYS === 'true',
   };
 }

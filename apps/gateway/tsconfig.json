@@ -1,1 +1,1 @@
-{ "extends": "@kestrel/config/tsconfig.node.json", "include": ["src"] }
+{ "extends": "@kestrel/config/tsconfig.node.json", "include": ["src", "scripts", "windows"] }
