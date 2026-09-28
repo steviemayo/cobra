@@ -389,6 +389,33 @@ describe('device firmware', () => {
   });
 });
 
+describe('device details', () => {
+  const gw = { id: GW, orgId: ORG };
+  const details = (serial: string) => [
+    { title: 'Device', rows: [{ label: 'Serial number', value: serial }] },
+  ];
+  const devices = (d?: ReturnType<typeof details>) => [
+    { deviceId: 'dsp', name: 'DSP', online: true, ...(d ? { details: d } : {}) },
+  ];
+  const dsp = (w: ReturnType<typeof world>) =>
+    w.deviceStatus.rows.find((r) => r.deviceId === 'dsp')!;
+
+  it('stores what a device says about itself, and replaces it when it changes', async () => {
+    const w = world();
+    await recordReports(w.db, gw, [report({ devices: devices(details('A1')) })], T0);
+    expect(dsp(w).details).toEqual(details('A1'));
+    await recordReports(w.db, gw, [report({ devices: devices(details('B2')) })], at(60_000));
+    expect(dsp(w).details).toEqual(details('B2'));
+  });
+
+  it('keeps the last details when a heartbeat leaves them out (the gateway only sends changes)', async () => {
+    const w = world();
+    await recordReports(w.db, gw, [report({ devices: devices(details('A1')) })], T0);
+    await recordReports(w.db, gw, [report({ devices: devices() })], at(60_000));
+    expect(dsp(w).details).toEqual(details('A1'));
+  });
+});
+
 describe('sweep', () => {
   const gwRow = (over = {}) => ({
     id: GW,

@@ -138,6 +138,28 @@ describe('device monitoring', () => {
     expect(devices.every((d) => d.name.length > 0)).toBe(true);
   });
 
+  it('sends a device’s details when they change and now and then, not in every heartbeat', () => {
+    const { host } = boot();
+    const send = (
+      host as unknown as {
+        detailsFor(room: string, device: string, details: unknown, now: number): unknown;
+      }
+    ).detailsFor.bind(host);
+    const a = [{ title: 'Device', rows: [{ label: 'Serial number', value: 'A1' }] }];
+    const b = [{ title: 'Device', rows: [{ label: 'Serial number', value: 'B2' }] }];
+    expect(send('r', 'd', a, 0)).toEqual(a);
+    expect(send('r', 'd', a, 60_000)).toBeUndefined();
+    expect(send('r', 'd', b, 90_000)).toEqual(b);
+    expect(send('r', 'd', b, 120_000)).toBeUndefined();
+    // Stale enough that the cloud is sent it again, in case it lost it.
+    expect(send('r', 'd', b, 90_000 + 6 * 60_000)).toEqual(b);
+    // Another device is tracked separately, and nothing to send is nothing.
+    expect(send('r', 'other', a, 0)).toEqual(a);
+    expect(send('r', 'd', undefined, 0)).toBeUndefined();
+    // A driver's mistake must never make the whole heartbeat invalid.
+    expect(send('r', 'bad', [{ title: 'x'.repeat(200), rows: [] }], 0)).toBeUndefined();
+  });
+
   it('reports each device’s driver, and the firmware version when its device gave one', async () => {
     const projector = class2Projector('3.1.0');
     const port = await listen(projector);

@@ -1,5 +1,3 @@
-import http from 'node:http';
-import https from 'node:https';
 import type {
   ControlPoint,
   Device,
@@ -8,137 +6,15 @@ import type {
   PointReading,
 } from '@kestrel/model';
 import { BaseDriver } from './base';
-import { isRecord } from './nvx';
+import { CresNextSession, digPath } from './cresnext';
 import type { DriverContext } from './types';
 
 // The Crestron "CresNext" CWS REST API, shared by DM-NVX (see nvx.ts), 4-series control processors
 // (RMC4, MC4, CP4, ...) and TSW/TS touch panels: a single cookie-authenticated web server exposing
 // its whole configuration as one JSON tree at GET /Device. Verified against real RMC4 and TS-1070
-// units: log in by POSTing `login=<u>&&passwd=<p>` to /userlogin.html (Origin and Referer headers
-// set to the device's own URL; the device answers 403 without them) and keep the cookies it sets;
-// an expired session on a 4-series/panel unit shows up as a 301/302 redirect back to
-// /userlogin.html, not the 401 NVX itself answers with, so both are treated as "log in again".
+// units. Login and session handling live in cresnext.ts.
 
-/**
- * Reads a dotted path out of a parsed `/Device` tree, e.g.
- * "Device.Programs.ProgramInstanceLibrary.DeviceSlot1.IpTable.Entries.3.Status". Numeric path
- * segments also index into an array.
- */
-export function digPath(tree: unknown, path: string): unknown {
-  return path.split('.').reduce<unknown>((o, key) => {
-    if (isRecord(o)) return o[key];
-    if (Array.isArray(o) && /^\d+$/.test(key)) return o[Number(key)];
-    return undefined;
-  }, tree);
-}
-
-/** One CresNext unit: logs in once, keeps its cookies, logs in again when the session is rejected. */
-export class CrestronCwsSession {
-  private cookies = new Map<string, string>();
-  private readonly agent: http.Agent | https.Agent;
-
-  constructor(
-    private readonly host: string,
-    private readonly o: {
-      protocol: 'http' | 'https';
-      port: number;
-      username: string;
-      password: string;
-      timeoutMs: number;
-      allowSelfSigned: boolean;
-    },
-  ) {
-    this.agent =
-      o.protocol === 'https'
-        ? new https.Agent({ keepAlive: true, rejectUnauthorized: !o.allowSelfSigned })
-        : new http.Agent({ keepAlive: true });
-  }
-
-  close() {
-    this.agent.destroy();
-  }
-
-  private request(method: 'GET' | 'POST', path: string, body?: string, type = 'application/json') {
-    return new Promise<{ status: number; location?: string; body: string }>((resolve, reject) => {
-      const headers: Record<string, string | number> = {
-        Referer: `${this.o.protocol}://${this.host}/`,
-        Origin: `${this.o.protocol}://${this.host}`,
-      };
-      if (this.cookies.size)
-        headers.Cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join('; ');
-      if (body !== undefined) {
-        headers['Content-Type'] = type;
-        headers['Content-Length'] = Buffer.byteLength(body);
-      }
-      const lib = this.o.protocol === 'https' ? https : http;
-      const req = lib.request(
-        {
-          host: this.host,
-          port: this.o.port,
-          path,
-          method,
-          headers,
-          agent: this.agent,
-          timeout: this.o.timeoutMs,
-        },
-        (res) => {
-          for (const raw of res.headers['set-cookie'] ?? []) {
-            const pair = raw.split(';', 1)[0]!;
-            const eq = pair.indexOf('=');
-            if (eq > 0) this.cookies.set(pair.slice(0, eq), pair.slice(eq + 1));
-          }
-          const chunks: Buffer[] = [];
-          res.on('data', (c: Buffer) => chunks.push(c));
-          res.on('end', () =>
-            resolve({
-              status: res.statusCode ?? 0,
-              location: res.headers.location,
-              body: Buffer.concat(chunks).toString('utf8'),
-            }),
-          );
-        },
-      );
-      req.on('timeout', () => req.destroy(new Error('timed out')));
-      req.on('error', reject);
-      if (body !== undefined) req.write(body);
-      req.end();
-    });
-  }
-
-  private async login() {
-    this.cookies.clear();
-    await this.request('GET', '/userlogin.html');
-    const form = `login=${encodeURIComponent(this.o.username)}&&passwd=${encodeURIComponent(this.o.password)}`;
-    const res = await this.request(
-      'POST',
-      '/userlogin.html',
-      form,
-      'application/x-www-form-urlencoded',
-    );
-    if (res.status !== 200 && res.status !== 302)
-      throw new Error(`login refused (HTTP ${res.status})`);
-  }
-
-  private needsLogin(res: { status: number; location?: string }): boolean {
-    if (res.status === 401 || res.status === 403) return true;
-    return (res.status === 301 || res.status === 302) && !!res.location?.includes('userlogin');
-  }
-
-  async get(path: string): Promise<unknown> {
-    let res = await this.request('GET', path);
-    if (this.needsLogin(res)) {
-      await this.login();
-      res = await this.request('GET', path);
-    }
-    if (res.status < 200 || res.status >= 300)
-      throw new Error(`GET ${path} answered HTTP ${res.status}`);
-    try {
-      return res.body.trim() ? JSON.parse(res.body) : undefined;
-    } catch {
-      throw new Error(`GET ${path} did not answer JSON`);
-    }
-  }
-}
+export { digPath };
 
 /**
  * Shared machinery for a monitoring-only CresNext device (4-series processor, touch panel): one
@@ -147,7 +23,7 @@ export class CrestronCwsSession {
  * Never sends anything: these are watched, not driven.
  */
 export abstract class CrestronCwsMonitor extends BaseDriver {
-  private session: CrestronCwsSession | null = null;
+  private session: CresNextSession | null = null;
   private poller: ReturnType<typeof setInterval> | null = null;
   private busy = false;
 
@@ -160,10 +36,10 @@ export abstract class CrestronCwsMonitor extends BaseDriver {
     return this.device.points ?? [];
   }
 
-  private ensureSession(): CrestronCwsSession {
+  protected ensureSession(): CresNextSession {
     if (!this.session) {
       const protocol = this.setting<'http' | 'https'>('protocol', 'https');
-      this.session = new CrestronCwsSession(this.setting<string>('host', ''), {
+      this.session = new CresNextSession(this.setting<string>('host', ''), {
         protocol,
         port: this.setting<number>('port', protocol === 'http' ? 80 : 443),
         username: this.setting<string>('username', 'admin'),
@@ -210,7 +86,7 @@ export abstract class CrestronCwsMonitor extends BaseDriver {
     this.session = null;
   }
 
-  private async refresh() {
+  protected async refresh() {
     if (this.busy) return;
     this.busy = true;
     try {
@@ -221,7 +97,8 @@ export abstract class CrestronCwsMonitor extends BaseDriver {
         s.points = points;
         this.applyFeedback(tree, s);
       });
-    } catch {
+    } catch (e) {
+      this.ctx.log('warn', `${this.device.name}: ${e instanceof Error ? e.message : String(e)}`);
       this.update((s) => {
         s.online = false;
       });

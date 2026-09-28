@@ -156,6 +156,10 @@ export async function recordReports(
             ? { firmware: d.firmware, firmwareSince: now }
             : {}),
           ...(feedbackChanged ? { feedback: d.feedback as Prisma.InputJsonValue } : {}),
+          // Like firmware: a heartbeat that leaves details out means "unchanged", not "none".
+          ...(d.details && JSON.stringify(d.details) !== JSON.stringify(row?.details ?? null)
+            ? { details: d.details as Prisma.InputJsonValue }
+            : {}),
         };
         if (!row) {
           await db.deviceStatus.create({

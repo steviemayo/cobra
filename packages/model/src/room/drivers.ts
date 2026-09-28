@@ -58,6 +58,13 @@ const CRESTRON_CWS_PATH = [
   },
 ];
 
+const CRESTRON_FLEX_JOIN = [
+  {
+    key: 'join',
+    label: 'Reserved join (D27767 digital, S27702 serial or A17347 analog)',
+  },
+];
+
 export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   'visca-ip': {
     name: 'PTZ camera (VISCA over IP)',
@@ -315,5 +322,38 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
       username: 'admin',
       password: '<password>',
     },
+  },
+  'crestron-flex': {
+    name: 'Crestron Flex (Microsoft Teams Room)',
+    description:
+      'Monitoring only. Logs in to the UC-Engine’s secure console and reads the Teams Rooms app’s reserved joins: app state, Teams and Exchange sign-in, microphone, speaker, camera and display health, and the room’s occupancy. Watch any reserved join as a control point to alert on it, for example the microphone status (S27702) expecting Healthy.',
+    class: 'conference_system',
+    features: ['call_state', 'peripheral_health'],
+    settings: [
+      { key: 'host', label: 'Address', scope: 'binding', required: true },
+      { key: 'username', label: 'Logon name (admin)', scope: 'binding', required: true },
+      { key: 'password', label: 'Password', scope: 'secret', required: true },
+      { key: 'port', label: 'Secure console port (41797)', scope: 'binding' },
+    ],
+    points: { generic: CRESTRON_FLEX_JOIN },
+    categories: ['conference_system'],
+    example: { host: '<UC-Engine IP>', username: 'admin', password: '<password>' },
+  },
+  'crestron-occupancy': {
+    name: 'Crestron occupancy sensor',
+    description:
+      'Monitoring only, over the CresNext REST API: reports whether the room is occupied, kept up to date with a long poll, and lists what the sensor says about itself. Not yet checked against a real sensor.',
+    class: 'sensor',
+    features: ['occupancy'],
+    settings: [
+      ...CRESTRON_CWS_SETTINGS,
+      {
+        key: 'occupiedPath',
+        label: 'Occupied property path (only if not found automatically)',
+        scope: 'design',
+      },
+    ],
+    categories: ['occupancy_sensor'],
+    example: { host: '<sensor IP>', username: 'admin', password: '<password>' },
   },
 };
