@@ -9,7 +9,7 @@ import { Store } from './store';
 
 async function main() {
   const cfg = loadConfig();
-  const log = createLogger(cfg.logLevel);
+  const log = createLogger(cfg.logLevel, join(cfg.dataDir, 'logs', 'gateway.log'));
   const store = new Store(join(cfg.dataDir, 'gateway.db'));
 
   // A gateway must keep running rooms even if something unexpected throws.

@@ -43,8 +43,10 @@ function Start-Gateway {
 
   $script:proc = New-Object System.Diagnostics.Process
   $script:proc.StartInfo = $psi
-  $script:proc.add_OutputDataReceived({ param($sender, $e) if ($e.Data) { Add-Content -Path $log -Value $e.Data } }.GetNewClosure())
-  $script:proc.add_ErrorDataReceived({ param($sender, $e) if ($e.Data) { Add-Content -Path $log -Value $e.Data } }.GetNewClosure())
+  # The gateway writes its own gateway.log directly now, so these just drain the redirected
+  # streams (still required so the OS pipe never fills and blocks the child) without duplicating it.
+  $script:proc.add_OutputDataReceived({})
+  $script:proc.add_ErrorDataReceived({})
   [void]$script:proc.Start()
   $script:proc.BeginOutputReadLine()
   $script:proc.BeginErrorReadLine()
@@ -66,6 +68,7 @@ $notify.Text = 'Kestrel Gateway'
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $openItem = $menu.Items.Add('Open panel')
 $logsItem = $menu.Items.Add('Open logs folder')
+$reconfigureItem = $menu.Items.Add('Change cloud URL...')
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 $toggleItem = $menu.Items.Add('Stop gateway')
 $restartItem = $menu.Items.Add('Restart gateway')
@@ -75,6 +78,10 @@ $notify.ContextMenuStrip = $menu
 
 $openItem.add_Click({ Start-Process "http://127.0.0.1:$port/" }.GetNewClosure())
 $logsItem.add_Click({ Start-Process $logDir }.GetNewClosure())
+# reconfigure.ps1 self-elevates (UAC) and restarts the gateway itself once applied.
+$reconfigureItem.add_Click({ Start-Process powershell.exe -ArgumentList `
+  "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $root 'reconfigure.ps1')`" -InstallDir `"$root`""
+}.GetNewClosure())
 $notify.add_DoubleClick({ Start-Process "http://127.0.0.1:$port/" }.GetNewClosure())
 
 $toggleItem.add_Click({

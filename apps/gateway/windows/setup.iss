@@ -39,10 +39,16 @@ WizardStyle=modern
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}\app"; Flags: recursesubdirs ignoreversion
 Source: "{#SourceDir}\windows\configure.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\windows\reconfigure.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\windows\tray.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\windows\update.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\windows\uninstall.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\windows\KestrelGatewayService.exe"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{group}\Change cloud URL"; Filename: "powershell.exe"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\reconfigure.ps1"" -InstallDir ""{app}"""; \
+  WorkingDir: "{app}"
 
 [Code]
 var
