@@ -28,6 +28,12 @@ const Env = z.object({
    */
   KESTREL_UPDATE_URL: z.string().url().optional(),
   KESTREL_UPDATE_TOKEN: z.string().optional(),
+  /**
+   * Names this gateway may be reached by, besides IP addresses, `localhost`, its own machine name,
+   * bare names and `.local`/`.lan` names. Comma separated; `*.example.com` allows a domain and `*`
+   * allows anything (which turns off the protection against DNS rebinding).
+   */
+  KESTREL_ALLOWED_HOSTS: z.string().optional(),
   KESTREL_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
@@ -45,6 +51,7 @@ export interface GatewayConfig {
   healthTimeoutMs?: number;
   updateUrl?: string;
   updateToken?: string;
+  allowedHosts?: string[];
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): GatewayConfig {
@@ -68,5 +75,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     healthTimeoutMs: e.KESTREL_HEALTH_TIMEOUT_SECONDS * 1000,
     updateUrl: e.KESTREL_UPDATE_URL,
     updateToken: e.KESTREL_UPDATE_TOKEN,
+    allowedHosts: (e.KESTREL_ALLOWED_HOSTS ?? '')
+      .split(',')
+      .map((h) => h.trim())
+      .filter(Boolean),
   };
 }
