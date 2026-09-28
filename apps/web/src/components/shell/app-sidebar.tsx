@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
 import { useBilling } from '@/components/common/plan-gate';
-import { StatusDot, designHealth } from '@/components/common/status';
+import { HealthDot } from '@/components/common/health';
 import {
   Sidebar,
   SidebarContent,
@@ -122,7 +122,7 @@ function NavItem({
 function EstateTree() {
   const { orgId } = useOrg();
   const pathname = usePathname();
-  const { sites, rooms, roomsBySite, isPending } = useEstate();
+  const { sites, rooms, roomsBySite, live, isPending } = useEstate();
   const [manual, setManual] = useState<Record<string, boolean>>({});
 
   const activeSiteId = (() => {
@@ -180,14 +180,15 @@ function EstateTree() {
                 )}
                 {siteRooms.map((r) => {
                   const href = orgPath(orgId, `/rooms/${r.id}`);
+                  const health = live.get(r.id)?.health;
                   return (
                     <SidebarMenuSubItem key={r.id}>
                       <SidebarMenuSubButton
                         isActive={pathname === href || pathname.startsWith(`${href}/`)}
                         render={<Link href={href} />}
                       >
-                        <StatusDot health={designHealth(r.draft)} />
-                        <span>{r.name}</span>
+                        <HealthDot level={health?.level ?? 'unknown'} />
+                        <span title={health?.reasons[0]}>{r.name}</span>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
                   );

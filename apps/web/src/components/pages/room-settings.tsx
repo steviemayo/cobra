@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { Switch } from '@/components/ui/switch';
 import { ROOM_TYPE_LABEL } from '@/lib/format';
 import { useInvalidateEstate, useSites } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
@@ -38,6 +39,15 @@ export function RoomSettings({ roomId }: { roomId: string }) {
         setName(null);
         setSiteId(null);
       },
+    }),
+  );
+  const monitorOnly = useMutation(
+    trpc.room.update.mutationOptions({
+      onSuccess: async () => {
+        await invalidate();
+        toast.success('Room updated');
+      },
+      onError: (e) => toast.error(e.message),
     }),
   );
   const duplicate = useMutation(
@@ -122,6 +132,22 @@ export function RoomSettings({ roomId }: { roomId: string }) {
         </Button>
       </form>
 
+      <section className="flex items-start justify-between gap-4 rounded-lg border p-4">
+        <div>
+          <h2 className="text-sm font-medium">Monitor only</h2>
+          <p className="text-sm text-muted-foreground">
+            This room is only watched. Design warnings and errors are not shown as things to fix.
+            Live health, incidents and alerts are unaffected.
+          </p>
+        </div>
+        <Switch
+          aria-label="Monitor only"
+          checked={room.monitorOnly}
+          disabled={monitorOnly.isPending}
+          onCheckedChange={(checked) => monitorOnly.mutate({ orgId, roomId, monitorOnly: checked })}
+        />
+      </section>
+
       <GatewaySetting roomId={roomId} />
       <PanelSettings roomId={roomId} />
       <HookSettings roomId={roomId} />
@@ -137,8 +163,8 @@ export function RoomSettings({ roomId }: { roomId: string }) {
           <div>
             <h2 className="text-sm font-medium">Duplicate room</h2>
             <p className="text-sm text-muted-foreground">
-              Makes a new room at this site with the same design and gateway. Each device in the new room
-              needs its own address, so those are left to fill in.
+              Makes a new room at this site with the same design and gateway. Each device in the new
+              room needs its own address, so those are left to fill in.
             </p>
           </div>
           <div className="flex gap-2">
@@ -148,7 +174,11 @@ export function RoomSettings({ roomId }: { roomId: string }) {
               value={copyNameValue}
               onChange={(e) => setCopyName(e.target.value)}
             />
-            <Button type="submit" variant="outline" disabled={duplicate.isPending || !copyNameValue.trim()}>
+            <Button
+              type="submit"
+              variant="outline"
+              disabled={duplicate.isPending || !copyNameValue.trim()}
+            >
               {duplicate.isPending && <Spinner />}
               Duplicate
             </Button>

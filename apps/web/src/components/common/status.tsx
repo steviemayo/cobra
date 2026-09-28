@@ -3,10 +3,12 @@ import { cn } from '@/lib/utils';
 
 // This is the *design* validity of a room's draft (lint errors/warnings), not its live monitoring
 // state. See `HealthLevel`/`HealthPill` in `./health` for how a room is actually doing right now.
-export type DesignHealth = 'none' | 'errors' | 'warnings' | 'ok';
+export type DesignHealth = 'none' | 'errors' | 'warnings' | 'ok' | 'ignored';
 export type DraftSummary = RouterOutputs['room']['overview'][number]['draft'];
 
-export function designHealth(draft: DraftSummary): DesignHealth {
+/** A monitor-only room is only watched, so its design is not something to fix: `ignored`. */
+export function designHealth(draft: DraftSummary, monitorOnly = false): DesignHealth {
+  if (monitorOnly) return 'ignored';
   if (!draft) return 'none';
   if (draft.errors > 0) return 'errors';
   if (draft.warnings > 0) return 'warnings';
@@ -18,10 +20,13 @@ const TONE: Record<DesignHealth, string> = {
   errors: 'bg-destructive',
   warnings: 'bg-warning',
   ok: 'bg-success',
+  ignored: 'bg-muted-foreground/35',
 };
 
 export function designHealthLabel(health: DesignHealth, draft: DraftSummary): string {
   switch (health) {
+    case 'ignored':
+      return 'Monitor only';
     case 'none':
       return 'No design yet';
     case 'errors':
@@ -42,12 +47,18 @@ export function StatusDot({ health, className }: { health: DesignHealth; classNa
   );
 }
 
-export function DesignBadge({ draft }: { draft: DraftSummary }) {
-  const health = designHealth(draft);
+export function DesignBadge({
+  draft,
+  monitorOnly = false,
+}: {
+  draft: DraftSummary;
+  monitorOnly?: boolean;
+}) {
+  const health = designHealth(draft, monitorOnly);
   return (
     <span className="inline-flex items-center gap-2 text-sm">
       <StatusDot health={health} />
-      <span className={cn(health === 'none' && 'text-muted-foreground')}>
+      <span className={cn((health === 'none' || health === 'ignored') && 'text-muted-foreground')}>
         {designHealthLabel(health, draft)}
       </span>
     </span>

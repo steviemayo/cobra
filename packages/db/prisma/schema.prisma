@@ -154,6 +154,8 @@ model Room {
   /// Only standard rooms are billed.
   kind                    String    @default("standard")
   memberRoomIds           String[]  @default([]) @db.Uuid
+  /// A room that is only watched: its design warnings are not shown as something to fix.
+  monitorOnly             Boolean   @default(false)
   /// Hash of the secret webhook callers present. Null until someone generates one.
   hookSecretHash          String?
   desiredReleaseId        String?   @db.Uuid

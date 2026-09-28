@@ -62,7 +62,12 @@ async function applyGateway(
   // there (an address still to fill in, or a gateway that needs updating).
   const ready =
     gatewayId && room.desiredReleaseId
-      ? await checkDeployable(db, { orgId, roomId: room.id, gatewayId, releaseId: room.desiredReleaseId })
+      ? await checkDeployable(db, {
+          orgId,
+          roomId: room.id,
+          gatewayId,
+          releaseId: room.desiredReleaseId,
+        })
       : null;
   if (gatewayId && room.desiredReleaseId && ready?.ok)
     await createDeployment(db, {
@@ -79,7 +84,11 @@ async function applyGateway(
     actorId: userId,
     action: 'room.gateway',
     target: room.id,
-    meta: { room: room.name, gateway: gatewayName, ...(ready && !ready.ok ? { notDeployed: ready.message } : {}) },
+    meta: {
+      room: room.name,
+      gateway: gatewayName,
+      ...(ready && !ready.ok ? { notDeployed: ready.message } : {}),
+    },
   });
 }
 
@@ -186,14 +195,23 @@ export const roomRouter = router({
       requireRole(ctx.role, ['owner', 'dev']);
       const source = await findRoom(ctx.orgId, input.roomId);
       if (input.staging && source.kind === STAGING)
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'A staging room cannot have a staging copy of its own.' });
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'A staging room cannot have a staging copy of its own.',
+        });
       if (source.kind === 'combined')
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: 'A combined room is made from its room group and cannot be copied.',
         });
-      const draft = await db.roomDraft.findFirst({ where: { roomId: source.id, orgId: ctx.orgId } });
-      if (!draft) throw new TRPCError({ code: 'BAD_REQUEST', message: 'This room has no design to copy yet' });
+      const draft = await db.roomDraft.findFirst({
+        where: { roomId: source.id, orgId: ctx.orgId },
+      });
+      if (!draft)
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This room has no design to copy yet',
+        });
       // A staging room is free, so only a live copy counts against the plan.
       const entitlements = input.staging ? null : await getEntitlements(db, ctx.orgId);
       if (
@@ -226,7 +244,8 @@ export const roomRouter = router({
           }),
         );
       } catch (e) {
-        if (e instanceof DuplicateRoomError) throw new TRPCError({ code: 'CONFLICT', message: e.message });
+        if (e instanceof DuplicateRoomError)
+          throw new TRPCError({ code: 'CONFLICT', message: e.message });
         throw e;
       }
       await writeAudit({
@@ -252,8 +271,14 @@ export const roomRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
       const staging = await findRoom(ctx.orgId, input.roomId);
-      const draft = await db.roomDraft.findFirst({ where: { roomId: staging.id, orgId: ctx.orgId } });
-      if (!draft) throw new TRPCError({ code: 'BAD_REQUEST', message: 'This room has no design to promote yet' });
+      const draft = await db.roomDraft.findFirst({
+        where: { roomId: staging.id, orgId: ctx.orgId },
+      });
+      if (!draft)
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This room has no design to promote yet',
+        });
       const model = await designOnly(ctx.orgId, RoomModel.parse(draft.model));
       try {
         const result = await promoteStaging(db, {
@@ -275,13 +300,22 @@ export const roomRouter = router({
         }
         return result;
       } catch (e) {
-        if (e instanceof PromoteError) throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
+        if (e instanceof PromoteError)
+          throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
         throw e;
       }
     }),
 
   update: orgProcedure
-    .input(z.object({ orgId, roomId, name: name.optional(), siteId: z.string().uuid().optional() }))
+    .input(
+      z.object({
+        orgId,
+        roomId,
+        name: name.optional(),
+        siteId: z.string().uuid().optional(),
+        monitorOnly: z.boolean().optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
       const room = await findRoom(ctx.orgId, input.roomId);
@@ -295,6 +329,7 @@ export const roomRouter = router({
         where: { id: room.id },
         data: {
           name: input.name ?? room.name,
+          monitorOnly: input.monitorOnly ?? room.monitorOnly,
           // A room that moves site can no longer be served by a gateway at the old one.
           ...(site && { siteId: site.id, ...(site.id !== room.siteId && { gatewayId: null }) }),
         },
@@ -305,7 +340,11 @@ export const roomRouter = router({
         actorId: ctx.user.id,
         action: 'room.update',
         target: room.id,
-        meta: { name: updated.name, ...(site && { site: site.name }) },
+        meta: {
+          name: updated.name,
+          ...(site && { site: site.name }),
+          ...(input.monitorOnly !== undefined && { monitorOnly: input.monitorOnly }),
+        },
       });
       return updated;
     }),
@@ -351,7 +390,9 @@ export const roomRouter = router({
       }
       // A shared device has one connection, so rooms that share one must run on one gateway.
       if (input.gatewayId) {
-        const draft = await db.roomDraft.findFirst({ where: { roomId: room.id, orgId: ctx.orgId } });
+        const draft = await db.roomDraft.findFirst({
+          where: { roomId: room.id, orgId: ctx.orgId },
+        });
         const model = draft ? RoomModel.safeParse(draft.model) : null;
         if (model?.success) {
           const shared = await sharedGatewayProblem(db, {

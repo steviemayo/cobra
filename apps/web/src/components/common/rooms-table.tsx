@@ -82,7 +82,7 @@ export function RoomsTable({
                   )}
                 </TableCell>
                 <TableCell>
-                  <DesignBadge draft={r.draft} />
+                  <DesignBadge draft={r.draft} monitorOnly={r.monitorOnly} />
                 </TableCell>
                 <TableCell className="tabular text-right">
                   {liveRoom && liveRoom.devices.total > 0

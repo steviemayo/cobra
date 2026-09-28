@@ -22,6 +22,15 @@ export const HEALTH_ORDER: Record<HealthLevel, number> = {
   healthy: 3,
 };
 
+export function HealthDot({ level, className }: { level: HealthLevel; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn('inline-block size-2 shrink-0 rounded-full', TONE[level], className)}
+    />
+  );
+}
+
 export function HealthPill({
   level,
   reasons,
@@ -36,7 +45,7 @@ export function HealthPill({
       className={cn('inline-flex items-center gap-2 text-sm', className)}
       title={reasons?.length ? reasons.join('. ') : undefined}
     >
-      <span aria-hidden className={cn('size-2 shrink-0 rounded-full', TONE[level])} />
+      <HealthDot level={level} />
       <span className={cn(level === 'unknown' && 'text-muted-foreground')}>{LABEL[level]}</span>
     </span>
   );

@@ -10,6 +10,7 @@ on:
       - 'apps/gateway/**'
       - 'apps/panel/**'
       - 'packages/**'
+      - '!packages/db/**'
       - 'pnpm-lock.yaml'
       - '.github/workflows/gateway-image.yml'
   push:
@@ -19,6 +20,7 @@ on:
       - 'apps/gateway/**'
       - 'apps/panel/**'
       - 'packages/**'
+      - '!packages/db/**'
       - 'pnpm-lock.yaml'
       - '.github/workflows/gateway-image.yml'
 

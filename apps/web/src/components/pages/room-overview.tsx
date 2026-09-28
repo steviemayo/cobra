@@ -90,7 +90,7 @@ export function RoomOverview({ roomId }: { roomId: string }) {
             ) : (
               <dl className="divide-y">
                 <Row label="Status">
-                  <DesignBadge draft={room.draft} />
+                  <DesignBadge draft={room.draft} monitorOnly={room.monitorOnly} />
                 </Row>
                 <Row label="Devices">
                   <span className="tabular">{room.draft.devices}</span>
