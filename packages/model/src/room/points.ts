@@ -104,6 +104,22 @@ export const PointReading = z.object({
 });
 export type PointReading = z.infer<typeof PointReading>;
 
+/**
+ * One named thing a device says it has, for a driver that can list what is inside it (docs/driver-
+ * classes.md: "Where a vendor lets the device list its components, the form offers a pick-list").
+ * Lets someone choose a control point's address from what the device actually reports instead of
+ * typing a component or control name blind.
+ */
+export interface DiscoveredComponent {
+  name: string;
+  type?: string;
+}
+export interface DiscoveredControl {
+  name: string;
+  type?: string;
+  value?: number | boolean | string;
+}
+
 /** Points and their state values: 0 to 100 for a level, true or false for a mute. */
 export type PointValue = number | boolean | string;
 

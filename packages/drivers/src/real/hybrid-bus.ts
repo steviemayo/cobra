@@ -4,6 +4,8 @@ import type {
   DeviceCommand,
   DeviceEvent,
   DeviceState,
+  DiscoveredComponent,
+  DiscoveredControl,
   PointReading,
   QuickActionId,
 } from '@kestrel/model';
@@ -47,6 +49,20 @@ export class HybridBus implements DeviceBus {
     const driver = this.real.get(deviceId);
     if (driver?.readPoint) return driver.readPoint(point);
     return this.sim?.readPoint(deviceId, point) ?? Promise.reject(new Error('This device cannot read control points'));
+  }
+
+  discoverComponents(deviceId: string): Promise<DiscoveredComponent[]> {
+    const driver = this.real.get(deviceId);
+    return driver?.discoverComponents
+      ? driver.discoverComponents()
+      : Promise.reject(new Error('This device cannot list its components'));
+  }
+
+  discoverControls(deviceId: string, component: string): Promise<DiscoveredControl[]> {
+    const driver = this.real.get(deviceId);
+    return driver?.discoverControls
+      ? driver.discoverControls(component)
+      : Promise.reject(new Error('This device cannot list its controls'));
   }
 
   subscribe(listener: (event: DeviceEvent) => void): () => void {

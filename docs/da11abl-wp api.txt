@@ -1,0 +1,123 @@
+
+=================================
+DA11ABL-WP-US-V2 Terminal Control System
+FW Version : V1.3.0
+Type "HELP" For More Information
+=================================
+
+DA11ABL-WP-US-V2>??
+
+=================================================================
+      DA11ABL-WP-US-V2 Help Info
+      FW Version:MCU_Main V1.3.0/MCU_Sub V2.0.0
+                 DEP_SDK V1.3.3.5_20250723/Bluetooth V0.3.1
+
+============================= System Information Command
+?/HELP                        Print Help Information
+STATUS                        Print System Status And Port Status
+UPTIME                        Print System Uptime
+============================= System Control Command
+RESET                         Reset System Settings To Default
+                              (Should Type "Yes" To Confirm, "No" To Discard)
+RESET ALL                     Reset System And Network Settings To Default
+                              (Should Type "Yes" To Confirm, "No" To Discard)
+REBOOT                        Set System Reboot
+IDLED ON/OFF/15/30/60         Set IDLED On Or Auto Turn Off In 15/30/60s
+                              In Power On State Or Turn On 15/30/60s
+BTLED ON/OFF/15/30/60         Set BTLED On Or Auto Turn Off In 15/30/60s
+                              In Power On State Or Turn On 15/30/60s
+PWRLED ON/OFF/15/30/60        Set PWRLED On Or Auto Turn Off In 15/30/60s
+                              In Power On State Or Turn On 15/30/60s
+RESET ON/OFF                  Set Factory Reset By Pressing Pair Button On Or Off
+============================= Bluetooth Configuration Command
+BT NAME xx                    Set Bluetooth Name To xx
+                              xx:Max 30 Characters
+BT PAIR MODE xx               Set Bluetooth Pairing Mode To xx
+                              xx=[0...2]:0:Off,1:On,2:Manual
+BT TIMEOUT xx                 Set Bluetooth Timeout To xx Seconds
+                              xx=[1...999]:Default(30s)
+BT SOURCE                     Bluetooth RX Connected Source List
+BT MDBT xx                    Set Manual Disconnect Bluetooth Time Through Pressing Pairing Button Up To xx Seconds
+                              xx=[0/3/5/10]:0:Disable Manual Disconnect Function
+BT RXCD xx                    Set BT RX Connect Device xx
+                              xx=[1...2]:Paired Device List ID
+BT RXDIS xx                   Set BT RX Disconnect Device xx
+                              xx=[0...2]:0:All,1:Paired Device 1, 2:Paired Device 2
+BT CLEAR xx                   Clear BT RX Paired Device xx
+                              xx=[0...2]:0:All,1:Paired Device 1, 2:Paired Device 2
+BT RXPN xx                    Set BT RX Pairing Number To xx
+                              xx=[1...2]:Pairing Device Number
+BT PRIORITY xx                Set Bluetooth Audio Priority To xx
+                              xx=[0...1]:0:First Played Source,1:Last Played Source
+BT IN VOL xx                  Set Bluetooth Input Volume To xx
+                              xx=[0...16]:Volume
+BT IN VOL+xx                  Increase Bluetooth Input Volume
+                              xx=[1...16]:Steps
+                              xx can be empty(1 Step)
+BT IN VOL-xx                  Decrease Bluetooth Input Volume
+                              xx=[1...16]:Steps
+                              xx can be empty(1 Step)
+BT IN MUTE ON/OFF             Set Bluetooth Mute ON/OFF
+BT RXPAIR                     BT RX Trigger Paired Button
+BT COUNTDOWN                  Print Bluetooth Paired Countdown
+============================= Input And Output Port Connect Command
+AUTO SW xx                    Set Auto Switch Time To xx When First Priority Audio Stops Playing
+                              xx=[0...4]:0:Off,1:5s,2:15s,3:30s,4:60s
+MANUAL SW xx                  Set Manual Switch Through xx Press Button In Short Succession
+                              xx=[0...2]:0:Off,1:2x,2:3x
+PRIORITY xx                   Set First Priority Source To xx
+                              xx=[1...2]:1:Analogue,2:Bluetooth
+IN SOURCE xx                  Set Input Source To xx
+                              xx=[1...2]:1:Analogue,2:Bluetooth
+ANA IN MUTE ON/OFF            Set Analogue Input Mute ON/OFF
+ANA IN SENS xx                Set Analogue Input Sensitivity To xx
+                              xx=[0...15]:Sensitivity Levels
+                              xx=0:+24dBu
+                              xx=1:+21dBu
+                              xx=2:+18dBu
+                              xx=3:+15dBu
+                              xx=4:+12dBu
+                              xx=5:+9dBu
+                              xx=6:+6dBu
+                              xx=7:+4dBu
+                              xx=8:0dBu
+                              xx=9:0dBV
+                              xx=10:-3dBV
+                              xx=11:-6dBV
+                              xx=12:-10dBV
+                              xx=13:-14dBV
+                              xx=14:-20dBV
+                              xx=15:-28dBV
+OUT GAIN xx                   Set Analogue Output Gain To xx
+                              xx=[0...15]:Gain Levels
+                              xx=0:+20dBu
+                              xx=1:+18dBu
+                              xx=2:+15dBu
+                              xx=3:+12dBu
+                              xx=4:+9dBu
+                              xx=5:+6dBu
+                              xx=6:+4dBu
+                              xx=7:0dBu
+                              xx=8:0dBV
+                              xx=9:-3dBV
+                              xx=10:-6dBV
+                              xx=11:-10dBV
+                              xx=12:-14dBV
+                              xx=13:-20dBV
+                              xx=14:-24dBV
+                              xx=15:-28dBV
+OUT MUTE ON/OFF               Set Output Mute ON/OFF
+============================= Network Control Command
+NET DHCP ON/OFF               Set Auto IP(DHCP) On Or Off
+NET IP xxx.xxx.xxx.xxx        Set IP Address
+NET GW xxx.xxx.xxx.xxx        Set Gateway Address
+NET SM xxx.xxx.xxx.xxx        Set Subnet Mask Address
+NET TCPPORT ON/OFF            Set TCP/IP On Or Off
+NET TCPPORT xxxx              Set TCP/IP Port
+NET TN ON/OFF                 Set Telnet On Or Off
+NET TN xxxx                   Set Telnet Port
+NET RB                        Network Reboot And Apply New Config!!!
+NET DNS xxxx                  Set DNS Domain Name To xxxx
+=================================================================
+
+DA11ABL-WP-US-V2>

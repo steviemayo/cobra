@@ -1,0 +1,290 @@
+================================================================						
+		ACM1000 Advanced Control Module Help				
+		FW Version: 2.5.9				
+Note: Parameters In Brackets [ ] Are Optional						
+============= System Information Commands						
+? : Print Help Information						
+HELP : Print Help Information						
+STATUS : Print System Status And Port Status						
+============= System Control Commands						
+IR ON/OFF : Set ACM1000 IR Control On Or Off						
+PREVIEW IMAGE ON/OFF : Set ACM1000 Preview Image On Or Off						
+RSB x : Set RS232 Baud Rate to X bps						
+              x=[0:115200 1:57600, 2:38400, 3:19200, 4:9600]						
+RESET : Reset ACM1000 System To Default Settings, Excluding Network Settings						
+RESET NB : Reset ACM1000 Network To Default Settings						
+RESET ALL : Reset ACM1000 System And Network To Default Settings						
+              (Type "Yes" To Confirm Reset, "No" To Discard)						
+============= Input And Output Port Control Commands						
+OUT ooo ON/OFF : Set Output ooo On Or Off						
+OUT ooo ID id : Set Output ooo To ID id, If New ID Exists Than Swap Them,						
+              Note: DEVICE MUST BE ONLINE						
+OUT ooo FR yyy : Set Output ooo From Input yyy						
+OUT ooo VFR yyy : Fix Video Output ooo From Input yyy						
+OUT ooo AFR yyy : Fix Audio Output ooo From Input yyy						
+OUT ooo RFR yyy : Fix IR Output ooo From Input yyy						
+OUT ooo SFR yyy : Fix RS232 Output ooo From Input yyy						
+OUT ooo UFR yyy : Fix USB Output ooo From Input yyy						
+OUT ooo CFR yyy : Fix CEC Output ooo From Input yyy						
+OUT ooo FAST ON/OFF : Set Output ooo Fast Switching On Or Off						
+OUT ooo HDR ON/OFF : Set Output ooo HDR On Or Off						
+OUT ooo CEC ON/OFF : Set Output ooo CEC On Or Off						
+OUT ooo OSD ON [time] : Set Output ooo Show ID OSD On Display for time Seconds						
+OUT ooo OSD OFF : Set Output ooo Hide ID OSD						
+OUT ooo FLS ON [time] : Set Output ooo Flash Power LED for time Seconds						
+OUT ooo FLS OFF : Set Output ooo Disable Flash Power LED						
+OUT ooo DEL : Delete Output ooo From Current Project Config						
+OUT ooo RES rr : Set Output ooo Resolution To rr						
+OUT ooo ROTATE tt : Set Output ooo Rotation To tt						
+OUT ooo STRETCH ON/OFF : Set Output ooo Stretch On Or Off						
+OUT ooo HTTPS ON/OFF : Set Output ooo HTTPS On Or Off						
+OUT ooo AUDSD : Set Output ooo SPDIF Input To Dante Output						
+OUT ooo AUDHA : Set Output ooo HDMI Source To Analogue Output						
+OUT ooo AUDHH : Set Output ooo HDMI Source To HDMI Output						
+OUT ooo AUDHD : Set Output ooo HDMI Source To Dante Output						
+OUT ooo AUDDA : Set Output ooo Dante Input To Analogue Output						
+OUT ooo AUDDH : Set Output ooo Dante Input To HDMI Output						
+OUT ooo LAN2M0: Set Output ooo LAN2 Mode To Mode 0						
+OUT ooo LAN2M1: Set Output ooo LAN2 Mode To Mode 1						
+OUT ooo LAN2M2: Set Output ooo LAN2 Mode To Mode 2						
+OUT ooo LAN2M3: Set Output ooo LAN2 Mode To Mode 3						
+OUT ooo LAN2M4: Set Output ooo LAN2 Mode To Mode 4						
+OUT ooo ARC OFF: Set Output ooo ARC function OFF						
+OUT ooo ARC HDMI: Set Output ooo ARC port To HDMI						
+OUT ooo ARC OPT: Set Output ooo ARC port To OPTICAL						
+OUT ooo NAME name : Set Output ooo Device Name To name						
+OUT ooo MODE MX/VW : Set Output ooo To Matrix Or Video Wall Mode						
+OUT ooo DBG ON/OFF : Set Output ooo Debug Mode On Or Off						
+OUT ooo BTN ON/OFF : Set Output ooo Front Panel Button Enable On Or Off						
+OUT ooo IR ON/OFF : Set Output ooo Front Panel IR Enable On Or Off						
+OUT ooo MUTE ON/OFF : Set Output ooo Mute On Or Off						
+OUT ooo PAUSE ON/OFF : Set Output ooo Pause On Or Off						
+OUT ooo AUTOON ENABLED/DISABLED : Set Output ooo Automatically on Enabled Or Disabled						
+OUT ooo LED ee : Set Output ooo Front Panel LED Auto Off After ee*10 Seconds						
+OUT ooo SG [ON/OFF] [BR br] [BIT bit] : Set Output ooo Serial Guest Mode Config						
+OUT ooo GUEST: Start Serial Guest Mode To Output ooo						
+OUT ooo HDCP BYP/V14/V22: Set HDCP overrider mode To Output ooo						
+OUT ooo SSM L/N: Set System Size To Output ooo						
+              Note: To Close Guest Mode Use Command CLOSEACMGUEST						
+OUT [ooo] STATUS : Show Output ooo Detailed Status						
+OUT ooo RB : Reboot Output ooo And Apply New Config						
+OUT ooo RESET : Reset Output ooo To Factory Default Setting						
+              ooo=000: Select All Output Ports						
+              ooo=[001...n]: Select One Output Port						
+              id=[001...767]: ID value						
+              yyy=[001...n]: Select One Input Port						
+              yyy=AUTO: V/A/R/S/U/C/P follow "OUT ooo FR yyy" command						
+              						
+              rr=[0:Bypass 3:1080P@50Hz 4:1080P@60Hz]						
+                 [7:720P@60Hz 8:720P@50Hz]						
+		 [9:1280x1024@60Hz 10:1024x768@60Hz]				
+                 [11:1360x768@60Hz 12:1440x900@60Hz 13:1680x1050@60Hz]						
+                 [14:4K 30 Hz 15:4K 24 Hz 16:4K 50 Hz 17:4K 60 Hz]						
+                 [18:DCI 4K 25Hz 19:DCI 4K 30Hz 20:DCI 4K 50Hz 21:DCI 4K 60Hz]						
+                 [22:1280x800@60Hz 23:1920x1200@60Hzz]						
+              NOTE : This value is valid for IP300-350 						
+              						
+              rr=[0:Bypass 1:2160P@30Hz 2:2160P@24Hz 3:1080P@50Hz 4:1080P@60Hz]						
+                 [5:1080i@50Hz 6:1080i@60Hz 7:720P@60Hz]						
+                 [8:720P@50Hz 9:1280x1024@60Hz 10:1024x768@60Hz]						
+                 [11:1360x768@60Hz 12:1440x900@60Hz 13:1680x1050@60Hz]						
+              NOTE : This value is valid for IP200-250    						
+              						
+              tt=[0:Bypass 1:90 2:180 3:270]						
+              ee=[0:Always On 1...9:10~90Seconds]						
+              br=[0:300 1:600 2:1200 3:2400 4:4800 5:9600]						
+                 [6:19200 7:38400 8:57600 9:115200]						
+              bit=Data Bits + Parity + Stop Bits, example: 8n1						
+                 Data Bits=[5...8], Parity=[n o e], Stop Bits=[1..2]						
+              name: Max 16 Characters						
+IN iii ID id : Set Input iii To ID id, If New ID Exists Than Swap Them,						
+              Note: DEVICE MUST BE ONLINE						
+IN iii DEL : Delete Input iii From Current Project Config						
+IN iii RB : Reboot Input iii And Apply New Config						
+IN iii RESET : Reset Input iii To Factory Default Setting						
+IN iii AUD AUTO : Set Input iii Audio To Auto						
+IN iii AUD HDMI : Set Input iii Audio To HDMI						
+IN iii AUD ANA : Set Input iii Audio To Embedded Analogue L/R						
+IN iii HTTPS ON/OFF : Set Input iii HTTPS On Or Off						
+IN iii AUDAH : Set Input iii Analogue Input To HDMI Output						
+IN iii AUDAD : Set Input iii Analogue Input To Dante Output						
+IN iii AUDHA : Set Input iii HDMI Input To Analogue Output						
+IN iii AUDHH : Set Input iii HDMI Input To HDMI Output						
+IN iii AUDHD : Set Input iii HDMI Input To Dante Output						
+IN iii AUDDA : Set Input iii Dante Input To Analogue Output						
+IN iii AUDDH : Set Input iii Dante Input To HDMI Output						
+IN iii LAN2M0: Set Input iii LAN2 Mode To Mode 0						
+IN iii LAN2M1: Set Input iii LAN2 Mode To Mode 1						
+IN iii LAN2M2: Set Input iii LAN2 Mode To Mode 2						
+IN iii LAN2M3: Set Input iii LAN2 Mode To Mode 3						
+IN iii LAN2M4: Set Input iii LAN2 Mode To Mode 4						
+IN iii NAME name : Set Input iii Device Name To name						
+IN iii CEC ON/OFF : Set Input iii CEC On Or Off						
+IN iii FLS ON [time] : Set Input iii Flash Power LED time Seconds						
+IN iii FLS OFF : Set Input iii Disable Flash Power LED						
+IN iii LED ee : Set Input iii Front Panel LED Auto Off After ee*10 Seconds						
+IN iii SG [ON/OFF] [BR br] [BIT bit]: Set Input iii Serial Guest Mode Config						
+IN iii GUEST: Start Serial Guest Mode To Input iii						
+IN iii HDCP BYP/V14/V22: Set HDCP overrider mode To Input iii						
+IN iii SSM L/N: Set System Size To input iii						
+IN iii EFR ooo: Set Input iii ARC channel to ooo						
+              Note: To Close Guest Mode Use Command CLOSEACMGUEST						
+IN iii ARC ON/OFF						
+IN TGMODE xx: Switch Wallplate To Input xx 						
+     xx = 0: HDMI Input						
+     xx = 1: USB-C Input						
+IN iii SWMODE xx: : Set Switch Mode of Wallplate To xx						
+     xx = 1: Auto Switch(Default) 						
+     xx = 2: Auto Switch USB-C Priority						
+     xx = 3: Auto Switch HDMI Priority						
+     xx = 4: USB-C Only						
+     xx = 5: HDMI Only						
+     xx = 6: Button Only						
+IN [iii] STATUS : Show Input iii Detailed Status						
+              iii=000: Select All Input Ports						
+              iii=[001...n]: Select One Input Port						
+              id=[001...254]: ID value						
+              name: Max 16 Characters						
+EDID iii CP ooo : Set Input iii EDID Copy From Output ooo						
+EDID iii DF zz : Set Input iii EDID To zz						
+              zz=00: HDMI 1080p@60Hz, Audio 2CH PCM						
+              zz=01: HDMI 1080p@60Hz, Audio 5.1CH DTS/DOLBY						
+              zz=02: HDMI 1080p@60Hz, Audio 7.1CH DTS/DOLBY/HD						
+              zz=03: HDMI 1080i@60Hz, Audio 2CH PCM						
+              zz=04: HDMI 1080i@60Hz, Audio 5.1CH DTS/DOLBY						
+              zz=05: HDMI 1080i@60Hz, Audio 7.1CH DTS/DOLBY/HD						
+              zz=06: HDMI 1080p@60Hz/3D, Audio 2CH PCM						
+              zz=07: HDMI 1080p@60Hz/3D, Audio 5.1CH DTS/DOLBY						
+              zz=08: HDMI 1080p@60Hz/3D, Audio 7.1CH DTS/DOLBY/HD						
+              zz=09: HDMI 4K@30Hz 4:4:4, Audio 2CH PCM						
+              zz=10: HDMI 4K@30Hz 4:4:4, Audio 5.1CH DTS/DOLBY						
+              zz=11: HDMI 4K@30Hz 4:4:4, Audio 7.1CH DTS/DOLBY/HD						
+              zz=12: DVI 1280x1024@60Hz, Audio None						
+              zz=13: DVI 1920x1080@60Hz, Audio None						
+              zz=14: DVI 1920x1200@60Hz, Audio None						
+              zz=15: HDMI 4K@30Hz 4:4:4, Audio 7.1CH(Default)						
+              zz=16: HDMI 4K@60Hz 4:2:0, Audio 2CH PCM						
+              zz=17: HDMI 4K@60Hz 4:2:0, Audio 5.1CH DTS/DOLBY						
+              zz=18: HDMI 4K@60Hz 4:2:0, Audio 7.1CH DTS/DOLBY/HD						
+              zz=19: HDMI 4K@60Hz 4:4:4, 8-bit Audio 2CH PCM						
+              zz=20: HDMI 4K@60Hz 4:4:4, 8-bit Audio 5.1CH DTS/DOLBY						
+              zz=21: HDMI 4K@60Hz 4:4:4, 8-bit Audio 7.1CH DTS/DOLBY/HD						
+              zz=22: HDMI 4K@60Hz 4:4:4, 10-bit Audio 2CH PCM						
+              zz=23: HDMI 4K@60Hz 4:4:4, 10-bit 5.1CH DTS/DOLBY						
+              zz=24: HDMI 4K@60Hz 4:4:4, 10-bit 7.1CH DTS/DOLBY/HD						
+              zz=25: HDMI 4K@60Hz 4:4:4, 12-bit Audio 2CH PCM						
+              zz=26: HDMI 4K@60Hz 4:4:4, 12-bit 5.1CH DTS/DOLBY						
+              zz=27: HDMI 4K@60Hz 4:4:4, 12-bit 7.1CH DTS/DOLBY/HD						
+              zz=28: HDMI 4K@60Hz 4:4:4, 10-bit Inc DV Audio 2CH PCM						
+              zz=29: HDMI 4K@60Hz 4:4:4, 10-bit Inc DV 5.1CH DTS/DOLBY						
+              zz=30: HDMI 4K@60Hz 4:4:4, 10-bit Inc DV 7.1CH DTS/DOLBY/HD						
+              zz=31: HDMI 4K@60Hz 4:4:4, 12-bit Inc DV Audio 2CH PCM						
+              zz=32: HDMI 4K@60Hz 4:4:4, 12-bit Inc DV 5.1CH DTS/DOLBY						
+              zz=33: HDMI 4K@60Hz 4:4:4, 12-bit Inc DV 7.1CH DTS/DOLBY/HD						
+              NOTE : The value of zz = 0 to 18 is valid for IP200-250 						
+                     The value of zz = 0 to 33 is valid for IP300-350						
+============= General Control Commands						
+PRE xx AP: Recall Preset xx						
+MACRO xx: Trigger Macro with Index xx						
+============= Video Wall Control Commands						
+VW idx CREATE ccXrr [name] : Create Video Wall idx Of size Column cc X Row rr						
+VW idx NAME name : Set Video Wall idx Name To name						
+VW idx DEL: Delete Video Wall idx						
+VW idx OUT ooo HhhVvv : Video Wall idx Assign Receiver ooo To Position Horizontal hh						
+              And Vertical vv						
+VW idx C cidx CREATE [name] : Create Video Wall idx Config cidx						
+VW idx C cidx NAME name : Set Video Wall idx Config cidx Name To name						
+VW idx C cidx APPLY : Apply Video Wall idx Config cidx						
+VW idx C cidx DEL : Delete Video Wall idx Config cidx						
+VW idx C cidx G gidx HhhVvv : Set Video Wall idx Config cidx Position hh,vv To Group gidx						
+VW idx C cidx G gidx FR iii : Set Video Wall idx Config cidx Group gidx From Input iii						
+VW idx C cidx S HhhVvv : Set Video Wall idx Config cidx Position hh,vv To Single Mode						
+VW idx C cidx S HhhVvv FR iii : Set Video Wall idx Config cidx Group gidx From Input iii						
+VW idx HhhVvv OWaa VWww : Set Video Wall idx Position hh,vv Outer Width aa And View Width ww						
+VW idx HhhVvv OHaa VHww : Set Video Wall idx Position hh,vv Outer Height aa And View Height ww						
+VW [idx] STATUS : Print Video Wall Status						
+              idx=[01...09]: Select Video Wall Index						
+              cidx=[01...09]: Select Config Index						
+              gidx=[A...J]: Select Group Index						
+              cc=[01...09]: Number Of Columns In Video Wall						
+              rr=[01...09]: Number Of Rows In Video Wall						
+              hh=[01...09]: Horizontal Position In Video Wall						
+              vv=[01...09]: Vertical Position In Video Wall						
+              ooo=000: Remove Receiver From hhvv Position						
+              ooo=[001...n]: Select One Output Port						
+              iii=[001...n]: Select One Input Port						
+              name: Max 16 Characters						
+              aa=[100...1000]: Screen Outer Width/Height						
+              ww=[100...1000]: Screen View Width/Height						
+============= Project Control Commands						
+SCAN : Scan Network For All Input And Output Devices						
+SCAN STATUS : Print Scan Results						
+SCAN RESET : Reset Scan Results						
+SCAN OSD ON/OFF : Show Scan Index On All Receiver Displays						
+ASSIGN RESET : Reset All Input/Output/Videowall/Scan Configurations						
+ASSIGN DF IN iii : Assign Device At Default IP To Input iii						
+ASSIGN DF IN iii REPLACE : Assign Device At Default IP To Replace Input iii						
+ASSIGN INDEX ddd IN iii : Assign New Device At Index ddd To Input iii						
+ASSIGN INDEX ddd IN iii REPLACE : Assign New Device At Index ddd To Replace Input iii						
+ASSIGN DF OUT ooo : Assign Device At Default IP To Output ooo						
+ASSIGN DF OUT ooo REPLACE : Assign Device At Default IP To Replace Output ooo						
+ASSIGN INDEX ddd OUT ooo : Assign New Device At Index ddd To Output ooo						
+ASSIGN INDEX ddd OUT ooo REPLACE : Assign New Device At Index ddd To Replace Output ooo						
+ASSIGN AUTO : Auto Assign All New Scanned Devices To Current Project						
+              ddd=[01...n]: Scan List Index value						
+              iii=[001...n]: Select One Input Port						
+              ooo=[001...n]: Select One Output Port						
+============= General Purpose Input/Output Port Commands						
+GPIO VCC SET VOLTS 5/12 : Set voltage of VCC pin to 5v/12v						
+GPIO gg SET VOLTS 5/12 : Set voltage of gpio pin to 5v/12v						
+GPIO gg SET CURR 0/1 : Set current of gpio pin to LOW/HIGH						
+GPIO gg SET 0/1 : Set IO Output gg To Low(0)/High(1) Level						
+GPIO gg GET : Get IO Port gg Real Input Level						
+GPIO [gg] STATUS : Print IO Port gg Status						
+	gg = 01 : O/P1 This is an OUTPUT port which can provide High(5V-12V) and Low(0V) voltage.					
+	gg = 02 : O/P2 This is an OUTPUT port which can provide High(5V-12V) and Low(0V) voltage.					
+	gg = 03 : I/P1 This is an INPUT port which can accept High(5V-12V) and Low(0V) voltage.					
+	gg = 04 : I/P2 This is an INPUT port which can accept High(5V-12V) and Low(0V) voltage.					
+============= Network Control Commands						
+NET LAN2 DHCP ON/OFF : Set LAN2 (Control LAN) DHCP To On Or Off						
+NET aaaa IP xxx.xxx.xxx.xxx : Set IP Address To xxx.xxx.xxx.xxx						
+NET aaaa GW xxx.xxx.xxx.xxx : Set Gateway Address To xxx.xxx.xxx.xxx						
+NET aaaa SM xxx.xxx.xxx.xxx : Set Subnet Mask Address To xxx.xxx.xxx.xxx						
+              aaaa=LAN1: Set Video LAN(POE) Config						
+              aaaa=LAN2: Set Control LAN(Web GUI) Config						
+NET RB : Reboot Network And Apply New Config						
+         Call This Command After LAN Config Is Changed To Reboot Network						
+NET TN xxxx : Set Telnet Port To xxxx						
+NET DNS xxxx : Set DNS Domain Name To xxxx						
+						
+						
+						
+IN iii ASTPARAM 		: Getting Detailes of input iii				
+IN iii HOTPLUG ON/OFF 		: Set input iii hotplug to on or off				
+						
+OUT ooo ASTPARAM 		: Getting Detailes of input ooo				
+OUT ooo HOTPLUG ON/OFF 		: Set output ooo hotplug to on or off				
+OUT ooo FALLBACK iii   		: Set Output ooo fallback to input iii				
+						
+PRE idx ADD RX ooo TX iii	: Add TX iii and RX ooo in preset idx					
+PRE idx RM RX ooo TX iii	: remove TX iii and RX ooo in preset idx					
+PRE idx ON/OFF 			: preset idx enable/disable			
+						
+GRP idx ON/OFF		: group idx enable/disable				
+GRP idx AD ooo		: Add RX ooo in group idx				
+GRP idx RM ooo		: remove RX ooo in group idx				
+GRP idx FR iii		: group idx apply command				
+						
+ACM REBOOT	: Reboot ACM1000					
+						
+EVENT MACRO ADD:macro_idx TIME:HH:SS DAY:DD SS:1	 	: configure event scheduler in position idx				
+EVENT MACRO EDIT:macro_idx TIME:HH:SS DAY:DD EVENT_ID:eidx	: edit event scheduler in position idx with respactive eidx					
+EVENT MACRO DEL:macro_idx TIME:HH:SS DAY:DD EVENT_ID:eidx	: Del scheduler in position idx with respactive eidx					
+EVENT MACRO CLEAR DAY:idx				: Clear All Day idx event scheduler		
+						HH : Hour
+						SS : Seconds
+						DD : Day
+						eidx : event scheduler macro position
+================================================================						
+						
+ACM1000>						

@@ -1,0 +1,123 @@
+================================================================================                                                                                                             ====================
+                            PWR8IEC 8 Port IEC Power Controller
+                            FW Version: V1.1.0
+
+===================================      System Information Commands
+?/HELP                                   Print Help Information
+STATUS                                   Print System Status And Port Status
+GETSENSORCFG xx                          Print Sensor Configuration Information
+                                         xx = 0 All Event, 1 Event1, 2 Event2, 3                                                                                                              Event3
+ELESTA                                   Print All Outputs Electricity Level Inf                                                                                                             ormation
+FWVERSION                                Print FW Version And GUI Version
+=================================        System Control Commands
+DEVICENAME:xx                            Set Device Name To xx
+PON/OFF                                  Set System Power ON Or OFF
+RELAY ON/OFF                             Set System RELAY Control ON Or OFF
+KEY ON/OFF                               Set System Key Control ON Or OFF
+RESET                                    Reset System To Default Setting(Type "Y                                                                                                             es" To Confirm, "No" To Discard)
+REBOOT                                   Set System Reboot And Apply New Config!                                                                                                             !!
+RESTA                                    Set System Restart
+SETCURRENTTHRESHOLD xx                   Set System Current Threshold To xxA(Def                                                                                                             ault: 10A)
+                                         xx = 1 10A, 2 12A, 3 13A, 4 15A, 5 16A
+SAFEMODE xx                              Set The System Safe Mode To xx When Ove                                                                                                             rloaded
+                                         xx = 0 Outlet_Shutdown, 1 System_Shutdo                                                                                                             wn, 2 Auto_Retry
+OVERLOADRETRYCNT xx                      Set The System Retry Number To xx When                                                                                                              Overloaded(Default: 1)
+                                         xx = 1 : 3
+OVERLOADRETRYTIME xx                     Set The System Retry Delay Time To xxmi                                                                                                             ns When Overloaded(Default: 3mins)
+                                         xx = 1 : 10
+STANDBYMODE xx                           Set The System Standby Mode To xx
+                                         xx = 0 All_Standby_Mode, 1 Sleep_Mode
+RELAYMODE xx                             Set The System Relay Mode To xx
+                                         xx = 0 Dry_Contact, 1 Push_Button
+RELAYVOLTAGE xx                          Set The System Relay Toggle Voltage To                                                                                                              xx
+                                         xx = 0 Low_Voltage, 1 High_Voltage
+BEEPERTIME xx                            Set The Buzzer Sound Time To xxs When A                                                                                                             larming(Default: 10 Seconds)
+                                         xx = 0 : 9999
+OUTLETTIMEON xx:yy                       Set Outlet xx Power_ON Delay To yys
+                                         xx = 1 Outlet1, 2 Outlet2, 3 Outlet3, 4                                                                                                              Outlet4, 5 Outlet5, 6 Outlet6, 7 Outlet7, 8 Outlet8
+                                         yy = 0 : 9999
+OUTLETTIMEOFF xx:yy                      Set Outlet xx Power_OFF Delay To yys
+                                         xx = 1 Outlet1, 2 Outlet2, 3 Outlet3, 4                                                                                                              Outlet4, 5 Outlet5, 6 Outlet6, 7 Outlet7, 8 Outlet8
+                                         yy = 0 : 9999
+OUTLETELERESET xx:yy                     Set Outlet xx Electrical Work Reset Dur                                                                                                             ation To yys(Default: 10 Seconds)
+                                         xx = 1 Outlet1, 2 Outlet2, 3 Outlet3, 4                                                                                                              Outlet4, 5 Outlet5, 6 Outlet6, 7 Outlet7, 8 Outlet8
+                                         yy = 0 : 9999
+OUTLETTHRESHOLD xx:yy                    Set Outlet xx Current Threshold To xxA(                                                                                                             Default: 0A)
+                                         xx = 1 Outlet1, 2 Outlet2, 3 Outlet3, 4                                                                                                              Outlet4, 5 Outlet5, 6 Outlet6, 7 Outlet7, 8 Outlet8
+                                         yy = 0 : 10
+ALLOUT ON/OFF                            Set All Outlets ON/OFF
+OUTLET xx ON/OFF/RESTA                   Set Outlet xx ON/OFF/RESTA
+                                         xx = 1 Outlet1, 2 Outlet2, 3 Outlet3, 4                                                                                                              Outlet4, 5 Outlet5, 6 Outlet6, 7 Outlet7, 8 Outlet8, 9 Outlet9
+RSALLOUTELE                              Clean Up All Outlets Electrical Work
+RSOUTELE xx                              Clean Up The Outlet xx Electrical Work
+                                         xx = 1 Outlet1, 2 Outlet2, 3 Outlet3, 4                                                                                                              Outlet4, 5 Outlet5, 6 Outlet6, 7 Outlet7, 8 Outlet8, 9 Outlet9
+SYSTIME                                  Get The Time For The System
+RESYSTIME yyyy-mm-dd;hh:mm:ss            Set The Time For The System
+                                         yyyy = Year, mm = Month, dd = Day, hh =                                                                                                              Hour, mm = Minute, ss = Second
+LED ON/OFF                               Set Power LED To Always ON/Off
+LED xx                                   Set Power LED To Auto Turn Off After xx                                                                                                             s(Default: 60 Seconds)
+                                         xx = 3 : 60
+===================================      RS232 Control Commands
+RS232OUT y:z:c:a                         Send y Type Of Command a With Baud Rate                                                                                                              z, Parity c To Output
+                                         y=a: ASCII
+                                         y=h: HEX
+                                         z=1: 2400
+                                         z=2: 4800
+                                         z=3: 9600
+                                         z=4: 19200
+                                         z=5: 38400
+                                         z=6: 57600(Default)
+                                         z=7: 115200
+                                         c=1: None
+                                         c=2: Even
+                                         c=3: Odd
+                                         a=RS232 Command
+RS232BAUD z                              Set RS232 Baud Rate To xx
+                                         z = 1 - 2400, 2 - 4800, 3 - 9600, 4 - 1                                                                                                             9200, 5 - 38400, 6 - 57600(Default), 7 - 115200
+===================================      SENSOR Control Commands
+SENSOR1/SENSOR2 POWER xx                 Set Sensor1/Sensor2 Power To xx
+                                         xx = 0 OFF, 1 ON
+SENSOR1/SENSOR2 PROTOCOLS xx             Set SENSOR1/SENSOR2 Protocols To xx
+                                         xx = 1 1-wire(wiring2,3,6), 2 I2C(wirin                                                                                                             g2,3,7,8), 3 Modbus-RTU-RS485(wiring1,2,4,5), 4 Door(wiring2,6), 5 Relay Switch(                                                                                                             wiring1,2,6)
+SENSOR1/SENSOR2 TYPE xx                  Set SENSOR1/SENSOR2 Type To xx
+                                         xx = 1 Temperature, 2 Humidity, 3 Tempe                                                                                                             rature And Humidity, 4 Air Pressure, 5 Other Data, 6 Normally Open, 7 Normally C                                                                                                             lose
+SENSOR1/SENSOR2 ADDRESS xx               Set SENSOR1/SENSOR2 Data Address To xx
+                                         xx = 00 : FF or 0000 : FFFF
+SENSOR1/SENSOR2 MSADDRESS xx             Set SENSOR1/SENSOR2 Slave Station Addre                                                                                                             ss To xx
+                                         xx = 00 : FF
+SENSOR1/SENSOR2 MFUNCCODE xx             Set SENSOR1/SENSOR2 Function Code To xx
+                                         xx = 03 or 04
+SENSOR1/SENSOR2 VALUEMAX xx              Set SENSOR1/SENSOR2 Max Value To xx
+                                         xx = -9999 : 9999
+SENSOR1/SENSOR2 VALUEMIN xx              Set SENSOR1/SENSOR2 Min Value To xx
+                                         xx = -9999 : 9999
+SENSOR1/SENSOR2 UNIT xx                  Set SENSOR1/SENSOR2 Unit To xx
+                                         xx = 1 ▒▒, 2 %RH, 3 hPa
+SENSOR1/SENSOR2 BEEPER ON/OFF            Set SENSOR1/SENSOR2 Beeper ON/OFF
+SENSOR1/SENSOR2 OUTLETMODE xx:yy:zz      Set Event xx Outlet yy Response Sensor1                                                                                                             /Sensor2 Mode To zz
+                                         xx = 1 Event1, 2 Event2, 3 Event3
+                                         yy = 1 Outlet1, 2 Outlet2, 3 Outlet3, 4                                                                                                              Outlet4, 5 Outlet5, 6 Outlet6, 7 Outlet7, 8 Outlet8
+                                         zz = 1 NoAction, 2 Power ON, 3 Power OF                                                                                                             F, 4 Restart
+SENSOR1/SENSOR2 OUTLETTRIGGER xx:yy:zz   Set Event xx Outlet yy Response Sensor1                                                                                                             /Sensor2 Trigger To zz
+                                         xx = 1 Event1, 2 Event2, 3 Event3
+                                         yy = 1 Outlet1, 2 Outlet2, 3 Outlet3, 4                                                                                                              Outlet4, 5 Outlet5, 6 Outlet6, 7 Outlet7, 8 Outlet8
+                                         zz = 1 No Trigger, 2 Max Trigger, 3 Min                                                                                                              Trigger, 4 Min-Max, 5 ON, 6 OFF
+SENSOR1/SENSOR2 OUTLETDELAY xx:yy:zz     Set Event xx Outlet yy Response Sensor1                                                                                                             /Sensor2 Delay To zzs
+                                         xx = 1 Event1, 2 Event2, 3 Event3
+                                         yy = 1 Outlet1, 2 Outlet2, 3 Outlet3, 4                                                                                                              Outlet4, 5 Outlet5, 6 Outlet6, 7 Outlet7, 8 Outlet8
+                                         zz = 0 : 9999
+GET SENSOR1/SENSOR2 CURRENT              Get Sensor1/Sensor2 Current Value xx
+===================================      Network Control Commands
+NET TCP/IP ENABLE xx                     Set TCP/IP xx Enable(Only One Can Be En                                                                                                             abled)
+                                         xx = 1 TCP/IP1, 2 TCP/IP2
+NET TCP/IP1 DHCP ON/OFF                  Set TCP/IP1 Auto IP(DHCP) ON Or OFF
+NET TCP/IP1 IP xxx.xxx.xxx.xxx           Set TCP/IP1 IP Address
+NET TCP/IP1 GW xxx.xxx.xxx.xxx           Set TCP/IP1 Gateway Address
+NET TCP/IP1 SM xxx.xxx.xxx.xxx           Set TCP/IP1 Subnet Mask Address
+NET TCP/IP2 DHCP ON/OFF                  Set TCP/IP2 Auto IP(DHCP) ON Or OFF
+NET TCP/IP2 IP xxx.xxx.xxx.xxx           Set TCP/IP2 IP Address
+NET TCP/IP2 GW xxx.xxx.xxx.xxx           Set TCP/IP2 Gateway Address
+NET TCP/IP2 SM xxx.xxx.xxx.xxx           Set TCP/IP2 Subnet Mask Address
+NET MDNS ON/OFF                          Set mDNS ON/OFF
+NET RB                                   Set Network Reboot And Apply New Config
+================================================================================            

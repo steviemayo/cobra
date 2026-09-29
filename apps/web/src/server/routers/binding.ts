@@ -205,6 +205,39 @@ export const bindingRouter = router({
       return { commandId: res.id };
     }),
 
+  // Ask the room's gateway to list a point-based device's own named components, for a pick-list
+  // instead of typing one blind.
+  discoverComponents: orgProcedure
+    .input(roomInput.extend({ deviceId: z.string().min(1).max(100) }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const res = await requestCommand(db, {
+        orgId: ctx.orgId,
+        roomId: input.roomId,
+        type: 'discover_components',
+        args: { deviceId: input.deviceId },
+        requestedBy: ctx.user.id,
+      });
+      if (!res.ok) return fail(res.error);
+      return { commandId: res.id };
+    }),
+
+  // Ask the room's gateway to list one named component's controls.
+  discoverControls: orgProcedure
+    .input(roomInput.extend({ deviceId: z.string().min(1).max(100), component: z.string().min(1).max(100) }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const res = await requestCommand(db, {
+        orgId: ctx.orgId,
+        roomId: input.roomId,
+        type: 'discover_controls',
+        args: { deviceId: input.deviceId, component: input.component },
+        requestedBy: ctx.user.id,
+      });
+      if (!res.ok) return fail(res.error);
+      return { commandId: res.id };
+    }),
+
   credentialSets: router({
     list: orgProcedure.input(z.object({ orgId })).query(({ ctx }) => {
       requireRole(ctx.role, ['owner', 'dev']);

@@ -1,4 +1,13 @@
-import type { ControlPoint, Device, DeviceCommand, DeviceState, PointReading, QuickActionId } from '@kestrel/model';
+import type {
+  ControlPoint,
+  Device,
+  DeviceCommand,
+  DeviceState,
+  DiscoveredComponent,
+  DiscoveredControl,
+  PointReading,
+  QuickActionId,
+} from '@kestrel/model';
 
 /** A driver for one physical device. Translates engine commands into that device's protocol. */
 export interface DeviceDriver {
@@ -14,6 +23,10 @@ export interface DeviceDriver {
   streamLocation?(): Promise<string>;
   /** Read one control point, to check it exists and learn its range. Rejects if it cannot. */
   readPoint?(point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>): Promise<PointReading>;
+  /** List the device's own named components, for a pick-list instead of typing one blind. Rejects if it cannot. */
+  discoverComponents?(): Promise<DiscoveredComponent[]>;
+  /** List the controls of one named component. Rejects if it cannot. */
+  discoverControls?(component: string): Promise<DiscoveredControl[]>;
   /** Called with a fresh snapshot whenever feedback changes. */
   onChange(listener: (state: DeviceState) => void): () => void;
   /** Start any background polling / connections. */

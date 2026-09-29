@@ -2,6 +2,8 @@ import http from 'node:http';
 import { createServer, type Server, type Socket } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { STARTER_TEMPLATES, type Device } from '@kestrel/model';
+import { BlustreamAcm1000Driver } from './blustream-acm1000';
+import { BlustreamDa11ablDriver } from './blustream-da11abl';
 import { BUILT_IN_DRIVER_IDS, createDriver } from './registry';
 import { NvxDriver } from './nvx';
 import { QsysDriver } from './qsys';
@@ -33,6 +35,16 @@ const device = (id: string, driverId: string, settings: Record<string, unknown>)
 
 // ---- Q-SYS ----------------------------------------------------------------------------------
 
+const ENGINE_STATUS = {
+  Platform: 'Core 510i',
+  State: 'Active',
+  DesignName: 'SAF-MainPA',
+  DesignCode: 'qALFilm6IcAz',
+  IsRedundant: false,
+  IsEmulator: true,
+  Status: { Code: 0, String: 'OK' },
+};
+
 interface QrcServer {
   port: number;
   requests: { method: string; params: Record<string, unknown> }[];
@@ -42,7 +54,7 @@ interface QrcServer {
 }
 
 async function fakeQsys(
-  opts: { user?: string; password?: string; silent?: boolean } = {},
+  opts: { user?: string; password?: string; silent?: boolean; pushEngineStatus?: boolean } = {},
 ): Promise<QrcServer> {
   const requests: QrcServer['requests'] = [];
   const controls = new Map<string, number | boolean>([
@@ -56,6 +68,8 @@ async function fakeQsys(
     let buf = '';
     let authed = !opts.user;
     socket.on('error', () => undefined);
+    if (opts.pushEngineStatus)
+      socket.write(JSON.stringify({ jsonrpc: '2.0', method: 'EngineStatus', params: ENGINE_STATUS }) + '\0');
     socket.on('data', (chunk: string) => {
       buf += chunk;
       let i: number;
@@ -95,6 +109,21 @@ async function fakeQsys(
           for (const c of msg.params.Controls as { Name: string; Value: number }[])
             controls.set(c.Name, c.Name === 'mute' ? c.Value === 1 : c.Value);
           reply({ Name: msg.params.Name, Controls: [] });
+        } else if (msg.method === 'StatusGet') {
+          reply(ENGINE_STATUS);
+        } else if (msg.method === 'Component.GetComponents') {
+          reply([
+            { Name: 'gain', Type: 'gain' },
+            { Name: 'Mic Mixer', Type: 'mixer' },
+          ]);
+        } else if (msg.method === 'Component.GetControls') {
+          reply({
+            Name: msg.params.Name,
+            Controls: [
+              { Name: 'gain', Type: 'Float', Value: controls.get('gain') },
+              { Name: 'mute', Type: 'Boolean', Value: controls.get('mute') },
+            ],
+          });
         } else reply(true);
       }
     });
@@ -134,7 +163,11 @@ describe('Q-SYS Core driver', () => {
     await until(() => d.getState().online);
     // -20 dB on a -40..0 scale is half way.
     expect(d.getState()).toMatchObject({ online: true, volume: 50, muted: false });
-    expect(core.requests[0]).toMatchObject({ method: 'Component.Get', params: { Name: 'gain' } });
+    expect(core.requests.find((r) => r.method === 'Component.Get')).toMatchObject({
+      method: 'Component.Get',
+      params: { Name: 'gain' },
+    });
+    expect(core.requests[0]).toMatchObject({ method: 'StatusGet' });
   });
 
   it('sets volume as dB on the configured scale, and mute', async () => {
@@ -164,6 +197,42 @@ describe('Q-SYS Core driver', () => {
     core.controls.set('gain', -10);
     core.controls.set('mute', true);
     await until(() => d.getState().volume === 75 && d.getState().muted === true);
+  });
+
+  it('reads engine status (platform, design, redundancy) into details, from StatusGet and from the unsolicited push', async () => {
+    const core = await fakeQsys({ pushEngineStatus: true });
+    const d = new QsysDriver(qsysDevice(core.port), ctx);
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    await until(() => !!d.getState().details?.length);
+    expect(d.getState().details).toMatchObject([
+      {
+        title: 'Q-SYS Core',
+        rows: expect.arrayContaining([
+          { label: 'Platform', value: 'Core 510i' },
+          { label: 'Design', value: 'SAF-MainPA' },
+          { label: 'Engine status', value: 'OK', status: 'ok' },
+        ]),
+      },
+    ]);
+    expect(core.requests.some((r) => r.method === 'StatusGet')).toBe(true);
+  });
+
+  it('lists components and one component’s controls, for a pick-list', async () => {
+    const core = await fakeQsys();
+    const d = new QsysDriver(qsysDevice(core.port), ctx);
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    await expect(d.discoverComponents()).resolves.toEqual([
+      { name: 'gain', type: 'gain' },
+      { name: 'Mic Mixer', type: 'mixer' },
+    ]);
+    await expect(d.discoverControls('gain')).resolves.toEqual([
+      { name: 'gain', type: 'Float', value: -20 },
+      { name: 'mute', type: 'Boolean', value: false },
+    ]);
   });
 
   it('logs on when the Core asks for credentials, and stays offline when they are wrong', async () => {
@@ -481,5 +550,175 @@ describe('Crestron DM-NVX driver', () => {
     wrong.start();
     await wait(500);
     expect(wrong.getState().online).toBe(false);
+  });
+});
+
+// ---- Blustream DA11ABL-WP-V2 -------------------------------------------------------------------
+
+interface WallPlateServer {
+  port: number;
+  sent: string[];
+  btReply: string;
+  close: () => void;
+}
+
+async function fakeWallPlate(btReply: string): Promise<WallPlateServer> {
+  const sent: string[] = [];
+  const state = { btReply };
+  const server: Server = createServer((socket) => {
+    socket.setEncoding('utf8');
+    let buf = '';
+    socket.on('error', () => undefined);
+    socket.on('data', (chunk: string) => {
+      buf += chunk;
+      let i: number;
+      while ((i = buf.indexOf('\r\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        sent.push(line);
+        if (line === 'BT SOURCE') socket.write(state.btReply);
+        // Every other command gets no reply, matching the reference's undocumented replies.
+      }
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const port = (server.address() as { port: number }).port;
+  const s = { port, sent, btReply, close: () => server.close() };
+  servers.push(s);
+  return s;
+}
+
+const wallPlateDevice = (port: number) =>
+  device('dsp', 'blustream-da11abl', { host: '127.0.0.1', port, pollMs: 100, timeoutMs: 400 });
+
+describe('Blustream DA11ABL-WP-V2 driver', () => {
+  it('is what a device asks for by driver id', () => {
+    expect(BUILT_IN_DRIVER_IDS).toContain('blustream-da11abl');
+    expect(createDriver(wallPlateDevice(1), ctx)).toBeInstanceOf(BlustreamDa11ablDriver);
+  });
+
+  it('routes by the port id\'s digit, mutes and sets volume without waiting for a reply', async () => {
+    const wp = await fakeWallPlate('Connected\r\n');
+    const d = new BlustreamDa11ablDriver(wallPlateDevice(wp.port), ctx);
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    await d.send({ type: 'route', inputPortId: 'in2', outputPortId: 'out1' });
+    await d.send({ type: 'mute', muted: true });
+    await d.send({ type: 'volume', level: 100 });
+    await until(() => wp.sent.includes('OUT GAIN 0'));
+    expect(wp.sent).toEqual(expect.arrayContaining(['IN SOURCE 2', 'OUT MUTE ON', 'OUT GAIN 0']));
+    expect(d.getState()).toMatchObject({ muted: true, volume: 100, routes: { out1: 'in2' } });
+  });
+
+  it('reads Bluetooth connection status into details, and keeps the raw reply as a fallback', async () => {
+    const wp = await fakeWallPlate('BT1: MyPhone Connected\r\n');
+    const d = new BlustreamDa11ablDriver(wallPlateDevice(wp.port), ctx);
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    await until(() => !!d.getState().details?.length);
+    expect(d.getState().details).toMatchObject([
+      {
+        title: 'Bluetooth',
+        rows: expect.arrayContaining([
+          { label: 'Bluetooth', value: 'Connected', status: 'ok' },
+          { label: 'Paired device', value: 'MyPhone' },
+        ]),
+      },
+    ]);
+  });
+
+  it('goes offline when nothing answers', async () => {
+    const wp = await fakeWallPlate('');
+    wp.close();
+    const d = new BlustreamDa11ablDriver(wallPlateDevice(wp.port), ctx);
+    drivers.push(d);
+    d.start();
+    await wait(200);
+    expect(d.getState().online).toBe(false);
+  });
+});
+
+// ---- Blustream ACM1000 --------------------------------------------------------------------------
+
+interface AcmServer {
+  port: number;
+  sent: string[];
+  statusReply: string;
+  close: () => void;
+}
+
+async function fakeAcm(statusReply: string): Promise<AcmServer> {
+  const sent: string[] = [];
+  const server: Server = createServer((socket) => {
+    socket.setEncoding('utf8');
+    let buf = '';
+    socket.on('error', () => undefined);
+    socket.on('data', (chunk: string) => {
+      buf += chunk;
+      let i: number;
+      while ((i = buf.indexOf('\r\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        sent.push(line);
+        if (line === 'STATUS') socket.write(statusReply);
+        // OUT ... FR ... gets no reply, matching the reference's undocumented replies.
+      }
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const port = (server.address() as { port: number }).port;
+  const s = { port, sent, statusReply, close: () => server.close() };
+  servers.push(s);
+  return s;
+}
+
+const acmDevice = (port: number) =>
+  device('dsp', 'blustream-acm1000', { host: '127.0.0.1', port, pollMs: 100, timeoutMs: 400 });
+
+describe('Blustream ACM1000 driver', () => {
+  it('is what a device asks for by driver id', () => {
+    expect(BUILT_IN_DRIVER_IDS).toContain('blustream-acm1000');
+    expect(createDriver(acmDevice(1), ctx)).toBeInstanceOf(BlustreamAcm1000Driver);
+  });
+
+  it('routes with zero-padded port numbers, without waiting for a reply', async () => {
+    const acm = await fakeAcm('OK\r\n');
+    const d = new BlustreamAcm1000Driver(acmDevice(acm.port), ctx);
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    await d.send({ type: 'route', inputPortId: 'in2', outputPortId: 'out12' });
+    await until(() => acm.sent.includes('OUT 012 FR 002'));
+    expect(d.getState().routes.out12).toBe('in2');
+  });
+
+  it('counts the inputs and outputs it sees in the status reply, and keeps the raw text', async () => {
+    const acm = await fakeAcm('IN 001 Online\r\nIN 002 Online\r\nOUT 001 FR 001\r\nOUT 002 FR 001\r\n');
+    const d = new BlustreamAcm1000Driver(acmDevice(acm.port), ctx);
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    await until(() => !!d.getState().details?.length);
+    expect(d.getState().details).toMatchObject([
+      {
+        title: 'ACM1000',
+        rows: expect.arrayContaining([
+          { label: 'Inputs seen', value: '2 (1, 2)' },
+          { label: 'Outputs seen', value: '2 (1, 2)' },
+        ]),
+      },
+    ]);
+  });
+
+  it('goes offline when nothing answers', async () => {
+    const acm = await fakeAcm('');
+    acm.close();
+    const d = new BlustreamAcm1000Driver(acmDevice(acm.port), ctx);
+    drivers.push(d);
+    d.start();
+    await wait(200);
+    expect(d.getState().online).toBe(false);
   });
 });

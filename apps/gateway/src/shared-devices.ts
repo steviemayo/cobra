@@ -3,6 +3,8 @@ import type {
   Device,
   DeviceCommand,
   DeviceState,
+  DiscoveredComponent,
+  DiscoveredControl,
   PointReading,
   QuickActionId,
 } from '@kestrel/model';
@@ -205,6 +207,18 @@ export class View implements DeviceDriver {
   readPoint(point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>): Promise<PointReading> {
     if (!this.entry.driver.readPoint) return Promise.reject(new Error('This device cannot read control points'));
     return this.entry.driver.readPoint(point);
+  }
+
+  discoverComponents(): Promise<DiscoveredComponent[]> {
+    if (!this.entry.driver.discoverComponents)
+      return Promise.reject(new Error('This device cannot list its components'));
+    return this.entry.driver.discoverComponents();
+  }
+
+  discoverControls(component: string): Promise<DiscoveredControl[]> {
+    if (!this.entry.driver.discoverControls)
+      return Promise.reject(new Error('This device cannot list its controls'));
+    return this.entry.driver.discoverControls(component);
   }
 
   onChange(listener: (state: DeviceState) => void): () => void {

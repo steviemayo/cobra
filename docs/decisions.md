@@ -613,3 +613,38 @@ Start on the mediums (M1 to M12 in `docs/security-audit-2026-09-28.md`) and the 
 | W-12 | **M12, gateway as a proxy.** Declarative and generic-TCP/REST drivers refuse a link-local target (`169.254.0.0/16` and the IPv6 equivalents) unless the device's own settings set `allowLocalAddress: true`. Loopback was deliberately left alone: the existing test convention uses `127.0.0.1` as the fake-device address in 86 places, loopback pivoting to the admin page is already covered by W-10's protections, and link-local (cloud metadata, link-local service discovery) has no legitimate use here and no test collateral | The first pass blocked loopback too and broke 22 tests; narrowed after checking what those tests actually relied on rather than either abandoning the fix or rewriting them all |
 
 Also still open: the DRY sweep (next), a first-run PIN for rooms with walls or lifts (V-4), key rotation statements and anti-rollback for room releases, code signing for the installer, and the two items called out above as not done (W-5, W-10).
+
+## Step X: Q-SYS engine status and component/control discovery (2026-09-29)
+
+**From the user**
+
+Q-SYS control points are typed in blind today (a named component, a named control). Asked whether the driver should be able to list a design's components and a component's controls itself (`Component.GetComponents`, `Component.GetControls`), and whether the unsolicited `EngineStatus` push (or a direct `StatusGet`) should feed `online`/`details` instead of being dropped.
+
+**Made while building**
+
+| ID | Decision | Why |
+| --- | --- | --- |
+| X-1 | **Engine status feeds `details`, not `online`.** `qsys.ts` now handles the Core's unsolicited `EngineStatus` notification (previously dropped as "notifications such as EngineStatus") and also asks directly with `StatusGet` right after connecting. Either way it fills a "Q-SYS Core" details section (platform, design name and code, state, redundant, emulator, engine status with an ok/bad tag) | A non-OK engine status (a bad compile, a missing licence) still means the Core answered — that is what `online` means everywhere else in this driver, so conflating the two would flip a reachable-but-unhealthy Core to look disconnected |
+| X-2 | **Discovery is a driver capability, mirroring `readPoint`.** `discoverComponents()` (`Component.GetComponents`) and `discoverControls(component)` (`Component.GetControls`) are new optional methods on `DeviceDriver`/`DeviceBus`, wired through `HybridBus`, `ControlGate` and the shared-device `View` exactly like the existing `readPoint` read-only path, plus two new allowlisted gateway commands (`discover_components`, `discover_controls`) and portal mutations (`binding.discoverComponents`/`discoverControls`) reusing the existing `binding.testResult` poll | Reuses a pattern already proven for "read one control point to verify it", rather than a second parallel mechanism |
+| X-3 | **The portal offers a pick-list, gated to `qsys-core`.** `PointsEditor`'s new `Browse` control lists components, then that component's controls, and fills the point's `address` from what was clicked. Shown only when the device's driver id is `qsys-core`, since it is the only point-based driver that implements discovery today (Tesira's driver has no equivalent QRC-style discovery call) | Offering the button for a driver that always fails would just be a dead click; a driver that does add discovery later only needs the same interface methods, not a UI change |
+
+Not done: caching a design's component/control list (each Browse click is a fresh round trip to the gateway), and discovery for Biamp Tesira (Tesira has no equivalent enumeration call in its Text Protocol).
+
+## Step Y: three Blustream drivers (2026-09-29)
+
+**From the user**
+
+Three new drivers from vendor API references added to `docs/`: PWR8IEC (an 8-outlet IEC power controller, also sold as PWR4IEC/PWR2IEC with fewer outlets), DA11ABL-WP-V2 (a Bluetooth and analogue audio wall plate, needs to report Bluetooth connection status and name), and ACM1000 (a virtual AVoIP matrix controlled as one box, reporting how many inputs and outputs it has).
+
+**Made while building**
+
+| ID | Decision | Why |
+| --- | --- | --- |
+| Y-1 | **New category `power_outlet`**, added to the `relay` class's categories. `docs/driver-classes.md`'s own class table already said relay "covers... power outlets"; the enum just hadn't caught up | `lib:blustream-pwr8iec` needed a category, and none of the 21 existing ones fit a rack power sequencer |
+| Y-2 | **PWR8IEC stays declarative** (`lib:blustream-pwr8iec`): `power.on`/`power.off` send `ALLOUT ON`/`OFF` (satisfies the relay class's `on_off` feature); `command.outlet1_on` through `outlet8_off` switch one outlet each. The 2- and 4-outlet siblings use the exact same driver — the commissioner simply never wires the outlets the physical unit does not have | One driver file covers all three SKUs; a fixed-function on/off console over TCP is exactly what the declarative format is for |
+| Y-3 | **`video_switching`'s categories gained `audio_matrix`**, following the precedent `lib:extron-sis` already set (it lists both `video_matrix` and `audio_matrix` even though the class is named for video) | DA11ABL-WP-V2 is a 2-in/1-out audio switcher, not a DSP with named components, so `route` (physical switching) fits it better than `point_based` |
+| Y-4 | **DA11ABL-WP-V2 and ACM1000 are coded drivers, not declarative.** Declarative feedback can only set one of eight fixed fields (`power`, `muted`, `volume`, `input`, `preset`, `blanked`, `online`, `firmware`); neither "Bluetooth connection status and name" nor "how many inputs and outputs exist" fits any of them. Both instead write `DeviceState.details` (the same free-form mechanism Step R built for Crestron), and share new `askConsole`/`tellConsole` socket plumbing (`ascii-console.ts`) for the two shapes every Blustream console command needs: wait for a reply, or don't, since none of the three references show acknowledgement text for a single command. Both also refuse a link-local target the same way the other real drivers do (M12, address-guard.ts) | `details` already exists for exactly this ("what a device says about itself beyond its fixed fields"); factoring the socket code once instead of three times avoids three copies of the same TCP plumbing |
+| Y-5 | **Bluetooth and port-count reporting are best-effort regex reads over raw text, with the raw reply always kept as its own row.** Neither reference shows an example `STATUS`/`BT SOURCE` reply, so `crestron-occupancy`'s "degrade rather than guess" approach is followed: a plausible field is extracted if the text matches a permissive pattern, but the real reply is always shown too, so a wrong guess never hides the truth | Same reasoning as the occupancy sensor: built from documentation alone, not from a real unit |
+| Y-6 | **ACM1000 routes with zero-padded port numbers** (`OUT 012 FR 002`), matching the reference's own `ooo=[001...n]` notation, computed in code rather than through the declarative format's `{outputNumber}` placeholder (which is not zero-padded) | The declarative format has no decimal zero-pad placeholder (only `{levelHex}`/`{inputHex}`), so a fixed-width protocol like this one needs a coded driver either way |
+
+Not done / not verified: none of the three has been tried against real hardware. `command.outlet1_on`-style per-outlet actions on PWR8IEC, and the Bluetooth/port-count details on the other two, are a best reading of the vendor references only.
