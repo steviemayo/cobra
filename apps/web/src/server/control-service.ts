@@ -7,6 +7,7 @@ import {
   PollRequest,
   type ControlIntentMessage,
 } from '@kestrel/model';
+import { writeAudit } from './audit';
 
 // Controlling a room from the portal. The gateway never accepts inbound connections, so the portal
 // and the gateway meet in the database: the browser leaves intents and reads the latest panel state,
@@ -91,26 +92,28 @@ export async function portalIntent(
   await touch(db, input.orgId, room.id, now);
   // Starting and stopping things is worth a record; volume nudges are not.
   if (intent.data.type === 'activity.start' || intent.data.type === 'activity.stop')
-    await db.auditLog.create({
-      data: {
+    await writeAudit(
+      {
         orgId: input.orgId,
         actorId: input.by,
         action: 'control.intent',
         target: room.id,
         meta: { room: room.name, intent: intent.data.type, activityId: intent.data.activityId },
       },
-    });
+      db,
+    );
   // Moving a wall changes what several rooms do, so it is always recorded.
   if (intent.data.type === 'divider.set')
-    await db.auditLog.create({
-      data: {
+    await writeAudit(
+      {
         orgId: input.orgId,
         actorId: input.by,
         action: 'wall.set',
         target: intent.data.dividerId,
         meta: { room: room.name, open: intent.data.open },
       },
-    });
+      db,
+    );
   return { ok: true };
 }
 
@@ -140,15 +143,16 @@ export async function queueHook(
       createdAt: now,
     },
   });
-  await db.auditLog.create({
-    data: {
+  await writeAudit(
+    {
       orgId: input.orgId,
       actorId: null,
       action: 'hook.fire',
       target: room.id,
       meta: { room: room.name, hook: input.hookName },
     },
-  });
+    db,
+  );
   return { ok: true };
 }
 
@@ -170,15 +174,16 @@ export async function queueTrigger(
       createdAt: now,
     },
   });
-  await db.auditLog.create({
-    data: {
+  await writeAudit(
+    {
       orgId: input.orgId,
       actorId: null,
       action: 'trigger.fire',
       target: room.id,
       meta: { room: room.name, trigger: input.triggerId },
     },
-  });
+    db,
+  );
   return { ok: true };
 }
 

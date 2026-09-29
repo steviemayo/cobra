@@ -6,6 +6,7 @@ import {
   type Entitlements,
   type StoredPlan,
 } from '@kestrel/model';
+import { writeAudit } from './audit';
 import { activeOverride, ensureBilling } from './billing';
 import { recordStaffAudit, type StaffDb } from './staff';
 
@@ -103,15 +104,16 @@ export async function setOverride(
       setBy: args.staffUserId,
     },
   });
-  await db.auditLog.create({
-    data: {
+  await writeAudit(
+    {
       orgId: args.orgId,
       actorId: null,
       action: 'license.adjust',
       target: row.id,
       meta: { staff: true, summary: describeOverride(i) },
     },
-  });
+    db,
+  );
   await recordStaffAudit(db, {
     staffUserId: args.staffUserId,
     action: 'license.set',
@@ -136,15 +138,10 @@ export async function revokeOverride(
     where: { id: row.id },
     data: { revokedAt: now, revokedBy: args.staffUserId },
   });
-  await db.auditLog.create({
-    data: {
-      orgId: args.orgId,
-      actorId: null,
-      action: 'license.revoke',
-      target: row.id,
-      meta: { staff: true },
-    },
-  });
+  await writeAudit(
+    { orgId: args.orgId, actorId: null, action: 'license.revoke', target: row.id, meta: { staff: true } },
+    db,
+  );
   await recordStaffAudit(db, {
     staffUserId: args.staffUserId,
     action: 'license.revoke',

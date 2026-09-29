@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@kestrel/db';
 import { hashSecret, open, seal, secretMatches } from '@kestrel/crypto';
 import { AnnounceRequest, type AnnounceResponse } from '@kestrel/model';
+import { writeAudit } from './audit';
 import { newEnrollToken } from './gateway-service';
 
 // Gateways that are running but have no definition in any organisation. They announce themselves
@@ -186,15 +187,16 @@ export async function claimUnclaimed(
       claimTokenSealed: seal(t.token, key),
     },
   });
-  await db.auditLog.create({
-    data: {
+  await writeAudit(
+    {
       orgId: input.orgId,
       actorId: null,
       action: 'gateway.claim',
       target: gw.id,
       meta: { name, hostname: row.hostname, claimedByStaff: input.staffUserId },
     },
-  });
+    db,
+  );
   return { gatewayId: gw.id };
 }
 

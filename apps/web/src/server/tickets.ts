@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@kestrel/db';
 import { firstResponseAt, ticketSla, type OrgRole, type TicketSla } from '@kestrel/model';
+import { writeAudit } from './audit';
 import { recordStaffAudit, type StaffDb } from './staff';
 
 // Support tickets and who they are with. A ticket starts with the organisation's own team. Anyone
@@ -112,15 +113,10 @@ export async function escalateTicket(
       visibility: 'public',
     },
   });
-  await db.auditLog.create({
-    data: {
-      orgId: args.orgId,
-      actorId: args.by.userId,
-      action: 'ticket.escalate',
-      target: t.id,
-      meta: { title: t.title },
-    },
-  });
+  await writeAudit(
+    { orgId: args.orgId, actorId: args.by.userId, action: 'ticket.escalate', target: t.id, meta: { title: t.title } },
+    db,
+  );
 }
 
 /** Kestrel staff give a ticket back to the organisation's team. */
@@ -153,15 +149,10 @@ export async function handBack(
       visibility: 'public',
     },
   });
-  await db.auditLog.create({
-    data: {
-      orgId: t.orgId,
-      actorId: null,
-      action: 'ticket.handback',
-      target: t.id,
-      meta: { staff: true, title: t.title },
-    },
-  });
+  await writeAudit(
+    { orgId: t.orgId, actorId: null, action: 'ticket.handback', target: t.id, meta: { staff: true, title: t.title } },
+    db,
+  );
   await recordStaffAudit(db as unknown as StaffDb, {
     staffUserId: args.staff.userId,
     action: 'ticket.handback',
@@ -410,15 +401,16 @@ export async function staffUpdate(
   // The organisation sees status and priority changes in its activity log; who has the ticket
   // inside Kestrel is internal.
   if (args.status || args.priority)
-    await db.auditLog.create({
-      data: {
+    await writeAudit(
+      {
         orgId: t.orgId,
         actorId: null,
         action: 'ticket.update',
         target: t.id,
         meta: { staff: true, status: args.status, priority: args.priority },
       },
-    });
+      db,
+    );
   await recordStaffAudit(db as unknown as StaffDb, {
     staffUserId: args.staff.userId,
     action: 'ticket.update',
