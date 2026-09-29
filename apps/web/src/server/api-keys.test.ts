@@ -6,7 +6,6 @@ import {
   authenticateApiKey,
   createApiKey,
   listApiKeys,
-  makeRateLimiter,
   revokeApiKey,
   type ApiKeyDb,
 } from './api-keys';
@@ -121,16 +120,5 @@ describe('managing keys', () => {
     expect(await revokeApiKey(w.db, OTHER, id, NOW)).toBe(false);
     expect(await revokeApiKey(w.db, ORG, id, NOW)).toBe(true);
     expect(await revokeApiKey(w.db, ORG, id, NOW)).toBe(false);
-  });
-});
-
-describe('the rate limit', () => {
-  it('lets a key make so many requests a minute, then says when to try again', () => {
-    const limit = makeRateLimiter(3, 60_000);
-    expect([1, 2, 3].map(() => limit('k', 1000).ok)).toEqual([true, true, true]);
-    expect(limit('k', 2000)).toEqual({ ok: false, retryAfterSeconds: 59 });
-    // Another key has its own allowance, and the first gets a fresh minute.
-    expect(limit('other', 2000).ok).toBe(true);
-    expect(limit('k', 61_000).ok).toBe(true);
   });
 });

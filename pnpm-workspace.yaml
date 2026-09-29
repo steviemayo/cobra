@@ -6,3 +6,14 @@ allowBuilds:
   '@serialport/bindings-cpp': true
   esbuild: true
   prisma: true
+# All from prisma's own bundled Studio/CLI dependency tree (lodash, mysql2, deepmerge-ts), pulled
+# in through @prisma/client even though this app only speaks Postgres and never launches Studio.
+# `.github/workflows/ci.yml` runs `pnpm audit --prod` and fails on anything not listed here.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-r5fr-rjxr-66jc
+    - GHSA-f23m-r3pf-42rh
+    - GHSA-xxjr-mmjv-4gpg
+    - GHSA-ggr8-5vv4-36mx
+    - GHSA-3f6p-5ww8-9rcr
+    - GHSA-rgwj-5xj2-c3m3

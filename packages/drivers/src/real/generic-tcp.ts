@@ -1,5 +1,6 @@
 import { connect, type Socket } from 'node:net';
-import type { Device, DeviceCommand } from '@kestrel/model';
+import { hasCatastrophicBacktracking, type Device, type DeviceCommand } from '@kestrel/model';
+import { isLinkLocal, localAddressAllowed } from './address-guard';
 import { BaseDriver } from './base';
 import { renderGenericCommand } from './generic-commands';
 import type { DriverContext } from './types';
@@ -22,8 +23,22 @@ export class GenericTcpDriver extends BaseDriver {
    * Connect at start so a release can tell a reachable device from a wrong address, then keep
    * checking (probeIntervalMs, default 20s, 0 = never) so an unplugged device is noticed.
    */
+  /** True if `host` is the gateway's own address and this device's settings do not allow that. */
+  private blockedAddress(host: string): boolean {
+    return isLinkLocal(host) && !localAddressAllowed(this.device.settings);
+  }
+
   override start() {
-    if (!this.setting<string>('host', '')) return;
+    const host = this.setting<string>('host', '');
+    if (!host) return;
+    if (this.blockedAddress(host)) {
+      this.ctx.log(
+        'error',
+        `${this.device.name}'s address (${host}) is a cloud metadata address, not a device, and was refused`,
+        { device: this.device.name, hint: 'Add "allowLocalAddress": true to this device’s settings if this is deliberate' },
+      );
+      return;
+    }
     this.probe();
     const every = this.setting<number>('probeIntervalMs', 20_000);
     if (every > 0) {
@@ -66,11 +81,24 @@ export class GenericTcpDriver extends BaseDriver {
   private transmit(text: string): Promise<void> {
     const host = this.setting<string>('host', '');
     if (!host) return Promise.reject(new Error(`${this.device.name}: no host configured`));
+    if (this.blockedAddress(host))
+      return Promise.reject(
+        new Error(`${host} is a cloud metadata address, not a device (add "allowLocalAddress": true to allow it)`),
+      );
     const port = this.setting<number>('port', 23);
     const terminator = this.setting<string>('terminator', '\r\n');
     const timeoutMs = this.setting<number>('timeoutMs', 2000);
     const expectSource = this.setting<string | undefined>('expect', undefined);
-    const expect = expectSource ? new RegExp(expectSource) : null;
+    // Typed straight into the device's settings, so never checked at authoring time the way a
+    // driver's own patterns are: skip (never matches) rather than risk a hung gateway.
+    let expect: RegExp | null = null;
+    if (expectSource) {
+      if (hasCatastrophicBacktracking(expectSource))
+        this.ctx.log('error', `"expect" pattern "${expectSource}" could hang the gateway and was not used`, {
+          device: this.device.id,
+        });
+      else expect = new RegExp(expectSource);
+    }
     return new Promise((resolve, reject) => {
       const socket = connect({ host, port });
       let reply = '';

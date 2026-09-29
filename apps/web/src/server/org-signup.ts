@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from '@kestrel/db';
+import type { PrismaClient } from '@kestrel/db';
 import {
   JOIN_DECLINE_COOLDOWN_DAYS,
   JOIN_REQUESTS_PER_DAY,
@@ -8,6 +8,7 @@ import {
   trialKeys,
   type OrgRole,
 } from '@kestrel/model';
+import { writeAudit } from './audit';
 
 // What happens around creating an organisation: spotting one that already exists, asking its
 // owners to add you instead, and giving each person and company one free trial.
@@ -43,19 +44,6 @@ const MAX_LISTED = 5;
 
 /** The person's company domain, or null when it is a free mail address or not confirmed. */
 const trustedDomain = (p: Person) => (p.emailConfirmed ? companyDomain(p.email) : null);
-
-async function audit(
-  db: SignupDb,
-  orgId: string,
-  actorId: string | null,
-  action: string,
-  target: string,
-  meta: Record<string, unknown>,
-) {
-  await db.auditLog.create({
-    data: { orgId, actorId, action, target, meta: meta as Prisma.InputJsonValue },
-  });
-}
 
 export interface SimilarOrgs {
   /** Organisations of the same kind whose owners have the person's company domain. */
@@ -173,7 +161,10 @@ export async function requestToJoin(
   const request = await db.joinRequest.create({
     data: { orgId: org.id, userId: person.userId, email, createdAt: now },
   });
-  await audit(db, org.id, person.userId, 'member.join_request', request.id, { email });
+  await writeAudit(
+    { orgId: org.id, actorId: person.userId, action: 'member.join_request', target: request.id, meta: { email } },
+    db,
+  );
   return { id: request.id, created: true, orgName: org.name };
 }
 
@@ -186,7 +177,7 @@ export async function pendingRequests(db: SignupDb, orgId: string) {
   return rows.map((r) => ({ id: r.id, email: r.email, createdAt: r.createdAt }));
 }
 
-export const pendingRequestCount = (db: SignupDb, orgId: string) =>
+export const pendingRequestCount = (db: SignupDb, orgId: string): Promise<number> =>
   db.joinRequest.count({ where: { orgId, status: 'pending' } });
 
 /** An owner approves (adding the person at the role they choose) or declines a request. */
@@ -215,18 +206,31 @@ export async function decideRequest(
       where: { id: request.id },
       data: { status: 'approved', role, decidedBy: args.by, decidedAt: now },
     });
-    await audit(db, args.orgId, args.by, 'member.join_approve', request.id, {
-      email: request.email,
-      role,
-    });
+    await writeAudit(
+      {
+        orgId: args.orgId,
+        actorId: args.by,
+        action: 'member.join_approve',
+        target: request.id,
+        meta: { email: request.email, role },
+      },
+      db,
+    );
   } else {
     await db.joinRequest.update({
       where: { id: request.id },
       data: { status: 'declined', decidedBy: args.by, decidedAt: now },
     });
-    await audit(db, args.orgId, args.by, 'member.join_decline', request.id, {
-      email: request.email,
-    });
+    await writeAudit(
+      {
+        orgId: args.orgId,
+        actorId: args.by,
+        action: 'member.join_decline',
+        target: request.id,
+        meta: { email: request.email },
+      },
+      db,
+    );
   }
 }
 
@@ -288,9 +292,14 @@ export async function claimTrial(db: Pick<SignupDb, 'trialClaim'>, person: Perso
   }
 }
 
-export const attachTrialClaim = (db: Pick<SignupDb, 'trialClaim'>, userId: string, orgId: string) =>
-  db.trialClaim.updateMany({ where: { userId }, data: { orgId } });
+export const attachTrialClaim = (
+  db: Pick<SignupDb, 'trialClaim'>,
+  userId: string,
+  orgId: string,
+): Promise<{ count: number }> => db.trialClaim.updateMany({ where: { userId }, data: { orgId } });
 
 /** Gives the trial back when the organisation could not be created after all. */
-export const releaseTrialClaim = (db: Pick<SignupDb, 'trialClaim'>, userId: string) =>
-  db.trialClaim.deleteMany({ where: { userId, orgId: null } });
+export const releaseTrialClaim = (
+  db: Pick<SignupDb, 'trialClaim'>,
+  userId: string,
+): Promise<{ count: number }> => db.trialClaim.deleteMany({ where: { userId, orgId: null } });

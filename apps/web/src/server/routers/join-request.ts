@@ -14,10 +14,14 @@ import {
   personOf,
   requestToJoin,
 } from '../org-signup';
+import { makeRateLimiter } from '../rate-limit';
 import { authedProcedure, orgProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
 const requestId = z.string().uuid();
+// Each accepted request emails the target organisation's owners, so this is a person-level cap on
+// unwanted email, not just on database writes.
+const byUser = makeRateLimiter(10, 3_600_000);
 
 async function run<T>(work: Promise<T>): Promise<T> {
   try {
@@ -35,6 +39,9 @@ export const joinRequestRouter = router({
   mine: authedProcedure.query(({ ctx }) => myRequests(db, ctx.user.id)),
 
   create: authedProcedure.input(z.object({ orgId })).mutation(async ({ ctx, input }) => {
+    const limit = byUser(ctx.user.id);
+    if (limit.ok === false)
+      throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: 'Try again later' });
     const person = personOf(ctx.user);
     const result = await run(requestToJoin(db, { person, orgId: input.orgId }));
     if (result.created)

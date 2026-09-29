@@ -1,6 +1,7 @@
-import type { Device, DeviceCommand } from '@kestrel/model';
+import { hasCatastrophicBacktracking, type Device, type DeviceCommand } from '@kestrel/model';
 import { BaseDriver } from './base';
 import { renderGenericCommand } from './generic-commands';
+import { Reconnect } from './reconnect';
 import type { DriverContext } from './types';
 
 // Generic ASCII-over-serial control (RS-232 / RS-485 through a USB adaptor on the gateway machine).
@@ -34,15 +35,11 @@ const openReal: SerialOpener = async (opts) => {
   });
 };
 
-const MAX_BACKOFF_MS = 15_000;
-
 export class SerialDriver extends BaseDriver {
   private port: SerialLike | null = null;
   private buffer = '';
   private waiting: { re: RegExp | null; resolve: () => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }[] = [];
-  private retry: ReturnType<typeof setTimeout> | null = null;
-  private retries = 0;
-  private closed = false;
+  private readonly reconnect = new Reconnect(() => void this.open());
 
   constructor(
     device: Device,
@@ -55,19 +52,17 @@ export class SerialDriver extends BaseDriver {
 
   override start() {
     if (!this.setting<string>('path', '')) return;
-    this.closed = false;
+    this.reconnect.restart();
     void this.open();
   }
 
   override close() {
-    this.closed = true;
-    if (this.retry) clearTimeout(this.retry);
-    this.retry = null;
+    this.reconnect.stop();
     this.drop(new Error('closed'));
   }
 
   private async open() {
-    if (this.closed || this.port) return;
+    if (this.reconnect.closed || this.port) return;
     try {
       const port = await this.opener({
         path: this.setting<string>('path', ''),
@@ -76,32 +71,22 @@ export class SerialDriver extends BaseDriver {
         stopBits: this.setting<1 | 1.5 | 2>('stopBits', 1),
         parity: this.setting<'none' | 'even' | 'odd' | 'mark' | 'space'>('parity', 'none'),
       });
-      if (this.closed) return void port.close();
+      if (this.reconnect.closed) return void port.close();
       this.port = port;
-      this.retries = 0;
+      this.reconnect.succeeded();
       port.on('data', (chunk: Buffer) => this.onData(chunk.toString('latin1')));
       port.on('error', () => undefined);
       port.on('close', () => {
         if (this.port === port) this.drop(new Error(`${this.device.name} disconnected`));
-        this.scheduleRetry();
+        this.reconnect.schedule();
       });
       this.update((s) => {
         s.online = true;
       });
     } catch (e) {
       this.ctx.log('warn', 'Could not open the serial port', { device: this.device.name, error: String(e) });
-      this.scheduleRetry();
+      this.reconnect.schedule();
     }
-  }
-
-  private scheduleRetry() {
-    if (this.closed || this.retry) return;
-    const delay = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** Math.min(this.retries++, 4));
-    this.retry = setTimeout(() => {
-      this.retry = null;
-      void this.open();
-    }, delay);
-    this.retry.unref?.();
   }
 
   private drop(reason: Error) {
@@ -141,8 +126,12 @@ export class SerialDriver extends BaseDriver {
     const port = this.port;
     if (!port?.isOpen) this.fail('the serial port is not open');
     const expectSource = this.setting<string | undefined>('expect', undefined);
+    if (expectSource && hasCatastrophicBacktracking(expectSource))
+      this.ctx.log('error', `"expect" pattern "${expectSource}" could hang the gateway and was not used`, {
+        device: this.device.id,
+      });
     const wait = new Promise<void>((resolve, reject) => {
-      if (!expectSource) return resolve();
+      if (!expectSource || hasCatastrophicBacktracking(expectSource)) return resolve();
       const timer = setTimeout(() => {
         this.waiting = this.waiting.filter((w) => w.timer !== timer);
         reject(new Error(`${this.device.name} did not respond`));

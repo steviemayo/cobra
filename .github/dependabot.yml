@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # The workspace's own dependencies (pnpm reads this the same as npm/yarn).
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 10
+    groups:
+      # One PR for routine bumps instead of dozens; anything with an advisory still gets its own.
+      minor-and-patch:
+        update-types: ['minor', 'patch']
+
+  # The three workflow files: keeps action versions current even though they are pinned by SHA
+  # (Dependabot updates the SHA and refreshes the version comment next to it).
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+
+  # The gateway's own image and the Watchtower updater it runs alongside.
+  - package-ecosystem: 'docker'
+    directory: '/apps/gateway'
+    schedule:
+      interval: 'weekly'

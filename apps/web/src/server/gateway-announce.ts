@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@kestrel/db';
 import { hashSecret, open, seal, secretMatches } from '@kestrel/crypto';
 import { AnnounceRequest, type AnnounceResponse } from '@kestrel/model';
+import { writeAudit } from './audit';
 import { newEnrollToken } from './gateway-service';
 
 // Gateways that are running but have no definition in any organisation. They announce themselves
@@ -46,8 +47,17 @@ export async function announce(
     const held = await db.unclaimedGateway.count({
       where: { status: { in: ['open', 'dismissed'] } },
     });
-    if (held >= MAX_OPEN_UNCLAIMED)
-      return { status: 429, body: { error: 'Too many unclaimed gateways' } };
+    if (held >= MAX_OPEN_UNCLAIMED) {
+      // Make room rather than turn a real, new install away: an install nobody has claimed and
+      // nobody has seen in the longest time is the one least likely to matter. A claimed row
+      // (staff already working with it) is never touched.
+      const oldest = await db.unclaimedGateway.findFirst({
+        where: { status: { in: ['open', 'dismissed'] } },
+        orderBy: { lastSeenAt: 'asc' },
+      });
+      if (!oldest) return { status: 429, body: { error: 'Too many unclaimed gateways' } };
+      await db.unclaimedGateway.deleteMany({ where: { id: oldest.id, status: oldest.status } });
+    }
     if (ctx.ip) {
       const fromHere = await db.unclaimedGateway.count({
         where: { publicIp: ctx.ip, firstSeenAt: { gte: new Date(now.getTime() - 86_400_000) } },
@@ -177,15 +187,16 @@ export async function claimUnclaimed(
       claimTokenSealed: seal(t.token, key),
     },
   });
-  await db.auditLog.create({
-    data: {
+  await writeAudit(
+    {
       orgId: input.orgId,
       actorId: null,
       action: 'gateway.claim',
       target: gw.id,
       meta: { name, hostname: row.hostname, claimedByStaff: input.staffUserId },
     },
-  });
+    db,
+  );
   return { gatewayId: gw.id };
 }
 

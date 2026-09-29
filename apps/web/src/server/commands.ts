@@ -7,6 +7,7 @@ import {
   type CommandResult,
   type GatewayCommand,
 } from '@kestrel/model';
+import { writeAudit } from './audit';
 
 // Remote commands. Support asks in the portal; the gateway collects the request in its next
 // heartbeat response (it never accepts inbound connections), runs it if it is on the allowlist,
@@ -96,15 +97,16 @@ export async function requestCommand(
       createdAt: now,
     },
   });
-  await db.auditLog.create({
-    data: {
+  await writeAudit(
+    {
       orgId: input.orgId,
       actorId: input.requestedBy,
       action: 'command.request',
       target: room.id,
       meta: { commandId: created.id, type: type.data, room: room.name, ...args },
     },
-  });
+    db,
+  );
   return { ok: true, id: created.id };
 }
 
@@ -158,14 +160,15 @@ export async function applyCommandResults(
         finishedAt: now,
       },
     });
-    await db.auditLog.create({
-      data: {
+    await writeAudit(
+      {
         orgId: cmd.orgId,
         actorId: null,
         action: 'command.result',
         target: cmd.roomId,
         meta: { commandId: cmd.id, type: cmd.type, ok: r.ok },
       },
-    });
+      db,
+    );
   }
 }

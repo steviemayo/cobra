@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
+import { Stat } from '@/components/common/stat';
 import { useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,10 +14,9 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { plural } from '@/lib/format';
+import { percent, plural } from '@/lib/format';
 import { useTRPC } from '@/trpc/client';
 
-const percent = (x: number | null, digits = 0) => (x === null ? '—' : `${(x * 100).toFixed(digits)}%`);
 const duration = (m: number) => (m >= 120 ? `${Math.round((m / 60) * 10) / 10} h` : `${Math.round(m)} min`);
 const KIND: Record<string, string> = {
   device_offline: 'Device stopped answering',
@@ -43,16 +43,6 @@ function monthOptions(tz: string) {
     }
     return { value, label };
   });
-}
-
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="rounded-lg border px-4 py-3">
-      <div className="text-2xl font-semibold tabular-nums">{value}</div>
-      <div className="text-sm text-muted-foreground">{label}</div>
-      {hint && <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>}
-    </div>
-  );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

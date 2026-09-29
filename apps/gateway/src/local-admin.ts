@@ -129,18 +129,30 @@ function roomRows(host: RoomHost, hostHeader: string): string {
     .flatMap((id) => {
       const room = host.get(id);
       return room
-        ? [{ id, name: room.signed.manifest.roomName, offline: room.offline().length }]
+        ? [
+            {
+              id,
+              name: room.signed.manifest.roomName,
+              offline: room.offline().length,
+              pin: room.access.mode === 'pin',
+            },
+          ]
         : [];
     })
     .sort((a, b) => a.name.localeCompare(b.name));
   if (rooms.length === 0) return '<p class="muted">No rooms are running on this gateway yet.</p>';
   const rows = rooms
     .map((r) => {
-      const url = `http://${hostHeader}/room/${r.id}`;
       const state = r.offline
         ? `<span class="bad">${r.offline} device${r.offline === 1 ? '' : 's'} not answering</span>`
         : '<span class="ok">Running</span>';
-      return `<tr><td>${esc(r.name)}</td><td>${state}</td><td><a href="/room/${esc(r.id)}">Open panel</a><br><code>${esc(url)}</code></td></tr>`;
+      // A PIN room's id is the only thing standing between a LAN device and the PIN prompt, so it
+      // is not handed out here; an open room's panel needs no credential either way, so its link
+      // costs nothing to show and saves someone typing it in on the day.
+      const link = r.pin
+        ? '<span class="muted">PIN protected</span>'
+        : `<a href="/room/${esc(r.id)}">Open panel</a><br><code>${esc(`http://${hostHeader}/room/${r.id}`)}</code>`;
+      return `<tr><td>${esc(r.name)}</td><td>${state}</td><td>${link}</td></tr>`;
     })
     .join('');
   return `<table><thead><tr><th>Room</th><th>State</th><th>Panel link</th></tr></thead><tbody>${rows}</tbody></table>`;

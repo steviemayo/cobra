@@ -5,11 +5,14 @@ import { orgPanelBranding, type BrandDb } from './provider-brand';
 import { portalIntent, portalSnapshot, type ControlDb } from './control-service';
 
 // Controlling a room from a phone. The wall panel shows a QR code holding a "join" link the gateway
-// signed a few minutes ago; scanning it swaps that link for a two hour "session" token, and the
-// phone then talks to the room through the same control path as the portal. Both tokens are signed
-// with a secret derived for that room, so nothing is stored and a token for one room opens no other.
+// signed a few minutes ago; scanning it swaps that link for a 45 minute "session" token, and the
+// phone then talks to the room through the same control path as the portal, except for the
+// actuator intents (see ACTUATOR_ONLY_FROM_PANEL in control-service.ts): a session made from a
+// photo of a QR code is a weaker credential than being in the room, so it cannot move a wall or a
+// lift. Both tokens are signed with a secret derived for that room, so nothing is stored and a
+// token for one room opens no other; there is no way to revoke one before it expires.
 
-export const SESSION_TTL_SECONDS = 2 * 60 * 60;
+export const SESSION_TTL_SECONDS = 45 * 60;
 
 export type PhoneDb = ControlDb & BrandDb;
 export type PhoneResult<T> = { ok: true; value: T } | { ok: false; status: number; error: string };

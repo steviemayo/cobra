@@ -65,6 +65,9 @@ export const PanelIntent = z.discriminatedUnion('type', [
 ]);
 export type PanelIntent = z.infer<typeof PanelIntent>;
 
+/** Physical things a panel can move. Shared so anywhere an intent is accepted can treat these the same. */
+export const ACTUATOR_INTENTS: ReadonlySet<string> = new Set(['divider.set', 'mover.run']);
+
 // Plain-language messages are keys + params so panels can translate them.
 export const MessageKey = z.enum([
   'ready',

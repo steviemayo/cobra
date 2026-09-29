@@ -1,19 +1,22 @@
 import 'server-only';
 import { initTRPC, TRPCError } from '@trpc/server';
+import type { FetchCreateContextFnOptions } from '@trpc/server/adapters/fetch';
 import superjson from 'superjson';
 import { z } from 'zod';
 import { db } from '@kestrel/db';
 import { hasStaffRole, type Feature, type OrgRole, type StaffRole } from '@kestrel/model';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { getEntitlements, planRequired } from './billing';
+import { clientIp } from './rate-limit';
 import { findStaff, mfaRequired } from './staff';
 import { mspAccess } from './msp';
 import { activeSession, logSessionAction, sessionGate } from './support-sessions';
 
-export async function createContext() {
+export async function createContext(opts: FetchCreateContextFnOptions) {
   const supabase = await createSupabaseServer();
   const { data } = await supabase.auth.getUser();
-  return { user: data.user };
+  // Only used by the few procedures reachable before signing in, to slow down abuse (see rate-limit.ts).
+  return { user: data.user, ip: clientIp(opts.req) };
 }
 
 // `siteScoped` marks a procedure that filters by the caller's site scope (see site-scope.ts).

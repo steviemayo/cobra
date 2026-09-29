@@ -9,6 +9,7 @@ import {
   type AssignedRoom,
   type PublicKey,
 } from '@kestrel/model';
+import { writeAudit } from './audit';
 import { signedBindingsFor } from './bindings';
 import { applyCommandResults, takePendingCommands } from './commands';
 import { updateStep } from './gateway-update-service';
@@ -120,15 +121,10 @@ export async function enroll(db: Db, raw: unknown, keys: PublicKey[]): Promise<R
     },
   });
   if (count === 0) return fail(401, 'This enrolment token is invalid, expired or already used');
-  await db.auditLog.create({
-    data: {
-      orgId: gw.orgId,
-      actorId: null,
-      action: 'gateway.enroll',
-      target: gw.id,
-      meta: { name: gw.name, hostname },
-    },
-  });
+  await writeAudit(
+    { orgId: gw.orgId, actorId: null, action: 'gateway.enroll', target: gw.id, meta: { name: gw.name, hostname } },
+    db,
+  );
   return {
     status: 200,
     body: {

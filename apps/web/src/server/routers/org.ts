@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { TRIAL_DAYS } from '@kestrel/model';
 import { writeAudit } from '../audit';
@@ -10,10 +11,13 @@ import {
   releaseTrialClaim,
 } from '../org-signup';
 import { OrgBranding, readOrgBranding } from '../panel-settings';
+import { makeRateLimiter } from '../rate-limit';
 import { setStaffAccessBlocked } from '../support-sessions';
 import { authedProcedure, orgProcedure, requireRole, router } from '../trpc';
 
 const name = z.string().trim().min(1).max(100);
+// Per person, not per address: two colleagues behind the same NAT must not share an allowance.
+const byUser = makeRateLimiter(10, 3_600_000);
 
 export const orgRouter = router({
   // Every org the user belongs to, with their role in each.
@@ -44,6 +48,9 @@ export const orgRouter = router({
   create: authedProcedure
     .input(z.object({ name, kind: z.enum(['customer', 'msp']).default('customer') }))
     .mutation(async ({ ctx, input }) => {
+      const limit = byUser(ctx.user.id);
+      if (limit.ok === false)
+        throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: 'Try again later' });
       const person = personOf(ctx.user);
       const claimed = input.kind === 'customer' && (await claimTrial(db, person));
       const trial = input.kind === 'msp' || claimed ? 'granted' : 'used';

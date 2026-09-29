@@ -69,11 +69,11 @@ describe('applyPanelInput', () => {
 });
 
 describe('PanelInput validation', () => {
-  it('only accepts 4 to 8 digit PINs', () => {
+  it('only accepts 6 to 8 digit PINs', () => {
     const ok = (pin: string) => PanelInput.safeParse(input({ mode: 'pin', pin })).success;
-    expect(ok('4821')).toBe(true);
+    expect(ok('482193')).toBe(true);
     expect(ok('12345678')).toBe(true);
-    for (const bad of ['123', '123456789', 'abcd', '12 34', '']) expect(ok(bad), bad).toBe(false);
+    for (const bad of ['123', '4821', '123456789', 'abcd', '12 34', '']) expect(ok(bad), bad).toBe(false);
   });
 
   it('caps the number of trusted addresses', () => {

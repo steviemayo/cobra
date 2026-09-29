@@ -134,6 +134,16 @@ describe('portal side', () => {
     expect((await send(w, { type: 'divider.set', dividerId: '', open: true }, T0)).ok).toBe(false);
   });
 
+  it('refuses to move a wall or lifter from a phone session, but not from the portal', async () => {
+    const w = world();
+    const wall = { type: 'divider.set', dividerId: 'w1', open: true };
+    expect(await portalIntent(w.db, { orgId: ORG, roomId: ROOM, intent: wall, by: null }, T0)).toEqual(
+      { ok: false, error: 'Use the room’s own panel to do that' },
+    );
+    expect(w.controlIntent.rows).toHaveLength(0);
+    expect((await send(w, wall, T0)).ok).toBe(true);
+  });
+
   it('limits how fast intents can be queued', async () => {
     const w = world();
     for (let i = 0; i < MAX_INTENTS_PER_10S; i++) expect((await send(w, bump, T0)).ok).toBe(true);

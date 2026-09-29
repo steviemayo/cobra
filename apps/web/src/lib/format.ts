@@ -26,6 +26,19 @@ export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/** A count of minutes as "45m", "2h" or "2h 15m". */
+export function minutesLabel(m: number): string {
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  return rest ? `${h}h ${rest}m` : `${h}h`;
+}
+
+/** A fraction (0 to 1) as a percentage, or "—" for null. */
+export function percent(x: number | null, digits = 0): string {
+  return x === null ? '—' : `${(x * 100).toFixed(digits)}%`;
+}
+
 export const ROLE_LABEL = {
   owner: 'Owner',
   dev: 'Developer',

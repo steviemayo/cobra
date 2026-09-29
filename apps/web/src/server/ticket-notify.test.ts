@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  notifyOrg,
-  notifyStaff,
-  parseAddresses,
-  type NotifyDb,
-  type TicketEvent,
-} from './ticket-notify';
+import { parseAddresses } from './resend';
+import { notifyOrg, notifyStaff, type NotifyDb, type TicketEvent } from './ticket-notify';
 import { table } from './test-db';
 
 const ORG = '11111111-1111-4111-8111-111111111111';

@@ -1,6 +1,6 @@
 {
   "name": "@kestrel/gateway",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -15,7 +15,7 @@
     "demo": "tsx src/demo.ts"
   },
   "dependencies": {
-    "@fastify/static": "^8.2.0",
+    "@fastify/static": "^10.1.5",
     "@fastify/websocket": "^11.2.0",
     "@kestrel/crypto": "workspace:*",
     "@kestrel/drivers": "workspace:*",

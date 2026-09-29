@@ -3,13 +3,17 @@ on:
   pull_request:
   push:
     branches: [main, dev]
+# No job needs to write anything back to the repo or to packages; the default for every job below
+# is read-only unless a job says otherwise.
+permissions:
+  contents: read
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -20,3 +24,20 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The ignored advisories (pnpm-workspace.yaml, auditConfig.ignoreGhsas) all come from
+      # `prisma`'s own bundled Studio/CLI dependency tree (lodash, mysql2, deepmerge-ts), pulled in
+      # through @prisma/client even for a Postgres-only, Studio-never-launched app; nothing here
+      # calls into them. A new advisory anywhere else, including a new one in this same package,
+      # still fails the build. Re-check the ignore list whenever Prisma is upgraded.
+      - run: pnpm audit --prod

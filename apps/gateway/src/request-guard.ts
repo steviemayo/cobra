@@ -1,5 +1,8 @@
 import { hostname as machineName } from 'node:os';
 import { isIP } from 'node:net';
+import { ACTUATOR_INTENTS } from '@kestrel/model';
+
+export { ACTUATOR_INTENTS };
 
 // A web page can reach a gateway on the customer's network from a browser that is on it: it can open
 // a WebSocket to the panel from any origin, and with DNS rebinding it can make the browser treat
@@ -57,6 +60,6 @@ export function sameOrigin(origin: string | undefined, hostHeader: string | unde
   }
 }
 
-/** Physical things a panel can move. One at a time per room, and each is logged with who asked. */
-export const ACTUATOR_INTENTS: ReadonlySet<string> = new Set(['divider.set', 'mover.run']);
+// ACTUATOR_INTENTS itself now lives in @kestrel/model (shared with the web server); re-exported
+// above so existing imports from this module keep working.
 export const ACTUATOR_MIN_INTERVAL_MS = 2000;

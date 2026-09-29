@@ -1,12 +1,8 @@
 import type { PrismaClient } from '@kestrel/db';
 import { portalLink } from './alerts';
-import {
-  parseAddresses,
-  post,
-  realDeps,
-  sendEmail,
-  type NotifyDeps,
-} from './ticket-notify';
+import { postSigned } from './outbound';
+import { parseAddresses, sendEmail } from './resend';
+import { realDeps, type NotifyDeps } from './ticket-notify';
 
 // Tells an organisation's owners that someone from their company asked to join. Through the
 // organisation's own Teams, webhook and email channels, and by email straight to each owner (an
@@ -48,7 +44,7 @@ export async function notifyJoinRequest(
         const to = Array.isArray(cfg.to) ? parseAddresses(cfg.to.join(',')) : [];
         if (await sendEmail(d, to, `[Kestrel] ${headline}`, text)) sent++;
       } else if ((c.type === 'teams' || c.type === 'webhook') && cfg.url) {
-        await post(
+        await postSigned(
           d,
           cfg.url,
           {

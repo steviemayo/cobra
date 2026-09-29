@@ -8,6 +8,7 @@ import {
   type PointReading,
 } from '@kestrel/model';
 import { BaseDriver } from './base';
+import { Reconnect } from './reconnect';
 import type { DriverContext } from './types';
 
 // Q-SYS Core over QRC (Q-SYS Remote Control): JSON-RPC 2.0 over TCP port 1710, every message ended
@@ -25,7 +26,6 @@ import type { DriverContext } from './types';
 //
 // Routing on a DSP is part of the Q-SYS design, so `route` and `power` are accepted and do nothing.
 const NUL = '\0';
-const MAX_BACKOFF_MS = 15_000;
 
 interface Pending {
   resolve: (result: unknown) => void;
@@ -52,9 +52,7 @@ export class QsysDriver extends BaseDriver {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
   private poller: ReturnType<typeof setInterval> | null = null;
-  private retryTimer: ReturnType<typeof setTimeout> | null = null;
-  private retries = 0;
-  private closed = false;
+  private readonly reconnect = new Reconnect(() => this.open());
   /** Goes up on every write, so a read that began before one is not allowed to overwrite it. */
   private writes = 0;
 
@@ -104,7 +102,7 @@ export class QsysDriver extends BaseDriver {
 
   override start() {
     if (!this.setting<string>('host', '')) return;
-    this.closed = false;
+    this.reconnect.restart();
     this.open();
     const every = Math.min(this.setting<number>('pollMs', 5000), 30_000);
     this.poller = setInterval(() => void this.refresh(), every);
@@ -112,15 +110,14 @@ export class QsysDriver extends BaseDriver {
   }
 
   override close() {
-    this.closed = true;
     if (this.poller) clearInterval(this.poller);
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.poller = this.retryTimer = null;
+    this.poller = null;
+    this.reconnect.stop();
     this.drop(new Error('closed'));
   }
 
   private open() {
-    if (this.closed || this.socket) return;
+    if (this.reconnect.closed || this.socket) return;
     const socket = connect({
       host: this.setting<string>('host', ''),
       port: this.setting<number>('port', 1710),
@@ -133,7 +130,7 @@ export class QsysDriver extends BaseDriver {
     socket.on('error', () => undefined);
     socket.on('close', () => {
       if (this.socket === socket) this.drop(new Error(`${this.device.name} disconnected`));
-      this.scheduleRetry();
+      this.reconnect.schedule();
     });
   }
 
@@ -142,7 +139,7 @@ export class QsysDriver extends BaseDriver {
       const user = this.setting<string>('username', '');
       if (user)
         await this.rpc('Logon', { User: user, Password: this.setting<string>('password', '') });
-      this.retries = 0;
+      this.reconnect.succeeded();
       await this.refresh(true);
     } catch (e) {
       this.ctx.log('warn', 'Q-SYS logon failed', { device: this.device.name, error: String(e) });
@@ -163,16 +160,6 @@ export class QsysDriver extends BaseDriver {
     this.update((s) => {
       s.online = false;
     });
-  }
-
-  private scheduleRetry() {
-    if (this.closed || this.retryTimer) return;
-    const delay = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** Math.min(this.retries++, 4));
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = null;
-      this.open();
-    }, delay);
-    this.retryTimer.unref?.();
   }
 
   private onData(chunk: string) {

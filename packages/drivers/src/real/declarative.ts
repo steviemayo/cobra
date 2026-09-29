@@ -4,6 +4,7 @@ import {
   escapeJson,
   escapeLine,
   escapePath,
+  hasCatastrophicBacktracking,
   renderTemplate,
   resolveSettings,
   type Device,
@@ -12,7 +13,9 @@ import {
   type DriverSpec,
   type QuickActionId,
 } from '@kestrel/model';
+import { isLinkLocal, localAddressAllowed } from './address-guard';
 import { BaseDriver } from './base';
+import { Reconnect } from './reconnect';
 import type { DriverContext } from './types';
 
 // Runs a driver written in the Kestrel driver format (see @kestrel/model driver-spec). One
@@ -20,13 +23,38 @@ import type { DriverContext } from './types';
 // describes, so it can talk to its own device and nothing else.
 
 const MAX_REPLY_BYTES = 64 * 1024;
-const MAX_BACKOFF_MS = 15_000;
 
 type Values = Record<string, string | number | boolean>;
 
-/** Only the patterns that read feedback out of a line of text or a reply body. */
-function compile(spec: DriverSpec) {
-  return spec.feedback.patterns.map((p) => ({ ...p, re: new RegExp(p.match) }));
+/**
+ * Only the patterns that read feedback out of a line of text or a reply body. Saving a driver
+ * already refuses a pattern shaped for catastrophic backtracking (driver-spec.ts), but a release
+ * signed before that check existed could still carry one, so it is checked again here: skipped
+ * (never run) rather than left free to hang the gateway on a line that almost, but does not
+ * quite, match.
+ */
+function compile(spec: DriverSpec, log: DriverContext['log']) {
+  return spec.feedback.patterns.flatMap((p) => {
+    if (hasCatastrophicBacktracking(p.match)) {
+      log('error', `Feedback pattern "${p.match}" could hang the gateway and was not loaded`, {
+        driver: spec.id,
+      });
+      return [];
+    }
+    return [{ ...p, re: new RegExp(p.match) }];
+  });
+}
+
+/** A safe `expect` regex, or null (never matches, never runs) for one that could hang the gateway. */
+function safeExpect(source: string | undefined, spec: DriverSpec, log: DriverContext['log']): RegExp | null {
+  if (!source) return null;
+  if (hasCatastrophicBacktracking(source)) {
+    log('error', `"expect" pattern "${source}" could hang the gateway and was not used`, {
+      driver: spec.id,
+    });
+    return null;
+  }
+  return new RegExp(source);
 }
 
 export class DeclarativeDriver extends BaseDriver {
@@ -42,9 +70,7 @@ export class DeclarativeDriver extends BaseDriver {
     timer: ReturnType<typeof setTimeout>;
   }[] = [];
   private pollers: ReturnType<typeof setInterval>[] = [];
-  private retry: ReturnType<typeof setTimeout> | null = null;
-  private retries = 0;
-  private closed = false;
+  private readonly reconnect = new Reconnect(() => this.open());
 
   constructor(
     device: Device,
@@ -55,7 +81,7 @@ export class DeclarativeDriver extends BaseDriver {
     const r = resolveSettings(spec, device.settings);
     this.settings = r.values;
     this.missing = r.missing;
-    this.patterns = compile(spec);
+    this.patterns = compile(spec, ctx.log);
     this.state.online = false;
   }
 
@@ -67,6 +93,12 @@ export class DeclarativeDriver extends BaseDriver {
   }
   private get host() {
     return String(this.settings.host ?? '');
+  }
+  /** True if `host` is the gateway's own address and this device's settings do not allow that. */
+  private blockedAddress(): boolean {
+    // The escape hatch is read from the device's raw settings, not `this.settings`: only settings
+    // the driver's own spec declares survive resolveSettings, and no driver declares this one.
+    return !!this.host && isLinkLocal(this.host) && !localAddressAllowed(this.device.settings);
   }
   private get port() {
     const fromSetting = typeof this.settings.port === 'number' ? this.settings.port : undefined;
@@ -94,7 +126,15 @@ export class DeclarativeDriver extends BaseDriver {
       });
       return;
     }
-    this.closed = false;
+    if (this.blockedAddress()) {
+      this.ctx.log(
+        'error',
+        `${this.device.name}'s address (${this.host}) is a cloud metadata address, not a device, and was refused`,
+        { device: this.device.name, hint: 'Add "allowLocalAddress": true to this device’s settings if this is deliberate' },
+      );
+      return;
+    }
+    this.reconnect.restart();
     if (this.tcp) {
       if (this.tcp.keepOpen) this.open();
       else void this.probe();
@@ -105,11 +145,9 @@ export class DeclarativeDriver extends BaseDriver {
   }
 
   override close() {
-    this.closed = true;
     for (const t of this.pollers) clearInterval(t);
     this.pollers = [];
-    if (this.retry) clearTimeout(this.retry);
-    this.retry = null;
+    this.reconnect.stop();
     this.dropSocket(new Error('closed'));
   }
 
@@ -212,12 +250,12 @@ export class DeclarativeDriver extends BaseDriver {
   // ---- TCP ------------------------------------------------------------------------------------
 
   private open() {
-    if (this.closed || this.socket) return;
+    if (this.reconnect.closed || this.socket) return;
     const socket = connect({ host: this.host, port: this.port });
     this.socket = socket;
     socket.setEncoding('utf8');
     socket.on('connect', () => {
-      this.retries = 0;
+      this.reconnect.succeeded();
       this.update((s) => {
         s.online = true;
       });
@@ -228,13 +266,7 @@ export class DeclarativeDriver extends BaseDriver {
     socket.on('error', () => undefined);
     socket.on('close', () => {
       if (this.socket === socket) this.dropSocket(new Error(`${this.device.name} disconnected`));
-      if (this.closed || this.retry) return;
-      const delay = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** Math.min(this.retries++, 4));
-      this.retry = setTimeout(() => {
-        this.retry = null;
-        this.open();
-      }, delay);
-      this.retry.unref?.();
+      this.reconnect.schedule();
     });
   }
 
@@ -286,7 +318,7 @@ export class DeclarativeDriver extends BaseDriver {
         this.waiting = this.waiting.filter((w) => w.timer !== timer);
         reject(new Error(`${this.device.name} did not answer`));
       }, this.tcp!.timeoutMs);
-      this.waiting.push({ re: new RegExp(action.expect), resolve, reject, timer });
+      this.waiting.push({ re: safeExpect(action.expect, this.spec, this.ctx.log), resolve, reject, timer });
     });
     socket.write(this.text(action, values) + term);
     return wait;
@@ -297,7 +329,7 @@ export class DeclarativeDriver extends BaseDriver {
     const t = this.tcp!;
     return new Promise((resolve, reject) => {
       const socket = connect({ host: this.host, port: this.port });
-      const expect = action?.expect ? new RegExp(action.expect) : null;
+      const expect = safeExpect(action?.expect, this.spec, this.ctx.log);
       let buffer = '';
       let done = false;
       const finish = (err?: Error) => {
@@ -372,7 +404,8 @@ export class DeclarativeDriver extends BaseDriver {
     });
     const text = (await res.text()).slice(0, MAX_REPLY_BYTES);
     if (!allowAny && !res.ok) throw new Error(`${this.device.name} answered HTTP ${res.status}`);
-    if (action.expect && !new RegExp(action.expect).test(text))
+    const expect = safeExpect(action.expect, this.spec, this.ctx.log);
+    if (expect && !expect.test(text))
       throw new Error(`${this.device.name} sent an unexpected reply`);
     return text;
   }
@@ -382,6 +415,10 @@ export class DeclarativeDriver extends BaseDriver {
   private async run(key: string, values: Values, apply: () => void): Promise<void> {
     const action = this.spec.commands[key];
     if (!action) this.fail(`does not support "${key}"`);
+    if (this.blockedAddress())
+      this.fail(
+        `${this.host} is a cloud metadata address, not a device (add "allowLocalAddress": true to allow it)`,
+      );
     try {
       if (this.tcp) {
         if (this.tcp.keepOpen) await this.sendOnSocket(action, values);
