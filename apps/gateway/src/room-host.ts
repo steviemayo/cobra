@@ -44,12 +44,16 @@ export const CONTROL_NOT_LICENSED = 'Control is not included in this organisatio
  */
 export class ControlGate implements DeviceBus {
   readonly readPoint?: DeviceBus['readPoint'];
+  readonly discoverComponents?: DeviceBus['discoverComponents'];
+  readonly discoverControls?: DeviceBus['discoverControls'];
 
   constructor(
     private readonly inner: DeviceBus,
     private readonly allowed: () => boolean,
   ) {
     this.readPoint = inner.readPoint?.bind(inner);
+    this.discoverComponents = inner.discoverComponents?.bind(inner);
+    this.discoverControls = inner.discoverControls?.bind(inner);
   }
 
   send(deviceId: string, command: DeviceCommand): Promise<void> {

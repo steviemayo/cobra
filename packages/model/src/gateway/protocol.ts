@@ -126,6 +126,8 @@ export const COMMAND_TYPES = [
   'room_off',
   'verify_point',
   'discover_devices',
+  'discover_components',
+  'discover_controls',
 ] as const;
 export const CommandType = z.enum(COMMAND_TYPES);
 export type CommandType = z.infer<typeof CommandType>;
@@ -159,6 +161,16 @@ export const COMMAND_INFO: Record<
     description:
       'Look for projectors, DSPs and other equipment on the gateway’s own network and report what answers. Only reads; changes nothing.',
     needsDevice: false,
+  },
+  discover_components: {
+    label: 'List a device’s components',
+    description: 'Ask a point-based device what named components it has. Changes nothing.',
+    needsDevice: true,
+  },
+  discover_controls: {
+    label: 'List a component’s controls',
+    description: 'Ask a point-based device what controls one named component has. Changes nothing.',
+    needsDevice: true,
   },
   room_off: {
     label: 'Turn room off',

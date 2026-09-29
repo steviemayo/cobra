@@ -72,6 +72,12 @@ export async function requestCommand(
     args.address = text;
   }
 
+  if (type.data === 'discover_controls') {
+    const component = (input.args?.component ?? '').trim();
+    if (!component || component.length > 100) return { ok: false, error: 'That component name is not valid' };
+    args.component = component;
+  }
+
   if (type.data === 'discover_devices' && input.args?.subnet) {
     // One /24 the gateway is on, like 192.168.1. The gateway checks it is one of its own as well.
     if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(input.args.subnet))

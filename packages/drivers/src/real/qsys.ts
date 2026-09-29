@@ -5,6 +5,9 @@ import {
   type ControlPoint,
   type Device,
   type DeviceCommand,
+  type DeviceDetailSection,
+  type DiscoveredComponent,
+  type DiscoveredControl,
   type PointReading,
 } from '@kestrel/model';
 import { BaseDriver } from './base';
@@ -25,6 +28,18 @@ import type { DriverContext } from './types';
 // the panel volume and mute act on; without one, the gain component above is used (as before).
 //
 // Routing on a DSP is part of the Q-SYS design, so `route` and `power` are accepted and do nothing.
+//
+// Engine status: the Core pushes an unsolicited "EngineStatus" notification (no "id") as soon as a
+// client connects, and again whenever it changes, so `onData` applies it as soon as it arrives.
+// `onConnect` also asks for it directly with `StatusGet`, in case a particular Core or proxy only
+// answers when asked. Either way it fills `details` (platform, design, redundancy, emulator, engine
+// status) rather than `online`: a non-OK engine status (a bad compile, a missing licence) still means
+// the Core answered, which is what `online` means everywhere else in this driver.
+//
+// Discovery: `discoverComponents` (Component.GetComponents) and `discoverControls`
+// (Component.GetControls) let the portal offer a pick-list when someone adds a control point,
+// instead of them typing a component or control name blind (docs/driver-classes.md, "Where a vendor
+// lets the device list its components, the form offers a pick-list").
 const NUL = '\0';
 
 interface Pending {
@@ -35,13 +50,32 @@ interface Pending {
 
 interface QrcControl {
   Name: string;
+  Type?: string;
   Value?: number | boolean | string;
   ValueMin?: number;
   ValueMax?: number;
 }
 
+interface QrcComponent {
+  Name: string;
+  Type?: string;
+}
+
+interface QrcEngineStatus {
+  Platform?: string;
+  State?: string;
+  DesignName?: string;
+  DesignCode?: string;
+  IsRedundant?: boolean;
+  IsEmulator?: boolean;
+  Status?: { Code?: number; String?: string };
+}
+
 interface QrcReply {
   id?: number;
+  /** Set on an unsolicited push (no "id"), for example "EngineStatus". */
+  method?: string;
+  params?: unknown;
   result?: unknown;
   error?: { code?: number; message?: string };
 }
@@ -140,6 +174,13 @@ export class QsysDriver extends BaseDriver {
       if (user)
         await this.rpc('Logon', { User: user, Password: this.setting<string>('password', '') });
       this.reconnect.succeeded();
+      try {
+        // Usually redundant (the Core pushes this on connect unasked), but a direct ask is a
+        // deterministic first read rather than a race with whether the push arrives.
+        this.applyEngineStatus(await this.rpc('StatusGet', 0));
+      } catch {
+        // Some Cores or proxies only ever send it unsolicited; the push still updates details later.
+      }
       await this.refresh(true);
     } catch (e) {
       this.ctx.log('warn', 'Q-SYS logon failed', { device: this.device.name, error: String(e) });
@@ -175,8 +216,12 @@ export class QsysDriver extends BaseDriver {
       } catch {
         continue;
       }
-      const p = msg.id === undefined ? undefined : this.pending.get(msg.id);
-      if (!p || msg.id === undefined) continue; // notifications such as EngineStatus
+      if (msg.id === undefined) {
+        if (msg.method === 'EngineStatus') this.applyEngineStatus(msg.params);
+        continue; // an unsolicited notification, not a reply to anything pending
+      }
+      const p = this.pending.get(msg.id);
+      if (!p) continue;
       this.pending.delete(msg.id);
       clearTimeout(p.timer);
       if (msg.error)
@@ -252,6 +297,47 @@ export class QsysDriver extends BaseDriver {
       if (p.role === 'room_volume') s.volume = Number(value);
       if (p.role === 'room_mute') s.muted = value === true;
     });
+  }
+
+  /** Applies an EngineStatus payload, from the unsolicited push or a direct StatusGet. */
+  private applyEngineStatus(raw: unknown) {
+    if (!raw || typeof raw !== 'object') return;
+    const status = raw as QrcEngineStatus;
+    const ok = status.Status?.Code === 0;
+    const rows: DeviceDetailSection['rows'] = [];
+    if (status.Platform) rows.push({ label: 'Platform', value: status.Platform });
+    if (status.DesignName) rows.push({ label: 'Design', value: status.DesignName });
+    if (status.DesignCode) rows.push({ label: 'Design code', value: status.DesignCode });
+    if (status.State) rows.push({ label: 'State', value: status.State });
+    if (status.IsRedundant !== undefined)
+      rows.push({ label: 'Redundant', value: status.IsRedundant ? 'Yes' : 'No' });
+    if (status.IsEmulator !== undefined)
+      rows.push({ label: 'Emulator', value: status.IsEmulator ? 'Yes' : 'No' });
+    if (status.Status?.String)
+      rows.push({ label: 'Engine status', value: status.Status.String, status: ok ? 'ok' : 'bad' });
+    this.update((s) => {
+      // Receiving this at all proves the Core answered, whatever its own health says.
+      s.online = true;
+      if (rows.length) s.details = [{ title: 'Q-SYS Core', rows }];
+    });
+  }
+
+  /** Lists the design's named components, for a pick-list instead of typing one blind. */
+  async discoverComponents(): Promise<DiscoveredComponent[]> {
+    const res = (await this.rpc('Component.GetComponents', {})) as QrcComponent[] | undefined;
+    return (res ?? []).map((c) => ({ name: c.Name, ...(c.Type ? { type: c.Type } : {}) }));
+  }
+
+  /** Lists one named component's controls. */
+  async discoverControls(component: string): Promise<DiscoveredControl[]> {
+    const res = (await this.rpc('Component.GetControls', { Name: component })) as
+      | { Controls?: QrcControl[] }
+      | undefined;
+    return (res?.Controls ?? []).map((c) => ({
+      name: c.Name,
+      ...(c.Type ? { type: c.Type } : {}),
+      ...(c.Value !== undefined ? { value: c.Value } : {}),
+    }));
   }
 
   /** Reads one control point, to check it exists and learn its range. */

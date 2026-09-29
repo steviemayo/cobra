@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { DisplayKey, LocalId } from '../room/common';
-import type { ControlPoint, PointReading } from '../room/points';
+import type { ControlPoint, DiscoveredComponent, DiscoveredControl, PointReading } from '../room/points';
 import type { QuickActionId } from './quick-actions';
 
 // The vocabulary the engine speaks to drivers (real or simulated). Drivers translate to protocol.
@@ -153,6 +153,10 @@ export interface DeviceBus {
     deviceId: string,
     point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>,
   ): Promise<PointReading>;
+  /** List the named components a point-based device exposes, for a pick-list. Rejects if it cannot. */
+  discoverComponents?(deviceId: string): Promise<DiscoveredComponent[]>;
+  /** List the controls of one named component. Rejects if it cannot. */
+  discoverControls?(deviceId: string, component: string): Promise<DiscoveredControl[]>;
 }
 
 export const defaultDeviceState = (): DeviceState => ({

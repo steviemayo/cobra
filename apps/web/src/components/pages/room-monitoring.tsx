@@ -124,6 +124,8 @@ const COMMAND_ICON: Record<CommandType, typeof Power> = {
   room_off: Power,
   verify_point: Stethoscope,
   discover_devices: Search,
+  discover_components: Search,
+  discover_controls: Search,
 };
 
 const STATUS_LABEL: Record<string, string> = {

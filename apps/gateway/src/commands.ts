@@ -105,6 +105,33 @@ async function execute(host: RoomHost, cmd: GatewayCommand, facts: GatewayFacts)
         return fail(e instanceof Error ? e.message.slice(0, 300) : 'Could not read the control point');
       }
     }
+    case 'discover_components': {
+      // Lists a point-based device's own named components, so someone can pick one instead of
+      // typing it blind. Reads only.
+      const device = model.devices.find((d) => d.id === cmd.args.deviceId);
+      if (!device) return fail('That device is not in this room');
+      if (!room.bus.discoverComponents) return fail('This device cannot list its components');
+      try {
+        const components = await room.bus.discoverComponents(device.id);
+        return { id: '', ok: true, output: { device: device.name, components } };
+      } catch (e) {
+        return fail(e instanceof Error ? e.message.slice(0, 300) : 'Could not list the device’s components');
+      }
+    }
+    case 'discover_controls': {
+      // Lists one named component's controls. Reads only.
+      const device = model.devices.find((d) => d.id === cmd.args.deviceId);
+      if (!device) return fail('That device is not in this room');
+      const component = cmd.args.component ?? '';
+      if (!component) return fail('No component was given');
+      if (!room.bus.discoverControls) return fail('This device cannot list its controls');
+      try {
+        const controls = await room.bus.discoverControls(device.id, component);
+        return { id: '', ok: true, output: { device: device.name, component, controls } };
+      } catch (e) {
+        return fail(e instanceof Error ? e.message.slice(0, 300) : 'Could not list the component’s controls');
+      }
+    }
     case 'restart_room': {
       host.load(room.signed, room.bindings);
       return { id: '', ok: true, output: { restarted: room.signed.manifest.roomName } };

@@ -8,6 +8,8 @@ import {
   POINT_TYPE_LABEL,
   type ControlPoint,
   type Device,
+  type DiscoveredComponent,
+  type DiscoveredControl,
   type PointForms,
   type PointType,
   type RoomModel,
@@ -201,6 +203,17 @@ function PointRow({
           if (x.max === undefined && max !== undefined) x.max = max;
         })} />
       </div>
+      {device.control?.kind === 'driver' && device.control.driverId === 'qsys-core' && (
+        <Browse
+          device={device}
+          roomId={roomId}
+          onPick={(component, control) =>
+            change(p.id, (x) => {
+              x.address = { ...x.address, component, control };
+            })
+          }
+        />
+      )}
       <WatchRow point={p} change={change} />
     </div>
   );
@@ -337,6 +350,98 @@ function Verify({
       )}
       {status === 'failed' && <span className="text-xs text-destructive">{result.data?.error ?? 'Not found'}</span>}
       {start.error && <span className="text-xs text-destructive">{start.error.message}</span>}
+    </div>
+  );
+}
+
+const PENDING_COMMAND_ID = '00000000-0000-4000-8000-000000000000';
+
+/**
+ * Lets someone pick a Q-SYS component and one of its controls from what the Core actually reports,
+ * instead of typing the names blind (docs/driver-classes.md, "Where a vendor lets the device list
+ * its components, the form offers a pick-list").
+ */
+function Browse({
+  device,
+  roomId,
+  onPick,
+}: {
+  device: Device;
+  roomId?: string;
+  onPick: (component: string, control: string) => void;
+}) {
+  const trpc = useTRPC();
+  const { orgId } = useOrg();
+  const [componentsId, setComponentsId] = useState<string | null>(null);
+  const [controlsId, setControlsId] = useState<string | null>(null);
+  const [component, setComponent] = useState('');
+
+  const startComponents = useMutation(
+    trpc.binding.discoverComponents.mutationOptions({ onSuccess: (r) => setComponentsId(r.commandId) }),
+  );
+  const componentsResult = useQuery({
+    ...trpc.binding.testResult.queryOptions({ orgId, roomId: roomId ?? '', commandId: componentsId ?? PENDING_COMMAND_ID }),
+    enabled: !!componentsId && !!roomId,
+    refetchInterval: (q) => (q.state.data && ['succeeded', 'failed'].includes(q.state.data.status) ? false : 2000),
+  });
+  const components = (componentsResult.data?.output as { components?: DiscoveredComponent[] } | null)?.components ?? [];
+  const componentsDone = componentsResult.data?.status === 'succeeded' || componentsResult.data?.status === 'failed';
+
+  const startControls = useMutation(
+    trpc.binding.discoverControls.mutationOptions({ onSuccess: (r) => setControlsId(r.commandId) }),
+  );
+  const controlsResult = useQuery({
+    ...trpc.binding.testResult.queryOptions({ orgId, roomId: roomId ?? '', commandId: controlsId ?? PENDING_COMMAND_ID }),
+    enabled: !!controlsId && !!roomId,
+    refetchInterval: (q) => (q.state.data && ['succeeded', 'failed'].includes(q.state.data.status) ? false : 2000),
+  });
+  const controls = (controlsResult.data?.output as { controls?: DiscoveredControl[] } | null)?.controls ?? [];
+  const controlsDone = controlsResult.data?.status === 'succeeded' || controlsResult.data?.status === 'failed';
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2">
+      <button
+        type="button"
+        className={ghostBtnCls}
+        disabled={!roomId || startComponents.isPending || (!!componentsId && !componentsDone)}
+        title="Ask the room's gateway to list this device's named components. The room must be running with this device."
+        onClick={() => {
+          setComponentsId(null);
+          setControlsId(null);
+          setComponent('');
+          if (roomId) startComponents.mutate({ orgId, roomId, deviceId: device.id });
+        }}
+      >
+        {componentsId && !componentsDone ? 'Listing…' : 'Browse components'}
+      </button>
+      {components.length > 0 && (
+        <Select
+          value={component}
+          options={[
+            { value: '', label: 'Choose a component…' },
+            ...components.map((c) => ({ value: c.name, label: c.type ? `${c.name} (${c.type})` : c.name })),
+          ]}
+          onChange={(v) => {
+            setComponent(v);
+            setControlsId(null);
+            if (v && roomId) startControls.mutate({ orgId, roomId, deviceId: device.id, component: v });
+          }}
+        />
+      )}
+      {controlsId && !controlsDone && <span className="text-xs text-muted-foreground">Listing controls…</span>}
+      {controls.length > 0 && (
+        <Select
+          value=""
+          options={[{ value: '', label: 'Choose a control…' }, ...controls.map((c) => ({ value: c.name, label: c.name }))]}
+          onChange={(v) => v && onPick(component, v)}
+        />
+      )}
+      {componentsResult.data?.status === 'failed' && (
+        <span className="text-xs text-destructive">{componentsResult.data?.error ?? 'Could not list components'}</span>
+      )}
+      {controlsResult.data?.status === 'failed' && (
+        <span className="text-xs text-destructive">{controlsResult.data?.error ?? 'Could not list controls'}</span>
+      )}
     </div>
   );
 }

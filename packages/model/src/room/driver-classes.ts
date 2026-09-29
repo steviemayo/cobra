@@ -64,7 +64,7 @@ export const DRIVER_CLASSES: Record<DriverClass, DriverClassInfo> = {
   },
   video_switching: {
     label: 'Video switching (physical)',
-    categories: ['video_matrix'],
+    categories: ['video_matrix', 'audio_matrix'],
     features: {
       route: 'Routes any input to any output',
       output_mute: 'Mutes an output',
@@ -178,7 +178,7 @@ export const DRIVER_CLASSES: Record<DriverClass, DriverClassInfo> = {
   },
   relay: {
     label: 'Relay or mechanical',
-    categories: ['screen', 'lifter', 'blinds'],
+    categories: ['screen', 'lifter', 'blinds', 'power_outlet'],
     features: {
       up_down: 'Up and down',
       stop: 'Stop',
