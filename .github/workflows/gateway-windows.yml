@@ -90,11 +90,15 @@ jobs:
             "/DSourceDir=$PWD\bundle\app" `
             "/DOutputDir=$PWD" `
             apps/gateway/windows/setup.iss
+      # A pull request only needs to prove the bundle and installer build; nothing downloads these,
+      # so uploading them would just spend the org's Actions artifact storage for no reason.
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: kestrel-gateway-win-x64
           path: kestrel-gateway-win-x64.zip
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: KestrelGatewaySetup
           path: KestrelGatewaySetup.exe
