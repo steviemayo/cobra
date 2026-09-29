@@ -47,7 +47,7 @@ const join = (room = ROOM, exp = nowSec + 600, key = KEY) =>
   signAccess(roomAccessSecret(key, room), 'join', room, exp);
 
 describe('joining a room from a phone', () => {
-  it('swaps a fresh QR link for a two hour session', async () => {
+  it('swaps a fresh QR link for a 45 minute session', async () => {
     const r = await joinRoom(world().db, { joinToken: join() }, KEY, NOW);
     expect(r.ok && r.value.roomName).toBe('Boardroom');
     expect(r.ok && r.value.expiresAt).toBe(later(SESSION_TTL_SECONDS).toISOString());
@@ -141,6 +141,24 @@ describe('controlling a room from a phone', () => {
       NOW,
     );
     expect(join1).toMatchObject({ ok: false, status: 401 });
+  });
+
+  it('refuses to move a wall or a lifter from a phone session', async () => {
+    const { db, token } = await session();
+    const res = await phoneIntent(
+      db,
+      { session: token, intent: { type: 'divider.set', dividerId: 'wall-1', open: true } },
+      KEY,
+      NOW,
+    );
+    expect(res).toMatchObject({ ok: false, status: 400 });
+    const res2 = await phoneIntent(
+      db,
+      { session: token, intent: { type: 'mover.run', deviceId: 'blinds', action: 'up' } },
+      KEY,
+      NOW,
+    );
+    expect(res2).toMatchObject({ ok: false, status: 400 });
   });
 
   it('is rate limited like the portal', async () => {

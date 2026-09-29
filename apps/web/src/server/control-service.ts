@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@kestrel/db';
 import {
+  ACTUATOR_INTENTS,
   GatewayIntent,
   PanelIntent,
   PanelViewModel,
@@ -65,6 +66,10 @@ export async function portalIntent(
 ): Promise<IntentResult> {
   const intent = PanelIntent.safeParse(input.intent);
   if (!intent.success) return { ok: false, error: 'That isn’t something a panel can do' };
+  // A phone session (input.by === null) comes from scanning a QR code, a weaker credential than
+  // being at the panel in the room, so it may not move a wall, screen or lifter.
+  if (input.by === null && ACTUATOR_INTENTS.has(intent.data.type))
+    return { ok: false, error: 'Use the room’s own panel to do that' };
   const room = await db.room.findFirst({ where: { id: input.roomId, orgId: input.orgId } });
   if (!room) return { ok: false, error: 'Room not found' };
   if (!room.gatewayId) return { ok: false, error: 'This room isn’t running on a gateway yet' };
