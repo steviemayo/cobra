@@ -24,4 +24,9 @@ jobs:
       - uses: github/codeql-action/init@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
         with:
           languages: javascript-typescript
+      # Code scanning isn't turned on for this (private) repo yet, so the upload half of this step
+      # fails every run ("Code scanning is not enabled for this repository"). Non-blocking (on the
+      # step itself, so the check reports green) until that's turned on in Settings > Code
+      # security, matching this workflow's own stated intent above ("not as a blocking check").
       - uses: github/codeql-action/analyze@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+        continue-on-error: true
