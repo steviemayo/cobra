@@ -2,7 +2,7 @@
 #   docker build -f apps/gateway/Dockerfile -t kestrel-gateway .
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-slim AS build
+FROM node:26-slim AS build
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -12,7 +12,7 @@ COPY . .
 RUN pnpm install --frozen-lockfile --filter "@kestrel/gateway..." --filter "@kestrel/panel-app..."
 RUN pnpm --filter @kestrel/panel-app build
 
-FROM node:24-slim AS runtime
+FROM node:26-slim AS runtime
 ENV NODE_ENV=production \
     KESTREL_DATA_DIR=/data \
     KESTREL_PANEL_DIR=/app/panel \
