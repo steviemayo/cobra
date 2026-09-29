@@ -1,5 +1,6 @@
-import type { Prisma, PrismaClient } from '@kestrel/db';
+import type { PrismaClient } from '@kestrel/db';
 import { GatewayUpdateReport, type GatewayUpdateOrder } from '@kestrel/model';
+import { writeAudit } from './audit';
 import { bundleDigest, channelRelease, type ChannelRelease } from './gateway-release';
 import {
   canSelfUpdate,
@@ -15,19 +16,6 @@ export type UpdateDb = Pick<PrismaClient, 'gateway' | 'auditLog'>;
 export type ReleaseLookup = (channel: Channel) => Promise<ChannelRelease | null>;
 
 export type UpdateResult = { ok: true } | { ok: false; error: string };
-
-async function audit(
-  db: UpdateDb,
-  orgId: string,
-  actorId: string | null,
-  action: string,
-  target: string,
-  meta: Record<string, unknown>,
-) {
-  await db.auditLog.create({
-    data: { orgId, actorId, action, target, meta: meta as Prisma.InputJsonValue },
-  });
-}
 
 /** Asks a gateway to update to what its channel has published, now or from `when`. */
 export async function requestUpdate(
@@ -63,12 +51,16 @@ export async function requestUpdate(
       updateReportedAt: null,
     },
   });
-  await audit(db, gw.orgId, input.userId, 'gateway.update.request', gw.id, {
-    name: gw.name,
-    from: gw.version,
-    to: release.version,
-    at: notBefore.toISOString(),
-  });
+  await writeAudit(
+    {
+      orgId: gw.orgId,
+      actorId: input.userId,
+      action: 'gateway.update.request',
+      target: gw.id,
+      meta: { name: gw.name, from: gw.version, to: release.version, at: notBefore.toISOString() },
+    },
+    db,
+  );
   return { ok: true };
 }
 
@@ -88,7 +80,10 @@ export async function cancelUpdate(
       updateReportedAt: null,
     },
   });
-  await audit(db, gw.orgId, input.userId, 'gateway.update.cancel', gw.id, { name: gw.name });
+  await writeAudit(
+    { orgId: gw.orgId, actorId: input.userId, action: 'gateway.update.cancel', target: gw.id, meta: { name: gw.name } },
+    db,
+  );
   return { ok: true };
 }
 
@@ -99,10 +94,16 @@ export async function setAutoUpdate(
   const gw = await db.gateway.findFirst({ where: { id: input.gatewayId, orgId: input.orgId } });
   if (!gw) return { ok: false, error: 'Gateway not found' };
   await db.gateway.update({ where: { id: gw.id }, data: { autoUpdate: input.on } });
-  await audit(db, gw.orgId, input.userId, 'gateway.update.policy', gw.id, {
-    name: gw.name,
-    automatic: input.on,
-  });
+  await writeAudit(
+    {
+      orgId: gw.orgId,
+      actorId: input.userId,
+      action: 'gateway.update.policy',
+      target: gw.id,
+      meta: { name: gw.name, automatic: input.on },
+    },
+    db,
+  );
   return { ok: true };
 }
 
@@ -179,10 +180,16 @@ export async function updateStep(
             updateReportedAt: null,
           },
         });
-        await audit(db, gw.orgId, null, 'gateway.update.done', gw.id, {
-          name: gw.name,
-          version: reportedVersion,
-        });
+        await writeAudit(
+          {
+            orgId: gw.orgId,
+            actorId: null,
+            action: 'gateway.update.done',
+            target: gw.id,
+            meta: { name: gw.name, version: reportedVersion },
+          },
+          db,
+        );
       }
       return undefined;
     case 'request':
@@ -190,11 +197,16 @@ export async function updateStep(
         where: { id: gw.id },
         data: { updateNotBefore: action.notBefore, updateVersion: action.version },
       });
-      await audit(db, gw.orgId, null, 'gateway.update.request', gw.id, {
-        name: gw.name,
-        to: action.version,
-        automatic: true,
-      });
+      await writeAudit(
+        {
+          orgId: gw.orgId,
+          actorId: null,
+          action: 'gateway.update.request',
+          target: gw.id,
+          meta: { name: gw.name, to: action.version, automatic: true },
+        },
+        db,
+      );
       return orderFor(release, action.version);
     case 'fail':
       await db.gateway.update({
