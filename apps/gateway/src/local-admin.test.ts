@@ -16,6 +16,7 @@ import { Store } from './store';
 import { CREDENTIAL, ENROLL_TOKEN, FakeCloud } from './test-support/fake-cloud';
 
 const ROOM = '33333333-3333-4333-8333-333333333331';
+const PIN_ROOM = '33333333-3333-4333-8333-333333333332';
 const CODE = 'ABCD-2345';
 const FORM = { 'content-type': 'application/x-www-form-urlencoded' };
 const keys = generateKeyPair();
@@ -32,6 +33,23 @@ function signedRoom() {
       createdAt: new Date().toISOString(),
       model: structuredClone(STARTER_TEMPLATES[0]!.model),
       panel: { access: { mode: 'open', trustedIps: [] }, branding: {} },
+    },
+    { privateKeyPem: keys.privateKeyPem, keyId: 'k' },
+  );
+}
+
+function signedPinRoom() {
+  return signManifest(
+    {
+      manifestVersion: 1,
+      orgId: '11111111-1111-4111-8111-111111111111',
+      roomId: PIN_ROOM,
+      roomName: 'Studio',
+      releaseId: '44444444-4444-4444-8444-444444444442',
+      releaseNumber: 1,
+      createdAt: new Date().toISOString(),
+      model: structuredClone(STARTER_TEMPLATES[0]!.model),
+      panel: { access: { mode: 'pin', pinHash: 'salt:hash', trustedIps: [] }, branding: {} },
     },
     { privateKeyPem: keys.privateKeyPem, keyId: 'k' },
   );
@@ -108,6 +126,16 @@ describe('the local pages', () => {
     expect(res.headers['cache-control']).toBe('no-store');
     // Browsers send "Origin: null" on form posts under no-referrer, which the origin check would refuse.
     expect(res.headers['referrer-policy']).toBe('same-origin');
+  });
+
+  it('names a PIN room without handing out its id or link', async () => {
+    host.load(signedPinRoom());
+    const res = await app.inject({ url: '/', headers: { host: '10.0.0.5:8080' } });
+    expect(res.body).toContain('Studio');
+    expect(res.body).toContain('PIN protected');
+    expect(res.body).not.toContain(PIN_ROOM);
+    // The open room on the same gateway is unaffected.
+    expect(res.body).toContain(`href="/room/${ROOM}"`);
   });
 
   it('tells an unclaimed gateway’s installer what to give staff', async () => {
