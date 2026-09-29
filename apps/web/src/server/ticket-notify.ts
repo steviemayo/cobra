@@ -1,7 +1,7 @@
-import { createHmac } from 'node:crypto';
 import type { PrismaClient } from '@kestrel/db';
 import { portalLink } from './alerts';
-import { pinnedFetch, postJson, type Lookup } from './outbound';
+import { pinnedFetch, postSigned, type Lookup } from './outbound';
+import { parseAddresses, sendEmail } from './resend';
 
 // Tickets tell people when something needs them: Kestrel staff when a ticket is escalated to them,
 // and the organisation when Kestrel replies or changes its status. Through Teams, webhooks and
@@ -52,61 +52,6 @@ function body(e: TicketEvent, url: string | null) {
   };
 }
 
-export async function post(d: NotifyDeps, rawUrl: string, payload: unknown, secret?: string) {
-  const text = JSON.stringify(payload);
-  const headers: Record<string, string> = {};
-  if (secret) {
-    const ts = String(Math.floor(Date.now() / 1000));
-    headers['x-kestrel-timestamp'] = ts;
-    headers['x-kestrel-signature'] =
-      `sha256=${createHmac('sha256', secret).update(`${ts}.${text}`).digest('hex')}`;
-  }
-  await postJson(d, rawUrl, text, headers);
-}
-
-const EMAIL = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/;
-const MAX_RECIPIENTS = 10;
-
-/** Addresses from a comma or semicolon separated list, keeping only well-formed ones. */
-export function parseAddresses(list: string | undefined): string[] {
-  return [
-    ...new Set(
-      (list ?? '')
-        .split(/[,;]/)
-        .map((a) => a.trim())
-        .filter((a) => EMAIL.test(a)),
-    ),
-  ].slice(0, MAX_RECIPIENTS);
-}
-
-/**
- * Sends a plain text email through Resend. Returns false (without trying) when the server has no
- * email settings, so a Kestrel that has not set up its sending domain simply does not send.
- */
-export async function sendEmail(
-  d: NotifyDeps,
-  to: string[],
-  subject: string,
-  text: string,
-): Promise<boolean> {
-  const key = d.env.RESEND_API_KEY;
-  const from = d.env.ALERT_FROM_EMAIL;
-  if (!key || !from || to.length === 0) return false;
-  const res = await d.fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      from,
-      to: to.slice(0, MAX_RECIPIENTS),
-      subject: subject.replace(/[\r\n]+/g, ' '),
-      text,
-    }),
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`The email service answered HTTP ${res.status}`);
-  return true;
-}
-
 async function email(
   d: NotifyDeps,
   to: string[],
@@ -127,7 +72,7 @@ export async function notifyStaff(e: TicketEvent, d: NotifyDeps = realDeps()): P
   const hook = d.env.STAFF_TICKET_WEBHOOK_URL;
   if (hook)
     try {
-      await post(d, hook, body(e, url));
+      await postSigned(d, hook, body(e, url));
       reached = true;
     } catch (err) {
       console.error(
@@ -161,7 +106,7 @@ export async function notifyOrg(
         const to = Array.isArray(cfg.to) ? parseAddresses(cfg.to.join(',')) : [];
         if (await email(d, to, e, url)) sent++;
       } else if ((c.type === 'teams' || c.type === 'webhook') && cfg.url) {
-        await post(d, cfg.url, body(e, url), c.type === 'webhook' ? cfg.secret : undefined);
+        await postSigned(d, cfg.url, body(e, url), c.type === 'webhook' ? cfg.secret : undefined);
         sent++;
       }
     } catch (err) {

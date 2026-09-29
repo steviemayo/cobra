@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@kestrel/db';
 import { portalLink } from './alerts';
 import { buildMonthlyReport, previousMonth, reportText, type MonthlyReport, type ReportDb, type ReportMonth } from './monthly-report';
+import { emailConfigured, sendEmail } from './resend';
 
 // Sending monthly reports: to one person on request, and to an organisation's list on the first days
 // of each month. Email needs RESEND_API_KEY and ALERT_FROM_EMAIL on the server; without them nothing
@@ -19,9 +20,7 @@ export const SEND_WINDOW_DAYS = 7;
 
 export const monthKey = (m: ReportMonth) => `${m.year}-${String(m.month).padStart(2, '0')}`;
 
-export function emailConfigured(env: Record<string, string | undefined> = process.env): boolean {
-  return !!env.RESEND_API_KEY && !!env.ALERT_FROM_EMAIL;
-}
+export { emailConfigured };
 
 /** Sends the report as plain text. False (without trying) when email is not set up. */
 export async function sendReportEmail(
@@ -30,22 +29,12 @@ export async function sendReportEmail(
   orgId: string,
   report: MonthlyReport,
 ): Promise<boolean> {
-  const key = d.env.RESEND_API_KEY;
-  const from = d.env.ALERT_FROM_EMAIL;
-  if (!key || !from || to.length === 0) return false;
-  const res = await d.fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      from,
-      to: to.slice(0, MAX_REPORT_RECIPIENTS),
-      subject: `[Kestrel] ${report.orgName}: ${report.label} report`.replace(/[\r\n]+/g, ' '),
-      text: reportText(report, portalLink(orgId, '/reports', d.env) ?? undefined),
-    }),
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`The email service answered HTTP ${res.status}`);
-  return true;
+  return sendEmail(
+    d,
+    to.slice(0, MAX_REPORT_RECIPIENTS),
+    `[Kestrel] ${report.orgName}: ${report.label} report`,
+    reportText(report, portalLink(orgId, '/reports', d.env) ?? undefined),
+  );
 }
 
 /** The day of the month in a zone, 1 to 31. */

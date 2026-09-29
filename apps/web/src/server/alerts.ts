@@ -1,11 +1,11 @@
-import { createHmac } from 'node:crypto';
 import { z } from 'zod';
 import type { PrismaClient } from '@kestrel/db';
 import { alertChannelAllowed } from '@kestrel/model';
 import { ChannelRules, dueNow, hasRules } from './alert-rules';
 import { getEntitlements, type EntitlementDb } from './billing';
 import { SEVERITY_RANK, type AlertJob, type Severity } from './monitoring';
-import { pinnedFetch, postJson, resolveAll, type Lookup } from './outbound';
+import { pinnedFetch, postJson, postSigned, resolveAll, type Lookup } from './outbound';
+import { sendEmail } from './resend';
 
 export type AlertDb = Pick<PrismaClient, 'alertChannel' | 'alertDelivery' | 'incident' | 'room'>;
 
@@ -82,26 +82,14 @@ const headline = (m: AlertMessage) =>
         ? `Test alert: ${m.incident.title}`
         : m.incident.title;
 
-const post = (s: Senders, rawUrl: string, body: string, headers: Record<string, string> = {}) =>
-  postJson(s, rawUrl, body, headers);
-
 function payload(m: AlertMessage) {
   return { event: m.event, incident: m.incident, portalUrl: m.portalUrl };
 }
 
 export async function send(s: Senders, config: ChannelConfig, m: AlertMessage): Promise<void> {
   switch (config.type) {
-    case 'webhook': {
-      const body = JSON.stringify(payload(m));
-      const headers: Record<string, string> = {};
-      if (config.secret) {
-        const ts = String(Math.floor(Date.now() / 1000));
-        headers['x-kestrel-timestamp'] = ts;
-        headers['x-kestrel-signature'] =
-          `sha256=${createHmac('sha256', config.secret).update(`${ts}.${body}`).digest('hex')}`;
-      }
-      return post(s, config.url, body, headers);
-    }
+    case 'webhook':
+      return postSigned(s, config.url, payload(m), config.secret);
     case 'itsm': {
       if (!config.url) throw new NotConfigured('No service desk address is set yet');
       const body = JSON.stringify({
@@ -116,7 +104,7 @@ export async function send(s: Senders, config: ChannelConfig, m: AlertMessage): 
           correlation_id: m.incident.id,
         },
       });
-      return post(s, config.url, body);
+      return postJson(s, config.url, body);
     }
     case 'teams': {
       const body = JSON.stringify({
@@ -157,12 +145,9 @@ export async function send(s: Senders, config: ChannelConfig, m: AlertMessage): 
           },
         ],
       });
-      return post(s, config.url, body);
+      return postJson(s, config.url, body);
     }
     case 'email': {
-      const key = s.env.RESEND_API_KEY;
-      const from = s.env.ALERT_FROM_EMAIL;
-      if (!key || !from) throw new NotConfigured('Email is not set up on this Kestrel server');
       const text = [
         headline(m),
         m.incident.room ? `Room: ${m.incident.room}` : '',
@@ -171,13 +156,8 @@ export async function send(s: Senders, config: ChannelConfig, m: AlertMessage): 
       ]
         .filter(Boolean)
         .join('\n\n');
-      const res = await s.fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ from, to: config.to, subject: `[Kestrel] ${headline(m)}`, text }),
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!res.ok) throw new Error(`The email service answered HTTP ${res.status}`);
+      const sent = await sendEmail(s, config.to, `[Kestrel] ${headline(m)}`, text);
+      if (!sent) throw new NotConfigured('Email is not set up on this Kestrel server');
     }
   }
 }
