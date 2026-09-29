@@ -6,6 +6,7 @@ import { BarChart3, Lightbulb } from 'lucide-react';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
+import { Stat } from '@/components/common/stat';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -32,16 +33,6 @@ const hours = (minutes: number) => {
   return h >= 10 ? `${Math.round(h)} h` : `${Math.round(h * 10) / 10} h`;
 };
 const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'am' : 'pm'}`;
-
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="rounded-lg border px-4 py-3">
-      <div className="text-2xl font-semibold tabular-nums">{value}</div>
-      <div className="text-sm text-muted-foreground">{label}</div>
-      {hint && <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>}
-    </div>
-  );
-}
 
 function Section({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
   return (

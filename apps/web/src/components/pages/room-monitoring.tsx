@@ -23,6 +23,7 @@ import {
   dateTime,
 } from '@/components/common/health';
 import { PageContainer } from '@/components/common/page-header';
+import { Section } from '@/components/common/section';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -86,26 +87,6 @@ function DeviceHistoryLine({
       Last 30 days: {durations.map((d) => `${show(d.value)} ${minutesLabel(d.minutes)}`).join(', ')}
       {history.data?.truncated && ' (partial)'}
     </span>
-  );
-}
-
-function Section({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="overflow-hidden rounded-lg border">
-      <div className="flex items-center justify-between gap-3 border-b bg-muted/40 px-4 py-2.5">
-        <h2 className="text-sm font-medium">{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
   );
 }
 
