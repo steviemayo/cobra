@@ -29,7 +29,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { COMMAND_INFO, type CommandType, type DeviceFeedback } from '@kestrel/model';
-import { timeAgo } from '@/lib/format';
+import { minutesLabel, timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
@@ -54,13 +54,6 @@ function feedbackChips(f: DeviceFeedback | null | undefined): string[] {
     chips.push(f.streamConnected ? 'Stream connected' : 'Stream not connected');
   if (f.activeApp) chips.push(f.activeApp);
   return chips;
-}
-
-function minutesLabel(m: number): string {
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const rest = m % 60;
-  return rest ? `${h}h ${rest}m` : `${h}h`;
 }
 
 /**

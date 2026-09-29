@@ -13,10 +13,9 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { plural } from '@/lib/format';
+import { percent, plural } from '@/lib/format';
 import { useTRPC } from '@/trpc/client';
 
-const percent = (x: number | null, digits = 0) => (x === null ? '—' : `${(x * 100).toFixed(digits)}%`);
 const duration = (m: number) => (m >= 120 ? `${Math.round((m / 60) * 10) / 10} h` : `${Math.round(m)} min`);
 const KIND: Record<string, string> = {
   device_offline: 'Device stopped answering',

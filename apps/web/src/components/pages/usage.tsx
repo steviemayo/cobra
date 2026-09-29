@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { plural } from '@/lib/format';
+import { percent, plural } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
@@ -31,7 +31,6 @@ const hours = (minutes: number) => {
   const h = minutes / 60;
   return h >= 10 ? `${Math.round(h)} h` : `${Math.round(h * 10) / 10} h`;
 };
-const percent = (x: number | null) => (x === null ? '—' : `${Math.round(x * 100)}%`);
 const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'am' : 'pm'}`;
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
