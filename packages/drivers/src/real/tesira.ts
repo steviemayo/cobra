@@ -8,6 +8,7 @@ import {
   type PointReading,
 } from '@kestrel/model';
 import { BaseDriver } from './base';
+import { Reconnect } from './reconnect';
 import type { DriverContext } from './types';
 
 // Biamp Tesira over the Tesira Text Protocol (TTP), on the Telnet port (23). Checked against
@@ -28,7 +29,6 @@ const DO = 0xfd;
 const DONT = 0xfe;
 const WILL = 0xfb;
 const WONT = 0xfc;
-const MAX_BACKOFF_MS = 15_000;
 /** How long a firmware reading is trusted before the device is asked again. */
 const FIRMWARE_REREAD_MS = 6 * 3_600_000;
 
@@ -53,9 +53,7 @@ export class TesiraDriver extends BaseDriver {
   private queue: (() => void)[] = [];
   private busy = false;
   private poller: ReturnType<typeof setInterval> | null = null;
-  private retryTimer: ReturnType<typeof setTimeout> | null = null;
-  private retries = 0;
-  private closed = false;
+  private readonly reconnect = new Reconnect(() => this.open());
   /** Goes up on every write, so a read that began before one is not allowed to overwrite it. */
   private writes = 0;
   private firmwareAt = 0;
@@ -73,7 +71,7 @@ export class TesiraDriver extends BaseDriver {
 
   override start() {
     if (!this.setting<string>('host', '')) return;
-    this.closed = false;
+    this.reconnect.restart();
     this.open();
     const every = Math.min(this.setting<number>('pollMs', 5000), 30_000);
     this.poller = setInterval(() => void this.refresh(), every);
@@ -81,15 +79,14 @@ export class TesiraDriver extends BaseDriver {
   }
 
   override close() {
-    this.closed = true;
     if (this.poller) clearInterval(this.poller);
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.poller = this.retryTimer = null;
+    this.poller = null;
+    this.reconnect.stop();
     this.drop(new Error('closed'));
   }
 
   private open() {
-    if (this.closed || this.socket) return;
+    if (this.reconnect.closed || this.socket) return;
     const socket = connect({
       host: this.setting<string>('host', ''),
       port: this.setting<number>('port', 23),
@@ -100,7 +97,7 @@ export class TesiraDriver extends BaseDriver {
     socket.on('error', () => undefined);
     socket.on('close', () => {
       if (this.socket === socket) this.drop(new Error(`${this.device.name} disconnected`));
-      this.scheduleRetry();
+      this.reconnect.schedule();
     });
   }
 
@@ -120,16 +117,6 @@ export class TesiraDriver extends BaseDriver {
     this.update((s) => {
       s.online = false;
     });
-  }
-
-  private scheduleRetry() {
-    if (this.closed || this.retryTimer) return;
-    const delay = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** Math.min(this.retries++, 4));
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = null;
-      this.open();
-    }, delay);
-    this.retryTimer.unref?.();
   }
 
   /** Answers option negotiation (refusing everything) and turns the rest into lines. */
@@ -162,7 +149,7 @@ export class TesiraDriver extends BaseDriver {
     if (!line) return;
     if (/welcome to the tesira text protocol/i.test(line)) {
       this.ready = true;
-      this.retries = 0;
+      this.reconnect.succeeded();
       this.update((s) => {
         s.online = true;
       });

@@ -15,6 +15,7 @@ import {
 } from '@kestrel/model';
 import { isLinkLocal, localAddressAllowed } from './address-guard';
 import { BaseDriver } from './base';
+import { Reconnect } from './reconnect';
 import type { DriverContext } from './types';
 
 // Runs a driver written in the Kestrel driver format (see @kestrel/model driver-spec). One
@@ -22,7 +23,6 @@ import type { DriverContext } from './types';
 // describes, so it can talk to its own device and nothing else.
 
 const MAX_REPLY_BYTES = 64 * 1024;
-const MAX_BACKOFF_MS = 15_000;
 
 type Values = Record<string, string | number | boolean>;
 
@@ -70,9 +70,7 @@ export class DeclarativeDriver extends BaseDriver {
     timer: ReturnType<typeof setTimeout>;
   }[] = [];
   private pollers: ReturnType<typeof setInterval>[] = [];
-  private retry: ReturnType<typeof setTimeout> | null = null;
-  private retries = 0;
-  private closed = false;
+  private readonly reconnect = new Reconnect(() => this.open());
 
   constructor(
     device: Device,
@@ -136,7 +134,7 @@ export class DeclarativeDriver extends BaseDriver {
       );
       return;
     }
-    this.closed = false;
+    this.reconnect.restart();
     if (this.tcp) {
       if (this.tcp.keepOpen) this.open();
       else void this.probe();
@@ -147,11 +145,9 @@ export class DeclarativeDriver extends BaseDriver {
   }
 
   override close() {
-    this.closed = true;
     for (const t of this.pollers) clearInterval(t);
     this.pollers = [];
-    if (this.retry) clearTimeout(this.retry);
-    this.retry = null;
+    this.reconnect.stop();
     this.dropSocket(new Error('closed'));
   }
 
@@ -254,12 +250,12 @@ export class DeclarativeDriver extends BaseDriver {
   // ---- TCP ------------------------------------------------------------------------------------
 
   private open() {
-    if (this.closed || this.socket) return;
+    if (this.reconnect.closed || this.socket) return;
     const socket = connect({ host: this.host, port: this.port });
     this.socket = socket;
     socket.setEncoding('utf8');
     socket.on('connect', () => {
-      this.retries = 0;
+      this.reconnect.succeeded();
       this.update((s) => {
         s.online = true;
       });
@@ -270,13 +266,7 @@ export class DeclarativeDriver extends BaseDriver {
     socket.on('error', () => undefined);
     socket.on('close', () => {
       if (this.socket === socket) this.dropSocket(new Error(`${this.device.name} disconnected`));
-      if (this.closed || this.retry) return;
-      const delay = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** Math.min(this.retries++, 4));
-      this.retry = setTimeout(() => {
-        this.retry = null;
-        this.open();
-      }, delay);
-      this.retry.unref?.();
+      this.reconnect.schedule();
     });
   }
 
