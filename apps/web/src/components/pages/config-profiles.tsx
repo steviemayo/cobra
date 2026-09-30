@@ -349,6 +349,11 @@ export function ConfigProfilesView() {
                           Copy to customers
                         </Button>
                       )}
+                      {org.kind === 'msp' && (
+                        <Button size="xs" variant="outline" onClick={() => setPushing(p)}>
+                          Copy to customers
+                        </Button>
+                      )}
                       <Button size="xs" variant="outline" onClick={() => setEditing(p)}>
                         Edit
                       </Button>
@@ -385,6 +390,14 @@ export function ConfigProfilesView() {
         <ProfileDialog
           profile={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
+        />
+      )}
+      {pushing && (
+        <PushToCustomersDialog
+          kind="profile"
+          sourceId={pushing.id}
+          name={pushing.name}
+          onClose={() => setPushing(null)}
         />
       )}
       {pushing && (
