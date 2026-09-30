@@ -224,7 +224,7 @@ Today: a provider org holds `MspGrant`s to customer orgs (role + optional sites)
 | M5 | Support: maintenance windows, routing, auto-ticket, ITSM webhook, email-in and demo connector | |
 | M5b | Preventative maintenance: templates, schedules, runs with auto-filled items, org PM record, signed PM report | Needs maintenance windows and tickets from M5 |
 | M6 | Providers: Internal vs Customer estates, portfolio, all-customer views, grant scopes | |
-| M7 | Tiers and billing, removal of parked control code, launch readiness | Includes old security-review items |
+| M7 | Tiers and billing, removal of parked control code, launch readiness | Tiers, billing and web clean-up built. Left: run the legacy device migration, remove the gateway room runtime and v1 tables (M7-6), launch readiness and security review |
 
 ## Settled 2026-09-30
 
