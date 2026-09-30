@@ -2,12 +2,11 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
-import { DoorOpen, MoreHorizontal, Pencil, Plus, Router, Trash2 } from 'lucide-react';
+import { DoorOpen, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
-import { RoomsTable } from '@/components/common/rooms-table';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { useDialogs, timezoneOptions } from '@/components/shell/dialogs';
 import { orgPath, useOrg } from '@/components/shell/org-context';
@@ -34,6 +33,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { plural } from '@/lib/format';
 import { useEstate, useInvalidateEstate } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
+import { AreasPanel, SiteGateways, SiteRooms } from './site-areas';
 
 export function SiteDetailView({ siteId }: { siteId: string }) {
   const trpc = useTRPC();
@@ -109,29 +109,27 @@ export function SiteDetailView({ siteId }: { siteId: string }) {
         }
       />
 
+      <AreasPanel siteId={site.id} />
+
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Rooms</h2>
         {rooms.length === 0 ? (
           <EmptyState
             icon={DoorOpen}
             title="No rooms in this site"
-            description="Add a room, pick a template, and start designing."
+            description="Add a room, then put its devices in it."
             action={
               canEdit ? <Button onClick={() => openNewRoom(site.id)}>Add a room</Button> : undefined
             }
           />
         ) : (
-          <RoomsTable rooms={rooms} showSite={false} />
+          <SiteRooms siteId={site.id} />
         )}
       </section>
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Gateways</h2>
-        <EmptyState
-          icon={Router}
-          title="No gateways at this site"
-          description="An on-site gateway runs your rooms and reports their status. Gateway enrolment is coming in a later release."
-        />
+        <SiteGateways siteId={site.id} />
       </section>
 
       <EditSiteDialog open={editing} onOpenChange={setEditing} site={site} />

@@ -21,6 +21,7 @@ import {
   Building2,
   CircuitBoard,
   ChevronRight,
+  Layers,
   Cpu,
   KeyRound,
   DoorOpen,
@@ -59,7 +60,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useEstate } from '@/lib/use-estate';
+import { useEstate, useEstateOverview } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
 import { useDialogs } from './dialogs';
@@ -128,7 +129,10 @@ function NavItem({
 function EstateTree() {
   const { orgId } = useOrg();
   const pathname = usePathname();
-  const { sites, rooms, roomsBySite, live, isPending } = useEstate();
+  const { sites, rooms, roomsBySite, isPending } = useEstate();
+  const estate = useEstateOverview();
+  const health = new Map((estate.data?.rooms ?? []).map((r) => [r.id, r.health]));
+  const areas = estate.data?.areas ?? [];
   const [manual, setManual] = useState<Record<string, boolean>>({});
 
   const activeSiteId = (() => {
@@ -148,6 +152,48 @@ function EstateTree() {
 
   if (sites.length === 0)
     return <p className="px-2 py-1 text-xs text-muted-foreground">No sites yet.</p>;
+
+  // Rooms with no area first, then each area (and the areas inside it) with its rooms.
+  const renderTree = (siteRooms: typeof rooms, siteAreas: typeof areas) => {
+    const room = (r: (typeof rooms)[number], depth: number) => {
+      const href = orgPath(orgId, `/rooms/${r.id}`);
+      const h = health.get(r.id);
+      return (
+        <SidebarMenuSubItem key={r.id} style={{ paddingLeft: depth * 10 }}>
+          <SidebarMenuSubButton
+            isActive={pathname === href || pathname.startsWith(`${href}/`)}
+            render={<Link href={href} />}
+          >
+            <HealthDot level={h?.level ?? 'unknown'} />
+            <span title={h?.reasons[0]}>{r.name}</span>
+          </SidebarMenuSubButton>
+        </SidebarMenuSubItem>
+      );
+    };
+    const area = (a: (typeof areas)[number], depth: number): React.ReactNode => (
+      <li key={a.id} className="list-none">
+        <div
+          className="flex items-center gap-1.5 px-2 pt-1.5 pb-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+          style={{ paddingLeft: 8 + depth * 10 }}
+          title={a.label ?? undefined}
+        >
+          <Layers className="size-3" />
+          <span className="truncate">{a.name}</span>
+        </div>
+        <ul className="m-0 list-none p-0">
+          {siteRooms.filter((r) => r.areaId === a.id).map((r) => room(r, depth + 1))}
+          {siteAreas.filter((c) => c.parentId === a.id).map((c) => area(c, depth + 1))}
+        </ul>
+      </li>
+    );
+    const inArea = new Set(siteAreas.map((a) => a.id));
+    return (
+      <>
+        {siteRooms.filter((r) => !r.areaId || !inArea.has(r.areaId)).map((r) => room(r, 0))}
+        {siteAreas.filter((a) => !a.parentId || !inArea.has(a.parentId)).map((a) => area(a, 0))}
+      </>
+    );
+  };
 
   return (
     <SidebarMenu>
@@ -184,21 +230,10 @@ function EstateTree() {
                 {siteRooms.length === 0 && (
                   <li className="px-2 py-1 text-xs text-muted-foreground">No rooms</li>
                 )}
-                {siteRooms.map((r) => {
-                  const href = orgPath(orgId, `/rooms/${r.id}`);
-                  const health = live.get(r.id)?.health;
-                  return (
-                    <SidebarMenuSubItem key={r.id}>
-                      <SidebarMenuSubButton
-                        isActive={pathname === href || pathname.startsWith(`${href}/`)}
-                        render={<Link href={href} />}
-                      >
-                        <HealthDot level={health?.level ?? 'unknown'} />
-                        <span title={health?.reasons[0]}>{r.name}</span>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                  );
-                })}
+                {renderTree(
+                  siteRooms,
+                  areas.filter((a) => a.siteId === site.id),
+                )}
               </SidebarMenuSub>
             </AnimatedCollapse>
           </SidebarMenuItem>

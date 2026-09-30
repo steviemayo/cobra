@@ -42,6 +42,18 @@ export function useRoomsLive() {
   return { byId, isPending: overview.isPending, isAvailable: !overview.isError };
 }
 
+/** The v2 estate roll-up (areas, room health, device and gateway counts). Shared by the Overview and the sidebar tree. */
+export function useEstateOverview() {
+  const trpc = useTRPC();
+  const { orgId } = useOrg();
+  return useQuery({
+    ...trpc.monitoring.estate.queryOptions({ orgId }),
+    staleTime: 15_000,
+    refetchInterval: 15_000,
+    retry: false,
+  });
+}
+
 export function useEstate() {
   const sites = useSites();
   const rooms = useRoomsOverview();
