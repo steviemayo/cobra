@@ -125,13 +125,25 @@ Move-Item -Path $stage -Destination $app
 if (($mode -eq 'Service') -and (Test-Path (Join-Path $app 'windows\KestrelGatewayService.exe'))) {
   Copy-Item -Force (Join-Path $app 'windows\KestrelGatewayService.exe') (Join-Path $root 'KestrelGatewayService.exe')
 }
+# An install made before the compiled gateway existed starts the TypeScript source, which takes many
+# seconds to start. Point it at the compiled one now that the new bundle has it.
+$xmlPath = Join-Path $root 'KestrelGatewayService.xml'
+if (($mode -eq 'Service') -and (Test-Path (Join-Path $app 'dist\main.mjs')) -and (Test-Path $xmlPath)) {
+  $xml = Get-Content $xmlPath -Raw
+  if ($xml -match '--import tsx src/main\.ts') {
+    Set-Content -Path $xmlPath -Value ($xml -replace '--import tsx src/main\.ts', 'dist\main.mjs') -Encoding UTF8
+    Note 'Switched the service to the compiled gateway'
+  }
+}
 Start-Gateway
 
 # Healthy means the panel server answers within a minute.
 $healthy = $false
 for ($i = 0; $i -lt 30 -and -not $healthy; $i++) {
   Start-Sleep -Seconds 2
-  try { $healthy = (Invoke-WebRequest -Uri "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200 } catch { }
+  foreach ($p in ([int]$port)..([int]$port + 9)) {
+    try { if ((Invoke-WebRequest -Uri "http://127.0.0.1:$p/health" -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { $healthy = $true; break } } catch { }
+  }
 }
 if ($healthy) {
   # Pick up changes to the helper scripts. This script is running, so it is left for the installer.
@@ -164,5 +176,9 @@ Forget-Request
 Stop-Gateway
 Remove-Item -Recurse -Force $app
 Move-Item -Path $old -Destination $app
+# The version put back may not have the compiled gateway the settings were just pointed at.
+if ((Test-Path $xmlPath) -and -not (Test-Path (Join-Path $app 'dist\main.mjs'))) {
+  Set-Content -Path $xmlPath -Value ((Get-Content $xmlPath -Raw) -replace 'dist\\main\.mjs', '--import tsx src/main.ts') -Encoding UTF8
+}
 Start-Gateway
 exit 1

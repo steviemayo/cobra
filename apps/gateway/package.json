@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src scripts windows",
     "test": "vitest run --passWithNoTests"
@@ -22,6 +23,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@kestrel/config": "workspace:*"
+    "@kestrel/config": "workspace:*",
+    "esbuild": "^0.28.2"
   }
 }

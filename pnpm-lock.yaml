@@ -218,6 +218,9 @@ importers:
       '@kestrel/config':
         specifier: workspace:*
         version: link:../../packages/config
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
 
   apps/panel:
     dependencies:

@@ -1,4 +1,4 @@
-; Inno Setup script for the Kestrel gateway Windows installer. Compiled by CI on windows-latest
+﻿; Inno Setup script for the Kestrel gateway Windows installer. Compiled by CI on windows-latest
 ; (Inno Setup ships preinstalled there) into KestrelGatewaySetup.exe, one per channel.
 ;
 ; Command-line defines set by .github/workflows/gateway-windows.yml:
@@ -29,7 +29,7 @@ DefaultGroupName=Kestrel Gateway
 DisableProgramGroupPage=yes
 DisableWelcomePage=no
 PrivilegesRequired=admin
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesInstallIn64BitMode=x64compatible
 OutputBaseFilename=KestrelGatewaySetup
 OutputDir={#OutputDir}
 Compression=lzma2
@@ -63,7 +63,9 @@ begin
     'portal (Add gateway, or a gateway''s menu) - you can leave it blank and enrol later.');
   ConnectPage.Add('Cloud URL:', False);
   ConnectPage.Add('Enrolment token (optional):', False);
-  ConnectPage.Values[0] := '{#CloudUrlDefault}';
+  // Silent installs pass these on the command line: /CloudUrl=https://... /Token=... /Mode=Service|Tray
+  ConnectPage.Values[0] := ExpandConstant('{param:CloudUrl|{#CloudUrlDefault}}');
+  ConnectPage.Values[1] := ExpandConstant('{param:Token|}');
 
   ModePage := CreateInputOptionPage(ConnectPage.ID,
     'How should it run?', 'Choose how the gateway starts and keeps running',
@@ -72,6 +74,7 @@ begin
   ModePage.Add('As a Windows service (starts at boot, before anyone logs in - recommended for a dedicated room PC)');
   ModePage.Add('When I log in (shows an icon in the system tray)');
   ModePage.SelectedValueIndex := 0;
+  if CompareText(ExpandConstant('{param:Mode|Service}'), 'Tray') = 0 then ModePage.SelectedValueIndex := 1;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -110,8 +113,54 @@ begin
     Result := 'Tray';
 end;
 
+// Whatever is already installed here is stopped and cleared before new files go down. Files of a
+// running gateway are locked, and an old app folder mixed with a new one is how a half-working install
+// happens; the data folder (identity, saved devices) is left alone.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Dir, Script: String;
+  Code: Integer;
+begin
+  Result := '';
+  Dir := AddBackslash(WizardDirValue);
+  Script := Dir + 'uninstall.ps1';
+  if FileExists(Script) then
+    Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -File "' + Script + '" -NoSelfDelete', '', SW_HIDE, ewWaitUntilTerminated, Code)
+  else begin
+    Exec('sc.exe', 'stop KestrelGateway', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    Exec('sc.exe', 'delete KestrelGateway', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  end;
+  Exec('taskkill.exe', '/F /IM KestrelGatewayService.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Sleep(1000);
+  DelTree(Dir + 'app', True, True, True);
+  DelTree(Dir + 'app.new', True, True, True);
+  DelTree(Dir + 'app.old', True, True, True);
+end;
+
+// Uninstalling keeps the gateway's data (so a reinstall picks up where it left off) unless asked not to.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Data: String;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    Data := ExpandConstant('{commonappdata}\Kestrel Gateway');
+    if (not UninstallSilent) and DirExists(Data) then
+      if MsgBox('Also delete the gateway''s saved data (its identity, saved devices and logs)?' + #13#10 + #13#10 +
+                'Choose No to keep it, so installing again carries on where this left off.',
+                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+        DelTree(Data, True, True, True);
+  end;
+end;
+
 [Run]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\configure.ps1"" -CloudUrl ""{code:GetCloudUrl}"" -EnrollToken ""{code:GetEnrollToken}"" -InstallDir ""{app}"" -Mode {code:GetMode}"; StatusMsg: "Setting up the gateway..."; Flags: runhidden waituntilterminated
 
+[UninstallDelete]
+; Everything the setup scripts made in the install folder is not tracked by the installer, so without
+; this the folder is left behind with a stale service definition and settings in it.
+Type: filesandordirs; Name: "{app}"
+
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\uninstall.ps1"" -NoSelfDelete"; RunOnceId: "KestrelUninstall"; Flags: runhidden waituntilterminated
+
