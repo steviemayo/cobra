@@ -444,6 +444,7 @@ export function AssetsView() {
         </div>
       )}
 
+      {importing && <ImportRegisterDialog sites={sites} onClose={() => setImporting(false)} />}
       {adding && <AddDeviceDialog sites={sites} rooms={rooms} onClose={() => setAdding(false)} />}
     </PageContainer>
   );
