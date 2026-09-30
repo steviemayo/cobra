@@ -22,6 +22,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PushToCustomersDialog } from './push-to-customers-dialog';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
 
@@ -232,7 +233,8 @@ function TemplateDialog({ template, onClose }: { template: Template | null; onCl
 export function PmTemplatesView() {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const { orgId, canSupport, isOwner, role } = useOrg();
+  const { orgId, canSupport, isOwner, role, org } = useOrg();
+  const [pushing, setPushing] = useState<Template | null>(null);
   const templates = useQuery(trpc.pm.templates.queryOptions({ orgId }));
   const [editing, setEditing] = useState<Template | 'new' | null>(null);
   const [deleting, setDeleting] = useState<Template | null>(null);
@@ -316,6 +318,11 @@ export function PmTemplatesView() {
               </div>
               {canSupport && (
                 <div className="flex gap-2">
+                  {org.kind === 'msp' && (
+                    <Button size="xs" variant="outline" onClick={() => setPushing(t)}>
+                      Copy to customers
+                    </Button>
+                  )}
                   <Button size="xs" variant="outline" onClick={() => setEditing(t)}>
                     Edit
                   </Button>

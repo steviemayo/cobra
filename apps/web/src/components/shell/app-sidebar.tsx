@@ -460,23 +460,35 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {isMsp ? (
+        {/* A service provider looks after customers and also has an estate of its own (its Internal estate). */}
+        {isMsp && (
           <SidebarGroup>
-            <SidebarGroupLabel>Service provider</SidebarGroupLabel>
+            <SidebarGroupLabel>Customers</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                <NavItem href={`${base}/msp`} icon={Handshake} label="Customers" exact />
+                <NavItem href={`${base}/msp`} icon={Handshake} label="Portfolio" exact />
+                <NavItem
+                  href={`${base}/msp/incidents`}
+                  icon={AlertTriangle}
+                  label="All incidents"
+                />
                 <NavItem href={`${base}/msp/tickets`} icon={LifeBuoy} label="Support queue" />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-        ) : (
+        )}
+        {
           <>
             {full && (
               <SidebarGroup>
                 <SidebarGroupContent>
                   <SidebarMenu>
-                    <NavItem href={base} icon={LayoutDashboard} label="Overview" exact />
+                    <NavItem
+                      href={base}
+                      icon={LayoutDashboard}
+                      label={isMsp ? 'Internal estate' : 'Overview'}
+                      exact
+                    />
                   </SidebarMenu>
                 </SidebarGroupContent>
               </SidebarGroup>
@@ -508,7 +520,7 @@ export function AppSidebar() {
             <NavGroup id="analytics" label="Analytics" items={analytics} />
             <NavGroup id="support" label="Support" defaultOpen items={support} />
           </>
-        )}
+        }
 
         {canSeeTeam && !scoped && (
           <SidebarGroup>

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { GRANT_ROLE_LABEL, GrantRole } from '@kestrel/model';
 import { SimpleSelect } from '@/components/common/simple-select';
+import { dateTime } from '@/components/common/health';
 import { useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -33,6 +34,7 @@ export function ServiceProvidersSetting() {
   const [limited, setLimited] = useState(false);
   const [siteIds, setSiteIds] = useState<string[]>([]);
   const sites = useQuery(trpc.site.list.queryOptions({ orgId }));
+  const activity = useQuery({ ...trpc.msp.activity.queryOptions({ orgId }), retry: false });
 
   const refresh = () =>
     Promise.all([
@@ -56,6 +58,15 @@ export function ServiceProvidersSetting() {
       onSuccess: async (_r, vars) => {
         await refresh();
         toast.success(vars.on ? 'Their branding is on' : 'Their branding is off');
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const setEnd = useMutation(
+    trpc.msp.setEnd.mutationOptions({
+      onSuccess: async () => {
+        await refresh();
+        toast.success('Saved');
       },
       onError: (e) => toast.error(e.message),
     }),
@@ -112,6 +123,22 @@ export function ServiceProvidersSetting() {
                   Show their name, logo and colour
                 </label>
               )}
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                Ends
+                <Input
+                  type="date"
+                  className="h-7 w-36"
+                  aria-label={`End date for ${g.mspName}`}
+                  defaultValue={g.endsAt ? new Date(g.endsAt).toISOString().slice(0, 10) : ''}
+                  onChange={(e) =>
+                    setEnd.mutate({
+                      orgId,
+                      grantId: g.id,
+                      endsAt: e.target.value ? new Date(`${e.target.value}T23:59:59`) : null,
+                    })
+                  }
+                />
+              </label>
               <Button
                 size="sm"
                 variant="ghost"
@@ -190,6 +217,25 @@ export function ServiceProvidersSetting() {
           )}
         </fieldset>
       </form>
+
+      {(activity.data ?? []).length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium">What your providers did</h3>
+          <ul className="max-h-64 divide-y overflow-y-auto rounded-lg border text-sm">
+            {activity.data!.map((a) => (
+              <li
+                key={a.id}
+                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+              >
+                <span>
+                  <span className="font-medium">{a.provider}</span> {a.action.replace(/[._]/g, ' ')}
+                </span>
+                <span className="text-xs text-muted-foreground">{dateTime(a.at)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }

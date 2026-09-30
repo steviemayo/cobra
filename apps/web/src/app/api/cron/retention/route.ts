@@ -6,6 +6,7 @@ import { runReportSchedules } from '@/server/report-delivery';
 import { pruneOldData } from '@/server/retention';
 import { pruneUsage, rollupUsage } from '@/server/usage-service';
 import { snapshotAll } from '@/server/config-service';
+import { expireGrants } from '@/server/msp-portfolio';
 import { pmSweep } from '@/server/pm-service';
 import { runScheduledIssues } from '@/server/register-issues';
 import { loadSigningKey } from '@/server/signing';
@@ -54,8 +55,13 @@ export async function GET(req: Request) {
       return { error: e instanceof Error ? e.message : String(e) };
     }
   })();
+  // Connections to service providers that were given an end date.
+  const grants = await expireGrants(db as never).catch((e: unknown) => ({
+    error: e instanceof Error ? e.message : String(e),
+  }));
   return Response.json({
     ...res,
+    grants,
     snapshots,
     pm,
     register,

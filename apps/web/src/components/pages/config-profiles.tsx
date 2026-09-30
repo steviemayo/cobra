@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
+import { PushToCustomersDialog } from './push-to-customers-dialog';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
 
@@ -276,7 +277,8 @@ const MODE_LABEL: Record<string, string> = {
 export function ConfigProfilesView() {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const { orgId, canSupport, isOwner, role } = useOrg();
+  const { orgId, canSupport, isOwner, role, org } = useOrg();
+  const [pushing, setPushing] = useState<Profile | null>(null);
   const profiles = useQuery(trpc.config.profiles.queryOptions({ orgId }));
   const [editing, setEditing] = useState<Profile | 'new' | null>(null);
   const [deploying, setDeploying] = useState<Profile | null>(null);
@@ -342,6 +344,11 @@ export function ConfigProfilesView() {
                       <Button size="xs" variant="outline" onClick={() => setDeploying(p)}>
                         <Rocket data-icon="inline-start" /> Deploy
                       </Button>
+                      {org.kind === 'msp' && (
+                        <Button size="xs" variant="outline" onClick={() => setPushing(p)}>
+                          Copy to customers
+                        </Button>
+                      )}
                       <Button size="xs" variant="outline" onClick={() => setEditing(p)}>
                         Edit
                       </Button>
@@ -378,6 +385,14 @@ export function ConfigProfilesView() {
         <ProfileDialog
           profile={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
+        />
+      )}
+      {pushing && (
+        <PushToCustomersDialog
+          kind="profile"
+          sourceId={pushing.id}
+          name={pushing.name}
+          onClose={() => setPushing(null)}
         />
       )}
       {deploying && <DeployDialog profile={deploying} onClose={() => setDeploying(null)} />}

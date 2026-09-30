@@ -883,6 +883,11 @@ model MspGrant {
   endedBy        String?   @db.Uuid
   /// The customer's owner chose to show this provider's name, logo and colour in its portal and on its panels.
   useBrand       Boolean   @default(false)
+  /// The connection ends by itself at this time. Null: no end date.
+  endsAt         DateTime?
+  /// The provider's own notes about this customer, for sorting and filtering its portfolio.
+  accountManager String?
+  tags           String[]  @default([])
 
   msp      Org @relation("MspSide", fields: [mspOrgId], references: [id], onDelete: Cascade)
   customer Org @relation("CustomerSide", fields: [customerOrgId], references: [id], onDelete: Cascade)
