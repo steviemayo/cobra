@@ -8,6 +8,7 @@ import { writeAudit } from '../audit';
 import { deviceFeedbackDailyHistory, deviceFeedbackHistory } from '../device-feedback-history';
 import { firmwareReport } from '../firmware-report';
 import { maybeSweep } from '../monitoring';
+import { estateOverview } from '../estate-overview';
 import { orgDevices, orgOverview, sharedInRoom } from '../monitoring-queries';
 import { SITE_SCOPED, siteFilter, type SiteScope } from '../site-scope';
 import { featureProcedure, requireRole, router } from '../trpc';
@@ -53,6 +54,16 @@ export const monitoringRouter = router({
       const jobs = await maybeSweep(db);
       if (jobs.length) after(() => deliverAlerts(db, jobs));
       return orgOverview(db, ctx.orgId, new Date(), ctx.siteScope);
+    }),
+
+  // The v2 Overview: the whole estate (sites, areas, rooms, devices, gateways) in one query.
+  estate: monitoringProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId }))
+    .query(async ({ ctx }) => {
+      const jobs = await maybeSweep(db);
+      if (jobs.length) after(() => deliverAlerts(db, jobs));
+      return estateOverview(db, ctx.orgId, new Date(), ctx.siteScope);
     }),
 
   // Every device across the org, flattened, for the org-wide "Devices" list. Polled the same as
