@@ -161,7 +161,7 @@ describe('the signed device set', () => {
     const w = world();
     const id = await activeDevice(w, { secrets: { password: 'pw' } });
     const { publicKeyPem, privateKeyPem } = generateKeyPair();
-    const key = { privateKeyPem, keyId: 'k1' };
+    const key = { privateKeyPem, publicKeyPem, keyId: 'k1' };
     const signed = await signedDeviceSetFor(w.db, gw, key);
     expect(verifyDeviceSet(signed, [{ keyId: 'k1', publicKeyPem }]).ok).toBe(true);
     expect(signed.payload.devices[0]).toMatchObject({
@@ -183,7 +183,7 @@ describe('the signed device set', () => {
     const w = world();
     await activeDevice(w);
     const { publicKeyPem, privateKeyPem } = generateKeyPair();
-    const signed = await signedDeviceSetFor(w.db, gw, { privateKeyPem, keyId: 'k1' });
+    const signed = await signedDeviceSetFor(w.db, gw, { privateKeyPem, publicKeyPem, keyId: 'k1' });
     const forged = structuredClone(signed);
     forged.payload.devices[0]!.settings = { host: '6.6.6.6' };
     expect(verifyDeviceSet(forged, [{ keyId: 'k1', publicKeyPem }])).toMatchObject({
