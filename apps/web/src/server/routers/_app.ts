@@ -6,6 +6,8 @@ import { billingRouter } from './billing';
 import { bindingRouter } from './binding';
 import { bulkRouter } from './bulk';
 import { siteDeviceRouter } from './site-device';
+import { deviceRouter } from './device';
+import { areaRouter } from './area';
 import { calendarRouter } from './calendar';
 import { mspRouter } from './msp';
 import { roomGroupRouter } from './room-group';
@@ -59,6 +61,8 @@ export const appRouter = router({
   binding: bindingRouter,
   bulk: bulkRouter,
   siteDevice: siteDeviceRouter,
+  device: deviceRouter,
+  area: areaRouter,
   commissioning: commissioningRouter,
   apikey: apikeyRouter,
   usage: usageRouter,

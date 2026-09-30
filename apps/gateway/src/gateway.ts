@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { hostname, networkInterfaces, platform, release as osRelease } from 'node:os';
-import { ANY_KEY_ID, verifyBindings, verifyManifest } from '@kestrel/crypto';
+import { ANY_KEY_ID, verifyBindings, verifyDeviceSet, verifyManifest } from '@kestrel/crypto';
+import { DeviceHost, SETTLE_MS } from './device-host';
 import {
   GATEWAY_FEATURES,
   PROTOCOL_VERSION,
@@ -34,6 +35,7 @@ const KEY_IDENTITY = 'identity';
 const KEY_PUBLIC_KEYS = 'publicKeys';
 const KEY_CONFIG_VERSION = 'configVersion';
 const KEY_CONTROL = 'control';
+const KEY_DEVICE_SET = 'deviceSet';
 const KEY_INSTALL = 'install';
 const BINDINGS_PREFIX = 'bindings:';
 const keyBindings = (roomId: string) => `${BINDINGS_PREFIX}${roomId}`;
@@ -135,6 +137,8 @@ export class Gateway {
     private readonly host: RoomHost,
     private readonly log: Logger,
     private readonly updater: Updater = createUpdater(cfg),
+    /** Devices polled on their own, apart from any room's design (docs/pivot-monitoring.md). */
+    readonly devices: DeviceHost = new DeviceHost(log),
   ) {
     // What the plan said last time, so a restart while offline does not start accepting commands.
     host.setControl(store.get(KEY_CONTROL) !== 'off');
@@ -215,7 +219,9 @@ export class Gateway {
    * Join an organisation with a token typed on this machine. The token is tried first, so a wrong
    * one changes nothing; a right one replaces whatever this gateway belonged to before.
    */
-  enrolWithToken(token: string): Promise<{ ok: true; name: string } | { ok: false; message: string }> {
+  enrolWithToken(
+    token: string,
+  ): Promise<{ ok: true; name: string } | { ok: false; message: string }> {
     const clean = token.trim();
     if (!clean || clean.length > 300)
       return Promise.resolve({ ok: false, message: 'Enter the enrolment token from the portal.' });
@@ -253,13 +259,17 @@ export class Gateway {
       this.configTokenRefused = true;
       this.announcedStatus = null;
       this.announceHoldUntil = 0;
-      this.log('warn', 'Reset from the local admin page: forgot the organisation, will announce as unclaimed');
+      this.log(
+        'warn',
+        'Reset from the local admin page: forgot the organisation, will announce as unclaimed',
+      );
     });
   }
 
   /** Everything that belongs to the organisation this gateway was in: rooms, releases, addresses, credential. */
   private forgetOrganisation() {
-    for (const id of new Set([...this.host.ids(), ...this.deploymentRoomIds()])) this.host.unload(id);
+    for (const id of new Set([...this.host.ids(), ...this.deploymentRoomIds()]))
+      this.host.unload(id);
     for (const { roomId } of this.store.loadManifests()) this.store.deleteManifest(roomId);
     for (const prefix of [BINDINGS_PREFIX, DEPLOYMENT_PREFIX, 'phone:'])
       for (const key of this.store.keysWithPrefix(prefix)) this.store.delete(key);
@@ -311,21 +321,75 @@ export class Gateway {
     const builtIn = this.cfg.trustedKeys ?? [];
     if (builtIn.length === 0 || this.cfg.trustCloudKeys) return;
     const unknown = offered
-      .filter((k) => !builtIn.some((b) => b.keyId === k.keyId && b.publicKeyPem.trim() === k.publicKeyPem.trim()))
+      .filter(
+        (k) =>
+          !builtIn.some(
+            (b) => b.keyId === k.keyId && b.publicKeyPem.trim() === k.publicKeyPem.trim(),
+          ),
+      )
       .map((k) => k.keyId)
       .sort()
       .join(',');
     if (!unknown || unknown === this.untrustedKeysSeen) return;
     this.untrustedKeysSeen = unknown;
-    this.log('warn', 'The cloud offered signing keys this gateway does not trust and will not use', {
-      keys: unknown,
-      hint: 'A gateway update that includes them is needed before releases signed with them can run',
-    });
+    this.log(
+      'warn',
+      'The cloud offered signing keys this gateway does not trust and will not use',
+      {
+        keys: unknown,
+        hint: 'A gateway update that includes them is needed before releases signed with them can run',
+      },
+    );
   }
   private untrustedKeysSeen = '';
 
+  /** Restarts the polled devices from the last verified set, so they are watched with no internet. */
+  private bootDevices(keys: PublicKey[]) {
+    const raw = this.store.getJson<unknown>(KEY_DEVICE_SET);
+    if (!raw) return;
+    const result = verifyDeviceSet(raw, keys);
+    if (!result.ok) {
+      this.log('warn', 'The saved device list failed verification and was not started', {
+        reason: result.reason,
+      });
+      return;
+    }
+    try {
+      this.devices.apply(result.signed);
+    } catch (e) {
+      this.log('error', 'Could not start the saved devices', { error: String(e) });
+    }
+  }
+
+  /** Fetches, verifies and applies the device set the cloud says this gateway should poll. */
+  private async syncDeviceSet(credential: string): Promise<boolean> {
+    let raw: unknown;
+    try {
+      raw = await this.cloud.deviceSet(credential);
+    } catch (e) {
+      this.log('warn', 'Could not download the device list', { error: String(e) });
+      return false;
+    }
+    const result = verifyDeviceSet(raw, this.trustedKeys());
+    if (!result.ok) {
+      this.log('warn', 'The device list failed the signature check and was ignored', {
+        reason: result.reason,
+      });
+      return false;
+    }
+    const { payload } = result.signed;
+    if (payload.orgId !== this.identity?.orgId || payload.gatewayId !== this.identity?.gatewayId) {
+      this.log('warn', 'The device list is for a different gateway and was ignored');
+      return false;
+    }
+    this.devices.apply(result.signed);
+    this.store.setJson(KEY_DEVICE_SET, raw);
+    return true;
+  }
+
   private bootFromCache() {
     const keys = this.trustedKeys();
+    this.bootDevices(keys);
     for (const cached of this.store.loadManifests()) {
       // Re-verify on every boot: the local file is not trusted just because we wrote it.
       const result = verifyManifest(cached.raw, keys);
@@ -628,12 +692,21 @@ export class Gateway {
   private async heartbeat(): Promise<void> {
     const credential = this.store.get(KEY_CREDENTIAL)!;
     const res = await this.sendHeartbeat(credential);
+    // New devices to poll: start them, then report once they have had a moment to answer.
+    const devicesChanged =
+      !!res.deviceSetVersion &&
+      res.deviceSetVersion !== this.devices.setVersion &&
+      (await this.syncDeviceSet(credential));
     // Support is waiting on these, so they go before any slow release work.
     await this.processCommands(credential);
     if (res.configVersion !== this.store.get(KEY_CONFIG_VERSION)) {
       const progressed = await this.syncConfig(credential);
       // Tell the cloud how the deployment went now rather than a heartbeat later.
       if (progressed) await this.sendHeartbeat(credential);
+    }
+    if (devicesChanged && !this.stopped) {
+      await new Promise((r) => setTimeout(r, SETTLE_MS));
+      if (!this.stopped) await this.sendHeartbeat(credential);
     }
   }
 
@@ -655,6 +728,8 @@ export class Gateway {
         uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
         configVersion: this.store.get(KEY_CONFIG_VERSION),
         rooms: this.roomReports(),
+        devices: this.devices.reports(),
+        ...(this.devices.setVersion ? { deviceSetVersion: this.devices.setVersion } : {}),
         commandResults: results,
         dividers: this.groups.report(),
         features: [...GATEWAY_FEATURES],

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { generateKeyPair, signBindings, signManifest } from '@kestrel/crypto';
+import { generateKeyPair, signBindings, signDeviceSet, signManifest } from '@kestrel/crypto';
 import {
   AnnounceRequest,
   EnrollRequest,
@@ -9,6 +9,7 @@ import {
   TelemetryBatch,
   type DeviceValues,
   type GatewayCommand,
+  type MonitoredDevice,
   type RoomModel,
   type SignedManifest,
   type TelemetryEvent,
@@ -62,6 +63,9 @@ export class FakeCloud {
   readonly telemetry: TelemetryEvent[] = [];
   readonly manifestFetches: string[] = [];
   readonly bindingsFetches: string[] = [];
+  /** Devices this gateway polls on their own, and how many times it fetched them. */
+  deviceSet: { version: string; devices: MonitoredDevice[]; tamper?: boolean } | null = null;
+  deviceSetFetches = 0;
   private bindings = new Map<
     string,
     {
@@ -245,6 +249,9 @@ export class FakeCloud {
       this.heartbeats.push(parsed.data);
       return this.json(res, 200, {
         configVersion: String(this.version),
+        ...(this.deviceSet && parsed.data.features.includes('device-set')
+          ? { deviceSetVersion: this.deviceSet.version }
+          : {}),
         serverTime: new Date().toISOString(),
         commands: this.queuedCommands.splice(0),
         watch: this.watching,
@@ -281,6 +288,26 @@ export class FakeCloud {
         return this.json(res, 404, { error: 'No such release' });
       this.manifestFetches.push(a.releaseId);
       return this.json(res, 200, a.signed);
+    }
+    if (req.method === 'GET' && path === '/devices') {
+      if (!this.deviceSet) return this.json(res, 404, { error: 'none' });
+      this.deviceSetFetches++;
+      const signed = signDeviceSet(
+        {
+          orgId: ORG_ID,
+          gatewayId: GATEWAY_ID,
+          version: this.deviceSet.version,
+          devices: this.deviceSet.devices,
+        },
+        { privateKeyPem: this.keys.privateKeyPem, keyId: this.keyId },
+      );
+      const wire = JSON.parse(JSON.stringify(signed)) as {
+        payload: { devices: { settings: Record<string, unknown> }[] };
+      };
+      // A tampered set keeps its old signature but carries a different address.
+      if (this.deviceSet.tamper && wire.payload.devices[0])
+        wire.payload.devices[0].settings = { host: '6.6.6.6' };
+      return this.json(res, 200, wire);
     }
     const b = /^\/rooms\/([^/]+)\/bindings$/.exec(path);
     if (req.method === 'GET' && b) {

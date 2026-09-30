@@ -394,6 +394,10 @@ export const HeartbeatRequest = z.object({
   uptimeSeconds: z.number().int().min(0),
   configVersion: z.string().nullable(),
   rooms: z.array(RoomReport),
+  /** Devices polled on their own (not part of a room's design), by device id. Older gateways send none. */
+  devices: z.array(DeviceReport).max(500).default([]),
+  /** Version of the device set this gateway is running, so the cloud can say when to fetch a new one. */
+  deviceSetVersion: z.string().max(100).optional(),
   /** Outcomes of commands received in earlier heartbeat responses. */
   commandResults: z.array(CommandResult).max(50).default([]),
   /** Which movable walls are open, for the groups this gateway runs. The gateway owns this state. */
@@ -408,6 +412,8 @@ export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
 export const HeartbeatResponse = z.object({
   /** If this differs from the gateway's configVersion it should fetch /config. */
   configVersion: z.string(),
+  /** Version of the device set this gateway should run. If it differs from the gateway's, it fetches /devices. */
+  deviceSetVersion: z.string().optional(),
   serverTime: z.string().datetime(),
   /** Allowlisted commands to run now. */
   commands: z.array(GatewayCommand).default([]),

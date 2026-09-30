@@ -686,3 +686,18 @@ Plan: `docs/pivot-monitoring.md`. **User** = decided by the product owner; **pro
 | PV-22 | **Every device has an append-only asset history** (field changes with old > new, source and actor; moves; incidents; drift; PM results; register issues), kept for the life of the device. **A changed serial, MAC or model is flagged as a possible swap** and someone confirms Replaced (old identity retired with a date) or Correction | user | Traceability when kit is swapped or a check fails |
 
 Supersedes when built: the room design, release and control decisions (phases 1-2, 4, combined rooms, panel), TM-1..TM-20 where they concern control, and Step Q's control-forward Overview.
+
+### Built: M1, devices, areas and the device-centric gateway (2026-09-30, branch `feat/pivot-m1`)
+
+| ID | Decision | Who | Why |
+| --- | --- | --- | --- |
+| M1-1 | **New tables `Area`, `Device`, `DeviceEvent`; `Room.areaId` and `Room.tags`.** Additive migration `20260930004304_pivot_devices`, applied to `kestrel-dev`. Nothing dropped; `DeviceStatus`, `SiteDevice` and room designs still work | build | Old monitoring keeps running until the staged removal |
+| M1-2 | **Standalone devices reach a gateway as a signed device set** (`GET /api/gateway/v1/devices`, `SignedDeviceSet`, same Ed25519 signing as bindings). The heartbeat response carries `deviceSetVersion`; the gateway fetches when it differs, verifies, applies, and caches the raw set so it restarts with no internet. Older gateways never advertise `device-set` and are never told | build | Reuses the trust model; additive, protocol version stays 1 |
+| M1-3 | **The gateway runs a `DeviceHost` beside `RoomHost`**: one driver per device, rebuilt only when its name, category, driver or settings change. A device is not reported until it has answered once or 5 s have passed, and a change to the set triggers a follow-up heartbeat after that settle time | build | A driver starts as online; reporting that before it has tried would be a guess |
+| M1-4 | **Site default gateway = the site's oldest gateway** until sites can name one (no column yet) | build | Avoids a schema change now; revisit in M2 |
+| M1-5 | **Asset fields merge by provenance** (`mergeDiscovered`, `mergeManual` in `packages/model/src/devices.ts`): discovery fills and refreshes, a manual value is never overwritten and a disagreement is stored as `discovered`, a changed serial, MAC or model flags a possible swap. Serial, MAC and model are read from the sections a driver already puts in its details (labels like "Serial number"), so no driver had to change | build | Feeds the register now; drivers can report identity explicitly later |
+| M1-6 | **Every field change, move, gateway change, upgrade and swap decision is written to `DeviceEvent`**, kept for the life of the device | user (PV-22) | Asset history |
+| M1-7 | **A standalone offline device raises `device_offline` (subject `device:<id>`) after the usual 45 s grace**, resolved when it answers. A gateway outage still raises the one gateway incident; the portal shows the device as unknown (`deviceLiveState`) | build | PV-7 |
+| M1-8 | **Areas nest 3 deep, names unique per parent, no loops, same site only.** Rooms are placed with `area.placeRoom` | build | PV-4 |
+
+Not built yet in M1: room and device portal screens (M2), driver-declared history metrics (M3), making the heartbeat treat a gateway-offline device as `unknown` in incidents (only in views today), moving existing room-design devices into `Device` rows, and a gateway version bump (the release process does that).

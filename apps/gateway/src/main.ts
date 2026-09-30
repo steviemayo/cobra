@@ -42,6 +42,7 @@ async function main() {
     gateway.stop();
     await panel.close();
     host.shutdown();
+    gateway.devices.shutdown();
     store.close();
     process.exit(0);
   };

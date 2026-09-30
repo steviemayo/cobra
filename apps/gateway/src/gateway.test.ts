@@ -124,7 +124,10 @@ describe('enrolment and sync', () => {
       first.store.close();
       running.length = 0;
       // Now built to trust a different key, and the cloud is unreachable: the cached release must not run.
-      const second = boot({ trustedKeys: [{ keyId: cloud.keyId, publicKeyPem: generateKeyPair().publicKeyPem }] }, 'http://127.0.0.1:9');
+      const second = boot(
+        { trustedKeys: [{ keyId: cloud.keyId, publicKeyPem: generateKeyPair().publicKeyPem }] },
+        'http://127.0.0.1:9',
+      );
       second.gateway.start();
       await wait(150);
       expect(second.host.ids()).toEqual([]);
@@ -874,5 +877,67 @@ describe('bindings', () => {
       [made.switcherId!]: true,
     });
     unit.close();
+  });
+});
+
+describe('devices polled on their own', () => {
+  const DEV = '00000000-0000-4000-8000-000000000001';
+  const set = (version: string, tamper = false) => ({
+    version,
+    tamper,
+    devices: [
+      {
+        id: DEV,
+        name: 'Lobby display',
+        category: 'display',
+        control: { kind: 'generic' as const, protocol: 'pjlink' as const },
+        // Nothing listens on this port, so the device reports offline: enough to prove it is polled.
+        settings: { host: '127.0.0.1', port: 9 },
+      },
+    ],
+  });
+  const reported = () =>
+    cloud.heartbeats.some((h) =>
+      h.devices.some((d) => d.deviceId === DEV && d.name === 'Lobby display'),
+    );
+
+  it('fetches a verified device set, polls it and reports each device in the heartbeat', async () => {
+    cloud.deviceSet = set('v1');
+    const { gateway } = boot();
+    gateway.start();
+    await until(() => reported(), 12_000);
+    expect(cloud.deviceSetFetches).toBe(1);
+    expect(gateway.devices.setVersion).toBe('v1');
+    const last = cloud.heartbeats.at(-1)!;
+    expect(last.deviceSetVersion).toBe('v1');
+    gateway.devices.shutdown();
+  }, 20_000);
+
+  it('ignores a device set whose contents were changed after signing', async () => {
+    cloud.deviceSet = set('v1', true);
+    const { gateway } = boot();
+    gateway.start();
+    await until(() => cloud.deviceSetFetches > 0);
+    await wait(100);
+    expect(gateway.devices.size).toBe(0);
+    expect(gateway.devices.setVersion).toBeNull();
+  });
+
+  it('starts the saved devices again with no cloud, after a restart', async () => {
+    cloud.deviceSet = set('v1');
+    const first = boot();
+    first.gateway.start();
+    await until(() => first.gateway.devices.setVersion === 'v1');
+    first.gateway.stop();
+    first.gateway.devices.shutdown();
+    first.host.shutdown();
+    first.store.close();
+    running.length = 0;
+
+    cloud.up = false;
+    const second = boot();
+    second.gateway.start();
+    await until(() => second.gateway.devices.setVersion === 'v1');
+    second.gateway.devices.shutdown();
   });
 });

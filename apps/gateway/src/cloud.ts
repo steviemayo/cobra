@@ -117,6 +117,11 @@ export class CloudClient {
     return this.request('GET', `/rooms/${roomId}/bindings`, null, { credential });
   }
 
+  /** The devices this gateway polls on their own, returned raw: they must be verified before use. */
+  deviceSet(credential: string): Promise<unknown> {
+    return this.request('GET', '/devices', null, { credential });
+  }
+
   async telemetry(credential: string, body: TelemetryBatch): Promise<void> {
     await this.request('POST', '/telemetry', null, { body, credential });
   }

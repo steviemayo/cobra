@@ -79,6 +79,9 @@ model Org {
   credentialSets      CredentialSet[]
   siteDevices         SiteDevice[]
   joinRequests        JoinRequest[]
+  areas               Area[]
+  devices             Device[]
+  deviceEvents        DeviceEvent[]
 }
 
 model Member {
@@ -107,6 +110,8 @@ model Site {
   rooms       Room[]
   groups      RoomGroup[]
   siteDevices SiteDevice[]
+  areas       Area[]
+  devices     Device[]
 
   @@index([orgId])
 }
@@ -139,10 +144,11 @@ model Gateway {
   lastSeenAt           DateTime?
   createdAt            DateTime       @default(now())
 
-  org    Org            @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site   Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  rooms  Room[]
-  events GatewayEvent[]
+  org     Org            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site    Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  rooms   Room[]
+  events  GatewayEvent[]
+  devices Device[]
 
   @@index([orgId])
   @@index([siteId])
@@ -192,6 +198,10 @@ model Room {
   memberRoomIds           String[]  @default([]) @db.Uuid
   /// A room that is only watched: its design warnings are not shown as something to fix.
   monitorOnly             Boolean   @default(false)
+  /// The area (building, level, zone) the room sits in, when the customer groups rooms that way.
+  areaId                  String?   @db.Uuid
+  /// Free labels for cross-cutting groups ("boardroom", "VIP").
+  tags                    String[]  @default([])
   /// Hash of the secret webhook callers present. Null until someone generates one.
   hookSecretHash          String?
   desiredReleaseId        String?   @db.Uuid
@@ -209,6 +219,8 @@ model Room {
   site              Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
   gateway           Gateway?           @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
   group             RoomGroup?         @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  area              Area?              @relation(fields: [areaId], references: [id], onDelete: SetNull)
+  assets            Device[]
   draft             RoomDraft?
   binding           RoomBinding?
   releases          Release[]
@@ -222,6 +234,7 @@ model Room {
   @@index([orgId])
   @@index([siteId])
   @@index([groupId])
+  @@index([areaId])
 }
 
 // A room's addresses and logins, kept apart from its design so templates carry none of them, an IP
@@ -1095,4 +1108,133 @@ model TrialClaim {
   domainKey String?  @unique
   orgId     String?  @db.Uuid
   createdAt DateTime @default(now())
+}
+
+// ---- v2 (docs/pivot-monitoring.md): areas, devices as assets, device history -----------------------
+
+/// A grouping of rooms inside a site that the customer chooses: a building, a level, a wing. Nests
+/// (max depth 3, enforced in code). Rooms may sit in one area or none.
+model Area {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  siteId    String   @db.Uuid
+  parentId  String?  @db.Uuid
+  name      String
+  /// What this level is called ("Building", "Level", "Zone"). Free text, shown as a small label.
+  label     String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  org      Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site     Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  parent   Area?  @relation("AreaTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children Area[] @relation("AreaTree")
+  rooms    Room[]
+
+  @@unique([siteId, parentId, name])
+  @@index([orgId])
+  @@index([siteId])
+}
+
+/// A physical thing in a room, monitored or not. `active` devices are polled by a gateway through a
+/// driver; `passive` ones are asset records only (a fixed source, a laptop, a camera, a media player)
+/// and never show online or offline. This replaces the device list that used to live inside a room's
+/// design. Which gateway polls an active device: its own `gatewayId`, else its room's, else the
+/// site's default (resolved in code, see docs/pivot-monitoring.md).
+model Device {
+  id              String  @id @default(uuid()) @db.Uuid
+  orgId           String  @db.Uuid
+  siteId          String  @db.Uuid
+  /// The room it is in. Null for a spare or a device shared by several rooms.
+  roomId          String? @db.Uuid
+  name            String
+  /// active or passive
+  kind            String  @default("passive")
+  /// The device category (display, camera, dsp, laptop, media_player, ...).
+  category        String
+  /// Active only: { kind: "driver", driverId } or { kind: "generic", protocol }.
+  control         Json?
+  /// Active only: design settings the driver reads (not addresses or logins).
+  settings        Json    @default("{}")
+  /// Active only: addresses, setting key -> value.
+  values          Json    @default("{}")
+  /// Active only: logins sealed with KESTREL_SECRETS_KEY. Never sent to a browser.
+  sealed          String?
+  credentialSetId String? @db.Uuid
+  /// Active only: the gateway that polls it. Null: the room's gateway, then the site's.
+  gatewayId       String? @db.Uuid
+  /// Goes up whenever anything a gateway needs (driver, address, login) changes.
+  version         Int     @default(1)
+
+  // Asset record. The value here is the one shown; `provenance` says where each came from.
+  make              String?
+  model             String?
+  serial            String?
+  mac               String?
+  ip                String?
+  firmware          String?
+  assetTag          String?
+  /// in_service, spare, in_repair, retired
+  status            String    @default("in_service")
+  installedOn       DateTime? @db.Date
+  warrantyEndsOn    DateTime? @db.Date
+  endOfLifeOn       DateTime? @db.Date
+  supplier          String?
+  notes             String?
+  /// field -> { source: "discovered" | "manual", discovered?: value the device reported when it
+  /// disagrees with the manual value, at: ISO time, by?: user id }.
+  provenance        Json      @default("{}")
+  /// The identity this record had before a confirmed replacement (old serial, mac, model, date).
+  retiredIdentities Json      @default("[]")
+  /// Set when a serial, MAC or model changed and nobody has said "replaced" or "correction" yet.
+  swapPending       Boolean   @default(false)
+
+  // Live state, written by heartbeats. online / offline. "unknown" is worked out at read time from
+  // its gateway.
+  online        Boolean?
+  since         DateTime?
+  lastSeenAt    DateTime?
+  feedback      Json?
+  details       Json?
+  firmwareSince DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  org     Org           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site    Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  room    Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  gateway Gateway?      @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  events  DeviceEvent[]
+
+  @@index([orgId])
+  @@index([siteId])
+  @@index([roomId])
+  @@index([gatewayId])
+}
+
+/// Append-only history of one device: field changes (old to new, who or what), moves, gateway
+/// changes, swaps, and events copied in from elsewhere (incidents, PM results, drift). Kept for the
+/// life of the device, not the 90 day telemetry window.
+model DeviceEvent {
+  id       String   @id @default(uuid()) @db.Uuid
+  orgId    String   @db.Uuid
+  deviceId String   @db.Uuid
+  /// created, field_changed, moved, gateway_changed, swap_flagged, swap_confirmed, swap_dismissed,
+  /// upgraded, status_changed, note
+  type     String
+  field    String?
+  oldValue String?
+  newValue String?
+  /// discovered, manual or system
+  source   String   @default("system")
+  actorId  String?  @db.Uuid
+  data     Json?
+  at       DateTime @default(now())
+
+  org    Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([deviceId, at])
 }
