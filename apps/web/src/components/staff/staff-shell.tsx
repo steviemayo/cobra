@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, Building2, LifeBuoy, Router, ScrollText, Store, Users } from 'lucide-react';
+import { Activity, Building2, LifeBuoy, Router, ScrollText, Users } from 'lucide-react';
 import { hasStaffRole, type StaffRole } from '@kestrel/model';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
@@ -12,7 +12,6 @@ const NAV: { href: string; label: string; icon: typeof Building2; needs?: StaffR
   { href: '/staff/health', label: 'Fleet health', icon: Activity },
   { href: '/staff/gateways', label: 'Unclaimed gateways', icon: Router },
   { href: '/staff/tickets', label: 'Tickets', icon: LifeBuoy },
-  { href: '/staff/marketplace', label: 'Marketplace review', icon: Store },
   { href: '/staff/audit', label: 'Audit trail', icon: ScrollText, needs: ['admin', 'support'] },
   { href: '/staff/team', label: 'Team', icon: Users, needs: ['admin'] },
 ];

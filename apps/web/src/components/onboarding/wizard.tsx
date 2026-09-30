@@ -158,7 +158,7 @@ export function OnboardingWizard({
   );
   const createRoom = useMutation(
     trpc.room.create.mutationOptions({
-      onSuccess: (room) => finish(`/o/${orgId}/rooms/${room.id}/design`),
+      onSuccess: (room) => finish(`/o/${orgId}/rooms/${room.id}/devices`),
     }),
   );
 

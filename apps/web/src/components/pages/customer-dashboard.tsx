@@ -89,7 +89,7 @@ export function CustomerDashboard() {
                       {s.label}
                     </span>
                     <Link
-                      href={orgPath(orgId, `/rooms/${r.id}/control`)}
+                      href={orgPath(orgId, `/rooms/${r.id}`)}
                       className={buttonVariants({ size: 'sm' })}
                     >
                       <SlidersHorizontal data-icon="inline-start" /> Control
