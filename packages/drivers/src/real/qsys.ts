@@ -56,6 +56,9 @@ interface QrcControl {
   ValueMax?: number;
 }
 
+/** The Core answered, but with an error: it is reachable, whatever it thought of the request. */
+class QrcError extends Error {}
+
 interface QrcComponent {
   Name: string;
   Type?: string;
@@ -86,6 +89,7 @@ export class QsysDriver extends BaseDriver {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
   private poller: ReturnType<typeof setInterval> | null = null;
+  private warnedReply = false;
   private readonly reconnect = new Reconnect(() => this.open());
   /** Goes up on every write, so a read that began before one is not allowed to overwrite it. */
   private writes = 0;
@@ -225,7 +229,7 @@ export class QsysDriver extends BaseDriver {
       this.pending.delete(msg.id);
       clearTimeout(p.timer);
       if (msg.error)
-        p.reject(new Error(`${this.device.name}: ${msg.error.message ?? 'Q-SYS error'}`));
+        p.reject(new QrcError(`${this.device.name}: ${msg.error.message ?? 'Q-SYS error'}`));
       else p.resolve(msg.result);
     }
   }
@@ -385,13 +389,17 @@ export class QsysDriver extends BaseDriver {
         if (muted !== undefined) s.muted = muted === true || muted === 1;
       });
     } catch (e) {
-      if (first)
-        this.ctx.log('warn', 'Q-SYS did not answer', {
+      // A Core that replies with an error (no such component, no such control) is up: the design just
+      // lacks what was asked for. Only silence, or a lost connection, means it is not there.
+      const reachable = e instanceof QrcError;
+      if (first || (reachable && !this.warnedReply))
+        this.ctx.log('warn', reachable ? 'Q-SYS answered with an error' : 'Q-SYS did not answer', {
           device: this.device.name,
           error: String(e),
         });
+      if (reachable) this.warnedReply = true;
       this.update((s) => {
-        s.online = false;
+        s.online = reachable;
       });
     }
   }

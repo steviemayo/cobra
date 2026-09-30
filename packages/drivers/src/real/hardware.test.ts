@@ -54,7 +54,13 @@ interface QrcServer {
 }
 
 async function fakeQsys(
-  opts: { user?: string; password?: string; silent?: boolean; pushEngineStatus?: boolean } = {},
+  opts: {
+    user?: string;
+    password?: string;
+    silent?: boolean;
+    pushEngineStatus?: boolean;
+    noGain?: boolean;
+  } = {},
 ): Promise<QrcServer> {
   const requests: QrcServer['requests'] = [];
   const controls = new Map<string, number | boolean>([
@@ -99,7 +105,9 @@ async function fakeQsys(
           fail('Logon required');
           continue;
         }
-        if (msg.method === 'Component.Get') {
+        if (msg.method === 'Component.Get' && opts.noGain) {
+          fail(`Component '${String(msg.params.Name)}' does not exist`);
+        } else if (msg.method === 'Component.Get') {
           const cs = (msg.params.Controls as { Name: string }[]).map((c) => ({
             Name: c.Name,
             Value: controls.get(c.Name),
@@ -233,6 +241,16 @@ describe('Q-SYS Core driver', () => {
       { name: 'gain', type: 'Float', value: -20 },
       { name: 'mute', type: 'Boolean', value: false },
     ]);
+  });
+
+  it('stays online when the design has no gain component: the Core answered, it just has nothing to read', async () => {
+    const core = await fakeQsys({ noGain: true });
+    const d = new QsysDriver(qsysDevice(core.port), ctx);
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    await wait(300);
+    expect(d.getState().online).toBe(true);
   });
 
   it('logs on when the Core asks for credentials, and stays offline when they are wrong', async () => {
