@@ -365,7 +365,7 @@ export function AppSidebar() {
       },
   ]);
   const assets = entries([
-    canEdit && full && { soon: true, href: `${base}/assets`, icon: Package, label: 'Register' },
+    canSupport && { href: `${base}/assets`, icon: Package, label: 'Register' },
     canEdit &&
       full && {
         soon: true,

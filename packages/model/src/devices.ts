@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DeviceCategory } from './room/catalog';
+import { DEVICE_CATALOG, DeviceCategory } from './room/catalog';
 import { DeviceControl } from './room/device';
 import type { DeviceDetails } from './runtime/device';
 
@@ -22,6 +22,21 @@ export const ASSET_ONLY_CATEGORIES = [
 ] as const;
 export const AssetCategory = z.union([DeviceCategory, z.enum(ASSET_ONLY_CATEGORIES)]);
 export type AssetCategory = z.infer<typeof AssetCategory>;
+
+const ASSET_ONLY_LABEL: Record<(typeof ASSET_ONLY_CATEGORIES)[number], string> = {
+  computer: 'Computer or laptop',
+  media_player: 'Media player',
+  network_switch: 'Network switch',
+  wireless_presenter: 'Wireless presenter',
+  cabling: 'Cabling or wall plate',
+  other: 'Other',
+};
+
+/** A category's name for people. An unknown one (from a later version) shows as it is. */
+export function assetCategoryLabel(category: string): string {
+  const known = DEVICE_CATALOG[category as DeviceCategory]?.label;
+  return known ?? ASSET_ONLY_LABEL[category as keyof typeof ASSET_ONLY_LABEL] ?? category;
+}
 
 export const ASSET_STATUSES = ['in_service', 'spare', 'in_repair', 'retired'] as const;
 export const AssetStatus = z.enum(ASSET_STATUSES);

@@ -75,6 +75,19 @@ export const deviceRouter = router({
       });
     }),
 
+  /** Incidents raised against this device (open and closed), newest first. */
+  incidents: orgProcedure
+    .input(z.object({ orgId, deviceId: id }))
+    .query(async ({ ctx, input }) => {
+      const device = await db.device.findFirst({ where: { id: input.deviceId, orgId: ctx.orgId } });
+      if (!device) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such device' });
+      return db.incident.findMany({
+        where: { orgId: ctx.orgId, subject: { startsWith: `device:${input.deviceId}` } },
+        orderBy: { openedAt: 'desc' },
+        take: 50,
+      });
+    }),
+
   create: orgProcedure
     .input(
       z.object({
