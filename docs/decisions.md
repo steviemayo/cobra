@@ -701,3 +701,17 @@ Supersedes when built: the room design, release and control decisions (phases 1-
 | M1-8 | **Areas nest 3 deep, names unique per parent, no loops, same site only.** Rooms are placed with `area.placeRoom` | build | PV-4 |
 
 Not built yet in M1: room and device portal screens (M2), driver-declared history metrics (M3), making the heartbeat treat a gateway-offline device as `unknown` in incidents (only in views today), moving existing room-design devices into `Device` rows, and a gateway version bump (the release process does that).
+
+### Built: M2, Overview, estate, assets and device pages (2026-09-30, branch `feat/pivot-m2`)
+
+| ID | Decision | Who | Why |
+| --- | --- | --- | --- |
+| M2-1 | **The Overview reads one query, `monitoring.estate`** (`server/estate-overview.ts`): KPI cards, sites, areas and every room with its device counts (active, online, offline, unknown, recorded), gateways used, worst gateway state, open incidents. Site-limited providers get only their sites | build | PV-4, PV-7 |
+| M2-2 | **Room health no longer needs a deployed release.** A room is healthy when every monitored device answers, degraded or down with open incidents or offline devices, and unknown when it has nothing monitored, no gateway, or a silent gateway. Older room-design devices count as monitored devices until they are moved over | build | Health must come from devices, not from a room program |
+| M2-3 | **KPI cards for rooms in use and configuration drift show a dash** until in-use definitions (M3) and drift (M4) exist, rather than a made-up number | build | Honest placeholders |
+| M2-4 | **The asset register** (`/assets`) groups by site, area, room or category, filters, searches, shows a completeness percentage and serial changes waiting for review, and exports the filtered view as CSV | user (PV-15) | Asset management |
+| M2-5 | **The device page** (`/devices/[id]`) has Overview, Details (with where each value came from and any mismatch), Asset history (with the replaced / correction decision) and Incidents. History charts, Configuration and Maintenance tabs are added when those steps land, not shown empty | user (PV-20) | No empty tabs |
+| M2-6 | **Room pages are built around devices.** The Overview shows the room's devices, live status and location (area and tags); the Devices tab is the room's slice of the register. The Design, Simulate, Control, Deployments and Commissioning tabs are gone from the room (routes remain until removal) | user (PV-1) | Staged removal |
+| M2-7 | **Areas are managed on the site page** (add, rename, delete, nest three deep) and the sidebar tree shows rooms under their areas | build | PV-4 |
+
+Not done in M2: the old room-design device screen (addresses and logins of legacy design devices) was replaced, so those devices are edited through the new device page once they are moved into the register (migration still to do); the "New room" dialog still offers templates; register issues, the register import, the in-room maintenance tab, and browser verification (only `tsc`, `eslint`, `next build` and unit tests were run).
