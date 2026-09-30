@@ -13,7 +13,13 @@ export type MonitoringDb = Pick<
 
 export type Severity = 'info' | 'warning' | 'critical';
 export type IncidentKind =
-  'device_offline' | 'gateway_offline' | 'room_fault' | 'deploy_failed' | 'point_alert';
+  | 'device_offline'
+  | 'gateway_offline'
+  | 'room_fault'
+  | 'deploy_failed'
+  | 'point_alert'
+  | 'config_drift'
+  | 'config_enforce_failed';
 
 export interface AlertJob {
   incidentId: string;

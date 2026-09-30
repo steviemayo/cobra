@@ -5,7 +5,7 @@ import { TransitionAction } from '../room/groups';
 import { RoomModel } from '../room/room-model';
 import { Meetings, RoomMeetings } from '../schedule';
 import { PanelIntent, PanelViewModel, RoomStatus } from '../runtime/panel';
-import { DeviceDetails, PowerState } from '../runtime/device';
+import { DeviceCommand, DeviceDetails, PowerState } from '../runtime/device';
 
 // Gateway <-> cloud protocol, version 1. The gateway only ever makes outbound HTTPS requests.
 export const PROTOCOL_VERSION = 1;
@@ -415,6 +415,8 @@ export const HeartbeatResponse = z.object({
   /** Version of the device set this gateway should run. If it differs from the gateway's, it fetches /devices. */
   deviceSetVersion: z.string().optional(),
   serverTime: z.string().datetime(),
+  /** Settings to put back on polled devices now (configuration profiles set to enforce, and pushes). */
+  enforce: z.array(z.object({ deviceId: z.string().uuid(), command: DeviceCommand })).max(200).default([]),
   /** Allowlisted commands to run now. */
   commands: z.array(GatewayCommand).default([]),
   /** Rooms someone is controlling from the portal right now. Non-empty means: start polling fast. */

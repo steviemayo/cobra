@@ -1190,6 +1190,11 @@ model Device {
   retiredIdentities Json      @default("[]")
   /// Set when a serial, MAC or model changed and nobody has said "replaced" or "correction" yet.
   swapPending       Boolean   @default(false)
+  /// The configuration profile this device is held to, and settings of its own that add to or replace the profile.
+  profileId         String?   @db.Uuid
+  configParams      Json      @default("[]")
+  /// field -> { drifted, desired, actual, since, attempts, lastEnforcedAt }: what the last reading said about each held setting.
+  configState       Json      @default("{}")
 
   // Live state, written by heartbeats. online / offline. "unknown" is worked out at read time from
   // its gateway.
@@ -1307,4 +1312,65 @@ model RoomUsageDay {
 
   @@id([roomId, kind, day])
   @@index([orgId, day])
+}
+
+// ---- v2 configuration (docs/pivot-monitoring.md, "Configuration and deployment") -------------------
+
+/// A named set of desired device settings that many devices can be held to. `params` is a list of
+/// { field, value, mode } (packages/model/src/config.ts). `version` goes up on every change.
+model ConfigProfile {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  name        String
+  description String?
+  /// A device category this profile is meant for (a hint for pickers), or null for any.
+  category    String?
+  params      Json     @default("[]")
+  version     Int      @default(1)
+  createdBy   String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([orgId, name])
+  @@index([orgId])
+}
+
+/// A copy of what a device said about itself at a moment: readings, details, firmware and its
+/// non-secret settings. One per device can be the baseline drift is measured from.
+model DeviceSnapshot {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String   @db.Uuid
+  deviceId   String   @db.Uuid
+  /// manual, scheduled, before_deploy, after_deploy
+  reason     String   @default("manual")
+  data       Json
+  isBaseline Boolean  @default(false)
+  note       String?
+  takenBy    String?  @db.Uuid
+  takenAt    DateTime @default(now())
+
+  @@index([deviceId, takenAt])
+  @@index([orgId])
+}
+
+/// One push of a profile to some devices: a canary first, then the rest, with the snapshots taken
+/// before so it can be rolled back.
+model ConfigDeploy {
+  id             String   @id @default(uuid()) @db.Uuid
+  orgId          String   @db.Uuid
+  profileId      String   @db.Uuid
+  profileName    String
+  profileVersion Int
+  deviceIds      String[] @default([]) @db.Uuid
+  canaryIds      String[] @default([]) @db.Uuid
+  /// canary (waiting for a go-ahead), done, rolled_back
+  stage          String   @default("done")
+  /// deviceId -> the snapshot taken before this deploy touched it.
+  snapshots      Json     @default("{}")
+  note           String?
+  createdBy      String?  @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([orgId, createdAt])
 }

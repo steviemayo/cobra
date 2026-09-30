@@ -24,6 +24,7 @@ import {
   type AlertJob,
   type MonitoringDb,
 } from './monitoring';
+import { evaluateConfig, type ConfigDb, type EnforceItem } from './config-service';
 import type { SigningKey } from './signing';
 
 // v2 devices (docs/pivot-monitoring.md): the cloud's half. Functions take the database as a
@@ -33,6 +34,9 @@ export type DevicesDb = Pick<
   | 'device'
   | 'deviceEvent'
   | 'deviceHistory'
+  | 'configProfile'
+  | 'deviceSnapshot'
+  | 'configDeploy'
   | 'room'
   | 'gateway'
   | 'incident'
@@ -257,15 +261,17 @@ export async function deviceSetVersion(
  * fields the device can answer for itself (each merged by `mergeDiscovered`), the history of what
  * changed, and a device_offline incident when one stays silent.
  */
-export async function recordDeviceReports(
+export async function ingestDeviceReports(
   db: DevicesDb,
   gw: { id: string; orgId: string; siteId: string },
   reports: DeviceReport[],
   now: Date,
-): Promise<AlertJob[]> {
+): Promise<{ jobs: AlertJob[]; enforce: EnforceItem[] }> {
   const jobs: AlertJob[] = [];
+  const enforce: EnforceItem[] = [];
+  const profileCache = new Map<string, import('@kestrel/model').ConfigParam[]>();
   const add = (j: AlertJob | null) => void (j && jobs.push(j));
-  if (reports.length === 0) return jobs;
+  if (reports.length === 0) return { jobs, enforce };
   const mine = new Map((await devicesForGateway(db, gw)).map((d) => [d.id, d]));
   const monitoring = db as unknown as MonitoringDb;
   for (const rep of reports) {
@@ -324,6 +330,19 @@ export async function recordDeviceReports(
     }
     await db.device.update({ where: { id: row.id }, data: patch });
 
+    // Held settings: notice a change, and collect what a gateway should put back.
+    const readings = { ...(isObject(row.feedback) ? row.feedback : {}), ...(rep.feedback ?? {}) };
+    if (rep.online) {
+      const cfg = await evaluateConfig(db as unknown as ConfigDb, row, readings, now, profileCache);
+      jobs.push(...cfg.jobs);
+      enforce.push(...cfg.enforce);
+      if (cfg.state !== null)
+        await db.device.update({
+          where: { id: row.id },
+          data: { configState: cfg.state as unknown as Prisma.InputJsonValue },
+        });
+    }
+
     if (history.length > 0)
       await db.deviceHistory.createMany({
         data: history.map((h) => ({
@@ -366,7 +385,17 @@ export async function recordDeviceReports(
         ),
       );
   }
-  return jobs;
+  return { jobs, enforce };
+}
+
+/** As `ingestDeviceReports`, for callers that only want the alerts. */
+export async function recordDeviceReports(
+  db: DevicesDb,
+  gw: { id: string; orgId: string; siteId: string },
+  reports: DeviceReport[],
+  now: Date,
+): Promise<AlertJob[]> {
+  return (await ingestDeviceReports(db, gw, reports, now)).jobs;
 }
 
 // ---- Changes people make -------------------------------------------------------------------------

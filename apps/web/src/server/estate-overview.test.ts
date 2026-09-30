@@ -192,7 +192,7 @@ describe('estateOverview', () => {
       gatewaysOnline: 1,
       openTickets: 2,
       roomsInUse: 0,
-      driftCount: null,
+      driftCount: 0,
     });
   });
 

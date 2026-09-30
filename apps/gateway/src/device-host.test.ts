@@ -5,6 +5,8 @@ import { silentLogger } from './log';
 const built: FakeDriver[] = [];
 
 class FakeDriver {
+  sent: unknown[] = [];
+  failSend = false;
   starts = 0;
   closes = 0;
   state: DeviceState = defaultDeviceState();
@@ -19,6 +21,10 @@ class FakeDriver {
   }
   emit() {
     for (const l of this.listeners) l(this.getState());
+  }
+  async send(c: unknown) {
+    if (this.failSend) throw new Error('refused');
+    this.sent.push(c);
   }
   start() {
     this.starts++;
@@ -140,6 +146,16 @@ describe('DeviceHost', () => {
     built[0]!.emit();
     expect(host.reports(Date.now()).map((r) => r.deviceId)).toEqual([A]);
     expect(host.reports(LATER()).map((r) => r.deviceId)).toEqual([A, B]);
+  });
+
+  it('sends a setting to a polled device, and says so when it cannot', async () => {
+    const host = new DeviceHost(silentLogger);
+    host.apply(set('v1', [{ id: A }]));
+    expect(await host.execute(A, { type: 'power', on: true })).toBe(true);
+    expect(built[0]!.sent).toEqual([{ type: 'power', on: true }]);
+    built[0]!.failSend = true;
+    expect(await host.execute(A, { type: 'power', on: false })).toBe(false);
+    expect(await host.execute(B, { type: 'power', on: true })).toBe(false);
   });
 
   it('closes everything on shutdown', () => {

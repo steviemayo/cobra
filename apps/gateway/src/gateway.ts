@@ -745,6 +745,8 @@ export class Gateway {
     if (this.updateReport?.state === 'failed' || this.updateReport?.state === 'unsupported')
       this.updateReport = undefined;
     if (res.updateOrder) this.startUpdate(credential, res.updateOrder);
+    // Settings the cloud wants put back on polled devices. Not awaited: the heartbeat must not wait on a slow device.
+    for (const e of res.enforce) void this.devices.execute(e.deviceId, e.command);
     this.inbox.push(...res.commands);
     if (res.control !== this.host.control) this.store.set(KEY_CONTROL, res.control ? 'on' : 'off');
     this.host.setControl(res.control);

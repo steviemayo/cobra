@@ -940,4 +940,23 @@ describe('devices polled on their own', () => {
     await until(() => second.gateway.devices.setVersion === 'v1');
     second.gateway.devices.shutdown();
   });
+
+  it('puts a setting back when the cloud sends one', async () => {
+    cloud.deviceSet = set('v1');
+    const { gateway } = boot();
+    gateway.start();
+    await until(() => gateway.devices.setVersion === 'v1');
+    const sent: unknown[] = [];
+    // Stand in for the device driver so the test does not need a real projector.
+    (
+      gateway.devices as unknown as { execute: (id: string, c: unknown) => Promise<boolean> }
+    ).execute = async (id, c) => {
+      sent.push({ id, c });
+      return true;
+    };
+    cloud.queuedEnforce.push({ deviceId: DEV, command: { type: 'power', on: true } });
+    await until(() => sent.length > 0, 12_000);
+    expect(sent[0]).toEqual({ id: DEV, c: { type: 'power', on: true } });
+    gateway.devices.shutdown();
+  }, 20_000);
 });

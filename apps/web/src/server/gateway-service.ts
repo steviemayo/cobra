@@ -15,7 +15,7 @@ import { applyCommandResults, takePendingCommands } from './commands';
 import { updateStep } from './gateway-update-service';
 import { applyReport, promoteDue } from './deployment-service';
 import { deliverAlerts } from './alerts';
-import { deviceSetVersion, recordDeviceReports, signedDeviceSetFor } from './devices';
+import { deviceSetVersion, ingestDeviceReports, signedDeviceSetFor } from './devices';
 import { getEntitlements } from './billing';
 import { groupsForGateway, recordDividers } from './gateway-groups';
 import { hasWaitingIntents, watchedRooms } from './control-service';
@@ -52,6 +52,9 @@ export type Db = Pick<
   | 'device'
   | 'deviceEvent'
   | 'deviceHistory'
+  | 'configProfile'
+  | 'deviceSnapshot'
+  | 'configDeploy'
   | 'area'
   | 'site'
 >;
@@ -247,7 +250,12 @@ export async function heartbeat(
   const entitlements = await getEntitlements(db, gw.orgId, now);
   const monitored = entitlements.monitoring;
   const jobs = monitored ? await recordReports(db, gw, parsed.data.rooms, now) : [];
-  if (monitored) jobs.push(...(await recordDeviceReports(db, gw, parsed.data.devices, now)));
+  let enforce: { deviceId: string; command: unknown }[] = [];
+  if (monitored) {
+    const ingested = await ingestDeviceReports(db, gw, parsed.data.devices, now);
+    jobs.push(...ingested.jobs);
+    enforce = ingested.enforce;
+  }
   await recordDividers(db, gw, parsed.data.dividers);
   await applyCommandResults(db, gw.id, parsed.data.commandResults, now);
   jobs.push(...(await maybeSweep(db, now)));
@@ -272,6 +280,8 @@ export async function heartbeat(
         ? { deviceSetVersion: await deviceSetVersion(db, gw) }
         : {}),
       serverTime: now.toISOString(),
+      // Only a gateway that says it can put settings back is sent them.
+      enforce: parsed.data.features.includes('config-enforce') ? enforce : [],
       commands,
       watch: await watchedRooms(db, gw.id, now),
       pollNow: await hasWaitingIntents(db, gw.id, now),

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { createDriver, type DeviceDriver } from '@kestrel/drivers/real';
 import {
   Device,
+  type DeviceCommand,
   DeviceDetails,
   type DeviceReport,
   type MonitoredDevice,
@@ -154,6 +155,23 @@ export class DeviceHost {
     if (sent && sent.json === json && now - sent.at < DETAILS_REFRESH_MS) return undefined;
     this.sentDetails.set(deviceId, { json, at: now });
     return parsed.data;
+  }
+
+  /**
+   * Sends one command to a polled device (a setting the cloud wants put back). A device that is not
+   * running, or that refuses, is reported as false and left for the cloud to try again later.
+   */
+  async execute(deviceId: string, command: DeviceCommand): Promise<boolean> {
+    const run = this.running.get(deviceId);
+    if (!run) return false;
+    try {
+      await run.driver.send(command);
+      this.log('info', 'Put a setting back', { device: run.device.name, command: command.type });
+      return true;
+    } catch (e) {
+      this.log('warn', 'A device refused a setting', { device: run.device.name, error: String(e) });
+      return false;
+    }
   }
 
   shutdown() {

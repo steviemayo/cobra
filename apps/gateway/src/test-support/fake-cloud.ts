@@ -66,6 +66,8 @@ export class FakeCloud {
   /** Devices this gateway polls on their own, and how many times it fetched them. */
   deviceSet: { version: string; devices: MonitoredDevice[]; tamper?: boolean } | null = null;
   deviceSetFetches = 0;
+  /** Settings handed to the gateway to put back in its next heartbeat response. */
+  readonly queuedEnforce: { deviceId: string; command: unknown }[] = [];
   private bindings = new Map<
     string,
     {
@@ -254,6 +256,7 @@ export class FakeCloud {
           : {}),
         serverTime: new Date().toISOString(),
         commands: this.queuedCommands.splice(0),
+        enforce: this.queuedEnforce.splice(0),
         watch: this.watching,
         pollNow: this.queuedIntents.length > 0,
         schedules: this.schedules,

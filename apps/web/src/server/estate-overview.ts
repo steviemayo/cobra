@@ -305,6 +305,13 @@ export async function estateOverview(
     (t) => scope === null || (t.roomId && roomById.has(t.roomId)),
   ).length;
 
+  // Monitored devices with a held setting that currently reads wrong.
+  const driftDevices = devices.filter((d) =>
+    Object.entries((d.configState ?? {}) as Record<string, { drifted?: boolean }>).some(
+      ([f, s]) => f !== '__push' && s?.drifted,
+    ),
+  ).length;
+
   return {
     kpis: {
       liveIncidents: incidents.length,
@@ -323,7 +330,7 @@ export async function estateOverview(
       roomsInUse: rows.some((r) => r.inUse !== null)
         ? rows.filter((r) => r.inUse === true).length
         : null,
-      driftCount: null,
+      driftCount: driftDevices,
     },
     sites: sites.map((s) => ({ id: s.id, name: s.name })),
     areas: areas.map((a) => ({
