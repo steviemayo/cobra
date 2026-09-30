@@ -79,7 +79,10 @@ export async function buildRegisterRows(
     for (let grew = true; grew;) {
       grew = false;
       for (const a of areas)
-        if (a.parentId && ids.has(a.parentId) && !ids.has(a.id)) (ids.add(a.id), (grew = true));
+        if (a.parentId && ids.has(a.parentId) && !ids.has(a.id)) {
+          ids.add(a.id);
+          grew = true;
+        }
     }
     return ids;
   };

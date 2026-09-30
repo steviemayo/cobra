@@ -27,12 +27,16 @@ export function parseCsv(text: string): string[][] {
   for (let i = 0; i < src.length; i++) {
     const c = src[i]!;
     if (quoted) {
-      if (c === '"' && src[i + 1] === '"') ((cell += '"'), i++);
-      else if (c === '"') quoted = false;
+      if (c === '"' && src[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (c === '"') quoted = false;
       else cell += c;
     } else if (c === '"') quoted = true;
-    else if (c === ',') (row.push(cell), (cell = ''));
-    else if (c === '\n' || c === '\r') {
+    else if (c === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (c === '\n' || c === '\r') {
       if (c === '\r' && src[i + 1] === '\n') i++;
       row.push(cell);
       cell = '';
@@ -255,8 +259,10 @@ export async function importRegister(
             : String(cur ?? '') === String(v);
         if (!same) entry.changes.push(k);
       }
-      if (roomId && roomId !== match.d.roomId)
-        ((patch.roomId = roomId), entry.changes.push('room'));
+      if (roomId && roomId !== match.d.roomId) {
+        patch.roomId = roomId;
+        entry.changes.push('room');
+      }
       if (entry.changes.length === 0) {
         entry.action = 'skip';
         out.skipped++;
