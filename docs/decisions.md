@@ -760,3 +760,17 @@ Not done in M3: usage from older room-design devices (they have no stored readin
 | M4-8 | **Pages:** Profiles, Snapshots and drift, Changes, and a Configuration tab on each monitored device. The Overview's drift card counts monitored devices with a held setting currently reading wrong | build | PV-13 |
 
 Not done in M4: holding DSP control points (only the five readings above), a comparison against a profile's other settings than these, and a gateway-side check that the plan includes enforcement (plan gating comes with M7).
+
+### Built: M5, support (2026-09-30, branch `feat/pivot-m5`)
+
+| ID | Decision | Who | Why |
+| --- | --- | --- | --- |
+| M5-1 | **Migration `support_and_maintenance`** (additive, applied to `kestrel-dev`): `MaintenanceWindow`, `TicketRule`, `ItsmConnector`, `ItsmLink`, `ItsmSyncLog`, `Ticket.deviceId`, `ruleId`, `ruleEscalated`, `rootCause`, and the register issue and preventative maintenance tables (`RegisterIssue`, `PmTemplate`, `PmSchedule`, `PmRun`) used by the next step | build | PV-10, PV-16, PV-17 |
+| M5-2 | **Maintenance windows** cover everything, a site, a room or a device, once or repeating daily or weekly. While one is running no new incident is opened, so no alert and no ticket. An incident already open stays open. **Not done: leaving the window out of availability figures** | user (PV-10) | Planned work must not raise alarms |
+| M5-3 | **Ticket rules** (first match by order): incident kind, severity and up, site, how long it has been open, then priority and who it goes to (own team, Kestrel, or a connected service provider). A fault behind an offline gateway is one ticket, and a second fault in a room joins that room's open ticket as an internal note | user (PV-10) | Auto-tickets without a flood |
+| M5-4 | **Escalation:** a ticket a rule made that nobody has answered after N minutes is raised to a set priority and sent to a set route, once, with an internal note. Routing to a provider is only allowed for one with an active grant | user (PV-10) | Escalation ladder, one step |
+| M5-5 | **Service desks** are connectors: a webhook (signed, https, public addresses only, through the existing outbound checks), a built-in **demo desk**, and an **email-in** address that turns forwarded mail (JSON: from, subject, text) into a ticket. Kestrel mirrors ticket creation, changes and public comments; the desk calls back on a per-connector secret to link its reference, change status (its own names are mapped onto open, in progress, resolved, closed) and comment. Every exchange is logged. Real adapters (ServiceNow, Jira Service Management and so on) wait for customer demand | user (PV-10, settled item 4) | Round trip shown without a real system |
+| M5-6 | **Tickets know their device and root cause.** A ticket raised from a device's incident is about that device, its page lists them, and a root cause (power, network, configuration, firmware, hardware failure, user error, cabling, third party, no fault found, other) is chosen on the ticket | user (PV-10) | Repair history and top causes |
+| M5-7 | **Pages:** Maintenance windows (Monitor), Integrations (Support: ticket rules and service desks), Root cause on the ticket, Incidents and tickets on the device | build | PV-13 |
+
+Not done in M5: an availability figure that excludes maintenance windows, on-call contacts (the ladder is one step), and a per-organisation "who handles it" beyond the rule's route.

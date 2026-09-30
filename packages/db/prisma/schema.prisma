@@ -704,6 +704,13 @@ model Ticket {
   escalatedBy    String?   @db.Uuid
   /// A Kestrel staff member (StaffUser.userId) working the ticket.
   staffAssignee  String?   @db.Uuid
+  /// The device the ticket is about, so its history shows repairs. Set from the incident when there is one.
+  deviceId       String?   @db.Uuid
+  /// The auto-ticket rule that raised it, and whether the rule has since escalated it.
+  ruleId         String?   @db.Uuid
+  ruleEscalated  Boolean   @default(false)
+  /// What turned out to be wrong, chosen when it is resolved.
+  rootCause      String?
 
   org      Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
   room     Room?           @relation(fields: [roomId], references: [id], onDelete: SetNull)
@@ -1373,4 +1380,194 @@ model ConfigDeploy {
   updatedAt      DateTime @updatedAt
 
   @@index([orgId, createdAt])
+}
+
+// ---- v2 support (docs/pivot-monitoring.md, "Support") ----------------------------------------------
+
+/// A time when nothing raised about a site, room or device should alert or open a ticket, and that
+/// is left out of availability. Repeats daily or weekly when `repeat` says so.
+model MaintenanceWindow {
+  id          String    @id @default(uuid()) @db.Uuid
+  orgId       String    @db.Uuid
+  name        String
+  /// org, site, room or device
+  scope       String
+  scopeId     String?   @db.Uuid
+  startsAt    DateTime
+  endsAt      DateTime
+  /// none, daily or weekly: the same hours again, until `repeatUntil` if set.
+  repeat      String    @default("none")
+  repeatUntil DateTime?
+  reason      String?
+  createdBy   String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+
+  @@index([orgId, startsAt])
+}
+
+/// Turns an incident into a ticket by itself. First matching rule (by sortOrder) wins.
+model TicketRule {
+  id                   String   @id @default(uuid()) @db.Uuid
+  orgId                String   @db.Uuid
+  name                 String
+  enabled              Boolean  @default(true)
+  sortOrder            Int      @default(0)
+  /// Incident kinds to match (empty: any).
+  kinds                String[] @default([])
+  /// info, warning or critical: matches this severity and above.
+  minSeverity          String   @default("warning")
+  /// Only incidents at these sites (empty: any).
+  siteIds              String[] @default([]) @db.Uuid
+  /// The incident must have been open this long first.
+  afterMinutes         Int      @default(10)
+  priority             String   @default("normal")
+  /// org, kestrel or msp:<org id>
+  routeTo              String   @default("org")
+  /// If the ticket has had no reply after this many minutes, raise it to escalatePriority and send it to escalateTo. 0: never.
+  escalateAfterMinutes Int      @default(0)
+  escalatePriority     String   @default("high")
+  escalateTo           String   @default("kestrel")
+  createdAt            DateTime @default(now())
+
+  @@index([orgId, sortOrder])
+}
+
+/// Where tickets are mirrored to: a webhook (any service desk), a demo desk, or an inbound-only mail address.
+model ItsmConnector {
+  id           String   @id @default(uuid()) @db.Uuid
+  orgId        String   @db.Uuid
+  name         String
+  /// webhook, demo or email_in
+  type         String
+  enabled      Boolean  @default(true)
+  /// webhook: { url }. Nothing secret here.
+  config       Json     @default("{}")
+  /// Sealed with KESTREL_SECRETS_KEY: the secret used to sign outbound calls.
+  sealedSecret String?
+  /// Hash of the secret an external system presents when it calls Kestrel.
+  inboundHash  String?
+  createdBy    String?  @db.Uuid
+  createdAt    DateTime @default(now())
+
+  @@index([orgId])
+}
+
+/// A ticket and its counterpart in an external service desk.
+model ItsmLink {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  ticketId    String   @db.Uuid
+  connectorId String   @db.Uuid
+  externalRef String
+  lastStatus  String?
+  lastSyncAt  DateTime @default(now())
+
+  @@unique([ticketId, connectorId])
+  @@index([connectorId, externalRef])
+}
+
+model ItsmSyncLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  connectorId String   @db.Uuid
+  ticketId    String?  @db.Uuid
+  /// out or in
+  direction   String
+  ok          Boolean
+  summary     String
+  at          DateTime @default(now())
+
+  @@index([connectorId, at])
+}
+
+// ---- v2 register issues and preventative maintenance ---------------------------------------------
+
+/// A frozen, numbered, signed copy of the asset register (or a PM report). See docs/pivot-monitoring.md.
+model RegisterIssue {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  /// register or pm_report
+  kind      String   @default("register")
+  number    Int
+  /// org, site or area
+  scope     String   @default("org")
+  scopeId   String?  @db.Uuid
+  title     String
+  payload   Json
+  hash      String
+  signature String
+  keyId     String
+  takenBy   String?  @db.Uuid
+  takenAt   DateTime @default(now())
+
+  @@unique([orgId, kind, number])
+  @@index([orgId, takenAt])
+}
+
+model PmTemplate {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  name      String
+  /// room or device
+  appliesTo String   @default("room")
+  /// For device templates: the category it is for.
+  category  String?
+  /// [{ id, label, type: passfail | number | text | photo, unit?, min?, max?, auto? }]
+  items     Json     @default("[]")
+  version   Int      @default(1)
+  createdBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, name])
+  @@index([orgId])
+}
+
+model PmSchedule {
+  id               String    @id @default(uuid()) @db.Uuid
+  orgId            String    @db.Uuid
+  templateId       String    @db.Uuid
+  roomId           String?   @db.Uuid
+  deviceId         String?   @db.Uuid
+  intervalDays     Int
+  nextDueOn        DateTime  @db.Date
+  /// How many days before it is due it shows as due soon.
+  leadDays         Int       @default(7)
+  assigneeUserId   String?   @db.Uuid
+  /// A service provider organisation doing the visit, when it is not one of the customer's own people.
+  assigneeMspOrgId String?   @db.Uuid
+  enabled          Boolean   @default(true)
+  lastRunOn        DateTime? @db.Date
+  createdBy        String?   @db.Uuid
+  createdAt        DateTime  @default(now())
+
+  @@index([orgId, nextDueOn])
+  @@index([roomId])
+}
+
+/// One completed (or in-progress) check. Once signed it is never edited.
+model PmRun {
+  id              String    @id @default(uuid()) @db.Uuid
+  orgId           String    @db.Uuid
+  scheduleId      String?   @db.Uuid
+  templateId      String    @db.Uuid
+  templateName    String
+  templateVersion Int
+  roomId          String?   @db.Uuid
+  deviceId        String?   @db.Uuid
+  /// draft or signed
+  status          String    @default("draft")
+  /// [{ itemId, label, type, result, note?, auto?: { value, at } }]
+  results         Json      @default("[]")
+  failedCount     Int       @default(0)
+  notes           String?
+  startedBy       String?   @db.Uuid
+  signedBy        String?   @db.Uuid
+  signedByName    String?
+  signedAt        DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([roomId])
+  @@index([deviceId])
 }

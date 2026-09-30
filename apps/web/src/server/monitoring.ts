@@ -2,6 +2,10 @@ import { Prisma, type PrismaClient } from '@kestrel/db';
 import type { RoomReport } from '@kestrel/model';
 import { getEntitlements } from './billing';
 import { effectiveStatus } from './gateway-status';
+import { deviceOfSubject, inMaintenance, type MaintenanceDb } from './maintenance';
+import { mirrorTicket, type ItsmDb } from './itsm-service';
+import { pinnedFetch, resolveAll } from './outbound';
+import { autoTicket, type AutomationDb } from './ticket-automation';
 
 // Turns what gateways report into device status and incidents. Functions take the database as a
 // parameter so they can be tested without one. They return alert jobs instead of sending anything,
@@ -9,7 +13,8 @@ import { effectiveStatus } from './gateway-status';
 export type MonitoringDb = Pick<
   PrismaClient,
   'deviceStatus' | 'incident' | 'room' | 'gateway' | 'remoteCommand' | 'orgBilling' | 'org'
->;
+> &
+  Partial<Pick<PrismaClient, 'maintenanceWindow'>>;
 
 export type Severity = 'info' | 'warning' | 'critical';
 export type IncidentKind =
@@ -80,6 +85,16 @@ export async function openIncident(
     });
     return null;
   }
+  // Inside a maintenance window nothing new is raised: no incident, no alert, no ticket.
+  if (
+    await inMaintenance(
+      db as unknown as MaintenanceDb,
+      input.orgId,
+      { roomId: input.roomId, deviceId: deviceOfSubject(input.subject) },
+      now,
+    )
+  )
+    return null;
   const created = await db.incident.create({
     data: {
       orgId: input.orgId,
@@ -362,6 +377,17 @@ export async function sweep(db: MonitoringDb, now = new Date()): Promise<AlertJo
     where: { status: 'sent', sentAt: { lt: new Date(now.getTime() - COMMAND_SENT_EXPIRY_MS) } },
     data: { status: 'expired', finishedAt: now, error: 'The gateway never reported a result.' },
   });
+  // Tickets by rule, for incidents that have been open long enough. A database without the rule
+  // table (older tests) has none.
+  if ('ticketRule' in db) {
+    try {
+      await autoTicket(db as unknown as AutomationDb, now, (t, e) =>
+        mirrorTicket(db as unknown as ItsmDb, { fetch: pinnedFetch, resolve: resolveAll }, t, e),
+      );
+    } catch {
+      // Raising tickets must never stop monitoring.
+    }
+  }
   return jobs;
 }
 

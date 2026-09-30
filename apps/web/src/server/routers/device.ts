@@ -76,17 +76,35 @@ export const deviceRouter = router({
     }),
 
   /** Incidents raised against this device (open and closed), newest first. */
-  incidents: orgProcedure
-    .input(z.object({ orgId, deviceId: id }))
-    .query(async ({ ctx, input }) => {
-      const device = await db.device.findFirst({ where: { id: input.deviceId, orgId: ctx.orgId } });
-      if (!device) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such device' });
-      return db.incident.findMany({
-        where: { orgId: ctx.orgId, subject: { startsWith: `device:${input.deviceId}` } },
-        orderBy: { openedAt: 'desc' },
-        take: 50,
-      });
-    }),
+  incidents: orgProcedure.input(z.object({ orgId, deviceId: id })).query(async ({ ctx, input }) => {
+    const device = await db.device.findFirst({ where: { id: input.deviceId, orgId: ctx.orgId } });
+    if (!device) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such device' });
+    return db.incident.findMany({
+      where: { orgId: ctx.orgId, subject: { startsWith: `device:${input.deviceId}` } },
+      orderBy: { openedAt: 'desc' },
+      take: 50,
+    });
+  }),
+
+  /** Tickets about this device, newest first: its repair history. */
+  tickets: orgProcedure.input(z.object({ orgId, deviceId: id })).query(async ({ ctx, input }) => {
+    const device = await db.device.findFirst({ where: { id: input.deviceId, orgId: ctx.orgId } });
+    if (!device) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such device' });
+    return db.ticket.findMany({
+      where: { orgId: ctx.orgId, deviceId: input.deviceId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        priority: true,
+        createdAt: true,
+        closedAt: true,
+        rootCause: true,
+      },
+    });
+  }),
 
   create: orgProcedure
     .input(

@@ -10,6 +10,7 @@ import { deviceRouter } from './device';
 import { areaRouter } from './area';
 import { roomUsageRouter } from './room-usage';
 import { configRouter } from './config';
+import { supportRouter } from './support';
 import { calendarRouter } from './calendar';
 import { mspRouter } from './msp';
 import { roomGroupRouter } from './room-group';
@@ -67,6 +68,7 @@ export const appRouter = router({
   area: areaRouter,
   roomUsage: roomUsageRouter,
   config: configRouter,
+  support: supportRouter,
   commissioning: commissioningRouter,
   apikey: apikeyRouter,
   usage: usageRouter,

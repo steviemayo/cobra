@@ -584,6 +584,37 @@ function DeviceHistoryCharts({ deviceId }: { deviceId: string }) {
   );
 }
 
+function DeviceTickets({ deviceId }: { deviceId: string }) {
+  const trpc = useTRPC();
+  const { orgId } = useOrg();
+  const tickets = useQuery(trpc.device.tickets.queryOptions({ orgId, deviceId }));
+  if (tickets.isPending || !tickets.data || tickets.data.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-medium">Tickets about this device</h3>
+      <ul className="divide-y rounded-lg border">
+        {tickets.data.map((t) => (
+          <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+            <Link
+              href={orgPath(orgId, `/tickets/${t.id}`)}
+              className="text-sm font-medium hover:underline"
+            >
+              {t.title}
+            </Link>
+            <span className="flex items-center gap-2 text-xs text-muted-foreground">
+              {t.rootCause && <Badge variant="outline">{t.rootCause.replace(/_/g, ' ')}</Badge>}
+              <Badge variant={t.status === 'open' ? 'default' : 'secondary'}>
+                {t.status.replace('_', ' ')}
+              </Badge>
+              {dateTime(t.createdAt)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function DeviceIncidents({ deviceId }: { deviceId: string }) {
   const trpc = useTRPC();
   const { orgId } = useOrg();
@@ -762,7 +793,7 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
           {d.kind === 'active' && <TabsTrigger value="charts">History</TabsTrigger>}
           {d.kind === 'active' && <TabsTrigger value="config">Configuration</TabsTrigger>}
           <TabsTrigger value="history">Asset history</TabsTrigger>
-          <TabsTrigger value="incidents">Incidents</TabsTrigger>
+          <TabsTrigger value="incidents">Incidents and tickets</TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="pt-4">
           <Overview device={d} />
@@ -789,7 +820,10 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
           <AssetHistory deviceId={d.id} />
         </TabsContent>
         <TabsContent value="incidents" className="pt-4">
-          <DeviceIncidents deviceId={d.id} />
+          <div className="space-y-6">
+            <DeviceIncidents deviceId={d.id} />
+            <DeviceTickets deviceId={d.id} />
+          </div>
         </TabsContent>
       </Tabs>
       <ConfirmDialog

@@ -393,7 +393,6 @@ export function AppSidebar() {
     canSupport && { href: `${base}/gateways`, icon: Router, label: 'Gateways' },
     canEdit &&
       full && {
-        soon: true,
         href: `${base}/maintenance-windows`,
         icon: CalendarOff,
         label: 'Maintenance windows',
@@ -454,8 +453,7 @@ export function AppSidebar() {
   ]);
   const support = entries([
     { href: `${base}/tickets`, icon: LifeBuoy, label: 'Tickets' },
-    canEdit &&
-      full && { soon: true, href: `${base}/integrations`, icon: Plug, label: 'Integrations' },
+    canEdit && full && { href: `${base}/integrations`, icon: Plug, label: 'Integrations' },
   ]);
 
   return (
