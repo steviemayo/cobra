@@ -66,7 +66,10 @@ export function BillingView() {
 
   return (
     <PageContainer className="max-w-3xl">
-      <PageHeader title="Plan and billing" description="Charged per room, per month." />
+      <PageHeader
+        title="Plan and billing"
+        description="Charged per monitored room, per month. A room is monitored once it has a networked device with a driver. Recorded assets cost nothing."
+      />
 
       <section className="space-y-2 rounded-lg border p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -88,11 +91,11 @@ export function BillingView() {
         </div>
         <p className="text-sm text-muted-foreground">
           {e.plan === 'trial' &&
-            `Your trial ends in ${plural(e.trialDaysLeft ?? 0, 'day')}. It includes control, monitoring and up to ${e.maxRooms} rooms.`}
+            `Your trial ends in ${plural(e.trialDaysLeft ?? 0, 'day')}. It includes every feature and up to ${e.maxRooms} monitored rooms.`}
           {e.plan === 'trial_expired' &&
-            'Your free trial is over (or was already used by you or your company). Existing rooms are still monitored, but there are no alerts, no usage or reports, no new rooms and no control.'}
+            'Your free trial is over (or was already used by you or your company). Existing rooms are still monitored, but there are no alerts, no usage or reports, no new monitored rooms and no Pro features.'}
           {e.plan === 'lapsed' &&
-            'Your subscription has ended, so you are on Basic: monitoring and email alerts. Control is switched off until you choose Pro; your room designs are kept.'}
+            'Your subscription has ended, so you are on Essentials: monitoring, the asset register and email alerts. Configuration, maintenance, signed register issues and service desk connections are switched off until you choose Pro; nothing is deleted.'}
           {paid &&
             `${plural(b.subscription.quantity || b.rooms, 'room')} billed.${
               b.subscription.currentPeriodEnd
@@ -108,7 +111,7 @@ export function BillingView() {
           </p>
         )}
         <p className="text-sm text-muted-foreground">
-          {plural(b.rooms, 'room')} in use
+          {plural(b.rooms, 'monitored room')}
           {e.maxRooms !== null ? ` of ${e.maxRooms} on this plan` : ''}.
         </p>
       </section>

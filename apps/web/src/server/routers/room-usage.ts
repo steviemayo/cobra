@@ -19,6 +19,8 @@ import {
 const orgId = z.string().uuid();
 const id = z.string().uuid();
 const analytics = featureProcedure('analytics');
+// Editing what counts as in use is a Pro feature; every plan gets the usual rule.
+const definitions = featureProcedure('usageDefinitions');
 const days = z.number().int().min(1).max(90).default(30);
 
 function fail(message: string): never {
@@ -67,7 +69,7 @@ export const roomUsageRouter = router({
       return { ...effective, hasOwn: !!own };
     }),
 
-  saveDefinition: orgProcedure
+  saveDefinition: definitions
     .input(
       z.object({
         orgId,
@@ -92,7 +94,7 @@ export const roomUsageRouter = router({
       return { ok: true };
     }),
 
-  resetDefinition: orgProcedure
+  resetDefinition: definitions
     .input(z.object({ orgId, roomId: id.nullable(), kind: UsageKind }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev', 'support']);

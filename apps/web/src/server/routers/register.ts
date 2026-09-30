@@ -14,7 +14,10 @@ import {
 } from '../register-issues';
 import { importRegister } from '../register-import';
 import { loadSigningKey, trustedPublicKeys } from '../signing';
-import { orgProcedure, requireRole, router } from '../trpc';
+import { featureProcedure, orgProcedure, requireRole, router } from '../trpc';
+
+// Signed register issues are a Pro feature (and part of a running trial). The register, its CSV export and import are on every plan.
+const signed = featureProcedure('registerIssues');
 
 const orgId = z.string().uuid();
 const id = z.string().uuid();
@@ -27,7 +30,7 @@ function fail(message: string): never {
 // Register issues (signed, numbered copies of the asset register), CSV import and export.
 export const registerRouter = router({
   /** Issued copies, newest first. The signed content is fetched one at a time. */
-  issues: orgProcedure
+  issues: signed
     .input(z.object({ orgId, kind: z.enum(['register', 'pm_report']).default('register') }))
     .query(async ({ ctx, input }) => {
       const rows = await db.registerIssue.findMany({
@@ -51,7 +54,7 @@ export const registerRouter = router({
     }),
 
   /** One issue, whole, with whether its signature checks out today. */
-  issue: orgProcedure.input(z.object({ orgId, issueId: id })).query(async ({ ctx, input }) => {
+  issue: signed.input(z.object({ orgId, issueId: id })).query(async ({ ctx, input }) => {
     const row = await db.registerIssue.findFirst({
       where: { id: input.issueId, orgId: ctx.orgId },
     });
@@ -69,7 +72,7 @@ export const registerRouter = router({
   }),
 
   /** Freezes and signs the register as it is now. */
-  issue_now: orgProcedure
+  issue_now: signed
     .input(
       z.object({
         orgId,
@@ -99,12 +102,12 @@ export const registerRouter = router({
     }),
 
   /** How often an issue is taken by itself (null: never). */
-  schedule: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
+  schedule: signed.input(z.object({ orgId })).query(async ({ ctx }) => {
     const s = await db.registerSchedule.findFirst({ where: { orgId: ctx.orgId } });
     return { everyDays: s?.everyDays ?? null, lastIssuedAt: s?.lastIssuedAt ?? null };
   }),
 
-  setSchedule: orgProcedure
+  setSchedule: signed
     .input(z.object({ orgId, everyDays: z.number().int().nullable() }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);

@@ -366,6 +366,14 @@ export function AppSidebar() {
   // What the plan includes. Until it loads nothing is locked, so the menu does not flash.
   const plan = useBilling().data?.entitlements;
   const drivers = plan?.driverCreate ?? true;
+  // What each plan includes, so the pages it does not are still listed, with a lock.
+  const has = {
+    configuration: plan?.configuration ?? true,
+    maintenance: plan?.maintenance ?? true,
+    registerIssues: plan?.registerIssues ?? true,
+    serviceDesk: plan?.serviceDesk ?? true,
+    usageDefinitions: plan?.usageDefinitions ?? true,
+  };
   // People from the company asking to join, waiting for an owner.
   const joinRequests = useQuery({
     ...trpc.joinRequest.count.queryOptions({ orgId }),
@@ -405,6 +413,7 @@ export function AppSidebar() {
         href: `${base}/register-issues`,
         icon: FileCheck2,
         label: 'Register issues',
+        locked: !has.registerIssues,
       },
     canEdit && full && { href: `${base}/credentials`, icon: KeyRound, label: 'Shared logins' },
     canSupport && { href: `${base}/firmware`, icon: CircuitBoard, label: 'Firmware' },
@@ -416,26 +425,41 @@ export function AppSidebar() {
       href: `${base}/pm/schedule`,
       icon: CalendarCheck,
       label: 'Schedule',
+      locked: !has.maintenance,
     },
     canSupport && {
       href: `${base}/pm/records`,
       icon: ClipboardCheck,
       label: 'PM records',
+      locked: !has.maintenance,
     },
-    canEdit && full && { href: `${base}/pm/templates`, icon: ListChecks, label: 'PM templates' },
+    canEdit &&
+      full && {
+        href: `${base}/pm/templates`,
+        icon: ListChecks,
+        label: 'PM templates',
+        locked: !has.maintenance,
+      },
   ]);
   const configuration = entries([
     canSupport && {
       href: `${base}/config/profiles`,
       icon: SlidersHorizontal,
       label: 'Profiles',
+      locked: !has.configuration,
     },
     canSupport && {
       href: `${base}/config/drift`,
       icon: GitCompare,
       label: 'Snapshots and drift',
+      locked: !has.configuration,
     },
-    canSupport && { href: `${base}/config/changes`, icon: History, label: 'Changes' },
+    canSupport && {
+      href: `${base}/config/changes`,
+      icon: History,
+      label: 'Changes',
+      locked: !has.configuration,
+    },
   ]);
   const analytics = entries([
     { href: `${base}/usage`, icon: BarChart3, label: 'Usage' },
@@ -444,12 +468,19 @@ export function AppSidebar() {
         href: `${base}/room-definitions`,
         icon: Sigma,
         label: 'Room definitions',
+        locked: !has.usageDefinitions,
       },
     full && { href: `${base}/reports`, icon: FileText, label: 'Reports' },
   ]);
   const support = entries([
     { href: `${base}/tickets`, icon: LifeBuoy, label: 'Tickets' },
-    canEdit && full && { href: `${base}/integrations`, icon: Plug, label: 'Integrations' },
+    canEdit &&
+      full && {
+        href: `${base}/integrations`,
+        icon: Plug,
+        label: 'Integrations',
+        locked: !has.serviceDesk,
+      },
   ]);
 
   return (

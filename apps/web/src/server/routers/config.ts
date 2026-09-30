@@ -18,7 +18,10 @@ import {
   takeSnapshot,
   updateProfile,
 } from '../config-service';
-import { orgProcedure, requireRole, router } from '../trpc';
+import { featureProcedure, orgProcedure, requireRole, router } from '../trpc';
+
+// Configuration is a Pro feature (and part of a running trial).
+const pro = featureProcedure('configuration');
 
 const orgId = z.string().uuid();
 const id = z.string().uuid();
@@ -42,7 +45,7 @@ export const configRouter = router({
     })),
   ),
 
-  profiles: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
+  profiles: pro.input(z.object({ orgId })).query(async ({ ctx }) => {
     const [profiles, devices] = await Promise.all([
       db.configProfile.findMany({ where: { orgId: ctx.orgId }, orderBy: { name: 'asc' } }),
       db.device.findMany({ where: { orgId: ctx.orgId, profileId: { not: null } } }),
@@ -61,7 +64,7 @@ export const configRouter = router({
     });
   }),
 
-  createProfile: orgProcedure
+  createProfile: pro
     .input(
       z.object({
         orgId,
@@ -85,7 +88,7 @@ export const configRouter = router({
       return res.value;
     }),
 
-  updateProfile: orgProcedure
+  updateProfile: pro
     .input(
       z.object({
         orgId,
@@ -109,29 +112,27 @@ export const configRouter = router({
       return res.value;
     }),
 
-  deleteProfile: orgProcedure
-    .input(z.object({ orgId, profileId: id }))
-    .mutation(async ({ ctx, input }) => {
-      requireRole(ctx.role, ['owner', 'dev']);
-      const res = await deleteProfile(db, ctx.orgId, input.profileId);
-      if (!res.ok) return fail(res.message);
-      await writeAudit({
-        orgId: ctx.orgId,
-        actorId: ctx.user.id,
-        action: 'config.profile_delete',
-        target: input.profileId,
-      });
-      return res.value;
-    }),
+  deleteProfile: pro.input(z.object({ orgId, profileId: id })).mutation(async ({ ctx, input }) => {
+    requireRole(ctx.role, ['owner', 'dev']);
+    const res = await deleteProfile(db, ctx.orgId, input.profileId);
+    if (!res.ok) return fail(res.message);
+    await writeAudit({
+      orgId: ctx.orgId,
+      actorId: ctx.user.id,
+      action: 'config.profile_delete',
+      target: input.profileId,
+    });
+    return res.value;
+  }),
 
   /** One device: its profile, its own settings, what applies to it, and what it could be held to. */
-  device: orgProcedure.input(z.object({ orgId, deviceId: id })).query(async ({ ctx, input }) => {
+  device: pro.input(z.object({ orgId, deviceId: id })).query(async ({ ctx, input }) => {
     const v = await deviceConfigView(db, ctx.orgId, input.deviceId);
     if (!v) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such device' });
     return { ...v, baseline: await baselineDrift(db, ctx.orgId, input.deviceId) };
   }),
 
-  setDevice: orgProcedure
+  setDevice: pro
     .input(
       z.object({
         orgId,
@@ -154,7 +155,7 @@ export const configRouter = router({
     }),
 
   /** Every monitored device with what it is held to and whether it has drifted. */
-  overview: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
+  overview: pro.input(z.object({ orgId })).query(async ({ ctx }) => {
     const [devices, profiles, baselines, rooms] = await Promise.all([
       db.device.findMany({ where: { orgId: ctx.orgId, kind: 'active' }, orderBy: { name: 'asc' } }),
       db.configProfile.findMany({ where: { orgId: ctx.orgId } }),
@@ -183,7 +184,7 @@ export const configRouter = router({
     });
   }),
 
-  snapshots: orgProcedure.input(z.object({ orgId, deviceId: id })).query(({ ctx, input }) =>
+  snapshots: pro.input(z.object({ orgId, deviceId: id })).query(({ ctx, input }) =>
     db.deviceSnapshot.findMany({
       where: { orgId: ctx.orgId, deviceId: input.deviceId },
       orderBy: { takenAt: 'desc' },
@@ -199,7 +200,7 @@ export const configRouter = router({
     }),
   ),
 
-  takeSnapshot: orgProcedure
+  takeSnapshot: pro
     .input(
       z.object({
         orgId,
@@ -222,17 +223,15 @@ export const configRouter = router({
       return res.value;
     }),
 
-  setBaseline: orgProcedure
-    .input(z.object({ orgId, snapshotId: id }))
-    .mutation(async ({ ctx, input }) => {
-      requireRole(ctx.role, [...ROLES]);
-      const res = await setBaseline(db, ctx.orgId, input.snapshotId);
-      if (!res.ok) return fail(res.message);
-      return res.value;
-    }),
+  setBaseline: pro.input(z.object({ orgId, snapshotId: id })).mutation(async ({ ctx, input }) => {
+    requireRole(ctx.role, [...ROLES]);
+    const res = await setBaseline(db, ctx.orgId, input.snapshotId);
+    if (!res.ok) return fail(res.message);
+    return res.value;
+  }),
 
   /** What differs between two snapshots, or a snapshot and the device as it is now (live). */
-  compare: orgProcedure
+  compare: pro
     .input(z.object({ orgId, deviceId: id, from: z.string().max(40), to: z.string().max(40) }))
     .query(async ({ ctx, input }) => {
       const r = await compareSnapshots(db, { ...input, orgId: ctx.orgId });
@@ -240,7 +239,7 @@ export const configRouter = router({
       return r;
     }),
 
-  deployPlan: orgProcedure
+  deployPlan: pro
     .input(z.object({ orgId, profileId: id, deviceIds: z.array(id).min(1).max(200) }))
     .query(async ({ ctx, input }) => {
       const r = await planProfileDeploy(db, { ...input, orgId: ctx.orgId });
@@ -248,7 +247,7 @@ export const configRouter = router({
       return r;
     }),
 
-  deploy: orgProcedure
+  deploy: pro
     .input(
       z.object({
         orgId,
@@ -272,37 +271,33 @@ export const configRouter = router({
       return res.value;
     }),
 
-  continueDeploy: orgProcedure
-    .input(z.object({ orgId, deployId: id }))
-    .mutation(async ({ ctx, input }) => {
-      requireRole(ctx.role, [...ROLES]);
-      const res = await continueDeploy(db, ctx.orgId, input.deployId, ctx.user.id);
-      if (!res.ok) return fail(res.message);
-      await writeAudit({
-        orgId: ctx.orgId,
-        actorId: ctx.user.id,
-        action: 'config.deploy_continue',
-        target: input.deployId,
-      });
-      return res.value;
-    }),
+  continueDeploy: pro.input(z.object({ orgId, deployId: id })).mutation(async ({ ctx, input }) => {
+    requireRole(ctx.role, [...ROLES]);
+    const res = await continueDeploy(db, ctx.orgId, input.deployId, ctx.user.id);
+    if (!res.ok) return fail(res.message);
+    await writeAudit({
+      orgId: ctx.orgId,
+      actorId: ctx.user.id,
+      action: 'config.deploy_continue',
+      target: input.deployId,
+    });
+    return res.value;
+  }),
 
-  rollbackDeploy: orgProcedure
-    .input(z.object({ orgId, deployId: id }))
-    .mutation(async ({ ctx, input }) => {
-      requireRole(ctx.role, [...ROLES]);
-      const res = await rollbackDeploy(db, ctx.orgId, input.deployId, ctx.user.id);
-      if (!res.ok) return fail(res.message);
-      await writeAudit({
-        orgId: ctx.orgId,
-        actorId: ctx.user.id,
-        action: 'config.deploy_rollback',
-        target: input.deployId,
-      });
-      return res.value;
-    }),
+  rollbackDeploy: pro.input(z.object({ orgId, deployId: id })).mutation(async ({ ctx, input }) => {
+    requireRole(ctx.role, [...ROLES]);
+    const res = await rollbackDeploy(db, ctx.orgId, input.deployId, ctx.user.id);
+    if (!res.ok) return fail(res.message);
+    await writeAudit({
+      orgId: ctx.orgId,
+      actorId: ctx.user.id,
+      action: 'config.deploy_rollback',
+      target: input.deployId,
+    });
+    return res.value;
+  }),
 
-  deploys: orgProcedure.input(z.object({ orgId })).query(({ ctx }) =>
+  deploys: pro.input(z.object({ orgId })).query(({ ctx }) =>
     db.configDeploy.findMany({
       where: { orgId: ctx.orgId },
       orderBy: { createdAt: 'desc' },
@@ -311,7 +306,7 @@ export const configRouter = router({
   ),
 
   /** Settings changes across the estate (drift, corrections, pushes, rollbacks), newest first. */
-  changes: orgProcedure
+  changes: pro
     .input(z.object({ orgId, limit: z.number().int().min(1).max(200).default(100) }))
     .query(async ({ ctx, input }) => {
       const types = [

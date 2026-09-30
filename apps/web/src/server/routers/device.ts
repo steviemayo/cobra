@@ -11,6 +11,9 @@ import {
   type DeviceInput,
 } from '../devices';
 import { deviceViews } from '../device-views';
+import { canMonitorRoom, getEntitlements, monitorLimitMessage } from '../billing';
+import { syncQuantity } from '../stripe';
+import { after } from 'next/server';
 import { orgProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
@@ -19,6 +22,13 @@ const text = (n: number) => z.string().trim().max(n);
 const optText = (n: number) => text(n).nullable().optional();
 const date = z.coerce.date().nullable().optional();
 const fields = z.record(z.string(), z.union([z.string().max(2000), z.number(), z.boolean()]));
+
+/** A room is charged once it has a monitored device: refuse a device that would take the organisation over its plan. */
+async function checkMonitorLimit(orgIdValue: string, roomId: string | null | undefined) {
+  const e = await getEntitlements(db, orgIdValue);
+  if (!(await canMonitorRoom(db, orgIdValue, e, roomId ?? null)))
+    throw new TRPCError({ code: 'FORBIDDEN', message: monitorLimitMessage(e) });
+}
 
 function fail(message: string): never {
   throw new TRPCError({ code: 'BAD_REQUEST', message });
@@ -119,6 +129,7 @@ export const deviceRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev', 'support']);
+      if (input.kind === 'active') await checkMonitorLimit(ctx.orgId, input.roomId);
       const res = await createDevice(db, {
         ...(input as unknown as DeviceInput),
         orgId: ctx.orgId,
@@ -136,6 +147,7 @@ export const deviceRouter = router({
         target: res.value.id,
         meta: { name: input.name, kind: input.kind, category: input.category },
       });
+      if (input.kind === 'active') after(() => syncQuantity(db, ctx.orgId).catch(() => undefined));
       return res.value;
     }),
 
@@ -146,6 +158,16 @@ export const deviceRouter = router({
       const { deviceId, ...withOrg } = input;
       const patch: Record<string, unknown> = { ...withOrg };
       delete patch.orgId;
+      // Adding a driver (or moving a monitored device into a room) can start charging for a room.
+      const current = await db.device.findFirst({ where: { id: deviceId, orgId: ctx.orgId } });
+      if (current && (input.control !== undefined || input.roomId !== undefined)) {
+        const willBeActive = current.kind === 'active' || input.control !== undefined;
+        if (willBeActive)
+          await checkMonitorLimit(
+            ctx.orgId,
+            input.roomId === undefined ? current.roomId : input.roomId,
+          );
+      }
       const res = await updateDevice(db, {
         orgId: ctx.orgId,
         deviceId,
@@ -159,6 +181,7 @@ export const deviceRouter = router({
         action: 'device.update',
         target: deviceId,
       });
+      after(() => syncQuantity(db, ctx.orgId).catch(() => undefined));
       return res.value;
     }),
 
@@ -201,6 +224,7 @@ export const deviceRouter = router({
       action: 'device.delete',
       target: input.deviceId,
     });
+    after(() => syncQuantity(db, ctx.orgId).catch(() => undefined));
     return res.value;
   }),
 });

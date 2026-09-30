@@ -8,7 +8,7 @@ export const TRIAL_DAYS = 30;
 export const TRIAL_MAX_ROOMS = 5;
 /** Rooms a paid organisation may have for now. Staff can raise or lower it per organisation. */
 export const PAID_MAX_ROOMS = 500;
-/** The alert channels Basic keeps. Pro (and a running trial) has all of them. */
+/** The alert channels Essentials keeps. Pro (and a running trial) has all of them. */
 export const BASIC_ALERT_CHANNELS = ['email'] as const;
 
 /** Stripe statuses under which a paid plan keeps working. past_due gets a grace period. */
@@ -35,6 +35,16 @@ export interface Entitlements {
   allAlertChannels: boolean;
   /** Usage and reports. */
   analytics: boolean;
+  /** Configuration profiles, drift detection, enforcement, snapshots and deploys. Pro and a running trial. */
+  configuration: boolean;
+  /** Signed register issues and the public check. The register itself, its import and export are on every plan. */
+  registerIssues: boolean;
+  /** Preventative maintenance: checklists, schedules, signed visits and reports. */
+  maintenance: boolean;
+  /** Ticket rules and service desk connections. */
+  serviceDesk: boolean;
+  /** Editing what counts as a room being in use. Every plan gets the usual rule. */
+  usageDefinitions: boolean;
   marketplaceBuy: boolean;
   marketplacePublish: boolean;
   driverCreate: boolean;
@@ -53,13 +63,29 @@ const MONITOR_ONLY = {
   alerts: false,
   allAlertChannels: false,
   analytics: false,
+  configuration: false,
+  registerIssues: false,
+  maintenance: false,
+  serviceDesk: false,
+  usageDefinitions: false,
   marketplaceBuy: false,
   marketplacePublish: false,
   driverCreate: false,
   maxRooms: 0,
 } as const;
 
-/** Basic: monitoring, email alerts and analytics. No control, no marketplace, no custom drivers. */
+/** Everything Pro adds to Essentials. A running trial has it too. */
+const PRO_EXTRAS = {
+  configuration: true,
+  registerIssues: true,
+  maintenance: true,
+  serviceDesk: true,
+  usageDefinitions: true,
+  allAlertChannels: true,
+  driverCreate: true,
+} as const;
+
+/** Essentials: monitoring, the asset register, incidents, email alerts and usage with the usual rule. */
 const BASIC = {
   ...MONITOR_ONLY,
   alerts: true,
@@ -85,8 +111,8 @@ export function entitlementsFor(state: BillingState, now = new Date()): Entitlem
       ? {
           plan: 'trial',
           ...BASIC,
+          ...PRO_EXTRAS,
           control: true,
-          allAlertChannels: true,
           maxRooms: TRIAL_MAX_ROOMS,
           ...base,
         }
@@ -99,11 +125,10 @@ export function entitlementsFor(state: BillingState, now = new Date()): Entitlem
     : {
         plan: 'pro',
         ...BASIC,
+        ...PRO_EXTRAS,
         control: true,
-        allAlertChannels: true,
         marketplaceBuy: true,
         marketplacePublish: true,
-        driverCreate: true,
         ...base,
       };
 }
@@ -112,7 +137,7 @@ export const PLAN_LABEL: Record<EffectivePlan, string> = {
   trial: 'Trial',
   trial_expired: 'Trial ended',
   lapsed: 'Subscription ended',
-  basic: 'Basic',
+  basic: 'Essentials',
   pro: 'Pro',
 };
 
@@ -121,24 +146,28 @@ export const PLAN_FEATURES: Record<
   { label: string; summary: string; features: string[] }
 > = {
   basic: {
-    label: 'Basic',
-    summary: 'Watch your rooms and devices.',
+    label: 'Essentials',
+    summary: 'Know what you have and how it is doing.',
     features: [
-      'Live monitoring of every device and room',
-      'Incidents and email alerts',
-      'Usage and reports',
-      'Remote diagnostics for support',
+      'Live monitoring of every monitored device and room',
+      'The asset register, with CSV import and export',
+      'Incidents, tickets and email alerts',
+      'Maintenance windows',
+      'Usage and reports with the usual definition of in use',
+      'Passive assets are free: only rooms with a monitored device are charged',
     ],
   },
   pro: {
     label: 'Pro',
-    summary: 'Everything in Basic, plus control.',
+    summary: 'Everything in Essentials, plus keeping it in order.',
     features: [
-      'Everything in Basic',
-      'Deploy and control every room',
-      'Teams, webhook and service desk alerts',
-      'Marketplace templates',
-      'Create your own drivers',
+      'Everything in Essentials',
+      'Configuration profiles, drift detection, enforcement, snapshots and deploys',
+      'Preventative maintenance with signed visits and reports',
+      'Signed, numbered register issues',
+      'Your own definition of a room being in use',
+      'Service desk connections and ticket rules',
+      'Teams and webhook alerts, and your own drivers',
     ],
   },
 };
@@ -149,6 +178,11 @@ export type Feature =
   | 'alerts'
   | 'allAlertChannels'
   | 'analytics'
+  | 'configuration'
+  | 'registerIssues'
+  | 'maintenance'
+  | 'serviceDesk'
+  | 'usageDefinitions'
   | 'marketplaceBuy'
   | 'marketplacePublish'
   | 'driverCreate';
@@ -158,6 +192,11 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   alerts: 'Alerts',
   allAlertChannels: 'Teams, webhook and service desk alerts',
   analytics: 'Usage and reports',
+  configuration: 'Configuration profiles, drift and deploys',
+  registerIssues: 'Signed register issues',
+  maintenance: 'Preventative maintenance',
+  serviceDesk: 'Service desk connections and ticket rules',
+  usageDefinitions: 'Your own definition of in use',
   marketplaceBuy: 'Marketplace templates',
   marketplacePublish: 'Publishing to the marketplace',
   driverCreate: 'Creating drivers',
@@ -169,6 +208,11 @@ export const FEATURE_PLAN: Record<Feature, PaidPlan> = {
   alerts: 'basic',
   allAlertChannels: 'pro',
   analytics: 'basic',
+  configuration: 'pro',
+  registerIssues: 'pro',
+  maintenance: 'pro',
+  serviceDesk: 'pro',
+  usageDefinitions: 'pro',
   marketplaceBuy: 'pro',
   marketplacePublish: 'pro',
   driverCreate: 'pro',

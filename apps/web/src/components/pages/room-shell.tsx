@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/common/empty-state';
 import { NavTabs } from '@/components/common/nav-tabs';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/common/page-header';
+import { useBilling } from '@/components/common/plan-gate';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
@@ -34,6 +35,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
   const router = useRouter();
   const pathname = usePathname();
   const { orgId, canEdit, canSupport } = useOrg();
+  const maintenance = useBilling().data?.entitlements.maintenance ?? true;
   const { room, isPending } = useRoom(roomId);
   const onDesign = pathname.endsWith('/design') || pathname.endsWith('/simulate');
   const shellWidth = onDesign ? 'max-w-none' : 'max-w-6xl';
@@ -132,7 +134,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
             { label: 'Overview', href: base, exact: true },
             ...(canSupport ? [{ label: 'Devices', href: `${base}/devices` }] : []),
             { label: 'Usage', href: `${base}/usage` },
-            { label: 'Maintenance', href: `${base}/maintenance` },
+            { label: 'Maintenance', href: `${base}/maintenance`, locked: !maintenance },
             { label: 'Monitoring', href: `${base}/monitoring` },
             ...(canEdit ? [{ label: 'Settings', href: `${base}/settings` }] : []),
           ]}

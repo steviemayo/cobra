@@ -31,6 +31,7 @@ import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
 import { LineSeries, StateStrip, minutesLabel } from '@/components/common/usage-charts';
+import { RequireFeature } from '@/components/common/plan-gate';
 import { DeviceConfig } from './device-config';
 import { PmRuns } from './pm-records';
 import { PmSchedules } from './pm-schedule';
@@ -811,7 +812,9 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
         </TabsContent>
         {d.kind === 'active' && (
           <TabsContent value="config" className="pt-4">
-            <DeviceConfig deviceId={d.id} />
+            <RequireFeature feature="configuration">
+              <DeviceConfig deviceId={d.id} />
+            </RequireFeature>
           </TabsContent>
         )}
         {d.kind === 'active' && (
@@ -820,16 +823,18 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
           </TabsContent>
         )}
         <TabsContent value="maintenance" className="space-y-6 pt-4">
-          {d.kind === 'active' && (
+          <RequireFeature feature="maintenance">
+            {d.kind === 'active' && (
+              <section className="space-y-3">
+                <h3 className="text-sm font-medium">Schedule</h3>
+                <PmSchedules deviceId={d.id} compact />
+              </section>
+            )}
             <section className="space-y-3">
-              <h3 className="text-sm font-medium">Schedule</h3>
-              <PmSchedules deviceId={d.id} compact />
+              <h3 className="text-sm font-medium">Visits</h3>
+              <PmRuns deviceId={d.id} compact />
             </section>
-          )}
-          <section className="space-y-3">
-            <h3 className="text-sm font-medium">Visits</h3>
-            <PmRuns deviceId={d.id} compact />
-          </section>
+          </RequireFeature>
         </TabsContent>
         <TabsContent value="history" className="pt-4">
           <AssetHistory deviceId={d.id} />

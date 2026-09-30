@@ -760,11 +760,21 @@ export async function rollbackDeploy(
 }
 
 /** Daily: keeps a scheduled snapshot of every monitored device that has said anything. */
-export async function snapshotAll(db: ConfigDb, now = new Date()): Promise<number> {
+export async function snapshotAll(
+  db: ConfigDb,
+  now = new Date(),
+  /** Whether an organisation has configuration in its plan. Absent: every organisation. */
+  allowed?: (orgId: string) => Promise<boolean>,
+): Promise<number> {
   const devices = await db.device.findMany({ where: { kind: 'active' } });
+  const seen = new Map<string, boolean>();
   let n = 0;
   for (const d of devices) {
     if (!d.lastSeenAt) continue;
+    if (allowed) {
+      if (!seen.has(d.orgId)) seen.set(d.orgId, await allowed(d.orgId));
+      if (!seen.get(d.orgId)) continue;
+    }
     const r = await takeSnapshot(
       db,
       { orgId: d.orgId, deviceId: d.id, reason: 'scheduled', userId: null },

@@ -158,12 +158,9 @@ export const roomRouter = router({
       requireRole(ctx.role, ['owner', 'dev']);
       const site = await assertSite(ctx.orgId, input.siteId);
       const entitlements = await getEntitlements(db, ctx.orgId);
-      if (
-        !canAddRoom(
-          entitlements,
-          await db.room.count({ where: { orgId: ctx.orgId, ...billedRooms } }),
-        )
-      )
+      // A room is free until it has a monitored device (see monitoredRoomIds), so only an ended
+      // trial stops one being added.
+      if (entitlements.maxRooms === 0)
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: roomLimitMessage(entitlements),

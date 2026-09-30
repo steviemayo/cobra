@@ -18,7 +18,10 @@ import {
   upcomingWindows,
 } from '../maintenance';
 import { PRIORITY_ORDER, createRule, deleteRule, updateRule } from '../ticket-automation';
-import { orgProcedure, requireRole, router } from '../trpc';
+import { featureProcedure, orgProcedure, requireRole, router } from '../trpc';
+
+// Ticket rules and service desk connections are a Pro feature (and part of a running trial).
+const desk = featureProcedure('serviceDesk');
 
 const orgId = z.string().uuid();
 const id = z.string().uuid();
@@ -109,13 +112,13 @@ export const supportRouter = router({
       return res.value;
     }),
 
-  rules: orgProcedure
+  rules: desk
     .input(z.object({ orgId }))
     .query(({ ctx }) =>
       db.ticketRule.findMany({ where: { orgId: ctx.orgId }, orderBy: { sortOrder: 'asc' } }),
     ),
 
-  createRule: orgProcedure.input(z.object({ orgId, ...rule })).mutation(async ({ ctx, input }) => {
+  createRule: desk.input(z.object({ orgId, ...rule })).mutation(async ({ ctx, input }) => {
     requireRole(ctx.role, [...ADMIN]);
     const { orgId: _o, ...rest } = input;
     void _o;
@@ -131,7 +134,7 @@ export const supportRouter = router({
     return res.value;
   }),
 
-  updateRule: orgProcedure
+  updateRule: desk
     .input(z.object({ orgId, ruleId: id }).extend(z.object(rule).partial().shape))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, [...ADMIN]);
@@ -148,23 +151,21 @@ export const supportRouter = router({
       return res.value;
     }),
 
-  deleteRule: orgProcedure
-    .input(z.object({ orgId, ruleId: id }))
-    .mutation(async ({ ctx, input }) => {
-      requireRole(ctx.role, [...ADMIN]);
-      const res = await deleteRule(db, ctx.orgId, input.ruleId);
-      if (!res.ok) return fail(res.message);
-      await writeAudit({
-        orgId: ctx.orgId,
-        actorId: ctx.user.id,
-        action: 'ticket_rule.delete',
-        target: input.ruleId,
-      });
-      return res.value;
-    }),
+  deleteRule: desk.input(z.object({ orgId, ruleId: id })).mutation(async ({ ctx, input }) => {
+    requireRole(ctx.role, [...ADMIN]);
+    const res = await deleteRule(db, ctx.orgId, input.ruleId);
+    if (!res.ok) return fail(res.message);
+    await writeAudit({
+      orgId: ctx.orgId,
+      actorId: ctx.user.id,
+      action: 'ticket_rule.delete',
+      target: input.ruleId,
+    });
+    return res.value;
+  }),
 
   /** Service desk connectors. A secret is never sent back. */
-  connectors: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
+  connectors: desk.input(z.object({ orgId })).query(async ({ ctx }) => {
     requireRole(ctx.role, [...ADMIN]);
     const [rows, links] = await Promise.all([
       db.itsmConnector.findMany({ where: { orgId: ctx.orgId }, orderBy: { createdAt: 'asc' } }),
@@ -182,7 +183,7 @@ export const supportRouter = router({
     }));
   }),
 
-  createConnector: orgProcedure
+  createConnector: desk
     .input(
       z.object({
         orgId,
@@ -207,7 +208,7 @@ export const supportRouter = router({
       return res.value;
     }),
 
-  setConnectorEnabled: orgProcedure
+  setConnectorEnabled: desk
     .input(z.object({ orgId, connectorId: id, enabled: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, [...ADMIN]);
@@ -216,7 +217,7 @@ export const supportRouter = router({
       return res.value;
     }),
 
-  rotateSecret: orgProcedure
+  rotateSecret: desk
     .input(z.object({ orgId, connectorId: id }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, [...ADMIN]);
@@ -231,7 +232,7 @@ export const supportRouter = router({
       return res.value;
     }),
 
-  deleteConnector: orgProcedure
+  deleteConnector: desk
     .input(z.object({ orgId, connectorId: id }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, [...ADMIN]);
@@ -247,7 +248,7 @@ export const supportRouter = router({
     }),
 
   /** What has passed between Kestrel and one desk, newest first. */
-  log: orgProcedure.input(z.object({ orgId, connectorId: id })).query(async ({ ctx, input }) => {
+  log: desk.input(z.object({ orgId, connectorId: id })).query(async ({ ctx, input }) => {
     requireRole(ctx.role, [...ADMIN]);
     const c = await db.itsmConnector.findFirst({
       where: { id: input.connectorId, orgId: ctx.orgId },
@@ -261,7 +262,7 @@ export const supportRouter = router({
   }),
 
   /** Tickets sent to a connector's desk, with the reference on the other side. */
-  links: orgProcedure.input(z.object({ orgId, connectorId: id })).query(async ({ ctx, input }) => {
+  links: desk.input(z.object({ orgId, connectorId: id })).query(async ({ ctx, input }) => {
     requireRole(ctx.role, [...ADMIN]);
     const [links, tickets] = await Promise.all([
       db.itsmLink.findMany({
@@ -278,7 +279,7 @@ export const supportRouter = router({
   }),
 
   /** For the demo desk: answers as the outside system would, to show the round trip. */
-  simulateDemo: orgProcedure
+  simulateDemo: desk
     .input(
       z.object({
         orgId,

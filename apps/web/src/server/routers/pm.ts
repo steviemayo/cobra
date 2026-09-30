@@ -20,7 +20,10 @@ import {
 } from '../pm-service';
 import { loadSigningKey } from '../signing';
 import { SITE_SCOPED, roomIdsInScope, type SiteScope } from '../site-scope';
-import { orgProcedure, requireRole, router } from '../trpc';
+import { featureProcedure, requireRole, router } from '../trpc';
+
+// Preventative maintenance is a Pro feature (and part of a running trial).
+const orgProcedure = featureProcedure('maintenance');
 
 const orgId = z.string().uuid();
 const id = z.string().uuid();

@@ -4,7 +4,7 @@ import Stripe from 'stripe';
 import { db } from '@kestrel/db';
 import { PAID_PLANS } from '@kestrel/model';
 import { writeAudit } from '../audit';
-import { ensureBilling, getEntitlements, priceMapFromEnv } from '../billing';
+import { ensureBilling, getEntitlements, priceMapFromEnv, monitoredRoomIds } from '../billing';
 import {
   BillingNotConfigured,
   billingPortalUrl,
@@ -12,7 +12,6 @@ import {
   stripeConfigured,
 } from '../stripe';
 import { orgProcedure, requireRole, router } from '../trpc';
-import { billedRooms } from '../room-kinds';
 
 const orgId = z.string().uuid();
 
@@ -39,7 +38,8 @@ export const billingRouter = router({
     const [billing, entitlements, rooms] = await Promise.all([
       ensureBilling(db, ctx.orgId),
       getEntitlements(db, ctx.orgId),
-      db.room.count({ where: { orgId: ctx.orgId, ...billedRooms } }),
+      // A room is charged once it has a monitored device; recorded-only assets are free.
+      monitoredRoomIds(db, ctx.orgId).then((ids) => ids.size),
     ]);
     const prices = priceMapFromEnv();
     return {
@@ -63,7 +63,7 @@ export const billingRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner']);
       try {
-        const rooms = await db.room.count({ where: { orgId: ctx.orgId, ...billedRooms } });
+        const rooms = (await monitoredRoomIds(db, ctx.orgId)).size;
         const res = await startSubscription(db, {
           orgId: ctx.orgId,
           plan: input.plan,

@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: 'Room definitions' };
 
 export default function RoomDefinitionsPage() {
   return (
-    <RequireFeature feature="analytics">
+    <RequireFeature feature="usageDefinitions">
       <RoomDefinitionsView />
     </RequireFeature>
   );

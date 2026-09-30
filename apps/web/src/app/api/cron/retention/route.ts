@@ -5,6 +5,7 @@ import { pruneUnclaimed } from '@/server/gateway-announce';
 import { runReportSchedules } from '@/server/report-delivery';
 import { pruneOldData } from '@/server/retention';
 import { pruneUsage, rollupUsage } from '@/server/usage-service';
+import { getEntitlements } from '@/server/billing';
 import { snapshotAll } from '@/server/config-service';
 import { expireGrants } from '@/server/msp-portfolio';
 import { pmSweep } from '@/server/pm-service';
@@ -39,7 +40,7 @@ export async function GET(req: Request) {
     error: e instanceof Error ? e.message : String(e),
   }));
   // A scheduled snapshot of every monitored device, so there is something to compare with.
-  const snapshots = await snapshotAll(db).catch((e: unknown) => ({
+  const snapshots = await snapshotAll(db, new Date(), async (orgId) => (await getEntitlements(db, orgId)).configuration).catch((e: unknown) => ({
     error: e instanceof Error ? e.message : String(e),
   }));
   // Overdue maintenance becomes an info notice, and any register issue on a schedule is taken.

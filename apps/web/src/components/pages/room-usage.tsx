@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer } from '@/components/common/page-header';
 import { Section } from '@/components/common/section';
 import { SimpleSelect } from '@/components/common/simple-select';
+import { useBilling } from '@/components/common/plan-gate';
 import { useOrg } from '@/components/shell/org-context';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,7 @@ function Kpi({ label, value, hint }: { label: string; value: React.ReactNode; hi
 export function RoomUsageView({ roomId }: { roomId: string }) {
   const trpc = useTRPC();
   const { orgId, canSupport } = useOrg();
+  const canDefine = useBilling().data?.entitlements.usageDefinitions ?? false;
   const { room } = useRoom(roomId);
   const [kind, setKind] = useState<UsageKind>('av');
   const [days, setDays] = useState(30);
@@ -76,7 +78,7 @@ export function RoomUsageView({ roomId }: { roomId: string }) {
                 : 'Not in use now'}
           </Badge>
         )}
-        {canSupport && (
+        {canSupport && canDefine && (
           <Button size="sm" variant="outline" className="ml-auto" onClick={() => setEditing(true)}>
             <Pencil data-icon="inline-start" /> What counts as{' '}
             {kind === 'av' ? 'in use' : 'occupied'}
