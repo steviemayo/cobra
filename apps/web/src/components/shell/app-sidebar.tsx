@@ -6,25 +6,31 @@ import { usePathname } from 'next/navigation';
 import {
   Activity,
   AlertTriangle,
+  CalendarCheck,
+  CalendarOff,
+  ClipboardCheck,
+  FileCheck2,
+  GitCompare,
+  History,
+  ListChecks,
+  Package,
+  Plug,
+  Sigma,
+  SlidersHorizontal,
   BellRing,
   Building2,
   CircuitBoard,
   ChevronRight,
   Cpu,
   KeyRound,
-  Server,
-  Link2,
   DoorOpen,
   LayoutDashboard,
-  LayoutTemplate,
   LifeBuoy,
   Lock,
   type LucideIcon,
   Plus,
-  Rocket,
   Router,
   Settings,
-  Store,
   Users,
   Handshake,
   BarChart3,
@@ -230,6 +236,8 @@ interface NavEntry {
   exact?: boolean;
   count?: number;
   locked?: boolean;
+  /** A v2 page not built yet: listed disabled with a Soon badge. */
+  soon?: boolean;
 }
 
 /**
@@ -322,8 +330,6 @@ export function AppSidebar() {
   const trpc = useTRPC();
   // What the plan includes. Until it loads nothing is locked, so the menu does not flash.
   const plan = useBilling().data?.entitlements;
-  const control = plan?.control ?? true;
-  const marketplace = plan?.marketplaceBuy ?? true;
   const drivers = plan?.driverCreate ?? true;
   // People from the company asking to join, waiting for an owner.
   const joinRequests = useQuery({
@@ -342,41 +348,83 @@ export function AppSidebar() {
     canSupport && { href: `${base}/sites`, icon: Building2, label: 'All sites' },
     { href: `${base}/rooms`, icon: DoorOpen, label: 'All rooms' },
   ]);
+  // v2 pivot (PV-13, step M0). Routes for Templates, Marketplace, Room groups, Deployments and
+  // Shared devices still exist until the staged removal but are no longer linked from here.
+  // Items with `soon` are the new v2 pages, built in later steps (docs/pivot-monitoring.md).
   const monitor = entries([
     { href: `${base}/monitoring`, icon: Activity, label: 'Monitoring' },
     canSupport && { href: `${base}/incidents`, icon: AlertTriangle, label: 'Incidents' },
     canSeeTeam && full && { href: `${base}/alerts`, icon: BellRing, label: 'Alerts' },
-    { href: `${base}/usage`, icon: BarChart3, label: 'Usage' },
-    full && { href: `${base}/reports`, icon: FileText, label: 'Reports' },
-  ]);
-  const design = entries([
-    canEdit &&
-      full && {
-        href: `${base}/templates`,
-        icon: LayoutTemplate,
-        label: 'Templates',
-        locked: !control,
-      },
-    canEdit &&
-      full && {
-        href: `${base}/marketplace`,
-        icon: Store,
-        label: 'Marketplace',
-        locked: !marketplace,
-      },
-    canSupport &&
-      full && { href: `${base}/groups`, icon: Link2, label: 'Room groups', locked: !control },
-  ]);
-  const devices = entries([
     canSupport && { href: `${base}/gateways`, icon: Router, label: 'Gateways' },
-    canSupport && full && { href: `${base}/deployments`, icon: Rocket, label: 'Deployments' },
-    canEdit && full && { href: `${base}/shared-devices`, icon: Server, label: 'Shared devices' },
+    canEdit &&
+      full && {
+        soon: true,
+        href: `${base}/maintenance-windows`,
+        icon: CalendarOff,
+        label: 'Maintenance windows',
+      },
+  ]);
+  const assets = entries([
+    canEdit && full && { soon: true, href: `${base}/assets`, icon: Package, label: 'Register' },
+    canEdit &&
+      full && {
+        soon: true,
+        href: `${base}/register-issues`,
+        icon: FileCheck2,
+        label: 'Register issues',
+      },
     canEdit && full && { href: `${base}/credentials`, icon: KeyRound, label: 'Shared logins' },
     canSupport && { href: `${base}/firmware`, icon: CircuitBoard, label: 'Firmware' },
     canEdit &&
       full && { href: `${base}/drivers`, icon: Cpu, label: 'Custom drivers', locked: !drivers },
   ]);
-  const support = entries([{ href: `${base}/tickets`, icon: LifeBuoy, label: 'Support' }]);
+  const maintenance = entries([
+    canSupport && {
+      soon: true,
+      href: `${base}/pm/schedule`,
+      icon: CalendarCheck,
+      label: 'Schedule',
+    },
+    canSupport && {
+      soon: true,
+      href: `${base}/pm/records`,
+      icon: ClipboardCheck,
+      label: 'PM records',
+    },
+    canEdit &&
+      full && { soon: true, href: `${base}/pm/templates`, icon: ListChecks, label: 'PM templates' },
+  ]);
+  const configuration = entries([
+    canSupport && {
+      soon: true,
+      href: `${base}/config/profiles`,
+      icon: SlidersHorizontal,
+      label: 'Profiles',
+    },
+    canSupport && {
+      soon: true,
+      href: `${base}/config/drift`,
+      icon: GitCompare,
+      label: 'Snapshots and drift',
+    },
+    canSupport && { soon: true, href: `${base}/config/changes`, icon: History, label: 'Changes' },
+  ]);
+  const analytics = entries([
+    { href: `${base}/usage`, icon: BarChart3, label: 'Usage' },
+    canEdit &&
+      full && {
+        soon: true,
+        href: `${base}/room-definitions`,
+        icon: Sigma,
+        label: 'Room definitions',
+      },
+    full && { href: `${base}/reports`, icon: FileText, label: 'Reports' },
+  ]);
+  const support = entries([
+    { href: `${base}/tickets`, icon: LifeBuoy, label: 'Tickets' },
+    canEdit &&
+      full && { soon: true, href: `${base}/integrations`, icon: Plug, label: 'Integrations' },
+  ]);
 
   return (
     <Sidebar collapsible="icon">
@@ -428,8 +476,10 @@ export function AppSidebar() {
               </div>
             </NavGroup>
             <NavGroup id="monitor" label="Monitor" defaultOpen items={monitor} />
-            <NavGroup id="design" label="Design and deploy" items={design} />
-            <NavGroup id="devices" label="Devices and network" items={devices} />
+            <NavGroup id="assets" label="Assets" items={assets} />
+            <NavGroup id="maintenance" label="Maintenance" items={maintenance} />
+            <NavGroup id="configuration" label="Configuration" items={configuration} />
+            <NavGroup id="analytics" label="Analytics" items={analytics} />
             <NavGroup id="support" label="Support" defaultOpen items={support} />
           </>
         )}
