@@ -1,5 +1,9 @@
 # Decisions log
 
+> ## PIVOT 2026-09-30: decisions PV-1 onward (at the bottom of this file) supersede any v1 decision about control, room programs, panels, templates, room groups, tiers and billing
+> Everything above the "Pivot to monitoring" section is v1 history. Where a v1 decision conflicts with a PV decision, the PV decision wins. Plan: `docs/pivot-monitoring.md`.
+
+
 Decisions made while building the "Next build steps" in `docs/plan.md`, newest last. Status of each step (what is built, migrations, what is left) is in `docs/plan.md`: the Order table and, for steps N to U, "Later build steps N to U". The flows are drawn in `docs/diagrams.md`. Step letters here run C to U; the "Post-launch roadmap" letters in the plan (N to AC) are a separate list, whose decisions are under "Roadmap features built 2026-09-27" below. Each says who decided (user = the product owner; build = made while building, open to change).
 
 ## Step C: room groups, gateway runtime (2026-09-26)
@@ -648,3 +652,37 @@ Three new drivers from vendor API references added to `docs/`: PWR8IEC (an 8-out
 | Y-6 | **ACM1000 routes with zero-padded port numbers** (`OUT 012 FR 002`), matching the reference's own `ooo=[001...n]` notation, computed in code rather than through the declarative format's `{outputNumber}` placeholder (which is not zero-padded) | The declarative format has no decimal zero-pad placeholder (only `{levelHex}`/`{inputHex}`), so a fixed-width protocol like this one needs a coded driver either way |
 
 Not done / not verified: none of the three has been tried against real hardware. `command.outlet1_on`-style per-outlet actions on PWR8IEC, and the Bluetooth/port-count details on the other two, are a best reading of the vendor references only.
+
+
+---
+
+## Pivot to monitoring, configuration, support and analytics (2026-09-30)
+
+Plan: `docs/pivot-monitoring.md`. **User** = decided by the product owner; **proposed** = my default, awaiting confirmation.
+
+| ID | Decision | Who | Why |
+| --- | --- | --- | --- |
+| PV-1 | **Kestrel leads with monitoring, configuration/deployment, support and analytics.** The control platform and generated panel UI are deferred to a later add-on, not shipped subpar | user | The control side is not good enough to sell yet |
+| PV-2 | **Keep the look, feel, aesthetics and mechanisms of the app** (shell, theme, org switcher, command menu, incidents, tickets, alerts, staff portal, providers, gateway operations). Remove or park the rest | user | Retain what works |
+| PV-3 | **Tag `control-platform-v1` before any removal; remove control code in stages** so `dev` is never broken | user (delegated to build) | History keeps it; a clean tree keeps v2 simple |
+| PV-4 | **Hierarchy: estate (org) > site > area (optional, nestable, max 3 deep, org-defined level labels) > room > device.** Plus free tags on rooms | user (area idea), proposed (shape) | Customers group rooms by level, building or zone |
+| PV-5 | **A device is a first-class record, active or passive.** Active = networked, driver, polled. Passive = asset only (fixed source, laptop, camera, media player), never shown online/offline, can be upgraded to active | user | Assets need recording even when they cannot be monitored |
+| PV-6 | **The gateway is chosen per device, defaulting to the room's, then the site's.** A gateway belongs to one site; several per site are allowed | user | Network segregation inside a room |
+| PV-7 | **Device state is online / offline / unknown.** A gateway outage makes its devices unknown and raises one gateway incident, and availability counts unknown separately | proposed | Avoids an incident storm and false availability |
+| PV-8 | **Configuration profiles with per-parameter mode: watch, enforce, apply once.** Snapshots, a baseline, drift diff, revert, staged deploy with rollback. Needs a per-driver config surface (readable, writable, volatile) | user (goal), proposed (shape) | Set, hold and detect change in device settings |
+| PV-9 | **"In use" is a per-room rule tree** (conditions on device points, AND/OR/NOT, debounce), defaulted per room type, and evaluated in the cloud from stored history so a changed definition recomputes past sessions. Two named states proposed: Occupied and AV in use | user (goal), proposed (shape) | Usage analytics needs a definition the customer can tune |
+| PV-10 | **Support keeps incident > ticket > escalate to staff or handle internally.** Adds an ITSM connector (generic webhook, email-in and one demo connector now; real adapters on customer demand), auto-ticket rules, grouping, maintenance windows, routing rules, escalation ladder | user (keep and ITSM), proposed (additions) | Customers already run an ITSM |
+| PV-11 | **A service provider has an Internal estate and Customer estates**, never mixed unless "All customers" is picked. Provider home is a customer portfolio; picking a customer scopes the whole app; all-customer views for incidents and tickets | user (two estates), proposed (layout) | A provider is often also a customer |
+| PV-12 | **Grants can scope to area or room, end on a date, be audited to the customer, and a customer may have several providers** | proposed | Real MSP arrangements |
+| PV-13 | **Sidebar regrouped: Overview, Estate, Monitor, Assets, Configuration, Analytics, Support, Organisation, provider group.** Design and deploy, Templates, Marketplace, Room groups and Shared devices go | proposed | Matches the new product |
+| PV-14 | **Tiers to be replaced.** Proposed Trial, Essentials, Pro. Supersedes TM-1..TM-13 once confirmed | user (unit), open (names and split) | Control no longer separates the tiers. Unit settled: **per monitored room per month, chargeable only if the room has an active device; passive devices free.** Each org pays for its own rooms (a provider does not pay for customer rooms). Tier names and split still open |
+| PV-15 | **The asset register is the device list with field provenance** (discovered, manual, override). Discovery fills and refreshes; a person fills gaps and every passive device; a manual value is never silently overwritten and a disagreement is shown as a mismatch | user (idea), proposed (shape) | Registers need both machine and human sources |
+| PV-16 | **Register issues: numbered, frozen, Ed25519-signed copies of the register** (whole org, or a site or area), on a schedule or on demand, kept for the life of the subscription, PDF plus CSV/JSON, with a verify page and a diff between issues. The signature proves issuer and time, not that manual data is true | user (idea), proposed (shape) | Record keeping and audit |
+| PV-17 | **Preventative maintenance: templates, per-room schedules, and immutable signed-off runs**, stored on the room and rolled into an org-wide PM record. Monitoring pre-fills the items it can answer; a failed item raises a ticket | user (idea), proposed (shape) | Ties physical checks to live data and support |
+| PV-18 | **PM overdue and due-soon feed the Overview and Reports; PM visits use maintenance windows so they do not alert.** Providers can run PMs on customer rooms in their grant, visible to the customer | proposed | Compliance evidence for customers and providers |
+| PV-19 | **Register and PM tiers proposed:** register on Essentials; signed register issues and PM on Pro (open with PV-14) | open | Fits the tier split |
+| PV-20 | **One device detail page** reached from the register or a room, with sub-cards: Overview, Details, History, Configuration, Maintenance, Asset history, Incidents and tickets. Passive devices show only Details, Maintenance, Asset history, Incidents and tickets | user | Same detail wherever you arrive from |
+| PV-21 | **History charts show only metrics the driver declares** (plus an availability bar for every active device). No generic or empty charts | user | Charts must mean something for that device |
+| PV-22 | **Every device has an append-only asset history** (field changes with old > new, source and actor; moves; incidents; drift; PM results; register issues), kept for the life of the device. **A changed serial, MAC or model is flagged as a possible swap** and someone confirms Replaced (old identity retired with a date) or Correction | user | Traceability when kit is swapped or a check fails |
+
+Supersedes when built: the room design, release and control decisions (phases 1-2, 4, combined rooms, panel), TM-1..TM-20 where they concern control, and Step Q's control-forward Overview.

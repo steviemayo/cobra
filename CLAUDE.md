@@ -1,5 +1,11 @@
 # Kestrel — Project Memory (repo folder still `cobra`; product name = Kestrel)
 
+## PIVOT 2026-09-30 (read first)
+
+- Kestrel now leads with **monitoring, configuration/deployment (enforce, snapshot, drift), support (incident > ticket > ITSM/staff/provider) and analytics (room usage from device points)**. The control platform and generated panel are **deferred to a later add-on**, not cancelled. Plan: `docs/pivot-monitoring.md`; decisions PV-1..14 in `docs/decisions.md`; diagrams part "v2"
+- Sections below describe v1 (control first). Where they conflict with the pivot docs, the pivot wins. Hierarchy is now estate > site > area > room > device (active or passive). Providers have Internal and Customer estates
+- Status: plan only, nothing built yet. No code until the user says build
+
 ## What This Is
 
 - Cloud-based AV control system deployment tool
