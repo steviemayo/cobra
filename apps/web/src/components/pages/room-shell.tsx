@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { DoorOpen, MoreHorizontal, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
@@ -10,8 +10,6 @@ import { EmptyState } from '@/components/common/empty-state';
 import { NavTabs } from '@/components/common/nav-tabs';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/common/page-header';
-import { SyncBadge } from '@/components/common/deploy-status';
-import { DesignBadge } from '@/components/common/status';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
@@ -41,11 +39,6 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
   const shellWidth = onDesign ? 'max-w-none' : 'max-w-6xl';
   const invalidate = useInvalidateEstate();
   const [deleting, setDeleting] = useState(false);
-  const deploy = useQuery({
-    ...trpc.deployment.roomStatus.queryOptions({ orgId, roomId }),
-    refetchInterval: (q) => (q.state.data?.state === 'deploying' ? 3_000 : 15_000),
-  });
-
   const del = useMutation(
     trpc.room.delete.mutationOptions({
       onSuccess: async () => {
@@ -107,15 +100,6 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
               <span aria-hidden className="text-muted-foreground/50">
                 ·
               </span>
-              <DesignBadge draft={room.draft} monitorOnly={room.monitorOnly} />
-              {deploy.data && room.gateway && (
-                <>
-                  <span aria-hidden className="text-muted-foreground/50">
-                    ·
-                  </span>
-                  <SyncBadge state={deploy.data.state} />
-                </>
-              )}
             </>
           }
           actions={
