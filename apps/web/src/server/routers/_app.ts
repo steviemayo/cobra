@@ -8,6 +8,7 @@ import { bulkRouter } from './bulk';
 import { siteDeviceRouter } from './site-device';
 import { deviceRouter } from './device';
 import { areaRouter } from './area';
+import { roomUsageRouter } from './room-usage';
 import { calendarRouter } from './calendar';
 import { mspRouter } from './msp';
 import { roomGroupRouter } from './room-group';
@@ -63,6 +64,7 @@ export const appRouter = router({
   siteDevice: siteDeviceRouter,
   device: deviceRouter,
   area: areaRouter,
+  roomUsage: roomUsageRouter,
   commissioning: commissioningRouter,
   apikey: apikeyRouter,
   usage: usageRouter,

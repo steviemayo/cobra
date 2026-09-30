@@ -99,11 +99,13 @@ model Member {
 }
 
 model Site {
-  id        String   @id @default(uuid()) @db.Uuid
-  orgId     String   @db.Uuid
-  name      String
-  timezone  String   @default("Australia/Sydney")
-  createdAt DateTime @default(now())
+  id               String   @id @default(uuid()) @db.Uuid
+  orgId            String   @db.Uuid
+  name             String
+  timezone         String   @default("Australia/Sydney")
+  /// The gateway that polls devices with no gateway of their own and no room gateway. Null: the oldest at the site.
+  defaultGatewayId String?  @db.Uuid
+  createdAt        DateTime @default(now())
 
   org         Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
   gateways    Gateway[]
@@ -1237,4 +1239,72 @@ model DeviceEvent {
 
   @@index([orgId])
   @@index([deviceId, at])
+}
+
+// ---- v2 analytics (docs/pivot-monitoring.md, "Analytics") -----------------------------------------
+
+/// One change of a device reading, kept 90 days: what usage sessions and device charts are built from.
+/// `field` is a feedback field (power, input, muted, volume, occupied, ...) or "online". `value` is text
+/// ("on", "true", "62") so one table holds every kind.
+model DeviceHistory {
+  id       String   @id @default(uuid()) @db.Uuid
+  orgId    String   @db.Uuid
+  deviceId String   @db.Uuid
+  roomId   String?  @db.Uuid
+  field    String
+  value    String
+  at       DateTime @default(now())
+
+  @@index([deviceId, field, at])
+  @@index([roomId, at])
+  @@index([orgId, at])
+}
+
+/// What counts as a room being in use: a rule over device readings. Org default (roomId null) or
+/// one room's own. kind is "av" (equipment in use) or "occupied" (people there).
+model UsageDefinition {
+  id             String   @id @default(uuid()) @db.Uuid
+  orgId          String   @db.Uuid
+  roomId         String?  @db.Uuid
+  kind           String
+  /// A UsageRule tree (packages/model/src/usage.ts).
+  rule           Json
+  /// A gap shorter than this does not end a session.
+  holdOffSeconds Int      @default(180)
+  /// A session shorter than this is not counted.
+  minOnSeconds   Int      @default(60)
+  updatedBy      String?  @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([orgId, roomId, kind])
+  @@index([orgId])
+}
+
+/// When the organisation counts a room as available for utilisation: days of the week (0 = Sunday)
+/// and hours in the site's own time zone.
+model UsageSettings {
+  orgId     String   @id @db.Uuid
+  workDays  Int[]    @default([1, 2, 3, 4, 5])
+  workStart String   @default("08:00")
+  workEnd   String   @default("18:00")
+  updatedAt DateTime @updatedAt
+}
+
+/// A day of one room's usage, kept 13 months after the raw history is gone.
+model RoomUsageDay {
+  roomId         String   @db.Uuid
+  kind           String
+  day            DateTime @db.Date
+  orgId          String   @db.Uuid
+  /// Minutes in use, in total and inside working hours.
+  minutes        Int
+  workMinutes    Int
+  sessions       Int
+  longestMinutes Int
+  /// Minutes in use in each hour of the day (24 numbers), for the busy-hours view.
+  hours          Int[]
+
+  @@id([roomId, kind, day])
+  @@index([orgId, day])
 }

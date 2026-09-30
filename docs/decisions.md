@@ -728,3 +728,20 @@ Not done in M2: the old room-design device screen (addresses and logins of legac
 | S2-6 | **Old room-model tables and code are cleaned up in M7**, not before | user | Staged removal, PV-3 |
 
 M2 browser pass (local dev server against `kestrel-dev`, signed-in owner): Overview, asset register, add device (recorded and monitored), device details, serial change flagged as a possible swap and confirmed as replaced, asset history, site page and areas, room page with area, and the Overview roll-up all worked. Fixed afterwards: the serial change showing twice in the history, Enter not submitting the area form, the Add device type list cutting off its text, and the v1 marketing copy on the sign-in page. Test data was removed.
+
+### Built: M3, analytics (2026-09-30, branch `feat/pivot-m3`)
+
+| ID | Decision | Who | Why |
+| --- | --- | --- | --- |
+| M3-1 | **Migration `usage_analytics`** (additive, applied to `kestrel-dev`): `Site.defaultGatewayId`, `DeviceHistory`, `UsageDefinition`, `UsageSettings`, `RoomUsageDay` | build | S2-2, PV-9 |
+| M3-2 | **Every reading change is stored** (`DeviceHistory`): a device coming online or going offline, and each feedback field (power, input, muted, volume, occupied, recording, stream, app) when it changes. Written on the heartbeat that reports it, once per change | build | Sessions and charts are built from these |
+| M3-3 | **"In use" is a rule tree** (`packages/model/src/usage.ts`): AND / OR / NOT over conditions on one device or any device of a kind (`is`, `is not`, `above`, `below`, `has a signal`). Room rule, else organisation rule, else Kestrel's (AV in use: a display, projector or video destination is on, or a recorder is recording; Occupied: an occupancy sensor sees someone). Hold-off 180 s and minimum session 60 s by default, editable | user (PV-9) | Customer-tunable definition |
+| M3-4 | **Sessions are recomputed from the stored readings every time**, so saving a new rule changes past figures too. Utilisation is measured against the working minutes that fall inside the window (default Mon to Fri 08:00 to 18:00, set per organisation), in each site's own time zone | user (PV-9) | Rule changes must apply retrospectively |
+| M3-5 | **Daily roll-up** (`RoomUsageDay`, per room, kind and local day: minutes, working minutes, sessions, longest, minutes per hour) is written by the daily retention cron; raw readings are deleted after 90 days and rolled-up days after 13 months | user (S2-5) | Long-term figures |
+| M3-6 | **Device charts draw only the readings the device has reported.** This replaces a per-driver declaration: what a driver can report decides what appears, with no list to maintain. Numbers are stepped lines, everything else is a coloured state strip with time in each state, and every monitored device gets an availability figure | user (PV-21) | No empty or irrelevant charts |
+| M3-7 | **Insights are plain rules**: barely used (under 10% of working time), mostly out of hours (over half of use and at least 5 hours), and looks always on (about 20 hours a day) | build | PV-9, no model needed |
+| M3-8 | **The Overview's "Rooms in use now" and each room's in-use flag** come from the latest readings held on the device record and the room's rule; a room with no monitored device that has spoken shows a dash | build | M2-3 filled in |
+| M3-9 | **The Usage page is now the estate usage view** (ranking and insights), room pages have a Usage tab, and Room definitions holds the organisation rules and working hours. The old v1 usage report code is no longer routed | build | PV-13 |
+| M3-10 | **Sites name a default gateway** on the site page; a device with no gateway of its own and no room gateway uses it, falling back to the site's oldest | user (S2-2) | Replaces M1-4 |
+
+Not done in M3: usage from older room-design devices (they have no stored readings until moved into the register), the booking overlay (booked versus used), and scheduled usage reports (the existing Reports keep their v1 content until M7 reworks them).

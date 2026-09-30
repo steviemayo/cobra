@@ -4,6 +4,7 @@ import { pruneAudit } from '@/server/audit-retention';
 import { pruneUnclaimed } from '@/server/gateway-announce';
 import { runReportSchedules } from '@/server/report-delivery';
 import { pruneOldData } from '@/server/retention';
+import { pruneUsage, rollupUsage } from '@/server/usage-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,5 +26,20 @@ export async function GET(req: Request) {
   const unclaimed = await pruneUnclaimed(db).catch((e: unknown) => ({
     error: e instanceof Error ? e.message : String(e),
   }));
-  return Response.json({ ...res, cutoff: res.cutoff.toISOString(), audit, reports, unclaimed });
+  // Usage: store the last two days as daily figures first, then drop readings past 90 days.
+  const usage = await rollupUsage(db).catch((e: unknown) => ({
+    error: e instanceof Error ? e.message : String(e),
+  }));
+  const usagePruned = await pruneUsage(db).catch((e: unknown) => ({
+    error: e instanceof Error ? e.message : String(e),
+  }));
+  return Response.json({
+    ...res,
+    cutoff: res.cutoff.toISOString(),
+    audit,
+    reports,
+    unclaimed,
+    usage,
+    usagePruned,
+  });
 }

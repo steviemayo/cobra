@@ -8,6 +8,7 @@ import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { HealthPill } from '@/components/common/health';
 import { GatewayStatus } from '@/components/common/status';
 import { orgPath, useOrg } from '@/components/shell/org-context';
+import { SimpleSelect } from '@/components/common/simple-select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -291,11 +292,26 @@ export function SiteRooms({ siteId }: { siteId: string }) {
   );
 }
 
-/** The gateways at one site, with the state of each. */
+/** The gateways at one site, with the state of each, and which one takes devices that have none of their own. */
 export function SiteGateways({ siteId }: { siteId: string }) {
   const trpc = useTRPC();
-  const { orgId } = useOrg();
+  const qc = useQueryClient();
+  const { orgId, canEdit } = useOrg();
   const gateways = useQuery(trpc.gateway.list.queryOptions({ orgId }));
+  const sites = useQuery(trpc.site.list.queryOptions({ orgId }));
+  const setDefault = useMutation(
+    trpc.site.update.mutationOptions({
+      onSuccess: async () => {
+        toast.success('Saved');
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: trpc.site.list.queryKey() }),
+          qc.invalidateQueries({ queryKey: trpc.monitoring.estate.queryKey() }),
+          qc.invalidateQueries({ queryKey: trpc.device.list.queryKey() }),
+        ]);
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
   if (gateways.isPending) return <Skeleton className="h-16 w-full" />;
   const list = (gateways.data ?? []).filter((g) => g.siteId === siteId);
   if (list.length === 0)
@@ -304,19 +320,41 @@ export function SiteGateways({ siteId }: { siteId: string }) {
         <Router className="size-4" /> No gateways at this site yet. Add one on the Gateways page.
       </p>
     );
+  const current = sites.data?.find((s) => s.id === siteId)?.defaultGatewayId ?? null;
   return (
-    <ul className="divide-y rounded-lg border">
-      {list.map((g) => (
-        <li key={g.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
-          <GatewayStatus gateway={{ name: g.name, status: g.status }} />
-          <Link
-            href={orgPath(orgId, '/gateways')}
-            className="text-xs text-muted-foreground hover:underline"
-          >
-            Manage
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-3">
+      <ul className="divide-y rounded-lg border">
+        {list.map((g) => (
+          <li key={g.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+            <span className="inline-flex items-center gap-3">
+              <GatewayStatus gateway={{ name: g.name, status: g.status }} />
+              {(current ?? list[0]!.id) === g.id && (
+                <span className="text-xs text-muted-foreground">
+                  {current ? 'Default for this site' : 'Default (oldest)'}
+                </span>
+              )}
+            </span>
+            <Link
+              href={orgPath(orgId, '/gateways')}
+              className="text-xs text-muted-foreground hover:underline"
+            >
+              Manage
+            </Link>
+          </li>
+        ))}
+      </ul>
+      {canEdit && list.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Devices with no gateway of their own use</span>
+          <SimpleSelect
+            size="sm"
+            className="w-56"
+            value={current ?? list[0]!.id}
+            onValueChange={(v) => setDefault.mutate({ orgId, siteId, defaultGatewayId: v })}
+            options={list.map((g) => ({ value: g.id, label: g.name }))}
+          />
+        </div>
+      )}
+    </div>
   );
 }

@@ -51,6 +51,7 @@ export type Db = Pick<
   | 'roomSchedule'
   | 'device'
   | 'deviceEvent'
+  | 'deviceHistory'
   | 'area'
   | 'site'
 >;

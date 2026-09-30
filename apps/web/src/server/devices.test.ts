@@ -28,6 +28,7 @@ const at = (ms: number) => new Date(T0.getTime() + ms);
 function world() {
   const device = table([]);
   const deviceEvent = table([]);
+  const deviceHistory = table([]);
   const room = table([
     { id: ROOM, orgId: ORG, siteId: SITE, name: 'Boardroom', gatewayId: GW_ROOM },
   ]);
@@ -42,6 +43,7 @@ function world() {
   const db = {
     device,
     deviceEvent,
+    deviceHistory,
     room,
     gateway,
     incident,
@@ -49,7 +51,7 @@ function world() {
     area,
     site,
   } as unknown as DevicesDb;
-  return { db, device, deviceEvent, room, gateway, incident, area };
+  return { db, device, deviceEvent, deviceHistory, room, gateway, incident, area, site };
 }
 
 const gw = { id: GW_ROOM, orgId: ORG, siteId: SITE };
@@ -156,6 +158,21 @@ describe('which gateway polls a device', () => {
   });
 });
 
+describe('the site default gateway', () => {
+  it('uses the gateway the site names, and falls back to the oldest when none is named', async () => {
+    const w = world();
+    const spare = await activeDevice(w, { name: 'Spare', roomId: null });
+    const row = () => w.device.rows.find((r) => r.id === spare) as never;
+    expect(await gatewayIdFor(w.db, row())).toBe(GW_ROOM);
+    (w.site.rows[0] as Record<string, unknown>).defaultGatewayId = GW_OTHER;
+    expect(await gatewayIdFor(w.db, row())).toBe(GW_OTHER);
+    // A named gateway that no longer exists at the site is ignored.
+    (w.site.rows[0] as Record<string, unknown>).defaultGatewayId =
+      '99999999-9999-4999-8999-999999999999';
+    expect(await gatewayIdFor(w.db, row())).toBe(GW_ROOM);
+  });
+});
+
 describe('the signed device set', () => {
   it('merges address and login, signs, and changes version when a device changes', async () => {
     const w = world();
@@ -190,6 +207,35 @@ describe('the signed device set', () => {
       ok: false,
       reason: 'hash_mismatch',
     });
+  });
+});
+
+describe('reading history', () => {
+  it('records online and feedback changes once, not on every heartbeat', async () => {
+    const w = world();
+    const id = await activeDevice(w);
+    await recordDeviceReports(
+      w.db,
+      gw,
+      [report(id, { feedback: { power: 'on', volume: 40 } })],
+      T0,
+    );
+    await recordDeviceReports(
+      w.db,
+      gw,
+      [report(id, { feedback: { power: 'on', volume: 40 } })],
+      at(30_000),
+    );
+    await recordDeviceReports(
+      w.db,
+      gw,
+      [report(id, { feedback: { power: 'off', volume: 40 } })],
+      at(60_000),
+    );
+    const rows = w.deviceHistory.rows.map((r) => `${r.field}=${r.value}`);
+    expect(rows).toEqual(['online=true', 'power=on', 'volume=40', 'power=off']);
+    await recordDeviceReports(w.db, gw, [report(id, { online: false })], at(90_000));
+    expect(w.deviceHistory.rows.at(-1)).toMatchObject({ field: 'online', value: 'false' });
   });
 });
 

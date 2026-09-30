@@ -30,6 +30,7 @@ import { formatDate, timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
+import { LineSeries, StateStrip, minutesLabel } from '@/components/common/usage-charts';
 import { DeviceDetailsView } from './device-details';
 
 type Device = RouterOutputs['device']['get'];
@@ -491,6 +492,97 @@ function AssetHistory({ deviceId }: { deviceId: string }) {
   );
 }
 
+const FIELD_TITLE: Record<string, string> = {
+  online: 'Answering (availability)',
+  power: 'Power',
+  input: 'Input',
+  muted: 'Muted',
+  volume: 'Volume',
+  blanked: 'Picture blanked',
+  recording: 'Recording',
+  occupied: 'Occupied',
+  streamConnected: 'Receiving a stream',
+  activeApp: 'Active app',
+};
+
+/** Charts for only the readings this device has reported: nothing is drawn for what it does not have. */
+function DeviceHistoryCharts({ deviceId }: { deviceId: string }) {
+  const trpc = useTRPC();
+  const { orgId } = useOrg();
+  const [days, setDays] = useState(7);
+  const query = useQuery({
+    ...trpc.roomUsage.device.queryOptions({ orgId, deviceId, days }),
+    retry: false,
+  });
+  const history = query;
+  const data = query.data;
+  return (
+    <div className="space-y-4">
+      <SimpleSelect
+        size="sm"
+        className="w-36"
+        value={String(days)}
+        onValueChange={(v) => setDays(Number(v))}
+        options={[
+          { value: '1', label: 'Last 24 hours' },
+          { value: '7', label: 'Last 7 days' },
+          { value: '30', label: 'Last 30 days' },
+          { value: '90', label: 'Last 90 days' },
+        ]}
+      />
+      {history.isPending ? (
+        <Skeleton className="h-24 w-full" />
+      ) : history.isError ? (
+        <p className="text-sm text-muted-foreground">History is not available on your plan.</p>
+      ) : !data || data.series.length === 0 ? (
+        <EmptyState
+          icon={AlertTriangle}
+          title="No readings yet"
+          description="Charts appear here once the device has reported something to a gateway."
+        />
+      ) : (
+        <>
+          {data.availability !== null && (
+            <p className="text-sm">
+              Answering{' '}
+              <span className="font-semibold">{Math.round(data.availability * 1000) / 10}%</span> of
+              the time in this period.
+            </p>
+          )}
+          {data.series.map((s) => (
+            <Section key={s.field} title={FIELD_TITLE[s.field] ?? s.field}>
+              <div className="p-4">
+                {s.type === 'number' ? (
+                  <LineSeries
+                    points={s.points}
+                    from={data.from}
+                    to={data.to}
+                    unit={s.field === 'volume' ? '' : undefined}
+                  />
+                ) : (
+                  <StateStrip
+                    points={s.points}
+                    from={data.from}
+                    to={data.to}
+                    minutesByValue={s.minutesByValue}
+                    goodValue={s.field === 'online' ? 'true' : undefined}
+                  />
+                )}
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {s.points.length} change{s.points.length === 1 ? '' : 's'}
+                  {s.type === 'state' && Object.keys(s.minutesByValue).length === 1
+                    ? ` · ${minutesLabel(Object.values(s.minutesByValue)[0] ?? 0)} in one state`
+                    : ''}
+                </p>
+              </div>
+            </Section>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 function DeviceIncidents({ deviceId }: { deviceId: string }) {
   const trpc = useTRPC();
   const { orgId } = useOrg();
@@ -666,6 +758,7 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
+          {d.kind === 'active' && <TabsTrigger value="charts">History</TabsTrigger>}
           <TabsTrigger value="history">Asset history</TabsTrigger>
           <TabsTrigger value="incidents">Incidents</TabsTrigger>
         </TabsList>
@@ -680,6 +773,11 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
             </Label>
           )}
         </TabsContent>
+        {d.kind === 'active' && (
+          <TabsContent value="charts" className="pt-4">
+            <DeviceHistoryCharts deviceId={d.id} />
+          </TabsContent>
+        )}
         <TabsContent value="history" className="pt-4">
           <AssetHistory deviceId={d.id} />
         </TabsContent>

@@ -121,6 +121,7 @@ function world() {
     dev('d6', R3, { siteId: SITE2, kind: 'passive', online: null }),
   ]);
   const deviceStatus = table([]);
+  const usageDefinition = table([]);
   const incident = table([
     { id: 'i1', orgId: ORG, roomId: R1, gatewayId: G1, status: 'open', severity: 'warning' },
     { id: 'i2', orgId: ORG, roomId: null, gatewayId: G2, status: 'open', severity: 'critical' },
@@ -138,8 +139,9 @@ function world() {
     deviceStatus,
     incident,
     ticket,
+    usageDefinition,
   } as unknown as EstateDb;
-  return { db, deviceStatus };
+  return { db, deviceStatus, device, usageDefinition, site };
 }
 
 describe('estateOverview', () => {
@@ -189,9 +191,42 @@ describe('estateOverview', () => {
       gateways: 2,
       gatewaysOnline: 1,
       openTickets: 2,
-      roomsInUse: null,
+      roomsInUse: 0,
       driftCount: null,
     });
+  });
+
+  it('says a room is in use when its display is on, by the usual rule', async () => {
+    const { db, device } = world();
+    const d1 = device.rows.find((r) => r.id === 'd1')!;
+    d1.category = 'display';
+    d1.feedback = { power: 'on' };
+    const o = await estateOverview(db, ORG, NOW);
+    expect(o.rooms.find((r) => r.id === R1)!.inUse).toBe(true);
+    expect(o.rooms.find((r) => r.id === R3)!.inUse).toBeNull();
+    expect(o.kpis.roomsInUse).toBe(1);
+  });
+
+  it('uses the room own rule over the usual one', async () => {
+    const { db, device, usageDefinition } = world();
+    const d1 = device.rows.find((r) => r.id === 'd1')!;
+    d1.category = 'display';
+    d1.feedback = { power: 'on' };
+    await usageDefinition.create({
+      data: {
+        orgId: ORG,
+        roomId: R1,
+        kind: 'av',
+        rule: {
+          op: 'cond',
+          category: 'occupancy_sensor',
+          field: 'occupied',
+          cmp: 'eq',
+          value: true,
+        },
+      },
+    });
+    expect((await estateOverview(db, ORG, NOW)).rooms.find((r) => r.id === R1)!.inUse).toBe(false);
   });
 
   it('counts older room-design devices as active devices', async () => {

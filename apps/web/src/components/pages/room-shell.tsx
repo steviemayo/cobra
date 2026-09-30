@@ -131,6 +131,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
             // tabs are hidden with the control platform. Routes stay until the staged removal.
             { label: 'Overview', href: base, exact: true },
             ...(canSupport ? [{ label: 'Devices', href: `${base}/devices` }] : []),
+            { label: 'Usage', href: `${base}/usage` },
             { label: 'Monitoring', href: `${base}/monitoring` },
             ...(canEdit ? [{ label: 'Settings', href: `${base}/settings` }] : []),
           ]}

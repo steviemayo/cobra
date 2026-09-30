@@ -12,3 +12,4 @@ export * from './sla';
 export * from './schedule';
 export * from './signup';
 export * from './devices';
+export * from './usage';

@@ -1,5 +1,12 @@
 import type { PrismaClient } from '@kestrel/db';
-import { deviceLiveState, resolveGatewayId } from '@kestrel/model';
+import {
+  DEFAULT_USAGE_RULES,
+  UsageRuleSchema,
+  deviceLiveState,
+  inUseNow,
+  resolveGatewayId,
+  type UsageRule,
+} from '@kestrel/model';
 import { effectiveStatus } from './gateway-status';
 import type { HealthLevel } from './monitoring';
 import { SEVERITY_RANK, type Severity } from './monitoring';
@@ -10,7 +17,15 @@ import { incidentVisible, inScope, type SiteScope } from './site-scope';
 // Every query is scoped to the organisation, and to the caller's sites for a site-limited provider.
 export type EstateDb = Pick<
   PrismaClient,
-  'room' | 'gateway' | 'site' | 'area' | 'device' | 'deviceStatus' | 'incident' | 'ticket'
+  | 'room'
+  | 'gateway'
+  | 'site'
+  | 'area'
+  | 'device'
+  | 'deviceStatus'
+  | 'incident'
+  | 'ticket'
+  | 'usageDefinition'
 >;
 
 type GatewayStatus = 'pending' | 'online' | 'offline';
@@ -86,17 +101,27 @@ export async function estateOverview(
   now = new Date(),
   scope: SiteScope = null,
 ): Promise<EstateOverview> {
-  const [allSites, allAreas, allRooms, allGateways, allDevices, allLegacy, allIncidents, tickets] =
-    await Promise.all([
-      db.site.findMany({ where: { orgId }, orderBy: { name: 'asc' } }),
-      db.area.findMany({ where: { orgId }, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] }),
-      db.room.findMany({ where: { orgId }, orderBy: { name: 'asc' } }),
-      db.gateway.findMany({ where: { orgId } }),
-      db.device.findMany({ where: { orgId } }),
-      db.deviceStatus.findMany({ where: { orgId } }),
-      db.incident.findMany({ where: { orgId, status: 'open' } }),
-      db.ticket.findMany({ where: { orgId, status: { in: OPEN_TICKET } } }),
-    ]);
+  const [
+    allSites,
+    allAreas,
+    allRooms,
+    allGateways,
+    allDevices,
+    allLegacy,
+    allIncidents,
+    tickets,
+    definitions,
+  ] = await Promise.all([
+    db.site.findMany({ where: { orgId }, orderBy: { name: 'asc' } }),
+    db.area.findMany({ where: { orgId }, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] }),
+    db.room.findMany({ where: { orgId }, orderBy: { name: 'asc' } }),
+    db.gateway.findMany({ where: { orgId } }),
+    db.device.findMany({ where: { orgId } }),
+    db.deviceStatus.findMany({ where: { orgId } }),
+    db.incident.findMany({ where: { orgId, status: 'open' } }),
+    db.ticket.findMany({ where: { orgId, status: { in: OPEN_TICKET } } }),
+    db.usageDefinition.findMany({ where: { orgId, kind: 'av' } }),
+  ]);
   const sites = allSites.filter((s) => inScope(scope, s.id));
   const areas = allAreas.filter((a) => inScope(scope, a.siteId));
   const rooms = allRooms.filter((r) => inScope(scope, r.siteId));
@@ -115,9 +140,22 @@ export async function estateOverview(
       { id: g.id, name: g.name, status: effectiveStatus(g, now.getTime()) as GatewayStatus },
     ]),
   );
-  const oldestGatewayAt = new Map<string, string>();
+  // The gateway a site falls back on: the one it names, else its oldest.
+  const defaultGatewayAt = new Map<string, string>();
   for (const g of [...gateways].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()))
-    if (!oldestGatewayAt.has(g.siteId)) oldestGatewayAt.set(g.siteId, g.id);
+    if (!defaultGatewayAt.has(g.siteId)) defaultGatewayAt.set(g.siteId, g.id);
+  for (const s of sites) {
+    const named = s.defaultGatewayId
+      ? gateways.find((g) => g.id === s.defaultGatewayId && g.siteId === s.id)
+      : undefined;
+    if (named) defaultGatewayAt.set(s.id, named.id);
+  }
+  // The rule for "in use": a room's own, else the organisation's, else the usual one.
+  const parsedRule = (v: unknown): UsageRule | null => {
+    const r = UsageRuleSchema.safeParse(v);
+    return r.success ? r.data : null;
+  };
+  const orgRule = parsedRule(definitions.find((d) => d.roomId === null)?.rule);
   const roomById = new Map(rooms.map((r) => [r.id, r]));
 
   const pathOf = (areaId: string | null) => {
@@ -156,7 +194,7 @@ export async function estateOverview(
       const gwId = resolveGatewayId({
         deviceGatewayId: d.gatewayId,
         roomGatewayId: r.gatewayId,
-        siteGatewayId: oldestGatewayAt.get(d.siteId) ?? null,
+        siteGatewayId: defaultGatewayAt.get(d.siteId) ?? null,
       });
       const gw = note(gwId);
       const state = deviceLiveState({
@@ -217,6 +255,26 @@ export async function estateOverview(
     } else {
       level = 'healthy';
     }
+    // In use now, by the room's rule, from what its monitored devices last said. Unknown when none has spoken.
+    const speaking = own.filter((d) => d.kind === 'active' && d.online !== null);
+    let inUse: boolean | null = null;
+    if (speaking.length > 0) {
+      const rule =
+        parsedRule(definitions.find((d) => d.roomId === r.id)?.rule) ??
+        orgRule ??
+        DEFAULT_USAGE_RULES.av;
+      const readings = new Map<string, string>();
+      for (const d of speaking) {
+        readings.set(`${d.id}|online`, String(d.online));
+        for (const [k, v] of Object.entries((d.feedback ?? {}) as Record<string, unknown>))
+          if (v !== undefined && v !== null) readings.set(`${d.id}|${k}`, String(v));
+      }
+      inUse = inUseNow(
+        rule,
+        own.map((d) => ({ id: d.id, category: d.category })),
+        (id, f) => readings.get(`${id}|${f}`),
+      );
+    }
     return {
       id: r.id,
       name: r.name,
@@ -233,7 +291,7 @@ export async function estateOverview(
       gatewayStatus,
       openIncidents: open.length,
       worstSeverity: worst,
-      inUse: null,
+      inUse,
       updatedAt: r.updatedAt,
     };
   });
@@ -262,7 +320,9 @@ export async function estateOverview(
       gateways: gateways.length,
       gatewaysOnline,
       openTickets: ticketCount,
-      roomsInUse: null,
+      roomsInUse: rows.some((r) => r.inUse !== null)
+        ? rows.filter((r) => r.inUse === true).length
+        : null,
       driftCount: null,
     },
     sites: sites.map((s) => ({ id: s.id, name: s.name })),

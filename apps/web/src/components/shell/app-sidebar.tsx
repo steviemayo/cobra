@@ -448,7 +448,6 @@ export function AppSidebar() {
     { href: `${base}/usage`, icon: BarChart3, label: 'Usage' },
     canEdit &&
       full && {
-        soon: true,
         href: `${base}/room-definitions`,
         icon: Sigma,
         label: 'Room definitions',

@@ -3,6 +3,7 @@ import { open, seal, signDeviceSet } from '@kestrel/crypto';
 import type { Prisma, PrismaClient } from '@kestrel/db';
 import {
   ASSET_FIELDS,
+  DEVICE_FEEDBACK_FIELDS,
   DeviceDetails,
   DeviceControl,
   DISCOVERABLE_FIELDS,
@@ -29,7 +30,15 @@ import type { SigningKey } from './signing';
 // parameter so they can be tested without one, and return alert jobs instead of sending anything.
 export type DevicesDb = Pick<
   PrismaClient,
-  'device' | 'deviceEvent' | 'room' | 'gateway' | 'incident' | 'credentialSet' | 'area' | 'site'
+  | 'device'
+  | 'deviceEvent'
+  | 'deviceHistory'
+  | 'room'
+  | 'gateway'
+  | 'incident'
+  | 'credentialSet'
+  | 'area'
+  | 'site'
 >;
 
 const secretsKey = () => process.env.KESTREL_SECRETS_KEY || undefined;
@@ -120,8 +129,8 @@ async function applyField(
 // ---- Which gateway -------------------------------------------------------------------------------
 
 /**
- * The gateway that polls a device: its own, else its room's, else the site's default. The site's
- * default is its oldest gateway until sites can name one.
+ * The gateway that polls a device: its own, else its room's, else the site's default (the one the
+ * site names, else its oldest gateway).
  */
 export async function gatewayIdFor(
   db: DevicesDb,
@@ -130,17 +139,28 @@ export async function gatewayIdFor(
   const room = d.roomId
     ? await db.room.findFirst({ where: { id: d.roomId, orgId: d.orgId } })
     : null;
-  const first = async () =>
-    (
-      await db.gateway.findMany({
-        where: { siteId: d.siteId, orgId: d.orgId },
-        orderBy: { createdAt: 'asc' },
-      })
-    )[0]?.id ?? null;
+  const siteDefault = async () => {
+    const site = await db.site.findFirst({ where: { id: d.siteId, orgId: d.orgId } });
+    const named = site?.defaultGatewayId
+      ? await db.gateway.findFirst({
+          where: { id: site.defaultGatewayId, orgId: d.orgId, siteId: d.siteId },
+        })
+      : null;
+    if (named) return named.id;
+    // Not chosen (or the chosen one was removed): the site's oldest gateway.
+    return (
+      (
+        await db.gateway.findMany({
+          where: { siteId: d.siteId, orgId: d.orgId },
+          orderBy: { createdAt: 'asc' },
+        })
+      )[0]?.id ?? null
+    );
+  };
   return resolveGatewayId({
     deviceGatewayId: d.gatewayId,
     roomGatewayId: room?.gatewayId ?? null,
-    siteGatewayId: d.gatewayId || room?.gatewayId ? null : await first(),
+    siteGatewayId: d.gatewayId || room?.gatewayId ? null : await siteDefault(),
   });
 }
 
@@ -293,7 +313,28 @@ export async function recordDeviceReports(
     }
     patch.provenance = prov as Prisma.InputJsonValue;
     patch.swapPending = swap;
+    // What changed in the device's readings, for usage sessions and its charts.
+    const history: { field: string; value: string }[] = [];
+    if (patch.online !== undefined) history.push({ field: 'online', value: String(rep.online) });
+    const before = (isObject(row.feedback) ? row.feedback : {}) as Record<string, unknown>;
+    for (const f of DEVICE_FEEDBACK_FIELDS) {
+      const v = rep.feedback?.[f];
+      if (v !== undefined && String(v) !== String(before[f]))
+        history.push({ field: f, value: String(v) });
+    }
     await db.device.update({ where: { id: row.id }, data: patch });
+
+    if (history.length > 0)
+      await db.deviceHistory.createMany({
+        data: history.map((h) => ({
+          orgId: gw.orgId,
+          deviceId: row.id,
+          roomId: row.roomId,
+          field: h.field,
+          value: h.value,
+          at: now,
+        })),
+      });
 
     const subject = `device:${row.id}`;
     const roomName = row.roomId
