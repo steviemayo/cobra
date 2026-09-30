@@ -35,6 +35,7 @@ import { RequireFeature } from '@/components/common/plan-gate';
 import { DeviceConfig } from './device-config';
 import { PmRuns } from './pm-records';
 import { PmSchedules } from './pm-schedule';
+import { DeviceConnection } from './device-connection';
 import { DeviceDetailsView } from './device-details';
 
 type Device = RouterOutputs['device']['get'];
@@ -804,6 +805,17 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
         </TabsContent>
         <TabsContent value="details" className="space-y-6 pt-4">
           <AssetDetails key={`${d.id}:${d.version}:${JSON.stringify(d.provenance)}`} device={d} />
+          {d.kind === 'active' && (
+            <DeviceConnection
+              key={`${d.id}:${d.version}`}
+              deviceId={d.id}
+              control={d.control as never}
+              values={d.values}
+              hasLogin={d.hasLogin}
+              credentialSetId={d.credentialSetId}
+              canEdit={canSupport}
+            />
+          )}
           {!canSupport && (
             <Label className="text-xs text-muted-foreground">
               You can view but not change this device.

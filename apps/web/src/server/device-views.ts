@@ -24,6 +24,7 @@ export interface DeviceView {
   since: Date | null;
   lastSeenAt: Date | null;
   driver: string | null;
+  control: unknown;
   hasLogin: boolean;
   credentialSetId: string | null;
   values: unknown;
@@ -103,6 +104,7 @@ export async function deviceViews(
       since: d.since,
       lastSeenAt: d.lastSeenAt,
       driver: control?.driverId ?? control?.protocol ?? null,
+      control: d.control,
       hasLogin: !!d.sealed || !!d.credentialSetId,
       credentialSetId: d.credentialSetId,
       values: d.values,

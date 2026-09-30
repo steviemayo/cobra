@@ -43,6 +43,14 @@ import { useEstate } from '@/lib/use-estate';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
+import {
+  ConnectionFields,
+  connectionMissing,
+  connectionPatch,
+  connectionSlots,
+  emptyConnection,
+  type ConnectionDraft,
+} from './device-connection';
 import { DeviceStateBadge } from './device-detail';
 import { ImportRegisterDialog } from './import-register-dialog';
 
@@ -481,7 +489,7 @@ export function AddDeviceDialog({
   const [roomId, setRoomId] = useState(fixedRoom ?? '');
   const [category, setCategory] = useState('display');
   const [driver, setDriver] = useState('pjlink');
-  const [host, setHost] = useState('');
+  const [conn, setConn] = useState<ConnectionDraft>(emptyConnection());
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
   const [serial, setSerial] = useState('');
@@ -498,7 +506,9 @@ export function AddDeviceDialog({
       onError: (e) => toast.error(e.message),
     }),
   );
-  const valid = name.trim().length > 0 && siteId && (kind === 'passive' || host.trim().length > 0);
+  const slots = connectionSlots(controlFor(driver));
+  const valid =
+    name.trim().length > 0 && siteId && (kind === 'passive' || !connectionMissing(slots, conn));
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -555,18 +565,18 @@ export function AddDeviceDialog({
             <SimpleSelect value={category} onValueChange={setCategory} options={CATEGORY_OPTIONS} />
           </Field>
           {kind === 'active' && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-3">
               <Field label="Driver">
-                <SimpleSelect value={driver} onValueChange={setDriver} options={DRIVER_OPTIONS} />
-              </Field>
-              <Field label="Address (IP or hostname)">
-                <Input
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  placeholder="10.0.0.20"
-                  maxLength={200}
+                <SimpleSelect
+                  value={driver}
+                  onValueChange={(v) => {
+                    setDriver(v);
+                    setConn(emptyConnection());
+                  }}
+                  options={DRIVER_OPTIONS}
                 />
               </Field>
+              <ConnectionFields slots={slots} draft={conn} onChange={setConn} />
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
@@ -590,7 +600,8 @@ export function AddDeviceDialog({
           {kind === 'active' && (
             <p className="text-xs text-muted-foreground">
               Anything left blank that the device reports itself (serial, model, firmware) fills in
-              once a gateway is polling it. Logins are added on the device page.
+              once a gateway is polling it. Connection settings can be changed later on the device
+              page.
             </p>
           )}
         </div>
@@ -609,7 +620,12 @@ export function AddDeviceDialog({
                 category: category as never,
                 roomId: roomId || null,
                 ...(kind === 'active'
-                  ? { control: controlFor(driver), values: { host: host.trim() } }
+                  ? {
+                      control: controlFor(driver),
+                      values: connectionPatch(slots, conn).values,
+                      secrets: connectionPatch(slots, conn).secrets,
+                      credentialSetId: connectionPatch(slots, conn).credentialSetId,
+                    }
                   : {}),
                 make: make || null,
                 model: model || null,
