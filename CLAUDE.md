@@ -4,7 +4,7 @@
 
 - Kestrel now leads with **monitoring, configuration/deployment (enforce, snapshot, drift), support (incident > ticket > ITSM/staff/provider) and analytics (room usage from device points)**. The control platform and generated panel are **deferred to a later add-on**, not cancelled. Plan: `docs/pivot-monitoring.md`; decisions PV-1..14 in `docs/decisions.md`; diagrams part "v2"
 - Sections below describe v1 (control first). Where they conflict with the pivot docs, the pivot wins. Hierarchy is now estate > site > area > room > device (active or passive). Providers have Internal and Customer estates
-- Status: plan only, nothing built yet. No code until the user says build
+- Status (2026-09-30): M0-M7 built on stacked local branches feat/pivot-m0..m7 (unpushed). Gateway 0.4.0 watches devices only (M7-7); v1 web pages, routers and the gateway room runtime are removed; v1 web endpoints and tables remain for old gateways (M7-6). Windows hardening in M7-8; `apps/gateway/windows/build-local.ps1` builds and installs locally. Left: PM photos and reopening a signed inspection, browser pass of M3-M7 actions, push and signed gateway build, launch readiness
 
 ## What This Is
 
