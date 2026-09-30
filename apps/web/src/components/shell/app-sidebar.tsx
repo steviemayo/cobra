@@ -413,19 +413,16 @@ export function AppSidebar() {
   ]);
   const maintenance = entries([
     canSupport && {
-      soon: true,
       href: `${base}/pm/schedule`,
       icon: CalendarCheck,
       label: 'Schedule',
     },
     canSupport && {
-      soon: true,
       href: `${base}/pm/records`,
       icon: ClipboardCheck,
       label: 'PM records',
     },
-    canEdit &&
-      full && { soon: true, href: `${base}/pm/templates`, icon: ListChecks, label: 'PM templates' },
+    canEdit && full && { href: `${base}/pm/templates`, icon: ListChecks, label: 'PM templates' },
   ]);
   const configuration = entries([
     canSupport && {

@@ -132,6 +132,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
             { label: 'Overview', href: base, exact: true },
             ...(canSupport ? [{ label: 'Devices', href: `${base}/devices` }] : []),
             { label: 'Usage', href: `${base}/usage` },
+            { label: 'Maintenance', href: `${base}/maintenance` },
             { label: 'Monitoring', href: `${base}/monitoring` },
             ...(canEdit ? [{ label: 'Settings', href: `${base}/settings` }] : []),
           ]}

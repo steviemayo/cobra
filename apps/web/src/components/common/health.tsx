@@ -106,4 +106,5 @@ export const INCIDENT_KIND_LABEL: Record<string, string> = {
   point_alert: 'Watched value out of bounds',
   config_drift: 'Setting changed',
   config_enforce_failed: 'Setting could not be put back',
+  pm_overdue: 'Maintenance overdue',
 };

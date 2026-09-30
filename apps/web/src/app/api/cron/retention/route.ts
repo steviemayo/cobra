@@ -6,6 +6,9 @@ import { runReportSchedules } from '@/server/report-delivery';
 import { pruneOldData } from '@/server/retention';
 import { pruneUsage, rollupUsage } from '@/server/usage-service';
 import { snapshotAll } from '@/server/config-service';
+import { pmSweep } from '@/server/pm-service';
+import { runScheduledIssues } from '@/server/register-issues';
+import { loadSigningKey } from '@/server/signing';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,9 +41,24 @@ export async function GET(req: Request) {
   const snapshots = await snapshotAll(db).catch((e: unknown) => ({
     error: e instanceof Error ? e.message : String(e),
   }));
+  // Overdue maintenance becomes an info notice, and any register issue on a schedule is taken.
+  const pm = await pmSweep(db)
+    .then((j) => ({ notices: j.length }))
+    .catch((e: unknown) => ({
+      error: e instanceof Error ? e.message : String(e),
+    }));
+  const register = await (async () => {
+    try {
+      return { issued: await runScheduledIssues(db, loadSigningKey()) };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  })();
   return Response.json({
     ...res,
     snapshots,
+    pm,
+    register,
     cutoff: res.cutoff.toISOString(),
     audit,
     reports,

@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@kestrel/db';
 import {
   DEFAULT_USAGE_RULES,
+  dueState,
   UsageRuleSchema,
   deviceLiveState,
   inUseNow,
@@ -26,6 +27,7 @@ export type EstateDb = Pick<
   | 'incident'
   | 'ticket'
   | 'usageDefinition'
+  | 'pmSchedule'
 >;
 
 type GatewayStatus = 'pending' | 'online' | 'offline';
@@ -87,6 +89,9 @@ export interface EstateOverview {
     /** Null until in-use definitions (M3) and drift (M4) exist. */
     roomsInUse: number | null;
     driftCount: number | null;
+    /** Maintenance checks past their due date, and due within their lead time. */
+    pmOverdue: number;
+    pmDueSoon: number;
   };
   sites: { id: string; name: string }[];
   areas: EstateArea[];
@@ -111,6 +116,7 @@ export async function estateOverview(
     allIncidents,
     tickets,
     definitions,
+    pmSchedules,
   ] = await Promise.all([
     db.site.findMany({ where: { orgId }, orderBy: { name: 'asc' } }),
     db.area.findMany({ where: { orgId }, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] }),
@@ -121,6 +127,7 @@ export async function estateOverview(
     db.incident.findMany({ where: { orgId, status: 'open' } }),
     db.ticket.findMany({ where: { orgId, status: { in: OPEN_TICKET } } }),
     db.usageDefinition.findMany({ where: { orgId, kind: 'av' } }),
+    db.pmSchedule.findMany({ where: { orgId, enabled: true } }),
   ]);
   const sites = allSites.filter((s) => inScope(scope, s.id));
   const areas = allAreas.filter((a) => inScope(scope, a.siteId));
@@ -312,6 +319,14 @@ export async function estateOverview(
     ),
   ).length;
 
+  // Planned maintenance, for the rooms in view (a device check counts against its room).
+  const pmStates = pmSchedules
+    .filter((p) => {
+      const roomId = p.roomId ?? devices.find((d) => d.id === p.deviceId)?.roomId ?? null;
+      return roomId !== null && roomIds.has(roomId);
+    })
+    .map((p) => dueState(p.nextDueOn, p.leadDays, now));
+
   return {
     kpis: {
       liveIncidents: incidents.length,
@@ -331,6 +346,8 @@ export async function estateOverview(
         ? rows.filter((r) => r.inUse === true).length
         : null,
       driftCount: driftDevices,
+      pmOverdue: pmStates.filter((x) => x === 'overdue').length,
+      pmDueSoon: pmStates.filter((x) => x === 'due_soon').length,
     },
     sites: sites.map((s) => ({ id: s.id, name: s.name })),
     areas: areas.map((a) => ({

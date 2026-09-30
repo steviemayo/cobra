@@ -14,3 +14,4 @@ export * from './signup';
 export * from './devices';
 export * from './usage';
 export * from './config';
+export * from './pm';

@@ -32,6 +32,8 @@ import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
 import { LineSeries, StateStrip, minutesLabel } from '@/components/common/usage-charts';
 import { DeviceConfig } from './device-config';
+import { PmRuns } from './pm-records';
+import { PmSchedules } from './pm-schedule';
 import { DeviceDetailsView } from './device-details';
 
 type Device = RouterOutputs['device']['get'];
@@ -792,6 +794,7 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
           <TabsTrigger value="details">Details</TabsTrigger>
           {d.kind === 'active' && <TabsTrigger value="charts">History</TabsTrigger>}
           {d.kind === 'active' && <TabsTrigger value="config">Configuration</TabsTrigger>}
+          <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
           <TabsTrigger value="history">Asset history</TabsTrigger>
           <TabsTrigger value="incidents">Incidents and tickets</TabsTrigger>
         </TabsList>
@@ -816,6 +819,18 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
             <DeviceHistoryCharts deviceId={d.id} />
           </TabsContent>
         )}
+        <TabsContent value="maintenance" className="space-y-6 pt-4">
+          {d.kind === 'active' && (
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium">Schedule</h3>
+              <PmSchedules deviceId={d.id} compact />
+            </section>
+          )}
+          <section className="space-y-3">
+            <h3 className="text-sm font-medium">Visits</h3>
+            <PmRuns deviceId={d.id} compact />
+          </section>
+        </TabsContent>
         <TabsContent value="history" className="pt-4">
           <AssetHistory deviceId={d.id} />
         </TabsContent>

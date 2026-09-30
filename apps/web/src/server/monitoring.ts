@@ -24,7 +24,8 @@ export type IncidentKind =
   | 'deploy_failed'
   | 'point_alert'
   | 'config_drift'
-  | 'config_enforce_failed';
+  | 'config_enforce_failed'
+  | 'pm_overdue';
 
 export interface AlertJob {
   incidentId: string;

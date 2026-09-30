@@ -233,7 +233,7 @@ export function EstateOverviewView() {
       ) : (
         <Stagger className="space-y-6">
           <StaggerItem>
-            <div className="grid grid-cols-2 divide-x divide-y overflow-hidden rounded-lg border sm:grid-cols-4 sm:divide-y-0 [&>*:nth-child(n+5)]:sm:border-t">
+            <div className="grid grid-cols-2 divide-x divide-y overflow-hidden rounded-lg border sm:grid-cols-3 sm:divide-y-0 lg:grid-cols-5 sm:[&>*:nth-child(n+4)]:border-t">
               <Kpi
                 label="Live incidents"
                 value={k.liveIncidents}
@@ -285,6 +285,17 @@ export function EstateOverviewView() {
                 label="Configuration drift"
                 value={k.driftCount ?? '–'}
                 hint={k.driftCount === null ? 'Not set up yet' : undefined}
+              />
+              <Kpi
+                label="Maintenance due"
+                value={k.pmOverdue + k.pmDueSoon}
+                tone={k.pmOverdue > 0 ? 'bad' : k.pmDueSoon > 0 ? 'warn' : undefined}
+                hint={
+                  k.pmOverdue || k.pmDueSoon
+                    ? `${k.pmOverdue} overdue, ${k.pmDueSoon} due soon`
+                    : 'Nothing due'
+                }
+                href={orgPath(orgId, '/pm/schedule')}
               />
               <Kpi label="Open tickets" value={k.openTickets} href={orgPath(orgId, '/tickets')} />
             </div>

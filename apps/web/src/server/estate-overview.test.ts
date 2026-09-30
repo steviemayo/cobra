@@ -122,6 +122,26 @@ function world() {
   ]);
   const deviceStatus = table([]);
   const usageDefinition = table([]);
+  const pmSchedule = table([
+    {
+      id: 'p1',
+      orgId: ORG,
+      enabled: true,
+      roomId: R1,
+      deviceId: null,
+      nextDueOn: new Date('2026-09-20'),
+      leadDays: 7,
+    },
+    {
+      id: 'p2',
+      orgId: ORG,
+      enabled: true,
+      roomId: null,
+      deviceId: 'd4',
+      nextDueOn: new Date('2026-10-03'),
+      leadDays: 7,
+    },
+  ]);
   const incident = table([
     { id: 'i1', orgId: ORG, roomId: R1, gatewayId: G1, status: 'open', severity: 'warning' },
     { id: 'i2', orgId: ORG, roomId: null, gatewayId: G2, status: 'open', severity: 'critical' },
@@ -140,6 +160,7 @@ function world() {
     incident,
     ticket,
     usageDefinition,
+    pmSchedule,
   } as unknown as EstateDb;
   return { db, deviceStatus, device, usageDefinition, site };
 }
@@ -193,6 +214,8 @@ describe('estateOverview', () => {
       openTickets: 2,
       roomsInUse: 0,
       driftCount: 0,
+      pmOverdue: 1,
+      pmDueSoon: 1,
     });
   });
 
