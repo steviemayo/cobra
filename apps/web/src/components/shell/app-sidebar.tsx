@@ -431,18 +431,16 @@ export function AppSidebar() {
   ]);
   const configuration = entries([
     canSupport && {
-      soon: true,
       href: `${base}/config/profiles`,
       icon: SlidersHorizontal,
       label: 'Profiles',
     },
     canSupport && {
-      soon: true,
       href: `${base}/config/drift`,
       icon: GitCompare,
       label: 'Snapshots and drift',
     },
-    canSupport && { soon: true, href: `${base}/config/changes`, icon: History, label: 'Changes' },
+    canSupport && { href: `${base}/config/changes`, icon: History, label: 'Changes' },
   ]);
   const analytics = entries([
     { href: `${base}/usage`, icon: BarChart3, label: 'Usage' },

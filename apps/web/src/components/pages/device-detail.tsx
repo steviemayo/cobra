@@ -31,6 +31,7 @@ import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
 import { LineSeries, StateStrip, minutesLabel } from '@/components/common/usage-charts';
+import { DeviceConfig } from './device-config';
 import { DeviceDetailsView } from './device-details';
 
 type Device = RouterOutputs['device']['get'];
@@ -759,6 +760,7 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
           {d.kind === 'active' && <TabsTrigger value="charts">History</TabsTrigger>}
+          {d.kind === 'active' && <TabsTrigger value="config">Configuration</TabsTrigger>}
           <TabsTrigger value="history">Asset history</TabsTrigger>
           <TabsTrigger value="incidents">Incidents</TabsTrigger>
         </TabsList>
@@ -773,6 +775,11 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
             </Label>
           )}
         </TabsContent>
+        {d.kind === 'active' && (
+          <TabsContent value="config" className="pt-4">
+            <DeviceConfig deviceId={d.id} />
+          </TabsContent>
+        )}
         {d.kind === 'active' && (
           <TabsContent value="charts" className="pt-4">
             <DeviceHistoryCharts deviceId={d.id} />

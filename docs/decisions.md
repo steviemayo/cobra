@@ -745,3 +745,18 @@ M2 browser pass (local dev server against `kestrel-dev`, signed-in owner): Overv
 | M3-10 | **Sites name a default gateway** on the site page; a device with no gateway of its own and no room gateway uses it, falling back to the site's oldest | user (S2-2) | Replaces M1-4 |
 
 Not done in M3: usage from older room-design devices (they have no stored readings until moved into the register), the booking overlay (booked versus used), and scheduled usage reports (the existing Reports keep their v1 content until M7 reworks them).
+
+### Built: M4, configuration (2026-09-30, branch `feat/pivot-m4`)
+
+| ID | Decision | Who | Why |
+| --- | --- | --- | --- |
+| M4-1 | **Migration `configuration_tables`** (additive, applied to `kestrel-dev`): `ConfigProfile`, `DeviceSnapshot`, `ConfigDeploy`, and `Device.profileId`, `configParams`, `configState`. (An earlier migration named `configuration` is empty; it was created by a slip and does nothing) | build | PV-8 |
+| M4-2 | **A setting is a reading a driver already reports and a command it already accepts** (power, muted, volume, picture blanked, recording), so any driver that supports the command can be held with nothing extra to write. A per-driver "config surface" was not needed | user (PV-8 idea), build | Uses what drivers already have |
+| M4-3 | **A setting only applies to a device that reports that reading.** A device's own settings can only be ones it reports, and a profile setting the device does not report is shown as not applicable and is never tracked, enforced or counted as drift | user | Nothing is recorded that cannot exist on that device |
+| M4-4 | **Modes:** watch (an incident and history entry when it changes), enforce (also sent back by the gateway at most once a minute, up to five tries, then a "could not be put back" incident), apply once (pushed at deploy, not tracked) | user (PV-8) | Set, hold and detect change |
+| M4-5 | **Enforcement runs through the heartbeat reply** (`enforce`, only to gateways that advertise `config-enforce`), not the support command list, and is not part of the old control gate | build | Keeps v1 control out of v2 |
+| M4-6 | **Snapshots** copy a device's last readings, details, firmware, driver and its non-secret settings (anything that looks like a login is dropped). One per device can be the baseline; a scheduled one is taken daily and the last 30 are kept. Rows that change by themselves (uptime, clock, temperature and similar) are left out of comparisons | user (PV-8) | Drift against a baseline without noise |
+| M4-7 | **Deploys** take a snapshot of every chosen device first, can go to a canary first and wait for a go-ahead, and roll back by restoring the earlier profile and sending the snapshot's settings back once. A dry run shows what would change per device | user (PV-8) | Staged rollout and rollback |
+| M4-8 | **Pages:** Profiles, Snapshots and drift, Changes, and a Configuration tab on each monitored device. The Overview's drift card counts monitored devices with a held setting currently reading wrong | build | PV-13 |
+
+Not done in M4: holding DSP control points (only the five readings above), a comparison against a profile's other settings than these, and a gateway-side check that the plan includes enforcement (plan gating comes with M7).
