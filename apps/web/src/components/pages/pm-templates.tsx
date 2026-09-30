@@ -323,6 +323,11 @@ export function PmTemplatesView() {
                       Copy to customers
                     </Button>
                   )}
+                  {org.kind === 'msp' && (
+                    <Button size="xs" variant="outline" onClick={() => setPushing(t)}>
+                      Copy to customers
+                    </Button>
+                  )}
                   <Button size="xs" variant="outline" onClick={() => setEditing(t)}>
                     Edit
                   </Button>
@@ -341,6 +346,14 @@ export function PmTemplatesView() {
             </li>
           ))}
         </ul>
+      )}
+      {pushing && (
+        <PushToCustomersDialog
+          kind="pm_template"
+          sourceId={pushing.id}
+          name={pushing.name}
+          onClose={() => setPushing(null)}
+        />
       )}
       {editing && (
         <TemplateDialog
