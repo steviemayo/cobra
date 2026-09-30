@@ -402,7 +402,6 @@ export function AppSidebar() {
     canSupport && { href: `${base}/assets`, icon: Package, label: 'Register' },
     canEdit &&
       full && {
-        soon: true,
         href: `${base}/register-issues`,
         icon: FileCheck2,
         label: 'Register issues',

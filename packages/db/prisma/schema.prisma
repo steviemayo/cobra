@@ -1560,6 +1560,8 @@ model PmRun {
   /// [{ itemId, label, type, result, note?, auto?: { value, at } }]
   results         Json      @default("[]")
   failedCount     Int       @default(0)
+  /// The date the check was due when it was signed off, to tell on time from late.
+  dueOn           DateTime? @db.Date
   notes           String?
   startedBy       String?   @db.Uuid
   signedBy        String?   @db.Uuid
@@ -1570,4 +1572,12 @@ model PmRun {
   @@index([orgId, createdAt])
   @@index([roomId])
   @@index([deviceId])
+}
+
+/// How often an organisation wants a register issue taken by itself. One row per organisation.
+model RegisterSchedule {
+  orgId        String    @id @db.Uuid
+  everyDays    Int
+  lastIssuedAt DateTime?
+  updatedAt    DateTime  @updatedAt
 }

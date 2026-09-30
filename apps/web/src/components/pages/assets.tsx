@@ -44,6 +44,7 @@ import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
 import { DeviceStateBadge } from './device-detail';
+import { ImportRegisterDialog } from './import-register-dialog';
 
 export type DeviceRow = RouterOutputs['device']['list'][number];
 
@@ -98,6 +99,7 @@ export function AssetsView() {
   });
   const areas = useQuery(trpc.area.list.queryOptions({ orgId }));
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [search, setSearch] = useState('');
   const [siteId, setSiteId] = useState('');
   const [category, setCategory] = useState('');
@@ -207,6 +209,16 @@ export function AssetsView() {
             >
               <Download data-icon="inline-start" /> Export CSV
             </Button>
+            {canEdit && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setImporting(true)}
+                disabled={sites.length === 0}
+              >
+                Import CSV
+              </Button>
+            )}
             {canEdit && (
               <Button size="sm" onClick={() => setAdding(true)} disabled={sites.length === 0}>
                 <Plus data-icon="inline-start" /> Add device
