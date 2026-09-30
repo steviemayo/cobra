@@ -457,9 +457,18 @@ function AssetHistory({ deviceId }: { deviceId: string }) {
         description="Changes to this device are recorded here."
       />
     );
+  // A serial change is recorded twice (the change, and the swap flag). Show the flag once.
+  const flagged = new Set(
+    events.data
+      .filter((e) => e.type === 'swap_flagged')
+      .map((e) => `${e.field}|${new Date(e.at).getTime()}`),
+  );
+  const shown = events.data.filter(
+    (e) => !(e.type === 'field_changed' && flagged.has(`${e.field}|${new Date(e.at).getTime()}`)),
+  );
   return (
     <ol className="relative space-y-4 border-l pl-5">
-      {events.data.map((e) => {
+      {shown.map((e) => {
         const d = describe(e);
         return (
           <li key={e.id} className="relative">

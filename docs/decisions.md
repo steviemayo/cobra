@@ -715,3 +715,16 @@ Not built yet in M1: room and device portal screens (M2), driver-declared histor
 | M2-7 | **Areas are managed on the site page** (add, rename, delete, nest three deep) and the sidebar tree shows rooms under their areas | build | PV-4 |
 
 Not done in M2: the old room-design device screen (addresses and logins of legacy design devices) was replaced, so those devices are edited through the new device page once they are moved into the register (migration still to do); the "New room" dialog still offers templates; register issues, the register import, the in-room maintenance tab, and browser verification (only `tsc`, `eslint`, `next build` and unit tests were run).
+
+### Settled 2026-09-30 (user, after the M2 browser pass)
+
+| ID | Decision | Who | Why |
+| --- | --- | --- | --- |
+| S2-1 | **Legacy room-design devices are moved into the register by a one-off migration script** (not hidden) | user (default) | They keep being polled and editable |
+| S2-2 | **Sites get a "default gateway" setting in M3**, replacing "the site's oldest gateway" (M1-4) | user | Explicit beats implied |
+| S2-3 | **Tiers: Trial, Essentials, Pro.** The register is on Essentials; signed register issues, preventative maintenance, configuration enforcement and drift, full analytics and definitions, all alert channels, ITSM and the API are Pro (PV-14, PV-19) | user (accepted proposal) | Closes the tier question for M7 |
+| S2-4 | **Headline usage state: both Occupied and AV in use are shown, AV in use is the headline** | user (default) | PV-9 |
+| S2-5 | **Raw device history kept 90 days, rollups 13 months** | user (default) | PV-9 |
+| S2-6 | **Old room-model tables and code are cleaned up in M7**, not before | user | Staged removal, PV-3 |
+
+M2 browser pass (local dev server against `kestrel-dev`, signed-in owner): Overview, asset register, add device (recorded and monitored), device details, serial change flagged as a possible swap and confirmed as replaced, asset history, site page and areas, room page with area, and the Overview roll-up all worked. Fixed afterwards: the serial change showing twice in the history, Enter not submitting the area form, the Add device type list cutting off its text, and the v1 marketing copy on the sign-in page. Test data was removed.

@@ -79,6 +79,7 @@ export function AreasPanel({ siteId }: { siteId: string }) {
         className="h-8 w-56"
         maxLength={80}
         aria-label="Area name"
+        onKeyDown={(e) => e.key === 'Enter' && name.trim() && !busy && onSubmit()}
       />
       <Input
         value={label}
@@ -87,6 +88,7 @@ export function AreasPanel({ siteId }: { siteId: string }) {
         className="h-8 w-52"
         maxLength={40}
         aria-label="What this level is called"
+        onKeyDown={(e) => e.key === 'Enter' && name.trim() && !busy && onSubmit()}
       />
       <Button size="sm" disabled={!name.trim() || busy} onClick={onSubmit}>
         Save
