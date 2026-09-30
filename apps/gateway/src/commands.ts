@@ -1,13 +1,5 @@
-import { hostname } from 'node:os';
-import { PointAddress, PointType, type CommandResult, type GatewayCommand } from '@kestrel/model';
+import { type CommandResult, type GatewayCommand } from '@kestrel/model';
 import { discoverDevices } from './discovery';
-import type { RoomHost } from './room-host';
-
-export interface GatewayFacts {
-  version: string;
-  uptimeSeconds: number;
-  bufferedEvents: number;
-}
 
 const fail = (error: string, output: Record<string, unknown> = {}): CommandResult => ({
   id: '',
@@ -20,129 +12,26 @@ const fail = (error: string, output: Record<string, unknown> = {}): CommandResul
  * Runs one allowlisted command. Anything the cloud sends that is not in the allowlist is refused
  * here as well: the gateway never trusts the far end to have checked.
  */
-export async function runCommand(
-  host: RoomHost,
-  cmd: GatewayCommand,
-  facts: GatewayFacts,
-): Promise<CommandResult> {
-  return { ...(await execute(host, cmd, facts)), id: cmd.id };
+export async function runCommand(cmd: GatewayCommand): Promise<CommandResult> {
+  return { ...(await execute(cmd)), id: cmd.id };
 }
 
-async function execute(host: RoomHost, cmd: GatewayCommand, facts: GatewayFacts): Promise<CommandResult> {
-  const room = host.get(cmd.roomId);
-  if (!room) return fail('That room is not running on this gateway');
-  const model = room.signed.manifest.model;
-
+async function execute(cmd: GatewayCommand): Promise<CommandResult> {
   switch (cmd.type) {
-    case 'diagnostics': {
-      const devices = model.devices.map((d) => {
-        const s = room.bus.getState(d.id);
-        return {
-          id: d.id,
-          name: d.name,
-          online: s?.online ?? true,
-          power: s?.power ?? null,
-          selectedInput: s?.selectedInput ?? null,
-          muted: s?.muted ?? null,
-          volume: s?.volume ?? null,
-        };
-      });
-      const offline = devices.filter((d) => !d.online).map((d) => d.name);
-      return {
-        id: '',
-        ok: offline.length === 0,
-        error: offline.length ? `Not answering: ${offline.join(', ')}` : undefined,
-        output: {
-          room: {
-            name: room.signed.manifest.roomName,
-            release: room.signed.manifest.releaseNumber,
-            status: room.runtime.getSnapshot().status,
-          },
-          devices,
-          gateway: { ...facts, hostname: hostname(), node: process.version },
-        },
-      };
-    }
     case 'discover_devices': {
       // Looks at the gateway's own private networks and reports what answers. Reads only.
       const subnet = cmd.args.subnet;
-      if (subnet && !/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(subnet)) return fail('That is not a network address');
+      if (subnet && !/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(subnet))
+        return fail('That is not a network address');
       const found = await discoverDevices(subnet ? { subnets: [subnet] } : {});
       if (found.subnets.length === 0)
-        return fail(subnet ? 'The gateway is not on that network' : 'The gateway is not on a private network it can look at', { ...found });
+        return fail(
+          subnet
+            ? 'The gateway is not on that network'
+            : 'The gateway is not on a private network it can look at',
+          { ...found },
+        );
       return { id: '', ok: true, output: { ...found } };
-    }
-    case 'test_device': {
-      const device = model.devices.find((d) => d.id === cmd.args.deviceId);
-      if (!device) return fail('That device is not in this room');
-      const state = room.bus.getState(device.id);
-      const online = state?.online ?? true;
-      return {
-        id: '',
-        ok: online,
-        error: online ? undefined : `${device.name} is not answering`,
-        output: { device: device.name, online, state: state ?? null },
-      };
-    }
-    case 'verify_point': {
-      // Reads one control point of a DSP, to check it exists and learn its range. Changes nothing.
-      const device = model.devices.find((d) => d.id === cmd.args.deviceId);
-      if (!device) return fail('That device is not in this room');
-      const type = PointType.safeParse(cmd.args.type);
-      let address: unknown;
-      try {
-        address = JSON.parse(cmd.args.address ?? '');
-      } catch {
-        return fail('The control point address is not valid');
-      }
-      const parsed = PointAddress.safeParse(address);
-      if (!type.success || !parsed.success) return fail('The control point is not valid');
-      if (!room.bus.readPoint) return fail('This gateway cannot read control points');
-      try {
-        const reading = await room.bus.readPoint(device.id, { type: type.data, address: parsed.data });
-        return { id: '', ok: true, output: { device: device.name, ...reading } };
-      } catch (e) {
-        return fail(e instanceof Error ? e.message.slice(0, 300) : 'Could not read the control point');
-      }
-    }
-    case 'discover_components': {
-      // Lists a point-based device's own named components, so someone can pick one instead of
-      // typing it blind. Reads only.
-      const device = model.devices.find((d) => d.id === cmd.args.deviceId);
-      if (!device) return fail('That device is not in this room');
-      if (!room.bus.discoverComponents) return fail('This device cannot list its components');
-      try {
-        const components = await room.bus.discoverComponents(device.id);
-        return { id: '', ok: true, output: { device: device.name, components } };
-      } catch (e) {
-        return fail(e instanceof Error ? e.message.slice(0, 300) : 'Could not list the device’s components');
-      }
-    }
-    case 'discover_controls': {
-      // Lists one named component's controls. Reads only.
-      const device = model.devices.find((d) => d.id === cmd.args.deviceId);
-      if (!device) return fail('That device is not in this room');
-      const component = cmd.args.component ?? '';
-      if (!component) return fail('No component was given');
-      if (!room.bus.discoverControls) return fail('This device cannot list its controls');
-      try {
-        const controls = await room.bus.discoverControls(device.id, component);
-        return { id: '', ok: true, output: { device: device.name, component, controls } };
-      } catch (e) {
-        return fail(e instanceof Error ? e.message.slice(0, 300) : 'Could not list the component’s controls');
-      }
-    }
-    case 'restart_room': {
-      host.load(room.signed, room.bindings);
-      return { id: '', ok: true, output: { restarted: room.signed.manifest.roomName } };
-    }
-    case 'room_off': {
-      // While walls are open the combined room is the one in charge of this room's devices.
-      const running = host.active(cmd.roomId) ?? room;
-      const off = running.runtime.getSnapshot().activities.find((a) => a.kind === 'room_off');
-      if (!off) return fail('This room has no Room Off activity');
-      running.runtime.dispatch({ type: 'activity.start', activityId: off.id });
-      return { id: '', ok: true, output: {} };
     }
     default:
       return fail('That command is not supported by this gateway');

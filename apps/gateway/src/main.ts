@@ -3,9 +3,8 @@ import { CloudClient } from './cloud';
 import { loadConfig } from './config';
 import { Gateway } from './gateway';
 import { loadAdminCode } from './local-admin';
+import { createLocalServer } from './local-server';
 import { createLogger } from './log';
-import { createPanelServer } from './panel-server';
-import { RoomHost } from './room-host';
 import { Store } from './store';
 
 async function main() {
@@ -13,35 +12,29 @@ async function main() {
   const log = createLogger(cfg.logLevel, join(cfg.dataDir, 'logs', 'gateway.log'));
   const store = new Store(join(cfg.dataDir, 'gateway.db'));
 
-  // A gateway must keep running rooms even if something unexpected throws.
+  // A gateway must keep watching its devices even if something unexpected throws.
   process.on('unhandledRejection', (e) =>
     log('error', 'Unhandled rejection', { error: String(e) }),
   );
   process.on('uncaughtException', (e) => log('error', 'Uncaught exception', { error: String(e) }));
 
-  const host = new RoomHost(cfg.simulate, log, (event) => store.enqueue(event));
-  const gateway = new Gateway(cfg, store, new CloudClient(cfg.cloudUrl), host, log);
+  const gateway = new Gateway(cfg, store, new CloudClient(cfg.cloudUrl), log);
 
   const admin = loadAdminCode(cfg.dataDir, log);
-  const panel = await createPanelServer({
-    host,
+  const server = await createLocalServer({
     log,
-    panelDir: cfg.panelDir,
-    phone: gateway.phone,
-    schedule: gateway.bookings,
-    admin: { gateway, adminCode: admin.code },
+    admin: { gateway, log, adminCode: admin.code },
     allowedHosts: cfg.allowedHosts,
   });
-  await panel.listen({ port: cfg.panelPort, host: cfg.panelHost });
-  log('info', 'Panel server listening', { port: cfg.panelPort });
+  await server.listen({ port: cfg.panelPort, host: cfg.panelHost });
+  log('info', 'Local status page listening', { port: cfg.panelPort });
 
   gateway.start();
 
   const shutdown = async (signal: string) => {
     log('info', 'Shutting down', { signal });
     gateway.stop();
-    await panel.close();
-    host.shutdown();
+    await server.close();
     gateway.devices.shutdown();
     store.close();
     process.exit(0);

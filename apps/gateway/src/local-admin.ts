@@ -4,7 +4,6 @@ import { dirname, join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Gateway, LocalStatus } from './gateway';
 import type { Logger } from './log';
-import type { RoomHost } from './room-host';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const CODE_SHAPE = /^[A-Z2-9]{4}-[A-Z2-9]{4}$/;
@@ -16,7 +15,6 @@ const LOCKOUT_MS = 60_000;
 const RECENT_MS = 3 * 60_000;
 
 export interface LocalAdminOptions {
-  host: RoomHost;
   gateway: Pick<Gateway, 'status' | 'enrolWithToken' | 'reset'>;
   log: Logger;
   /** Unlocks the admin page. Kept in a file only people with access to this machine can read. */
@@ -54,7 +52,7 @@ const esc = (s: string) =>
 const MESSAGES: Record<string, { ok: boolean; text: string }> = {
   enrolled: {
     ok: true,
-    text: 'Enrolled. This gateway now belongs to the new organisation and is loading its rooms.',
+    text: 'Enrolled. This gateway now belongs to the new organisation and is loading its devices.',
   },
   reset: {
     ok: true,
@@ -101,7 +99,7 @@ function headline(s: LocalStatus, now: number): { text: string; ok: boolean } {
       return recent
         ? { text: 'Connected to Kestrel.', ok: true }
         : {
-            text: `Cannot reach Kestrel right now. Rooms keep running${s.problem ? ` (${s.problem})` : '.'}`,
+            text: `Cannot reach Kestrel right now. Devices keep being watched${s.problem ? ` (${s.problem})` : '.'}`,
             ok: false,
           };
     }
@@ -123,44 +121,9 @@ function headline(s: LocalStatus, now: number): { text: string; ok: boolean } {
   }
 }
 
-function roomRows(host: RoomHost, hostHeader: string): string {
-  const rooms = host
-    .ids()
-    .flatMap((id) => {
-      const room = host.get(id);
-      return room
-        ? [
-            {
-              id,
-              name: room.signed.manifest.roomName,
-              offline: room.offline().length,
-              pin: room.access.mode === 'pin',
-            },
-          ]
-        : [];
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
-  if (rooms.length === 0) return '<p class="muted">No rooms are running on this gateway yet.</p>';
-  const rows = rooms
-    .map((r) => {
-      const state = r.offline
-        ? `<span class="bad">${r.offline} device${r.offline === 1 ? '' : 's'} not answering</span>`
-        : '<span class="ok">Running</span>';
-      // A PIN room's id is the only thing standing between a LAN device and the PIN prompt, so it
-      // is not handed out here; an open room's panel needs no credential either way, so its link
-      // costs nothing to show and saves someone typing it in on the day.
-      const link = r.pin
-        ? '<span class="muted">PIN protected</span>'
-        : `<a href="/room/${esc(r.id)}">Open panel</a><br><code>${esc(`http://${hostHeader}/room/${r.id}`)}</code>`;
-      return `<tr><td>${esc(r.name)}</td><td>${state}</td><td>${link}</td></tr>`;
-    })
-    .join('');
-  return `<table><thead><tr><th>Room</th><th>State</th><th>Panel link</th></tr></thead><tbody>${rows}</tbody></table>`;
-}
-
 /**
- * The gateway's own pages: a status page anyone on the network can read (rooms and their panel
- * links, nothing secret) and an admin page behind a code for entering a new enrolment token or
+ * The gateway's own pages: a status page anyone on the network can read (what it is
+ * doing, nothing secret) and an admin page behind a code for entering a new enrolment token or
  * resetting. Plain server-rendered HTML with no scripts, so it works offline and needs no build.
  */
 export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions): Promise<void> {
@@ -239,11 +202,7 @@ export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions):
       ['Kestrel address', esc(s.cloudHost)],
       ['Last contact', esc(ago(s.lastContactAt, t))],
     ];
-    if (s.enrolment === 'enrolled')
-      facts.push([
-        'Control',
-        s.control ? 'On' : 'Off: this organisation’s plan is monitoring only',
-      ]);
+    if (s.enrolment === 'enrolled') facts.push(['Devices watched', String(s.devices)]);
     if (s.bufferedEvents > 0)
       facts.push([
         'Waiting to send',
@@ -257,7 +216,6 @@ export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions):
     const body = `<h1>Kestrel gateway</h1>
 <div class="card"><p class="${h.ok ? 'ok' : 'bad'}"><strong>${esc(h.text)}</strong></p>${claimHelp}
 <dl>${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></div>
-<h2>Rooms on this gateway</h2>${roomRows(opts.host, req.headers.host ?? 'this-gateway')}
 <p class="muted"><a href="/admin">Admin</a></p>`;
     return html(reply, layout('Kestrel gateway', body, true));
   });
@@ -286,14 +244,14 @@ ${banner ? `<div class="banner ${banner.ok ? 'ok' : 'bad'}">${esc(banner.text)}<
 <section><h2 style="margin-top:0">Enter an enrolment token</h2>
 <p>Create a token in the portal (Gateways, then Add gateway) and paste it here.${
       enrolled
-        ? ` <strong>This gateway already belongs to ${s.name ? esc(s.name) : 'an organisation'}.</strong> A working token moves it: its rooms stop and the new organisation’s rooms replace them.`
+        ? ` <strong>This gateway already belongs to ${s.name ? esc(s.name) : 'an organisation'}.</strong> A working token moves it: its devices stop being watched and the new organisation’s replace them.`
         : ''
     }</p>
 <form method="post" action="/admin/token"><label for="token">Enrolment token</label>
 <input id="token" name="token" type="text" autocomplete="off" required maxlength="300">
 <button type="submit">Enrol</button></form></section>
 <section><h2 style="margin-top:0">Reset</h2>
-<p>Forget the organisation and start again as an unclaimed gateway. <strong>Its rooms stop running</strong> until the gateway is claimed or enrolled again. Devices are not touched.</p>
+<p>Forget the organisation and start again as an unclaimed gateway. <strong>Its devices stop being watched</strong> until the gateway is claimed or enrolled again. Devices are not touched.</p>
 <form method="post" action="/admin/reset"><label for="confirm">Type RESET to confirm</label>
 <input id="confirm" name="confirm" type="text" autocomplete="off" required maxlength="10">
 <button class="danger" type="submit">Reset this gateway</button></form></section>

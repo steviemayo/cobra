@@ -9,11 +9,10 @@ import {
   type SignedDeviceSet,
 } from '@kestrel/model';
 import type { Logger } from './log';
-import { deviceFeedback } from './room-host';
+import { deviceFeedback } from './device-feedback';
 
 // v2 (docs/pivot-monitoring.md): the devices a gateway polls on their own, whatever room they are in.
-// There is no room program here: each device gets its driver, its connection, and a report. Rooms
-// that still run a design keep their own devices in RoomHost; the two never share a device id.
+// There is no room program here: each device gets its driver, its connection, and a report.
 
 /** How long before device details are sent again even though they have not changed. */
 const DETAILS_REFRESH_MS = 5 * 60_000;
@@ -60,8 +59,8 @@ export class DeviceHost {
    * Makes the running devices match a verified set: new ones are opened, changed ones rebuilt,
    * removed ones closed. A device whose driver cannot be built is skipped and logged, never fatal.
    */
-  apply(signed: SignedDeviceSet) {
-    const wanted = new Map(signed.payload.devices.map((d) => [d.id, d]));
+  apply(signed: SignedDeviceSet | null) {
+    const wanted = new Map((signed?.payload.devices ?? []).map((d) => [d.id, d]));
     for (const [id, run] of this.running)
       if (!wanted.has(id)) {
         run.off();
@@ -115,7 +114,7 @@ export class DeviceHost {
       this.running.set(id, run);
       this.log('info', 'Polling a device', { device: device.name, deviceId: id });
     }
-    this.version = signed.payload.version;
+    this.version = signed?.payload.version ?? null;
   }
 
   /** What each polled device says now, in the shape the heartbeat carries. */

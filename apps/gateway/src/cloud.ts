@@ -2,15 +2,12 @@ import type { z } from 'zod';
 import {
   AnnounceResponse,
   BundleLocation,
-  ConfigResponse,
   EnrollResponse,
   HeartbeatResponse,
   PROTOCOL_VERSION,
-  PollResponse,
   type AnnounceRequest,
   type EnrollRequest,
   type HeartbeatRequest,
-  type PollRequest,
   type TelemetryBatch,
 } from '@kestrel/model';
 
@@ -95,26 +92,6 @@ export class CloudClient {
   /** Where to download the update bundle from, once the portal has ordered an update. */
   bundle(credential: string) {
     return this.request('GET', '/bundle', BundleLocation, { credential });
-  }
-
-  poll(credential: string, body: PollRequest) {
-    return this.request('POST', '/poll', PollResponse, { body, credential });
-  }
-
-  config(credential: string) {
-    return this.request('GET', '/config', ConfigResponse, { credential });
-  }
-
-  /** The manifest is returned raw: it must be verified against its hash and signature before parsing. */
-  manifest(credential: string, roomId: string, releaseId: string): Promise<unknown> {
-    return this.request('GET', `/rooms/${roomId}/manifest?release=${releaseId}`, null, {
-      credential,
-    });
-  }
-
-  /** A room's addresses and logins, returned raw: they must be verified before use. */
-  bindings(credential: string, roomId: string): Promise<unknown> {
-    return this.request('GET', `/rooms/${roomId}/bindings`, null, { credential });
   }
 
   /** The devices this gateway polls on their own, returned raw: they must be verified before use. */

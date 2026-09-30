@@ -11,7 +11,6 @@ import type { GatewayConfig } from './config';
 import { Gateway } from './gateway';
 import { silentLogger } from './log';
 import { signBundle } from './release-signature';
-import { RoomHost } from './room-host';
 import { Store } from './store';
 import { FakeCloud, ENROLL_TOKEN } from './test-support/fake-cloud';
 import {
@@ -360,15 +359,12 @@ function boot(updater: Updater, version = '0.0.1') {
     dataDir: dir,
     panelPort: 0,
     panelHost: '127.0.0.1',
-    panelDir: '',
-    simulate: 'all',
     logLevel: 'error',
     version,
   };
   const store = new Store(join(dir, 'gateway.db'));
-  const host = new RoomHost('all', silentLogger, (e) => store.enqueue(e));
-  const gateway = new Gateway(cfg, store, new CloudClient(cloud.url), host, silentLogger, updater);
-  return { gateway, host, store };
+  const gateway = new Gateway(cfg, store, new CloudClient(cloud.url), silentLogger, updater);
+  return { gateway, store };
 }
 
 describe('a gateway told to update', () => {
@@ -390,7 +386,7 @@ describe('a gateway told to update', () => {
 
   it('advertises that it can, and acts on the order once', async () => {
     const { updater, applied } = stub('ok');
-    const { gateway, host, store } = boot(updater);
+    const { gateway, store } = boot(updater);
     cloud.updateOrder = { version: VERSION, bundle: { sha256: 'a'.repeat(64) } };
     await gateway.tick();
     await until(() => applied.length === 1);
@@ -403,13 +399,12 @@ describe('a gateway told to update', () => {
     await until(() => lastReport()?.state === 'applying');
     expect(lastReport()).toMatchObject({ state: 'applying', version: VERSION });
     gateway.stop();
-    host.shutdown();
     store.close();
   });
 
   it('reports a failure once, and does not try the same version again straight away', async () => {
     const { updater, applied } = stub('fail');
-    const { gateway, host, store } = boot(updater);
+    const { gateway, store } = boot(updater);
     cloud.updateOrder = { version: VERSION, bundle: { sha256: 'a'.repeat(64) } };
     await gateway.tick();
     await until(() => applied.length === 1);
@@ -423,32 +418,29 @@ describe('a gateway told to update', () => {
     expect(lastReport()).toBeUndefined();
     expect(applied).toHaveLength(1);
     gateway.stop();
-    host.shutdown();
     store.close();
   });
 
   it('says an install that cannot update itself is unsupported', async () => {
     const { updater } = stub('unsupported');
-    const { gateway, host, store } = boot(updater);
+    const { gateway, store } = boot(updater);
     cloud.updateOrder = { version: VERSION };
     await gateway.tick();
     await wait(30);
     await gateway.tick();
     expect(lastReport()).toMatchObject({ state: 'unsupported' });
     gateway.stop();
-    host.shutdown();
     store.close();
   });
 
   it('ignores an order for the version it already runs', async () => {
     const { updater, applied } = stub('ok');
-    const { gateway, host, store } = boot(updater, VERSION);
+    const { gateway, store } = boot(updater, VERSION);
     cloud.updateOrder = { version: VERSION };
     await gateway.tick();
     await wait(30);
     expect(applied).toHaveLength(0);
     gateway.stop();
-    host.shutdown();
     store.close();
   });
 
@@ -458,7 +450,7 @@ describe('a gateway told to update', () => {
       join(updateDir(dir), 'result.json'),
       JSON.stringify({ ok: false, version: VERSION, error: 'did not start' }),
     );
-    const { gateway, host, store } = boot(stub('ok').updater);
+    const { gateway, store } = boot(stub('ok').updater);
     gateway.start();
     await until(() => cloud.heartbeats.length > 0);
     expect(cloud.heartbeats[0]!.updateReport).toEqual({
@@ -467,7 +459,6 @@ describe('a gateway told to update', () => {
       error: 'did not start',
     });
     gateway.stop();
-    host.shutdown();
     store.close();
   });
 });
