@@ -783,6 +783,10 @@ model OrgBilling {
   cancelAtPeriodEnd    Boolean   @default(false)
   /// Rooms added mid-cycle are charged pro rata to the end of the period straight away, then billed in full from the next cycle.
   trueUp               Boolean   @default(false)
+  /// How the plan is billed: "month" or "year".
+  billingInterval      String    @default("month")
+  /// Billed on the 1st of each month (first period pro rata). Chosen when first subscribing; never changed on a live subscription.
+  anchorFirstOfMonth   Boolean   @default(false)
   updatedAt            DateTime  @default(now()) @updatedAt
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)

@@ -295,3 +295,17 @@ export function entitlementsWithOverride(
     e.maxRooms = override.maxRooms;
   return e;
 }
+
+/** How often a paid plan is billed. */
+export const BILLING_INTERVALS = ['month', 'year'] as const;
+export type BillingInterval = (typeof BILLING_INTERVALS)[number];
+
+/** 00:00 UTC on the 1st of the month after `now`. Always strictly in the future. */
+export function nextFirstOfMonthUtc(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+}
+
+/** The same moment as a Unix timestamp in seconds, as Stripe wants it. */
+export function nextFirstOfMonthUnix(now: Date): number {
+  return Math.floor(nextFirstOfMonthUtc(now).getTime() / 1000);
+}

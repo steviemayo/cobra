@@ -1,8 +1,18 @@
 import 'server-only';
 import Stripe from 'stripe';
 import { headers } from 'next/headers';
-import type { PaidPlan } from '@kestrel/model';
-import { ensureBilling, monitoredRoomIds, priceMapFromEnv, type BillingDb } from './billing';
+import type { BillingInterval, PaidPlan } from '@kestrel/model';
+import {
+  PAYING_STATUSES,
+  assertAnchorChangeAllowed,
+  checkoutSubscriptionData,
+  ensureBilling,
+  monitoredRoomIds,
+  priceIdFor,
+  priceMapFromEnv,
+  switchParams,
+  type BillingDb,
+} from './billing';
 
 export class BillingNotConfigured extends Error {
   constructor(what = 'Billing') {
@@ -29,13 +39,16 @@ export async function baseUrl(): Promise<string> {
   return `${h.get('x-forwarded-proto') ?? 'https'}://${host}`;
 }
 
-function priceFor(plan: PaidPlan): string {
-  const id = priceMapFromEnv()[plan];
-  if (!id) throw new BillingNotConfigured(`The ${plan} plan`);
+function priceFor(plan: PaidPlan, interval: BillingInterval): string {
+  const id = priceIdFor(priceMapFromEnv(), plan, interval);
+  if (!id)
+    throw new BillingNotConfigured(
+      interval === 'year' ? `The yearly ${plan} plan` : `The ${plan} plan`,
+    );
   return id;
 }
 
-const PAYING = new Set(['active', 'trialing', 'past_due']);
+const PAYING = PAYING_STATUSES;
 
 /**
  * Sends the owner to Stripe to subscribe. If they already have a live subscription, the plan is
@@ -43,19 +56,44 @@ const PAYING = new Set(['active', 'trialing', 'past_due']);
  */
 export async function startSubscription(
   db: BillingDb,
-  input: { orgId: string; plan: PaidPlan; rooms: number; email: string | null },
+  input: {
+    orgId: string;
+    plan: PaidPlan;
+    interval?: BillingInterval;
+    /** Bill on the 1st of each month. New subscriptions only. */
+    anchorFirstOfMonth?: boolean;
+    rooms: number;
+    email: string | null;
+  },
 ): Promise<{ url: string } | { changed: true }> {
   const stripe = getStripe();
   const billing = await ensureBilling(db, input.orgId);
-  const price = priceFor(input.plan);
+  const interval = input.interval ?? 'month';
+  const price = priceFor(input.plan, interval);
+  const anchor = !!input.anchorFirstOfMonth;
 
   if (billing.stripeSubscriptionId && billing.stripeItemId && PAYING.has(billing.status)) {
+    // The billing date cannot be chosen once subscribed.
+    if (anchor) assertAnchorChangeAllowed(billing);
+    const params = switchParams({
+      current: billing.billingInterval as BillingInterval,
+      target: interval,
+    });
     await stripe.subscriptions.update(billing.stripeSubscriptionId, {
       items: [{ id: billing.stripeItemId, price, quantity: Math.max(1, input.rooms) }],
-      proration_behavior: 'create_prorations',
+      ...params,
     });
+    // An interval switch restarts the billing date from today, so it is no longer on the 1st.
+    if (params.billing_cycle_anchor && billing.anchorFirstOfMonth)
+      await db.orgBilling.update({ where: { id: billing.id }, data: { anchorFirstOfMonth: false } });
     return { changed: true };
   }
+
+  // A new (or resubscribed) subscription: remember the date choice for display afterwards.
+  await db.orgBilling.update({
+    where: { id: billing.id },
+    data: { anchorFirstOfMonth: anchor },
+  });
 
   const base = await baseUrl();
   const back = `${base}/o/${input.orgId}/settings/billing`;
@@ -68,7 +106,7 @@ export async function startSubscription(
         ? { customer_email: input.email }
         : {}),
     line_items: [{ price, quantity: Math.max(1, input.rooms) }],
-    subscription_data: { metadata: { orgId: input.orgId } },
+    subscription_data: checkoutSubscriptionData({ orgId: input.orgId, anchor }),
     allow_promotion_codes: true,
     success_url: `${back}?checkout=success`,
     cancel_url: `${back}?checkout=cancelled`,
