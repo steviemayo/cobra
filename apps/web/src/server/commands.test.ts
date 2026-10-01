@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { GatewayCommand } from '@kestrel/model';
 import {
   MAX_COMMANDS_PER_ROOM_MINUTE,
+  MAX_SCANS_PER_GATEWAY_MINUTE,
+  NIL_UUID,
   applyCommandResults,
   requestCommand,
+  requestGatewayCommand,
   takePendingCommands,
   type CommandDb,
 } from './commands';
@@ -240,3 +244,120 @@ describe('checking a control point', () => {
   });
 });
 
+
+describe('gateway-level commands (finding devices)', () => {
+  const online = new Date(T0.getTime() - 10_000);
+  function gw() {
+    const w = world();
+    w.gateway.rows[0]!.enrolledAt = new Date('2026-01-01T00:00:00Z');
+    w.gateway.rows[0]!.lastSeenAt = online;
+    w.gateway.rows[0]!.name = 'Gateway one';
+    return w;
+  }
+  const scan = (w: ReturnType<typeof world>, over = {}, at = T0) =>
+    requestGatewayCommand(
+      w.db,
+      { orgId: ORG, gatewayId: GW, type: 'discover_devices', requestedBy: 'user-1', ...over },
+      at,
+    );
+
+  it('queues a scan with no room and writes an audit entry', async () => {
+    const w = gw();
+    const res = await scan(w, { args: { subnet: '192.168.1' } });
+    expect(res.ok).toBe(true);
+    expect(w.remoteCommand.rows[0]).toMatchObject({
+      orgId: ORG,
+      gatewayId: GW,
+      roomId: null,
+      type: 'discover_devices',
+      args: { subnet: '192.168.1' },
+      status: 'pending',
+    });
+    expect(w.auditLog.rows[0]).toMatchObject({
+      action: 'command.request',
+      target: GW,
+      actorId: 'user-1',
+    });
+  });
+
+  it('accepts no network at all', async () => {
+    const w = gw();
+    expect((await scan(w)).ok).toBe(true);
+    expect(w.remoteCommand.rows[0]!.args).toEqual({});
+  });
+
+  it('refuses an unknown gateway, another org, an offline one and one that cannot scan', async () => {
+    const w = gw();
+    expect((await scan(w, { gatewayId: GW2 })).ok).toBe(false);
+    expect(await scan(w, { orgId: OTHER_ORG })).toEqual({ ok: false, error: 'Gateway not found' });
+    w.gateway.rows[0]!.features = ['bindings'];
+    expect(await scan(w)).toEqual({
+      ok: false,
+      error: 'This gateway needs updating before it can look for devices.',
+    });
+    w.gateway.rows[0]!.features = ['discovery'];
+    w.gateway.rows[0]!.lastSeenAt = new Date(T0.getTime() - 10 * 60_000);
+    expect((await scan(w)).ok).toBe(false);
+    w.gateway.rows[0]!.enrolledAt = null;
+    expect((await scan(w)).ok).toBe(false);
+    expect(w.remoteCommand.rows).toHaveLength(0);
+  });
+
+  it('refuses a bad or public network', async () => {
+    const w = gw();
+    for (const subnet of ['8.8.8', '192.168.1.0/24', '300.1.1', 'x', '172.40.1'])
+      expect((await scan(w, { args: { subnet } })).ok).toBe(false);
+    expect(w.remoteCommand.rows).toHaveLength(0);
+  });
+
+  it('refuses a second scan while one is running, then allows it once it is old or done', async () => {
+    const w = gw();
+    expect((await scan(w)).ok).toBe(true);
+    expect(await scan(w, {}, new Date(T0.getTime() + 5_000))).toEqual({
+      ok: false,
+      error: 'A scan is already running',
+    });
+    // Finished: allowed again.
+    w.remoteCommand.rows[0]!.status = 'succeeded';
+    w.gateway.rows[0]!.lastSeenAt = new Date(T0.getTime() + 69_000);
+    expect((await scan(w, {}, new Date(T0.getTime() + 70_000))).ok).toBe(true);
+    // A scan stuck for over two minutes does not block forever.
+    const w2 = gw();
+    await scan(w2);
+    w2.gateway.rows[0]!.lastSeenAt = new Date(T0.getTime() + 3 * 60_000);
+    expect((await scan(w2, {}, new Date(T0.getTime() + 3 * 60_000))).ok).toBe(true);
+  });
+
+  it('limits how many scans one gateway can be asked for in a minute', async () => {
+    const w = gw();
+    for (let i = 0; i < MAX_SCANS_PER_GATEWAY_MINUTE; i++) {
+      expect((await scan(w, {}, new Date(T0.getTime() + i * 1_000))).ok).toBe(true);
+      w.remoteCommand.rows[i]!.status = 'succeeded';
+    }
+    const res = await scan(w, {}, new Date(T0.getTime() + 10_000));
+    expect(res.ok).toBe(false);
+    expect(w.remoteCommand.rows).toHaveLength(MAX_SCANS_PER_GATEWAY_MINUTE);
+    w.gateway.rows[0]!.lastSeenAt = new Date(T0.getTime() + 89_000);
+    expect((await scan(w, {}, new Date(T0.getTime() + 90_000))).ok).toBe(true);
+  });
+
+  it('hands the gateway the nil room id and the message still parses', async () => {
+    const w = gw();
+    await scan(w, { args: { subnet: '10.1.2' } });
+    const out = await takePendingCommands(w.db, GW, T0);
+    expect(out[0]).toMatchObject({ type: 'discover_devices', roomId: NIL_UUID });
+    expect(NIL_UUID).toBe('00000000-0000-0000-0000-000000000000');
+    expect(GatewayCommand.safeParse(out[0]).success).toBe(true);
+  });
+
+  it('records a result for a room-less command, audited against the gateway, and not from another gateway', async () => {
+    const w = gw();
+    await scan(w);
+    const [cmd] = await takePendingCommands(w.db, GW, T0);
+    await applyCommandResults(w.db, GW2, [{ id: cmd!.id, ok: true, output: {} }], T0);
+    expect(w.remoteCommand.rows[0]!.status).toBe('sent');
+    await applyCommandResults(w.db, GW, [{ id: cmd!.id, ok: true, output: { found: [] } }], T0);
+    expect(w.remoteCommand.rows[0]).toMatchObject({ status: 'succeeded', roomId: null });
+    expect(w.auditLog.rows.at(-1)).toMatchObject({ action: 'command.result', target: GW });
+  });
+});
