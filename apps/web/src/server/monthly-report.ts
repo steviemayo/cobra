@@ -49,6 +49,9 @@ export interface MonthlyReport {
     sessions: number;
     incidentsOpened: number;
     incidentsResolved: number;
+    /** Problems that opened while a meeting was on or about to start, and the meetings they put at risk. */
+    incidentsDuringMeetings: number;
+    meetingsAtRisk: number;
     avgResolveMinutes: number | null;
     downtimeMinutes: number;
     ticketsOpened: number;
@@ -132,6 +135,8 @@ export async function buildMonthlyReport(
     db.incident.findMany({
       where: {
         orgId,
+        // A group outage is the same problem as the devices in it, which are counted already.
+        kind: { not: 'group_outage' },
         openedAt: { lte: to },
         OR: [{ resolvedAt: null }, { resolvedAt: { gte: from } }],
       },
@@ -233,6 +238,8 @@ export async function buildMonthlyReport(
       sessions: usage.rooms.reduce((n, r) => n + r.sessions, 0),
       incidentsOpened: opened.length,
       incidentsResolved: resolved.length,
+      incidentsDuringMeetings: opened.filter((i) => i.meetingsAffected > 0).length,
+      meetingsAtRisk: opened.reduce((n, i) => n + i.meetingsAffected, 0),
       avgResolveMinutes: resolveTimes.length
         ? Math.round(resolveTimes.reduce((a, b) => a + b, 0) / resolveTimes.length)
         : null,
@@ -273,6 +280,11 @@ export function reportText(r: MonthlyReport, portalUrl?: string): string {
     '',
     'Reliability',
     `- ${s.incidentsOpened} problems came up, ${s.incidentsResolved} were resolved${s.avgResolveMinutes === null ? '' : ` (average ${duration(s.avgResolveMinutes)} to resolve)`}`,
+    ...(s.incidentsDuringMeetings > 0
+      ? [
+          `- ${s.incidentsDuringMeetings} of those came up while a meeting was on or about to start (${s.meetingsAtRisk} meeting${s.meetingsAtRisk === 1 ? '' : 's'} at risk)`,
+        ]
+      : []),
     `- Time rooms and gateways were out: ${duration(s.downtimeMinutes)}`,
     ...r.availability
       .filter((a) => a.downtimeMinutes > 0)

@@ -630,13 +630,22 @@ model Incident {
   acknowledgedAt DateTime?
   /// Other rooms this incident also affects (a shared device that is offline serves several rooms). `roomId` stays the first.
   roomIds        String[]  @default([]) @db.Uuid
+  /// Meetings on now or about to start in the room when this opened (0 when the room has no calendar or its copy was stale).
+  meetingsAffected Int     @default(0)
+  /// The severity was raised a step because a meeting was affected. `severity` holds the raised value.
+  severityRaised   Boolean @default(false)
+  /// The group this belongs to: devices on one network going silent together are one problem. Null for an ordinary incident and for the group itself.
+  parentId         String? @db.Uuid
 
-  org  Org   @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  room Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  org      Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  room     Room?      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  parent   Incident?  @relation("IncidentGroup", fields: [parentId], references: [id], onDelete: SetNull)
+  children Incident[] @relation("IncidentGroup")
 
   @@index([orgId, status, openedAt])
   @@index([orgId, kind, subject, status])
   @@index([roomId])
+  @@index([parentId])
 }
 
 // Where alerts go. `config` holds the destination (and any signing secret); it is never sent to a browser.

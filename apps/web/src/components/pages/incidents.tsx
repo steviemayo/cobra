@@ -29,6 +29,14 @@ export function IncidentsView() {
     ...trpc.monitoring.incidents.queryOptions({ orgId, status }),
     refetchInterval: 5_000,
   });
+  // A device that is part of a group outage is shown under its group, not on its own.
+  const all = incidents.data ?? [];
+  const shownIds = new Set(all.map((i) => i.id));
+  const members = new Map<string, Incident[]>();
+  for (const i of all)
+    if (i.parentId && shownIds.has(i.parentId))
+      members.set(i.parentId, [...(members.get(i.parentId) ?? []), i]);
+  const top = all.filter((i) => !i.parentId || !shownIds.has(i.parentId));
   const ack = useMutation(
     trpc.monitoring.acknowledge.mutationOptions({
       onSuccess: () => qc.invalidateQueries({ queryKey: trpc.monitoring.incidents.queryKey() }),
@@ -69,12 +77,19 @@ export function IncidentsView() {
         />
       ) : (
         <ul className="divide-y overflow-hidden rounded-lg border">
-          {incidents.data?.map((i) => (
+          {top.map((i) => (
             <li key={i.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
               <div className="min-w-0 space-y-1">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span className="font-medium">{i.title}</span>
                   <SeverityPill severity={i.severity} />
+                  {i.meetingsAffected > 0 && (
+                    <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+                      {i.meetingsAffected === 1
+                        ? 'Meeting affected'
+                        : `${i.meetingsAffected} meetings affected`}
+                    </span>
+                  )}
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {INCIDENT_KIND_LABEL[i.kind] ?? i.kind}
@@ -113,6 +128,17 @@ export function IncidentsView() {
                 </div>
                 {i.detail && <p className="text-sm text-muted-foreground">{i.detail}</p>}
                 {i.impact && <MeetingsAtRisk impact={i.impact} compact />}
+                {(members.get(i.id) ?? []).length > 0 && (
+                  <ul className="mt-1 space-y-0.5 border-l pl-3 text-sm text-muted-foreground">
+                    {members.get(i.id)!.map((m) => (
+                      <li key={m.id}>
+                        {m.title}
+                        {m.roomName && ` · ${m.roomName}`}
+                        {m.status === 'resolved' && ' · back'}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {i.status === 'open' && canSupport && !i.acknowledged && (

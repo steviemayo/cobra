@@ -440,7 +440,7 @@ export async function managedOverview(
     db.org.findMany({ where: { id: { in: ids } } }),
     db.room.findMany({ where: { orgId: { in: ids } } }),
     db.gateway.findMany({ where: { orgId: { in: ids } } }),
-    db.incident.findMany({ where: { orgId: { in: ids }, status: 'open' } }),
+    db.incident.findMany({ where: { orgId: { in: ids }, status: 'open', parentId: null } }),
     db.ticket.findMany({
       where: {
         orgId: { in: ids },

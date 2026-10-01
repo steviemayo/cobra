@@ -290,6 +290,12 @@ export function ReportsView() {
                   `, taking ${duration(s.avgResolveMinutes)} on average`}
                 .
               </p>
+              {s.incidentsDuringMeetings > 0 && (
+                <p className="text-muted-foreground">
+                  {s.incidentsDuringMeetings} of them came up while a meeting was on or about to
+                  start ({plural(s.meetingsAtRisk, 'meeting')} at risk).
+                </p>
+              )}
             </div>
             <Table>
               <TableHeader>

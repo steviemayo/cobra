@@ -148,6 +148,34 @@ describe('auto-ticket rules', () => {
     expect(w.ticket.rows[0]!.title).toBe('Gateway offline');
   });
 
+  it('raises one ticket for a group outage, not one for every device in it', async () => {
+    const w = world();
+    await createRule(w.db, ORG, { name: 'All', afterMinutes: 0 });
+    w.incident.rows.push(
+      inc({
+        id: 'grp',
+        kind: 'group_outage',
+        roomId: null,
+        gatewayId: GW,
+        subject: `group:${GW}:10.0.1.0/24`,
+        severity: 'critical',
+        title: '2 devices on 10.0.1.0/24 stopped answering together',
+      }),
+      inc({ id: 'd1', gatewayId: GW, parentId: 'grp' }),
+      inc({
+        id: 'd2',
+        gatewayId: GW,
+        roomId: ROOM2,
+        subject: `device:${crypto.randomUUID()}`,
+        parentId: 'grp',
+      }),
+    );
+    const r = await autoTicket(w.db, at(1));
+    expect(r.created).toHaveLength(1);
+    expect(r.grouped).toBe(2);
+    expect(w.ticket.rows[0]).toMatchObject({ incidentId: 'grp' });
+  });
+
   it('adds a second fault in the same room to the open ticket instead of raising another', async () => {
     const w = world();
     await createRule(w.db, ORG, { name: 'All', afterMinutes: 0 });
