@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'motion/react';
 import { Building2, Check, Handshake } from 'lucide-react';
 import { toast } from 'sonner';
-import { RoomType } from '@kestrel/model';
 import { Logo } from '@/components/brand/logo';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { timezoneOptions } from '@/components/shell/dialogs';
@@ -13,7 +12,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
-import { ROOM_TYPE_LABEL } from '@/lib/format';
 import { rememberOrg } from '@/lib/last-org';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
@@ -77,7 +75,6 @@ export function OnboardingWizard({
   const [siteName, setSiteName] = useState('');
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [roomName, setRoomName] = useState('');
-  const [roomType, setRoomType] = useState<RoomType>('meeting');
 
   const finish = (path: string) => {
     if (orgId) rememberOrg(orgId);
@@ -501,14 +498,13 @@ export function OnboardingWizard({
                     orgId: orgId!,
                     siteId: siteId!,
                     name: roomName,
-                    type: roomType,
                   });
                 }}
               >
                 <div className="space-y-1.5">
                   <h1 className="text-2xl font-semibold tracking-tight">Add your first room</h1>
                   <p className="text-sm text-muted-foreground">
-                    You’ll pick a starting template and open the designer next.
+                    You’ll add its devices next.
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -521,29 +517,6 @@ export function OnboardingWizard({
                     value={roomName}
                     onChange={(e) => setRoomName(e.target.value)}
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label>Room type</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {RoomType.options.map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => setRoomType(t)}
-                        className={cn(
-                          'rounded-lg border p-3 text-left text-sm transition-colors',
-                          roomType === t ? 'border-brand bg-accent' : 'hover:bg-muted',
-                        )}
-                      >
-                        <div className="font-medium">{ROOM_TYPE_LABEL[t]}</div>
-                        <div className="mt-0.5 text-xs text-muted-foreground">
-                          {t === 'meeting'
-                            ? 'Present and video calls'
-                            : 'Presenter, audience, recording'}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
                 </div>
                 {createRoom.error && (
                   <p className="text-sm text-destructive">{createRoom.error.message}</p>

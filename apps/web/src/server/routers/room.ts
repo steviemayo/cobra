@@ -2,9 +2,17 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
-import { RoomModel, RoomType } from '@kestrel/model';
+import { BUILT_IN_DRIVERS, ControlPoint, DeviceControl, RoomModel, RoomType, settingScope } from '@kestrel/model';
 import { writeAudit } from '../audit';
-import { getEntitlements, roomLimitMessage } from '../billing';
+import { getEntitlements, monitoredRoomIds, roomLimitMessage } from '../billing';
+import { pointsOf } from '../device-points';
+import {
+  checkCopies,
+  loadContext,
+  MAX_COPIES,
+  writeCopies,
+  type SourceDevice,
+} from '../room-copies';
 import { checkDeployable } from '../deploy-check';
 import { sharedGatewayProblem } from '../site-devices';
 import { createDeployment } from '../deployment-service';
@@ -147,7 +155,7 @@ export const roomRouter = router({
     }),
 
   create: orgProcedure
-    .input(z.object({ orgId, siteId: z.string().uuid(), name, type: RoomType }))
+    .input(z.object({ orgId, siteId: z.string().uuid(), name, type: RoomType.optional() }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
       const site = await assertSite(ctx.orgId, input.siteId);
@@ -160,7 +168,7 @@ export const roomRouter = router({
           message: roomLimitMessage(entitlements),
         });
       const room = await db.room.create({
-        data: { orgId: ctx.orgId, siteId: site.id, name: input.name, type: input.type },
+        data: { orgId: ctx.orgId, siteId: site.id, name: input.name, type: input.type ?? 'meeting' },
         omit,
       });
       await writeAudit({
@@ -168,7 +176,7 @@ export const roomRouter = router({
         actorId: ctx.user.id,
         action: 'room.create',
         target: room.id,
-        meta: { name: room.name, site: site.name, type: room.type },
+        meta: { name: room.name, site: site.name },
       });
       after(() =>
         syncQuantity(db, ctx.orgId).catch((e) =>
@@ -176,6 +184,144 @@ export const roomRouter = router({
         ),
       );
       return room;
+    }),
+
+  /**
+   * What a room is made of, as the shape a copy starts from: its devices with the fields each needs
+   * filled in per room, and their control points. No address or login is ever included.
+   */
+  copyShape: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, roomId }))
+    .query(async ({ ctx, input }) => {
+      const room = await db.room.findFirst({
+        where: { id: input.roomId, orgId: ctx.orgId, ...siteFilter(ctx.siteScope) },
+        select: { id: true, name: true, siteId: true, gatewayId: true, areaId: true, tags: true },
+      });
+      if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
+      const devices = await db.device.findMany({
+        where: { orgId: ctx.orgId, roomId: room.id },
+        orderBy: { createdAt: 'asc' },
+      });
+      return {
+        room,
+        devices: devices.map((d) => {
+          const control = DeviceControl.safeParse(d.control);
+          const driverId =
+            control.success && control.data.kind === 'driver' ? control.data.driverId : null;
+          const info = driverId ? BUILT_IN_DRIVERS[driverId] : undefined;
+          const need = (secret: boolean) =>
+            (info?.settings ?? [{ key: 'host', label: 'Address', scope: 'binding', required: true }])
+              .filter(
+                (s) =>
+                  s.required && (settingScope(s.key, { scope: s.scope }) === 'secret') === secret,
+              )
+              .map((s) => ({ key: s.key, label: s.label }));
+          return {
+            id: d.id,
+            name: d.name,
+            kind: d.kind,
+            category: d.category,
+            driverName: info?.name ?? (driverId ? driverId : null),
+            // Only active devices have anything to fill in.
+            binding: d.kind === 'active' ? need(false) : [],
+            secret: d.kind === 'active' ? need(true) : [],
+            hasSavedLogin: !!d.credentialSetId,
+            credentialSetId: d.credentialSetId,
+            points: pointsOf(d.points),
+          };
+        }),
+      };
+    }),
+
+  /**
+   * Makes copies of a room. With `dryRun` it only checks and says what is wrong. Everything is
+   * written in one transaction, or nothing is.
+   */
+  copy: orgProcedure
+    .input(
+      z.object({
+        orgId,
+        sourceRoomId: roomId,
+        dryRun: z.boolean().default(false),
+        copies: z
+          .array(
+            z.object({
+              name: z.string().trim().max(100),
+              areaId: z.string().uuid().nullable().optional(),
+              tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+              gatewayId: z.string().uuid().nullable().optional(),
+              devices: z
+                .array(
+                  z.object({
+                    sourceDeviceId: z.string().uuid(),
+                    skip: z.boolean().optional(),
+                    name: z.string().trim().min(1).max(80).optional(),
+                    values: z
+                      .record(z.string(), z.union([z.string().max(2000), z.number(), z.boolean()]))
+                      .optional(),
+                    settings: z
+                      .record(z.string(), z.union([z.string().max(2000), z.number(), z.boolean()]))
+                      .optional(),
+                    secrets: z
+                      .record(z.string(), z.union([z.string().max(2000), z.number(), z.boolean()]))
+                      .optional(),
+                    credentialSetId: z.string().uuid().nullable().optional(),
+                    points: z.array(ControlPoint).max(200).optional(),
+                  }),
+                )
+                .max(100),
+            }),
+          )
+          .min(1)
+          .max(MAX_COPIES),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const source = await findRoom(ctx.orgId, input.sourceRoomId);
+      const sourceDevices = (await db.device.findMany({
+        where: { orgId: ctx.orgId, roomId: source.id },
+      })) as SourceDevice[];
+      const e = await getEntitlements(db, ctx.orgId);
+      const monitored = await monitoredRoomIds(db, ctx.orgId);
+      const context = await loadContext(db, ctx.orgId, source.siteId, {
+        maxRooms: e.maxRooms,
+        monitoredRooms: monitored.size,
+      });
+      const checked = checkCopies(sourceDevices, input.copies, context);
+      const ok = checked.batch.length === 0 && checked.rows.every((r) => r.problems.length === 0);
+      if (input.dryRun || !ok) return { ok, created: [] as { roomId: string; name: string; devices: number }[], ...checked };
+
+      const created = await db.$transaction(
+        (tx) =>
+          writeCopies(tx as unknown as Parameters<typeof writeCopies>[0], {
+            orgId: ctx.orgId,
+            actorId: ctx.user.id,
+            source: {
+              id: source.id,
+              siteId: source.siteId,
+              gatewayId: source.gatewayId,
+              monitorOnly: source.monitorOnly,
+            },
+            sourceDevices,
+            copies: input.copies,
+          }),
+        { timeout: 60_000, maxWait: 10_000 },
+      );
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'room.copy',
+        target: source.id,
+        meta: { from: source.name, rooms: created.map((r) => r.name) },
+      });
+      after(() =>
+        syncQuantity(db, ctx.orgId).catch((err) =>
+          console.error('[billing] quantity sync failed', err),
+        ),
+      );
+      return { ok: true, created, ...checked };
     }),
 
   update: orgProcedure

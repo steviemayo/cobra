@@ -3,7 +3,6 @@ import { createContext, useContext, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { RoomType } from '@kestrel/model';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,9 +16,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
-import { ROOM_TYPE_LABEL } from '@/lib/format';
 import { useInvalidateEstate, useSites } from '@/lib/use-estate';
-import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 import { orgPath, useOrg } from './org-context';
 
@@ -168,7 +165,6 @@ function NewRoomDialog({
   const sites = useSites();
   const invalidate = useInvalidateEstate();
   const [name, setName] = useState('');
-  const [type, setType] = useState<RoomType>('meeting');
   const [pickedSite, setPickedSite] = useState('');
   const siteList = sites.data ?? [];
   const siteId = pickedSite || presetSiteId || siteList[0]?.id || '';
@@ -205,14 +201,14 @@ function NewRoomDialog({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              create.mutate({ orgId, siteId, name, type });
+              create.mutate({ orgId, siteId, name });
             }}
             className="space-y-5"
           >
             <DialogHeader>
               <DialogTitle>New room</DialogTitle>
               <DialogDescription>
-                You’ll pick a starting template and design the room next.
+                Add the room, then add its devices.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-2">
@@ -236,29 +232,6 @@ function NewRoomDialog({
                 options={siteList.map((s) => ({ value: s.id, label: s.name }))}
                 placeholder="Choose a site"
               />
-            </div>
-            <div className="space-y-2">
-              <Label>Room type</Label>
-              <div className="grid grid-cols-2 gap-2">
-                {RoomType.options.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setType(t)}
-                    className={cn(
-                      'rounded-lg border p-3 text-left text-sm transition-colors',
-                      type === t ? 'border-brand bg-accent' : 'hover:bg-muted',
-                    )}
-                  >
-                    <div className="font-medium">{ROOM_TYPE_LABEL[t]}</div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      {t === 'meeting'
-                        ? 'Present and video calls'
-                        : 'Presenter, audience, recording'}
-                    </div>
-                  </button>
-                ))}
-              </div>
             </div>
             {create.error && <p className="text-sm text-destructive">{create.error.message}</p>}
             <DialogFooter>
