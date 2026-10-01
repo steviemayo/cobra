@@ -163,7 +163,8 @@ export function OnboardingWizard({
   );
 
   // Someone with a request waiting (and no organisation yet) lands on the waiting screen.
-  const shown: Stage = !hasOrgs && waitingFor && !ownInstead && stage === 'kind' ? 'waiting' : stage;
+  const shown: Stage =
+    !hasOrgs && waitingFor && !ownInstead && stage === 'kind' ? 'waiting' : stage;
   const kindLabel = kind === 'msp' ? 'service provider' : 'organisation';
 
   async function signOut() {
@@ -315,15 +316,15 @@ export function OnboardingWizard({
                 }}
               >
                 <div className="space-y-1.5">
-                  <h1 className="text-2xl font-semibold tracking-tight">
-                    Name your {kindLabel}
-                  </h1>
+                  <h1 className="text-2xl font-semibold tracking-tight">Name your {kindLabel}</h1>
                   <p className="text-sm text-muted-foreground">
                     Usually your company or team. You can rename it later and invite others.
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="org">{kind === 'msp' ? 'Company name' : 'Organisation name'}</Label>
+                  <Label htmlFor="org">
+                    {kind === 'msp' ? 'Company name' : 'Organisation name'}
+                  </Label>
                   <Input
                     id="org"
                     required

@@ -5,9 +5,8 @@ import { ChannelRules, dueNow, hasRules } from './alert-rules';
 import { getEntitlements, type EntitlementDb } from './billing';
 import { SEVERITY_RANK, type AlertJob, type Severity } from './monitoring';
 import { pinnedFetch, postJson, postSigned, resolveAll, type Lookup } from './outbound';
-import { dayLabel, hhmm, validZone } from '../lib/week';
 import { sendEmail } from './resend';
-import { affectedMeetings } from './room-schedule';
+import { affectedForRooms, type Impact } from './room-schedule';
 
 // `site` and `roomSchedule` are only needed to say which meetings a fault may affect.
 export type AlertDb = Pick<PrismaClient, 'alertChannel' | 'alertDelivery' | 'incident' | 'room'> &
@@ -53,27 +52,9 @@ export interface AlertMessage {
      * Meetings in the room's calendar that this may disturb (on now or starting in the next 12
      * hours). Private meetings have no title or organiser. Absent when the room has no calendar.
      */
-    impact?: {
-      meetings: { title: string; organiser?: string; start: string; end: string; busy: boolean }[];
-      more: number;
-      /** The same, as plain lines in the site's time zone, for email and chat. */
-      lines: string[];
-    };
+    impact?: Impact;
   };
   portalUrl: string | null;
-}
-
-/** "Weekly sync, 07:30–08:30" or, for one already on, "Weekly sync, on now until 08:30". */
-export function impactLine(
-  m: { title: string; organiser?: string; start: string; end: string },
-  timeZone: string,
-  now: Date,
-): string {
-  const on = Date.parse(m.start) <= now.getTime();
-  const when = on
-    ? `on now until ${hhmm(m.end, timeZone)}`
-    : `${dayLabel(m.start, timeZone)} ${hhmm(m.start, timeZone)}–${hhmm(m.end, timeZone)}`;
-  return `${m.title || 'Busy'}, ${when}${m.organiser ? ` (organiser: ${m.organiser})` : ''}`;
 }
 
 const impactText = (m: AlertMessage): string =>
@@ -339,28 +320,12 @@ async function buildMessage(
       );
     room = roomNames.get(incident.roomId) ?? null;
   }
-  let impact: AlertMessage['incident']['impact'];
+  let impact: Impact | undefined;
   if (incident.roomId && (event === 'opened' || event === 'reminder')) {
     try {
-      const found = await affectedMeetings(db, incident.orgId, incident.roomId, now);
-      if (found.meetings.length) {
-        const roomRow = await db.room.findFirst({ where: { id: incident.roomId } });
-        const tz =
-          (roomRow && (await db.site?.findFirst({ where: { id: roomRow.siteId } }))?.timezone) ||
-          '';
-        const zone = validZone(tz) ? tz : 'Australia/Sydney';
-        impact = {
-          meetings: found.meetings.map((m) => ({
-            title: m.title,
-            ...(m.organiser ? { organiser: m.organiser } : {}),
-            start: m.start,
-            end: m.end,
-            busy: m.private,
-          })),
-          more: found.more,
-          lines: found.meetings.map((m) => impactLine(m, zone, now)),
-        };
-      }
+      impact = (await affectedForRooms(db, incident.orgId, [incident.roomId], now)).get(
+        incident.roomId,
+      );
     } catch (e) {
       // The calendar is only extra context: the alert goes out without it.
       console.error('[alerts] could not look up affected meetings', e);

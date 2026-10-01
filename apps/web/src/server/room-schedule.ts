@@ -6,6 +6,7 @@ import {
   type Meeting,
   type RoomMeetings,
 } from '@kestrel/model';
+import { dayLabel, hhmm, validZone } from '../lib/week';
 import {
   calendarTriggers,
   meetingsBetween,
@@ -173,6 +174,68 @@ export async function schedulesForGateway(
       .slice(0, MAX_MEETINGS);
     return [{ roomId: row.roomId, meetings }];
   });
+}
+
+/** What a fault may disturb in a room, for alerts, the incident page and the room's card. */
+export interface Impact {
+  meetings: { title: string; organiser?: string; start: string; end: string; busy: boolean }[];
+  more: number;
+  /** The same, as plain lines in the site's time zone, for email, chat and the portal. */
+  lines: string[];
+}
+
+/** "Weekly sync, Thu 7 Oct 07:30–08:30" or, for one already on, "Weekly sync, on now until 08:30". */
+export function impactLine(
+  m: { title: string; organiser?: string; start: string; end: string },
+  timeZone: string,
+  now: Date,
+): string {
+  const on = Date.parse(m.start) <= now.getTime();
+  const when = on
+    ? `on now until ${hhmm(m.end, timeZone)}`
+    : `${dayLabel(m.start, timeZone)} ${hhmm(m.start, timeZone)}–${hhmm(m.end, timeZone)}`;
+  return `${m.title || 'Busy'}, ${when}${m.organiser ? ` (organiser: ${m.organiser})` : ''}`;
+}
+
+/** The impact for each room that has meetings a fault could disturb. Rooms with none are left out. */
+export async function affectedForRooms(
+  db: Partial<Pick<PrismaClient, 'roomSchedule' | 'room' | 'site'>>,
+  orgId: string,
+  roomIds: string[],
+  now: Date,
+): Promise<Map<string, Impact>> {
+  const out = new Map<string, Impact>();
+  // A database without the tables (older tests) has no calendars.
+  if (!db.roomSchedule || !db.room || !db.site || roomIds.length === 0) return out;
+  const [rooms, sites] = await Promise.all([
+    db.room.findMany({ where: { orgId, id: { in: roomIds } } }),
+    db.site.findMany({ where: { orgId } }),
+  ]);
+  const zone = new Map(
+    sites.map((s) => [s.id, validZone(s.timezone) ? s.timezone : 'Australia/Sydney']),
+  );
+  for (const room of rooms) {
+    const { meetings, more } = await affectedMeetings(
+      db as Pick<PrismaClient, 'roomSchedule'>,
+      orgId,
+      room.id,
+      now,
+    );
+    if (!meetings.length) continue;
+    const tz = zone.get(room.siteId) ?? 'Australia/Sydney';
+    out.set(room.id, {
+      meetings: meetings.map((m) => ({
+        title: m.title,
+        ...(m.organiser ? { organiser: m.organiser } : {}),
+        start: m.start,
+        end: m.end,
+        busy: m.private,
+      })),
+      more,
+      lines: meetings.map((m) => impactLine(m, tz, now)),
+    });
+  }
+  return out;
 }
 
 /**

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { HealthPill } from '@/components/common/health';
+import { MeetingsAtRisk } from '@/components/common/meetings-at-risk';
 import { PageContainer } from '@/components/common/page-header';
 import { Section } from '@/components/common/section';
 import { SimpleSelect } from '@/components/common/simple-select';
@@ -144,6 +145,12 @@ export function RoomOverview({ roomId }: { roomId: string }) {
     refetchInterval: 15_000,
     retry: false,
   });
+  const impact = useQuery({
+    ...trpc.monitoring.roomImpact.queryOptions({ orgId, roomId }),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: false,
+  });
   if (!room) return null;
   const live = estate.data?.rooms.find((r) => r.id === roomId);
 
@@ -164,6 +171,8 @@ export function RoomOverview({ roomId }: { roomId: string }) {
         </div>
 
         <div className="space-y-6">
+          {impact.data && <MeetingsAtRisk impact={impact.data} />}
+
           <Section title="Status">
             {estate.isPending ? (
               <Skeleton className="m-4 h-12" />

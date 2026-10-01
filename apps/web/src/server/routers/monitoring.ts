@@ -10,6 +10,7 @@ import { firmwareReport } from '../firmware-report';
 import { maybeSweep } from '../monitoring';
 import { estateOverview } from '../estate-overview';
 import { orgDevices, orgOverview, sharedInRoom } from '../monitoring-queries';
+import { affectedForRooms } from '../room-schedule';
 import { SITE_SCOPED, siteFilter, type SiteScope } from '../site-scope';
 import { featureProcedure, requireRole, router } from '../trpc';
 import { validTimeZone } from '../usage-analytics';
@@ -211,7 +212,19 @@ export const monitoringRouter = router({
         select: { id: true, name: true },
       });
       const roomName = new Map(rooms.map((r) => [r.id, r.name]));
+      // Meetings the open incidents may disturb, from the rooms' calendars.
+      const impact = await affectedForRooms(
+        db,
+        ctx.orgId,
+        [
+          ...new Set(
+            rows.filter((r) => r.status === 'open').flatMap((r) => (r.roomId ? [r.roomId] : [])),
+          ),
+        ],
+        new Date(),
+      );
       return rows.map((r) => ({
+        impact: r.status === 'open' && r.roomId ? (impact.get(r.roomId) ?? null) : null,
         id: r.id,
         kind: r.kind,
         severity: r.severity,
@@ -225,6 +238,19 @@ export const monitoringRouter = router({
         occurrences: r.occurrences,
         acknowledged: r.acknowledgedAt !== null,
       }));
+    }),
+
+  // For a room's card: the meetings its open incidents may disturb, or null when it has none open.
+  roomImpact: monitoringProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, roomId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const room = await assertScopedRoom(ctx.orgId, input.roomId, ctx.siteScope);
+      const open = await db.incident.count({
+        where: { orgId: ctx.orgId, roomId: room.id, status: 'open' },
+      });
+      if (open === 0) return null;
+      return (await affectedForRooms(db, ctx.orgId, [room.id], new Date())).get(room.id) ?? null;
     }),
 
   acknowledge: monitoringProcedure

@@ -252,7 +252,13 @@ export function AlertsView() {
                     <TableCell className="w-44 text-muted-foreground">{dateTime(d.at)}</TableCell>
                     <TableCell>{d.channel}</TableCell>
                     <TableCell className="text-muted-foreground">
-                      {d.event === 'opened' ? 'Problem' : d.event === 'reminder' ? 'Reminder' : d.event === 'resolved' ? 'Fixed' : 'Test'}
+                      {d.event === 'opened'
+                        ? 'Problem'
+                        : d.event === 'reminder'
+                          ? 'Reminder'
+                          : d.event === 'resolved'
+                            ? 'Fixed'
+                            : 'Test'}
                     </TableCell>
                     <TableCell title={d.error ?? undefined}>
                       <DeliveryPill status={d.status} />
@@ -267,7 +273,13 @@ export function AlertsView() {
       </section>
 
       {adding && <AddChannelDialog open onOpenChange={setAdding} onDone={refresh} />}
-      {timing && <TimingDialog channel={timing} onOpenChange={(o) => !o && setTiming(null)} onDone={refresh} />}
+      {timing && (
+        <TimingDialog
+          channel={timing}
+          onOpenChange={(o) => !o && setTiming(null)}
+          onDone={refresh}
+        />
+      )}
       <ConfirmDialog
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}
@@ -328,7 +340,9 @@ function AddChannelDialog({
     }
   };
   const ready =
-    name.trim() && (type === 'email' ? emails.trim() : type === 'itsm' || url.trim()) && !draftProblem(rules);
+    name.trim() &&
+    (type === 'email' ? emails.trim() : type === 'itsm' || url.trim()) &&
+    !draftProblem(rules);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -456,7 +470,9 @@ function AddChannelDialog({
             </div>
           )}
           <details className="rounded-md border px-3 py-2">
-            <summary className="cursor-pointer text-sm font-medium">Timing and escalation (optional)</summary>
+            <summary className="cursor-pointer text-sm font-medium">
+              Timing and escalation (optional)
+            </summary>
             <div className="pt-3">
               <RulesFields value={rules} onChange={setRules} />
             </div>
@@ -513,8 +529,9 @@ function TimingDialog({
           <DialogHeader>
             <DialogTitle>Timing and escalation</DialogTitle>
             <DialogDescription>
-              When “{channel.name}” may alert, and whether it waits or repeats. With nothing set it alerts straight away, at any time.
-              For an on-call rota, add a channel for each person and give each their days and hours.
+              When “{channel.name}” may alert, and whether it waits or repeats. With nothing set it
+              alerts straight away, at any time. For an on-call rota, add a channel for each person
+              and give each their days and hours.
             </DialogDescription>
           </DialogHeader>
           <RulesFields value={draft} onChange={setDraft} />

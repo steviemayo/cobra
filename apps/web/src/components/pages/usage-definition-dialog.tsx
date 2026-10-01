@@ -117,7 +117,9 @@ export function UsageDefinitionDialog({
           <Skeleton className="h-40 w-full" />
         ) : (
           <div className="space-y-4">
-            <p className="text-xs text-muted-foreground">{def.data ? SOURCE_TEXT[def.data.source] : null}</p>
+            <p className="text-xs text-muted-foreground">
+              {def.data ? SOURCE_TEXT[def.data.source] : null}
+            </p>
             <UsageRuleEditor value={rule} onChange={setRule} devices={devices} />
             <p className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
               In words: {describeUsageRule(rule, nameOf)}

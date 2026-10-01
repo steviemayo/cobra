@@ -25,10 +25,14 @@ export function CredentialsView() {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const { orgId, canEdit } = useOrg();
-  const list = useQuery({ ...trpc.binding.credentialSets.list.queryOptions({ orgId }), enabled: canEdit });
+  const list = useQuery({
+    ...trpc.binding.credentialSets.list.queryOptions({ orgId }),
+    enabled: canEdit,
+  });
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
-  const refresh = () => qc.invalidateQueries({ queryKey: trpc.binding.credentialSets.list.queryKey() });
+  const refresh = () =>
+    qc.invalidateQueries({ queryKey: trpc.binding.credentialSets.list.queryKey() });
 
   const del = useMutation(
     trpc.binding.credentialSets.delete.mutationOptions({
@@ -43,7 +47,10 @@ export function CredentialsView() {
   if (!canEdit)
     return (
       <PageContainer>
-        <PageHeader title="Shared logins" description="Only owners and developers can manage shared logins." />
+        <PageHeader
+          title="Shared logins"
+          description="Only owners and developers can manage shared logins."
+        />
       </PageContainer>
     );
 
@@ -208,7 +215,9 @@ function SetForm({
           <Input
             type="password"
             autoComplete="off"
-            placeholder={isExisting(r.key) ? 'Set. Type to replace, or leave blank to keep' : 'Value'}
+            placeholder={
+              isExisting(r.key) ? 'Set. Type to replace, or leave blank to keep' : 'Value'
+            }
             value={r.value}
             onChange={(e) => set(i, { value: e.target.value })}
           />
@@ -220,7 +229,11 @@ function SetForm({
         ))}
       </datalist>
       <div className="flex gap-2">
-        <Button size="sm" variant="ghost" onClick={() => setRows((r) => [...r, { key: '', value: '' }])}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setRows((r) => [...r, { key: '', value: '' }])}
+        >
           <Plus data-icon="inline-start" /> Field
         </Button>
         <div className="ml-auto flex gap-2">

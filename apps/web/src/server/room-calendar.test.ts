@@ -3,7 +3,12 @@ import { generateSealKey, seal } from '@kestrel/crypto';
 import { weekDays, weekEnd, weekStart } from '../lib/week';
 import { deliverAlerts, type AlertDb, type Senders } from './alerts';
 import { clearTokenCache, type Deps } from './calendar';
-import { affectedMeetings, refreshSchedules, type ScheduleDb } from './room-schedule';
+import {
+  affectedForRooms,
+  affectedMeetings,
+  refreshSchedules,
+  type ScheduleDb,
+} from './room-schedule';
 import { freeSlots, maintenanceClashes, roomWeek, type RoomCalendarDb } from './room-calendar';
 import { table } from './test-db';
 
@@ -295,6 +300,20 @@ describe('meetings a fault may affect', () => {
     const w = world();
     saved(w, new Date(NOW.getTime() - 3_600_000));
     expect((await affectedMeetings(w as never, ORG, ROOM_A, NOW)).meetings).toEqual([]);
+  });
+});
+
+describe('impact for the portal', () => {
+  it('gives each room its meetings as lines in the site time zone, private ones as Busy', async () => {
+    const w = world();
+    saved(w);
+    const out = await affectedForRooms(w as never, ORG, [ROOM_A, ROOM_B], NOW);
+    expect([...out.keys()]).toEqual([ROOM_A]);
+    const impact = out.get(ROOM_A)!;
+    // 1 hour after 06:00 Sydney.
+    expect(impact.lines[0]).toBe('Board, Thu, 1 Oct 07:00–08:00 (organiser: Ann)');
+    expect(impact.lines[1]).toBe('Busy, Thu, 1 Oct 08:00–09:00');
+    expect(impact.meetings[1]).toMatchObject({ busy: true, title: '' });
   });
 });
 
