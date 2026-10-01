@@ -19,7 +19,7 @@ import {
 import { deviceViews } from '../device-views';
 import { setDeviceRooms } from '../device-sharing';
 import { MAX_POINTS, setDevicePoints } from '../device-points';
-import { canMonitorRoom, getEntitlements, monitorLimitMessage } from '../billing';
+import { canMonitorRoom, getEntitlements, monitoredRoomIds, monitorLimitMessage } from '../billing';
 import { syncQuantity } from '../stripe';
 import { after } from 'next/server';
 import { orgProcedure, requireRole, router } from '../trpc';
@@ -113,6 +113,25 @@ export const deviceRouter = router({
     .input(z.object({ orgId, deviceId: id, roomIds: z.array(id).max(50) }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev', 'support']);
+      // Linking a monitored device to a room makes that room monitored, which can take the
+      // organisation over its plan.
+      const shared = await db.device.findFirst({ where: { id: input.deviceId, orgId: ctx.orgId } });
+      if (shared?.kind === 'active') {
+        const have = new Set(
+          (await db.deviceRoom.findMany({ where: { orgId: ctx.orgId, deviceId: shared.id } })).map(
+            (l) => l.roomId,
+          ),
+        );
+        const e = await getEntitlements(db, ctx.orgId);
+        if (e.maxRooms !== null) {
+          const current = await monitoredRoomIds(db, ctx.orgId);
+          const fresh = new Set(
+            input.roomIds.filter((r) => r !== shared.roomId && !have.has(r) && !current.has(r)),
+          );
+          if (current.size + fresh.size > e.maxRooms)
+            throw new TRPCError({ code: 'FORBIDDEN', message: monitorLimitMessage(e) });
+        }
+      }
       const res = await setDeviceRooms(db, {
         orgId: ctx.orgId,
         deviceId: input.deviceId,
@@ -127,6 +146,7 @@ export const deviceRouter = router({
         target: input.deviceId,
         meta: { rooms: res.rooms },
       });
+      after(() => syncQuantity(db, ctx.orgId).catch(() => undefined));
       return res;
     }),
 

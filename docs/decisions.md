@@ -931,15 +931,12 @@ Not done: photo upload for checklist items, the visit being done offline on a ph
 | RS-13 | **Making rooms from a shape** uses the same grid and checks as copying a room, with a site chosen first (the rooms go to that site, with no gateway until assigned). `room.copy` takes `sourceRoomId` or `shapeId` and `siteId` | build | One engine |
 | RS-14 | **A device in a copy can be shared instead of made** (`linkTo`): pick an existing monitored device with the same driver (any site of the organisation). No device is made; the new room is linked to it and the room's points (rewritten as for any copy) are added to it, each belonging to the new room, with ids that do not clash. A device that is not there or has another driver is refused | user | Plan RS-13: a shared DSP with separate points per room |
 | RS-15 | **Not built**: a shape slot that remembers "shared" (the shared device is chosen at copy time), editing a shape after saving it (save again under a new name), test connection and verify points per row, a CSV or pasted sheet, power controller outlets per room, counting a room that only has a shared device as monitored | build | Slice 6 |
+
 ### Fixed: gateways not offered an update (2026-10-01)
 
 | ID | Decision | Who | Why |
 | --- | --- | --- | --- |
 | GU-1 | **The newest version per channel is read from the published release** (its `VERSION` file, cached 5 minutes) and the `GATEWAY_LATEST_STABLE` and `GATEWAY_LATEST_BETA` settings only win when they are newer or the release cannot be read (`publishedVersions`). The Gateways page and staff fleet health use it. The Update button only shows for a gateway that is "behind", and "behind" came from those settings alone, so a release that nobody wrote into them (0.4.1 to 0.4.3) left every gateway "current" with no button. The order itself already came from the release, so this was only the check | build | A manual step nobody remembers |
-| RS-12 | **Saved shapes** (table `RoomShape`): "Save as a shape" in room settings keeps the room's devices, drivers, design settings, saved-login references, held settings and control points, **with no address, no typed login, and only that room's own points**. Shapes are listed at `/rooms/shapes` (make rooms from one, delete one). Names are unique per organisation; at most 100 shapes, 100 devices each. Deleting a shape changes no room already made | build | Plan RS-3 |
-| RS-13 | **Making rooms from a shape** uses the same grid and checks as copying a room, with a site chosen first (the rooms go to that site, with no gateway until assigned). `room.copy` takes `sourceRoomId` or `shapeId` and `siteId` | build | One engine |
-| RS-14 | **A device in a copy can be shared instead of made** (`linkTo`): pick an existing monitored device with the same driver (any site of the organisation). No device is made; the new room is linked to it and the room's points (rewritten as for any copy) are added to it, each belonging to the new room, with ids that do not clash. A device that is not there or has another driver is refused | user | Plan RS-13: a shared DSP with separate points per room |
-| RS-15 | **Not built**: a shape slot that remembers "shared" (the shared device is chosen at copy time), editing a shape after saving it (save again under a new name), test connection and verify points per row, a CSV or pasted sheet, power controller outlets per room, counting a room that only has a shared device as monitored | build | Slice 6 |
 
 ### Built: outlets per room, paste rows (2026-10-01, slice 6 of `docs/room-shapes-and-shared-devices.md`)
 
@@ -948,3 +945,9 @@ Not done: photo upload for checklist items, the visit being done offline on a ph
 | RS-16 | **Power controller outlets as control points.** `blustream-pwr` takes generic points with the address `{ outlet, field }` (field: state, load, amps, watts, kwh or volts), reports each as the point's value and can read one to check it (`readPoint`). One controller shared by several rooms (`DeviceRoom`, point `roomId`) then gives each room its own outlets to watch and alert on. Switching is unchanged (`ALLOUT`, `OUTLET n`) | user | Plan RS-10b |
 | RS-17 | **Paste rows** into the copy page: one room per line from a spreadsheet or CSV (tabs or commas), the room name then the addresses the monitored devices need in the order listed. A heading line ("Room", "Name", "Room name") is skipped | build | Plan RS-4 |
 | RS-18 | **Still not built**: Test connection per row (it needs a new gateway round trip, and the v1 one went with the control pages), counting a room that only has a shared device as monitored (billing, to decide), and a shape slot that remembers "shared" | build | Open |
+
+### Built: shared rooms are monitored rooms (2026-10-01)
+
+| ID | Decision | Who | Why |
+| --- | --- | --- | --- |
+| RS-19 | **A room that a shared monitored device is linked to counts as a monitored room**, even with no device of its own, so it is charged and counts against the plan's limit like any other (`monitoredRoomIds` reads `DeviceRoom`). A room linked only to a recorded asset, or a staging or combined room, is still free. Linking a monitored device to a room that is not monitored yet is refused when it would take the organisation over its limit, and the billing quantity is synced after. This closes the open point in RS-11 | user | The room is being monitored |
