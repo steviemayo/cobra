@@ -107,4 +107,6 @@ export const INCIDENT_KIND_LABEL: Record<string, string> = {
   config_drift: 'Setting changed',
   config_enforce_failed: 'Setting could not be put back',
   pm_overdue: 'Maintenance overdue',
+  latency_high: 'Slow responses',
+  network_degraded: 'Network slow',
 };

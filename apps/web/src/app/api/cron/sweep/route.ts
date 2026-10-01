@@ -2,6 +2,7 @@ import { after } from 'next/server';
 import { db } from '@kestrel/db';
 import { deliverAlerts, deliverDue } from '@/server/alerts';
 import { cronAuthorised } from '@/server/cron-auth';
+import { latencyJob } from '@/server/latency';
 import { sweep } from '@/server/monitoring';
 import { refreshSchedules } from '@/server/room-schedule';
 
@@ -13,6 +14,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   if (!cronAuthorised(req)) return Response.json({ error: 'Unauthorised' }, { status: 401 });
   const jobs = await sweep(db);
+  // Response times: rolls the pings up into hours and raises slow-network incidents.
+  jobs.push(...(await latencyJob(db)));
   // Keeps the copy of each room's calendar fresh: it feeds fault alerts and maintenance checks.
   after(() =>
     refreshSchedules(db).then(

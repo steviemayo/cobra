@@ -10,6 +10,7 @@ import {
 } from '@kestrel/model';
 import type { Logger } from './log';
 import { deviceFeedback } from './device-feedback';
+import { Prober } from './probe';
 
 // v2 (docs/pivot-monitoring.md): the devices a gateway polls on their own, whatever room they are in.
 // There is no room program here: each device gets its driver, its connection, and a report.
@@ -44,7 +45,15 @@ export class DeviceHost {
   private readonly sentDetails = new Map<string, { json: string; at: number }>();
   private version: string | null = null;
 
-  constructor(private readonly log: Logger) {}
+  constructor(
+    private readonly log: Logger,
+    private readonly prober: Prober = new Prober(),
+  ) {}
+
+  /** Starts the steady pinging of the devices (kept apart so tests don't ping anything). */
+  start() {
+    this.prober.start();
+  }
 
   /** The version of the device set now running, or null when none has been applied. */
   get setVersion() {
@@ -67,6 +76,7 @@ export class DeviceHost {
         run.driver.close();
         this.running.delete(id);
         this.sentDetails.delete(id);
+        this.prober.untrack(id);
         this.log('info', 'Stopped polling a device', { device: run.device.name, deviceId: id });
       }
     for (const [id, d] of wanted) {
@@ -112,6 +122,13 @@ export class DeviceHost {
       });
       driver.start();
       this.running.set(id, run);
+      // Ping the device's own address, unless its settings say not to.
+      const host = typeof device.settings.host === 'string' ? device.settings.host : undefined;
+      this.prober.track(
+        id,
+        device.settings.probe === false ? undefined : host,
+        device.settings.allowLocalAddress === true,
+      );
       this.log('info', 'Polling a device', { device: device.name, deviceId: id });
     }
     this.version = signed?.payload.version ?? null;
@@ -132,12 +149,14 @@ export class DeviceHost {
               ? control.protocol
               : undefined;
         const details = this.detailsFor(device.id, state.details, now);
+        const latency = this.prober.take(device.id, state.online ?? true);
         return {
           deviceId: device.id,
           name: device.name,
           online: state.online ?? true,
           ...(driverName && { driver: driverName }),
           ...(state.firmware && { firmware: state.firmware }),
+          ...(latency && { latency }),
           ...(Object.keys(feedback).length > 0 && { feedback }),
           ...(details && { details }),
         };
@@ -174,6 +193,7 @@ export class DeviceHost {
   }
 
   shutdown() {
+    this.prober.stop();
     for (const run of this.running.values()) {
       run.off();
       run.driver.close();

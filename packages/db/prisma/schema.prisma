@@ -72,6 +72,9 @@ model Org {
   grantsToProviders   MspGrant[]            @relation("CustomerSide")
   grantsFromCustomers MspGrant[]            @relation("MspSide")
   calendars           CalendarConnection[]
+  latencyBuckets      LatencyBucket[]
+  latencyHours        LatencyHour[]
+  latencySettings     OrgLatencySettings?
   listings            MarketplaceListing[]
   purchases           MarketplacePurchase[]
   customDrivers       CustomDriver[]
@@ -1593,4 +1596,63 @@ model RegisterSchedule {
   everyDays    Int
   lastIssuedAt DateTime?
   updatedAt    DateTime  @updatedAt
+}
+
+// ---- Response times ----------------------------------------------------------------------------
+
+// How devices answered the gateway's pings, summed into 5-minute buckets per device (heartbeats add
+// to the current bucket). Kept 7 days; after that only the hourly rollup remains.
+model LatencyBucket {
+  deviceId String   @db.Uuid
+  bucket   DateTime
+  orgId    String   @db.Uuid
+  siteId   String   @db.Uuid
+  /// Pings sent and answered in the bucket, and the round-trip times of the answered ones.
+  sent     Int
+  ok       Int
+  sumMs    Float
+  minMs    Float?
+  maxMs    Float?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@id([deviceId, bucket])
+  @@index([orgId, bucket])
+  @@index([siteId, bucket])
+}
+
+// The same, one row per device per hour, built from the buckets. Kept for the retention window.
+model LatencyHour {
+  deviceId String   @db.Uuid
+  bucket   DateTime
+  orgId    String   @db.Uuid
+  siteId   String   @db.Uuid
+  sent     Int
+  ok       Int
+  sumMs    Float
+  minMs    Float?
+  maxMs    Float?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@id([deviceId, bucket])
+  @@index([orgId, bucket])
+  @@index([siteId, bucket])
+}
+
+// An organisation's own limits for "slow" and "dropping pings". A null field uses Kestrel's default;
+// deleting the row resets them all.
+model OrgLatencySettings {
+  orgId         String   @id @db.Uuid
+  /// Slow when the recent average is this many times the device's usual.
+  factor        Float?
+  /// ...and at least this many milliseconds more than usual.
+  minIncreaseMs Float?
+  /// Slow whatever the usual: the average over the last 15 minutes is above this.
+  highMs        Float?
+  /// Dropping pings when this share (percent) of the last 15 minutes' pings had no answer.
+  lossPercent   Float?
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }

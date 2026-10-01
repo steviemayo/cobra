@@ -25,7 +25,9 @@ export type IncidentKind =
   | 'point_alert'
   | 'config_drift'
   | 'config_enforce_failed'
-  | 'pm_overdue';
+  | 'pm_overdue'
+  | 'latency_high'
+  | 'network_degraded';
 
 export interface AlertJob {
   incidentId: string;
@@ -43,6 +45,8 @@ interface NewIncident {
   orgId: string;
   roomId?: string | null;
   gatewayId?: string | null;
+  /** The site, for a problem that is about the site rather than a room (so its maintenance windows apply). */
+  siteId?: string | null;
   kind: IncidentKind;
   subject: string;
   severity: Severity;
@@ -91,7 +95,7 @@ export async function openIncident(
     await inMaintenance(
       db as unknown as MaintenanceDb,
       input.orgId,
-      { roomId: input.roomId, deviceId: deviceOfSubject(input.subject) },
+      { roomId: input.roomId, deviceId: deviceOfSubject(input.subject), siteId: input.siteId },
       now,
     )
   )

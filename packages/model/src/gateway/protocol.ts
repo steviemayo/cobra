@@ -241,6 +241,22 @@ export const WatchedPoint = z.object({
 });
 export type WatchedPoint = z.infer<typeof WatchedPoint>;
 
+/**
+ * How a device answered the gateway's pings since the last heartbeat. Absent when the device has no
+ * address to ping, or when it is online but never answers pings (they are blocked), which says
+ * nothing about the network.
+ */
+export const DeviceLatency = z.object({
+  /** Pings sent in this window, and how many were answered. */
+  sent: z.number().int().min(1).max(1000),
+  ok: z.number().int().min(0).max(1000),
+  /** Round-trip times of the answered pings. Absent when none were. */
+  minMs: z.number().min(0).max(60_000).optional(),
+  avgMs: z.number().min(0).max(60_000).optional(),
+  maxMs: z.number().min(0).max(60_000).optional(),
+});
+export type DeviceLatency = z.infer<typeof DeviceLatency>;
+
 export const DeviceReport = z.object({
   deviceId: z.string().min(1).max(100),
   name: z.string().max(200),
@@ -249,6 +265,8 @@ export const DeviceReport = z.object({
   driver: z.string().max(100).optional(),
   /** The firmware version the device reported, if its driver can ask. */
   firmware: z.string().max(100).optional(),
+  /** Ping round-trip times since the last heartbeat, a measure of the network to the device. */
+  latency: DeviceLatency.optional(),
   /** The points this device is watched on. Absent when none are. */
   watched: z.array(WatchedPoint).max(100).optional(),
   /** Whatever the driver reports back, control or not. Absent when it has nothing to say. */

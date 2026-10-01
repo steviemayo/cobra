@@ -25,6 +25,7 @@ import {
   type MonitoringDb,
 } from './monitoring';
 import { evaluateConfig, type ConfigDb, type EnforceItem } from './config-service';
+import { recordLatency, type LatencyDb } from './latency';
 import type { SigningKey } from './signing';
 
 // v2 devices (docs/pivot-monitoring.md): the cloud's half. Functions take the database as a
@@ -43,7 +44,8 @@ export type DevicesDb = Pick<
   | 'credentialSet'
   | 'area'
   | 'site'
->;
+> &
+  Partial<Pick<PrismaClient, 'latencyBucket'>>;
 
 const secretsKey = () => process.env.KESTREL_SECRETS_KEY || undefined;
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -329,6 +331,14 @@ export async function ingestDeviceReports(
         history.push({ field: f, value: String(v) });
     }
     await db.device.update({ where: { id: row.id }, data: patch });
+    // How the device answered the gateway's pings since the last heartbeat.
+    if (rep.latency && db.latencyBucket)
+      await recordLatency(
+        db as Pick<LatencyDb, 'latencyBucket'>,
+        { id: row.id, orgId: gw.orgId, siteId: row.siteId },
+        rep.latency,
+        now,
+      );
 
     // Held settings: notice a change, and collect what a gateway should put back.
     const readings = { ...(isObject(row.feedback) ? row.feedback : {}), ...(rep.feedback ?? {}) };

@@ -131,6 +131,7 @@ export class Gateway {
   /** Start the saved devices immediately, then begin talking to the cloud. */
   start() {
     this.bootDevices(this.trustedKeys());
+    this.devices.start();
     // If the installer had to put the old version back, say so once the cloud is reachable.
     this.updateReport = takeUpdateResult(this.cfg.dataDir);
     this.record({ type: 'gateway.started', data: { version: this.cfg.version } });
