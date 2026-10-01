@@ -157,10 +157,12 @@ try {
 } finally {
   for (const x of [a, b]) {
     if (!x) continue;
+    const tables = db as never as Record<
+      string,
+      { deleteMany: (a: object) => Promise<unknown> }
+    >;
     for (const t of PURGED_BY_ORG_ID)
-      await (db as never as Record<string, { deleteMany: (a: object) => Promise<unknown> }>)
-        [t]!.deleteMany({ where: { orgId: x.org.id } })
-        .catch(() => undefined);
+      await tables[t]!.deleteMany({ where: { orgId: x.org.id } }).catch(() => undefined);
     await db.org.deleteMany({ where: { id: x.org.id } });
   }
   await db.staffAudit.deleteMany({ where: { staffUserId } });
