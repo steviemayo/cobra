@@ -9,6 +9,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  Radar,
   RefreshCw,
   Rocket,
   Router,
@@ -55,6 +56,7 @@ import { useSites } from '@/lib/use-estate';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
+import { FindDevicesDialog } from './find-devices';
 
 type Gateway = RouterOutputs['gateway']['list'][number];
 
@@ -101,6 +103,7 @@ export function GatewaysView() {
   const [deleting, setDeleting] = useState<Gateway | null>(null);
   const [updating, setUpdating] = useState<Gateway | null>(null);
   const [updatingAll, setUpdatingAll] = useState(false);
+  const [finding, setFinding] = useState<Gateway | null>(null);
   // Behind, able to take a portal update, and nothing already asked of it.
   const updatable = (gateways.data ?? []).filter(
     (g) => g.update.status === 'behind' && g.canSelfUpdate && !g.updateVersion,
@@ -321,6 +324,12 @@ export function GatewaysView() {
                               ? 'Turn off automatic updates'
                               : 'Turn on automatic updates'}
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={g.status !== 'online' || !g.canDiscover}
+                            onClick={() => setFinding(g)}
+                          >
+                            <Radar className="size-4" /> Find devices on this network
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => setReenrolling(g)}>
                             <RefreshCw className="size-4" /> Re-enrol on a new machine
                           </DropdownMenuItem>
@@ -350,6 +359,7 @@ export function GatewaysView() {
       <InstallDialog open={installOpen} onOpenChange={setInstallOpen} />
       <TokenDialog token={token} onClose={() => setToken(null)} />
       <RenameDialog gateway={renaming} onClose={() => setRenaming(null)} onDone={refresh} />
+      {finding && <FindDevicesDialog gatewayId={finding.id} onClose={() => setFinding(null)} />}
       {updating && (
         <UpdateDialog
           gateway={updating}

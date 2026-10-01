@@ -8,6 +8,8 @@ import {
   type GatewayCommand,
 } from '@kestrel/model';
 import { writeAudit } from './audit';
+import { parseSubnet } from './discovery';
+import { effectiveStatus } from './gateway-status';
 
 // Remote commands. Support asks in the portal; the gateway collects the request in its next
 // heartbeat response (it never accepts inbound connections), runs it if it is on the allowlist,
@@ -15,6 +17,11 @@ import { writeAudit } from './audit';
 export type CommandDb = Pick<PrismaClient, 'remoteCommand' | 'room' | 'deviceStatus' | 'auditLog' | 'gateway'>;
 
 export const MAX_COMMANDS_PER_ROOM_MINUTE = 6;
+export const MAX_SCANS_PER_GATEWAY_MINUTE = 3;
+/** A scan that is still waiting or running this long after it was asked for blocks another one. */
+export const SCAN_IN_FLIGHT_MS = 2 * 60_000;
+/** What deployed gateways read for a command with no room, so the wire protocol is unchanged. */
+export const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 const MAX_PER_HEARTBEAT = 10;
 
 export type RequestResult = { ok: true; id: string } | { ok: false; error: string };
@@ -116,6 +123,84 @@ export async function requestCommand(
   return { ok: true, id: created.id };
 }
 
+/**
+ * Asks a gateway to do something about itself rather than a room: for now, look for devices on its
+ * network. Stored with no room; the gateway is told the nil room id.
+ */
+export async function requestGatewayCommand(
+  db: CommandDb,
+  input: {
+    orgId: string;
+    gatewayId: string;
+    type: 'discover_devices';
+    args?: { subnet?: string };
+    requestedBy: string | null;
+  },
+  now = new Date(),
+): Promise<RequestResult> {
+  if (input.type !== 'discover_devices') return { ok: false, error: 'That command is not allowed' };
+  const gateway = await db.gateway.findFirst({ where: { id: input.gatewayId, orgId: input.orgId } });
+  if (!gateway) return { ok: false, error: 'Gateway not found' };
+  if (effectiveStatus(gateway, now.getTime()) !== 'online')
+    return { ok: false, error: 'This gateway is offline, so it cannot look for devices right now.' };
+  if (!gateway.features?.includes('discovery'))
+    return { ok: false, error: 'This gateway needs updating before it can look for devices.' };
+
+  const args: Record<string, string> = {};
+  if (input.args?.subnet !== undefined && input.args.subnet.trim() !== '') {
+    const subnet = parseSubnet(input.args.subnet);
+    if (!subnet)
+      return {
+        ok: false,
+        error: 'That is not a private network address. Use three numbers, like 192.168.1.',
+      };
+    args.subnet = subnet;
+  }
+
+  const running = await db.remoteCommand.findFirst({
+    where: {
+      gatewayId: gateway.id,
+      type: 'discover_devices',
+      status: { in: ['pending', 'sent'] },
+      createdAt: { gte: new Date(now.getTime() - SCAN_IN_FLIGHT_MS) },
+    },
+  });
+  if (running) return { ok: false, error: 'A scan is already running' };
+  const recent = await db.remoteCommand.count({
+    where: {
+      gatewayId: gateway.id,
+      type: 'discover_devices',
+      createdAt: { gte: new Date(now.getTime() - 60_000) },
+    },
+  });
+  if (recent >= MAX_SCANS_PER_GATEWAY_MINUTE)
+    return { ok: false, error: 'Too many scans for this gateway. Try again in a minute' };
+
+  const created = await db.remoteCommand.create({
+    data: {
+      orgId: input.orgId,
+      gatewayId: gateway.id,
+      roomId: null,
+      type: 'discover_devices',
+      args,
+      status: 'pending',
+      requestedBy: input.requestedBy,
+      createdAt: now,
+    },
+  });
+  await writeAudit(
+    {
+      orgId: input.orgId,
+      actorId: input.requestedBy,
+      action: 'command.request',
+      target: gateway.id,
+      meta: { commandId: created.id, type: 'discover_devices', gateway: gateway.name, ...args },
+    },
+    db,
+  );
+  return { ok: true, id: created.id };
+}
+
 /** Hands a gateway the commands waiting for it, marking them sent so each is delivered once. */
 export async function takePendingCommands(
   db: CommandDb,
@@ -138,7 +223,7 @@ export async function takePendingCommands(
     out.push({
       id: c.id,
       type: c.type as GatewayCommand['type'],
-      roomId: c.roomId,
+      roomId: c.roomId ?? NIL_UUID,
       args: (c.args ?? {}) as Record<string, string>,
     });
   }
@@ -171,7 +256,7 @@ export async function applyCommandResults(
         orgId: cmd.orgId,
         actorId: null,
         action: 'command.result',
-        target: cmd.roomId,
+        target: cmd.roomId ?? cmd.gatewayId,
         meta: { commandId: cmd.id, type: cmd.type, ok: r.ok },
       },
       db,

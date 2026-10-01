@@ -16,6 +16,7 @@ import { calloutRouter } from './callout';
 import { mspRouter } from './msp';
 import { staffRouter } from './staff';
 import { draftRouter } from './draft';
+import { discoveryRouter } from './discovery';
 import { driverRouter } from './driver';
 import { gatewayRouter } from './gateway';
 import { inviteRouter } from './invite';
@@ -40,6 +41,7 @@ export const appRouter = router({
   joinRequest: joinRequestRouter,
   audit: auditRouter,
   gateway: gatewayRouter,
+  discovery: discoveryRouter,
   monitoring: monitoringRouter,
   alert: alertRouter,
   ticket: ticketRouter,

@@ -683,7 +683,8 @@ model RemoteCommand {
   id          String    @id @default(uuid()) @db.Uuid
   orgId       String    @db.Uuid
   gatewayId   String    @db.Uuid
-  roomId      String    @db.Uuid
+  /// Null for a command about the gateway itself (finding devices on its network).
+  roomId      String?   @db.Uuid
   type        String
   args        Json      @default("{}")
   status      String    @default("pending")
@@ -695,9 +696,10 @@ model RemoteCommand {
   finishedAt  DateTime?
 
   org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  room Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
   @@index([gatewayId, status])
+  @@index([gatewayId, createdAt])
   @@index([roomId, createdAt])
   @@index([orgId, createdAt])
 }
