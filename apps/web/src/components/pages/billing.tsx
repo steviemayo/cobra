@@ -11,6 +11,7 @@ import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
+import { Switch } from '@/components/ui/switch';
 import { formatDate, plural } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
@@ -41,6 +42,12 @@ export function BillingView() {
         toast.success('Plan changed');
         await refresh();
       },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const trueUp = useMutation(
+    trpc.billing.setTrueUp.mutationOptions({
+      onSuccess: refresh,
       onError: (e) => toast.error(e.message),
     }),
   );
@@ -115,6 +122,25 @@ export function BillingView() {
           {e.maxRooms !== null ? ` of ${e.maxRooms} on this plan` : ''}.
         </p>
       </section>
+
+      {b.subscription.managed && (
+        <section className="flex items-start justify-between gap-4 rounded-lg border p-4">
+          <div>
+            <div className="text-sm font-medium">True up new rooms</div>
+            <p className="text-sm text-muted-foreground">
+              When rooms are added part-way through a billing period, charge for them straight away
+              pro rata to the end of the period. From the next billing date they are billed with the
+              rest of your rooms. Off: the pro rata charge appears on your next invoice.
+            </p>
+          </div>
+          <Switch
+            aria-label="True up new rooms"
+            checked={b.subscription.trueUp}
+            disabled={trueUp.isPending}
+            onCheckedChange={(enabled) => trueUp.mutate({ orgId, enabled })}
+          />
+        </section>
+      )}
 
       {!b.available && (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">

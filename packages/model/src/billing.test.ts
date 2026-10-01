@@ -137,7 +137,7 @@ describe('entitlements', () => {
     const pro = entitlementsFor(state({ plan: 'pro', status: 'active' }), NOW);
     const ended = entitlementsFor(state({ trialEndsAt: new Date(NOW.getTime() - 1) }), NOW);
     expect(alertChannelAllowed(basic, 'email')).toBe(true);
-    for (const t of ['teams', 'webhook', 'itsm']) {
+    for (const t of ['sms', 'teams', 'webhook', 'itsm']) {
       expect(alertChannelAllowed(basic, t), t).toBe(false);
       expect(alertChannelAllowed(pro, t), t).toBe(true);
       expect(alertChannelAllowed(ended, t), t).toBe(false);

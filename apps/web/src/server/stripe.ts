@@ -95,9 +95,13 @@ export async function syncQuantity(db: BillingDb, orgId: string): Promise<void> 
   if (!billing.stripeSubscriptionId || !billing.stripeItemId || !PAYING.has(billing.status)) return;
   const rooms = Math.max(1, (await monitoredRoomIds(db, orgId)).size);
   if (rooms === billing.quantity) return;
+  // True up: rooms added mid-cycle are invoiced now, pro rata to the end of the period. The next
+  // renewal then bills every room in full, so they are aligned with the billing cycle. Without it,
+  // (and when rooms are removed) the proration is credited or charged on the next invoice.
   await getStripe().subscriptionItems.update(billing.stripeItemId, {
     quantity: rooms,
-    proration_behavior: 'create_prorations',
+    proration_behavior:
+      billing.trueUp && rooms > billing.quantity ? 'always_invoice' : 'create_prorations',
   });
   await db.orgBilling.update({ where: { id: billing.id }, data: { quantity: rooms } });
 }

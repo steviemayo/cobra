@@ -51,6 +51,7 @@ export const billingRouter = router({
         currentPeriodEnd: billing.currentPeriodEnd,
         cancelAtPeriodEnd: billing.cancelAtPeriodEnd,
         managed: !!billing.stripeCustomerId,
+        trueUp: billing.trueUp,
       },
       /** False until Stripe keys and prices are configured on the server. */
       available: stripeConfigured() && !!prices.basic && !!prices.pro,
@@ -81,6 +82,23 @@ export const billingRouter = router({
       } catch (e) {
         return asTrpc(e);
       }
+    }),
+
+  // Owners only. Whether rooms added mid-cycle are charged pro rata straight away (true up).
+  setTrueUp: orgProcedure
+    .input(z.object({ orgId, enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      const billing = await ensureBilling(db, ctx.orgId);
+      await db.orgBilling.update({ where: { id: billing.id }, data: { trueUp: input.enabled } });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'billing.true_up',
+        target: ctx.orgId,
+        meta: { enabled: input.enabled },
+      });
+      return { ok: true };
     }),
 
   portal: orgProcedure.input(z.object({ orgId })).mutation(async ({ ctx }) => {

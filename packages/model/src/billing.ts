@@ -31,7 +31,7 @@ export interface Entitlements {
   monitoring: boolean;
   /** Sending alerts at all. Off once a trial has ended. */
   alerts: boolean;
-  /** Teams, webhook and ITSM alerts as well as email. */
+  /** Text message (SMS), Teams, webhook and ITSM alerts as well as email. */
   allAlertChannels: boolean;
   /** Usage and reports. */
   analytics: boolean;
@@ -167,7 +167,8 @@ export const PLAN_FEATURES: Record<
       'Signed, numbered register issues',
       'Your own definition of a room being in use',
       'Service desk connections and ticket rules',
-      'Teams and webhook alerts, and your own drivers',
+      'Text message (SMS), Teams and webhook alerts',
+      'Your own drivers',
     ],
   },
 };
@@ -190,7 +191,7 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   control: 'Deploying and controlling rooms',
   monitoring: 'Monitoring',
   alerts: 'Alerts',
-  allAlertChannels: 'Teams, webhook and service desk alerts',
+  allAlertChannels: 'Text message, Teams, webhook and service desk alerts',
   analytics: 'Usage and reports',
   configuration: 'Configuration profiles, drift and deploys',
   registerIssues: 'Signed register issues',

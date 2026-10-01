@@ -781,6 +781,8 @@ model OrgBilling {
   quantity             Int       @default(0)
   currentPeriodEnd     DateTime?
   cancelAtPeriodEnd    Boolean   @default(false)
+  /// Rooms added mid-cycle are charged pro rata to the end of the period straight away, then billed in full from the next cycle.
+  trueUp               Boolean   @default(false)
   updatedAt            DateTime  @default(now()) @updatedAt
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
