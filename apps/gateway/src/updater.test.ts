@@ -122,6 +122,24 @@ describe('updating a Windows gateway', () => {
     expect(runs).toEqual([['schtasks', '/Run', '/TN', UPDATE_TASK]]);
   });
 
+  it('still starts the update task when the install folder cannot be written to', async () => {
+    cloud.bundle = { bytes: BYTES, version: VERSION };
+    const layout = install(join(dir, 'install'));
+    // A directory where the script should be makes the copy fail, as it does for the service account.
+    rmSync(layout.installed);
+    mkdirSync(layout.installed);
+    const runs: string[][] = [];
+    const u = new WindowsUpdater(
+      dir,
+      layout,
+      trust({ run: async (f, a) => void runs.push([f, ...a]) }),
+    );
+    const p = io(location());
+    await u.apply(order(), p.io);
+    expect(runs).toEqual([['schtasks', '/Run', '/TN', UPDATE_TASK]]);
+    expect(p.seen).toContain('applying');
+  });
+
   it('throws away a download that does not match its digest, and starts nothing', async () => {
     cloud.bundle = { bytes: Buffer.from('something else entirely'), version: VERSION };
     const layout = install(join(dir, 'install'));

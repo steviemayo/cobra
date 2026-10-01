@@ -31,7 +31,7 @@ export interface Entitlements {
   monitoring: boolean;
   /** Sending alerts at all. Off once a trial has ended. */
   alerts: boolean;
-  /** Teams, webhook and ITSM alerts as well as email. */
+  /** Text message (SMS), Teams, webhook and ITSM alerts as well as email. */
   allAlertChannels: boolean;
   /** Usage and reports. */
   analytics: boolean;
@@ -150,6 +150,7 @@ export const PLAN_FEATURES: Record<
     summary: 'Know what you have and how it is doing.',
     features: [
       'Live monitoring of every monitored device and room',
+      'Find devices on your local network from the gateway',
       'The asset register, with CSV import and export',
       'Incidents, tickets and email alerts',
       'Maintenance windows',
@@ -167,7 +168,8 @@ export const PLAN_FEATURES: Record<
       'Signed, numbered register issues',
       'Your own definition of a room being in use',
       'Service desk connections and ticket rules',
-      'Teams and webhook alerts, and your own drivers',
+      'Text message (SMS), Teams and webhook alerts',
+      'Your own drivers',
     ],
   },
 };
@@ -190,7 +192,7 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   control: 'Deploying and controlling rooms',
   monitoring: 'Monitoring',
   alerts: 'Alerts',
-  allAlertChannels: 'Teams, webhook and service desk alerts',
+  allAlertChannels: 'Text message, Teams, webhook and service desk alerts',
   analytics: 'Usage and reports',
   configuration: 'Configuration profiles, drift and deploys',
   registerIssues: 'Signed register issues',
@@ -293,4 +295,18 @@ export function entitlementsWithOverride(
   else if (override.maxRooms !== null && override.maxRooms !== undefined)
     e.maxRooms = override.maxRooms;
   return e;
+}
+
+/** How often a paid plan is billed. */
+export const BILLING_INTERVALS = ['month', 'year'] as const;
+export type BillingInterval = (typeof BILLING_INTERVALS)[number];
+
+/** 00:00 UTC on the 1st of the month after `now`. Always strictly in the future. */
+export function nextFirstOfMonthUtc(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+}
+
+/** The same moment as a Unix timestamp in seconds, as Stripe wants it. */
+export function nextFirstOfMonthUnix(now: Date): number {
+  return Math.floor(nextFirstOfMonthUtc(now).getTime() / 1000);
 }

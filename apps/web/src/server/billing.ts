@@ -1,6 +1,8 @@
 import type { PrismaClient } from '@kestrel/db';
 import {
   TRIAL_DAYS,
+  nextFirstOfMonthUnix,
+  type BillingInterval,
   entitlementsWithOverride,
   overrideActive,
   type Entitlements,
@@ -20,15 +22,87 @@ export type BillingDb = EntitlementDb &
 export interface PriceMap {
   basic?: string;
   pro?: string;
+  basicYearly?: string;
+  proYearly?: string;
 }
 export const priceMapFromEnv = (
   env: Record<string, string | undefined> = process.env,
 ): PriceMap => ({
   basic: env.STRIPE_PRICE_BASIC || undefined,
   pro: env.STRIPE_PRICE_PRO || undefined,
+  basicYearly: env.STRIPE_PRICE_BASIC_YEARLY || undefined,
+  proYearly: env.STRIPE_PRICE_PRO_YEARLY || undefined,
 });
+
+/** Which plan and billing interval a Stripe price id stands for, or null if it is not one of ours. */
+export function planAndIntervalForPrice(
+  prices: PriceMap,
+  priceId: string | undefined,
+): { plan: PaidPlan; interval: BillingInterval } | null {
+  if (!priceId) return null;
+  if (prices.basic === priceId) return { plan: 'basic', interval: 'month' };
+  if (prices.pro === priceId) return { plan: 'pro', interval: 'month' };
+  if (prices.basicYearly === priceId) return { plan: 'basic', interval: 'year' };
+  if (prices.proYearly === priceId) return { plan: 'pro', interval: 'year' };
+  return null;
+}
 export const planForPrice = (prices: PriceMap, priceId: string | undefined): PaidPlan | null =>
-  !priceId ? null : prices.basic === priceId ? 'basic' : prices.pro === priceId ? 'pro' : null;
+  planAndIntervalForPrice(prices, priceId)?.plan ?? null;
+
+/** The price id for a plan and interval, or undefined if it is not configured. */
+export function priceIdFor(
+  prices: PriceMap,
+  plan: PaidPlan,
+  interval: BillingInterval,
+): string | undefined {
+  return interval === 'year'
+    ? plan === 'basic'
+      ? prices.basicYearly
+      : prices.proYearly
+    : plan === 'basic'
+      ? prices.basic
+      : prices.pro;
+}
+
+/** Yearly billing is offered only when both yearly prices exist. */
+export const yearlyAvailable = (prices: PriceMap): boolean =>
+  !!prices.basicYearly && !!prices.proYearly;
+
+/** Stripe statuses that count as a live subscription. */
+export const PAYING_STATUSES = new Set(['active', 'trialing', 'past_due']);
+
+/** Checkout's `subscription_data` for a new subscription, optionally anchored to the next 1st of the month. */
+export function checkoutSubscriptionData(input: { orgId: string; anchor: boolean; now?: Date }) {
+  return {
+    metadata: { orgId: input.orgId },
+    ...(input.anchor
+      ? {
+          billing_cycle_anchor: nextFirstOfMonthUnix(input.now ?? new Date()),
+          proration_behavior: 'create_prorations' as const,
+        }
+      : {}),
+  };
+}
+
+/**
+ * What to send Stripe when switching an existing subscription. Changing between monthly and yearly
+ * restarts the billing date and is charged now (with credit for unused time); a plan change within
+ * the same interval keeps the date and prorates on the next invoice.
+ */
+export function switchParams(input: { current: BillingInterval; target: BillingInterval }): {
+  proration_behavior: 'always_invoice' | 'create_prorations';
+  billing_cycle_anchor?: 'now';
+} {
+  return input.current !== input.target
+    ? { billing_cycle_anchor: 'now', proration_behavior: 'always_invoice' }
+    : { proration_behavior: 'create_prorations' };
+}
+
+/** The 1st-of-the-month choice only applies to new subscriptions; refuses while one is live. */
+export function assertAnchorChangeAllowed(billing: { status: string }): void {
+  if (PAYING_STATUSES.has(billing.status))
+    throw new Error('The billing date can only be chosen when you first subscribe.');
+}
 
 /** The organisation's billing row, created on first use with a fresh trial. */
 export async function ensureBilling(db: EntitlementDb, orgId: string, now = new Date()) {
@@ -92,10 +166,7 @@ export type BillingRoomsDb = Pick<PrismaClient, 'device' | 'deviceStatus' | 'roo
  * that a shared monitored device is linked to (`DeviceRoom`) is monitored too, even with no device of
  * its own, so the rooms a shared DSP or control system serves are charged like any other.
  */
-export async function monitoredRoomIds(
-  db: BillingRoomsDb,
-  orgId: string,
-): Promise<Set<string>> {
+export async function monitoredRoomIds(db: BillingRoomsDb, orgId: string): Promise<Set<string>> {
   const [devices, legacy, rooms, links] = await Promise.all([
     db.device.findMany({ where: { orgId, kind: 'active' } }),
     db.deviceStatus.findMany({ where: { orgId } }),
@@ -176,7 +247,9 @@ export async function applyStripeSubscription(
   if (billing.stripeCustomerId && billing.stripeCustomerId !== customer) return false;
 
   const item = sub.items.data[0];
-  const plan = planForPrice(prices, item?.price.id);
+  const known = planAndIntervalForPrice(prices, item?.price.id);
+  if (!known && item)
+    console.warn('[billing] subscription', sub.id, 'has a price Kestrel does not recognise');
   const periodEnd = item?.current_period_end ?? sub.current_period_end;
   await db.orgBilling.update({
     where: { id: billing.id },
@@ -185,8 +258,8 @@ export async function applyStripeSubscription(
       stripeSubscriptionId: sub.id,
       stripeItemId: item?.id ?? null,
       status: sub.status,
-      // An unknown price leaves the plan alone rather than guessing.
-      ...(plan ? { plan } : {}),
+      // An unknown price leaves the plan and interval alone rather than guessing.
+      ...(known ? { plan: known.plan, billingInterval: known.interval } : {}),
       quantity: item?.quantity ?? billing.quantity,
       currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
       cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,

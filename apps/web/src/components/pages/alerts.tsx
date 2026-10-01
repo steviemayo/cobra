@@ -46,10 +46,11 @@ import type { RouterOutputs } from '@/trpc/types';
 
 type Channel = RouterOutputs['alert']['channels'][number];
 type Severity = 'info' | 'warning' | 'critical';
-type ChannelType = 'email' | 'teams' | 'webhook' | 'itsm';
+type ChannelType = 'email' | 'sms' | 'teams' | 'webhook' | 'itsm';
 
 const TYPE_LABEL: Record<string, string> = {
   email: 'Email',
+  sms: 'Text message (SMS)',
   teams: 'Microsoft Teams',
   webhook: 'Webhook',
   itsm: 'Service desk (ITSM)',
@@ -143,7 +144,7 @@ export function AlertsView() {
         <EmptyState
           icon={BellRing}
           title="No alert channels yet"
-          description="Add an email address, a Teams channel or a webhook and Kestrel will message it when a room, device or gateway has a problem."
+          description="Add an email address, a mobile number for text messages, a Teams channel or a webhook and Kestrel will message it when a room, device or gateway has a problem."
           action={
             canEdit ? <Button onClick={() => setAdding(true)}>Add a channel</Button> : undefined
           }
@@ -310,6 +311,7 @@ function AddChannelDialog({
   const [name, setName] = useState('');
   const [minSeverity, setMinSeverity] = useState<Severity>('warning');
   const [emails, setEmails] = useState('');
+  const [phones, setPhones] = useState('');
   const [url, setUrl] = useState('');
   const [secret, setSecret] = useState('');
   const [system, setSystem] = useState<'generic' | 'servicenow' | 'jira'>('generic');
@@ -331,6 +333,8 @@ function AddChannelDialog({
     switch (type) {
       case 'email':
         return { type, to: emails.split(/[\s,;]+/).filter(Boolean), ...extra };
+      case 'sms':
+        return { type, to: phones.split(/[\s,;]+/).filter(Boolean), ...extra };
       case 'teams':
         return { type, url, ...extra };
       case 'webhook':
@@ -341,7 +345,11 @@ function AddChannelDialog({
   };
   const ready =
     name.trim() &&
-    (type === 'email' ? emails.trim() : type === 'itsm' || url.trim()) &&
+    (type === 'email'
+      ? emails.trim()
+      : type === 'sms'
+        ? phones.trim()
+        : type === 'itsm' || url.trim()) &&
     !draftProblem(rules);
 
   return (
@@ -411,7 +419,24 @@ function AddChannelDialog({
               <p className="text-xs text-muted-foreground">Separate several with commas.</p>
             </div>
           )}
-          {type !== 'email' && (
+          {type === 'sms' && (
+            <div className="space-y-2">
+              <Label htmlFor="ch-phones">Mobile numbers</Label>
+              <Input
+                id="ch-phones"
+                type="tel"
+                required
+                placeholder="+61412345678, +61498765432"
+                value={phones}
+                onChange={(e) => setPhones(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                International format starting with +, up to 5 numbers separated by commas. Texts are
+                kept short: the problem, the room and a link.
+              </p>
+            </div>
+          )}
+          {type !== 'email' && type !== 'sms' && (
             <div className="space-y-2">
               <Label htmlFor="ch-url">
                 {type === 'teams'

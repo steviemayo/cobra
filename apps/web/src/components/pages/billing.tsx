@@ -1,16 +1,23 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Check } from 'lucide-react';
 import { toast } from 'sonner';
-import { PAID_PLANS, PLAN_FEATURES, PLAN_LABEL, type PaidPlan } from '@kestrel/model';
+import {
+  PAID_PLANS,
+  PLAN_FEATURES,
+  PLAN_LABEL,
+  type BillingInterval,
+  type PaidPlan,
+} from '@kestrel/model';
 import { useBilling } from '@/components/common/plan-gate';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
+import { Switch } from '@/components/ui/switch';
 import { formatDate, plural } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
@@ -21,6 +28,8 @@ export function BillingView() {
   const router = useRouter();
   const { orgId, isOwner } = useOrg();
   const billing = useBilling();
+  const [pickedInterval, setPickedInterval] = useState<BillingInterval | null>(null);
+  const [anchor, setAnchor] = useState(false);
 
   useEffect(() => {
     if (!isOwner) router.replace(orgPath(orgId, '/settings/activity'));
@@ -44,6 +53,12 @@ export function BillingView() {
       onError: (e) => toast.error(e.message),
     }),
   );
+  const trueUp = useMutation(
+    trpc.billing.setTrueUp.mutationOptions({
+      onSuccess: refresh,
+      onError: (e) => toast.error(e.message),
+    }),
+  );
   const portal = useMutation(
     trpc.billing.portal.mutationOptions({
       onSuccess: (res) => go(res.url),
@@ -63,6 +78,12 @@ export function BillingView() {
   if (!b) return null;
   const e = b.entitlements;
   const paid = e.plan === 'basic' || e.plan === 'pro';
+  const live = ['active', 'trialing', 'past_due'].includes(b.subscription.status);
+  const currentInterval = b.subscription.interval;
+  // Yearly is only offered when the server has both yearly prices.
+  const interval: BillingInterval = !b.yearlyAvailable
+    ? 'month'
+    : (pickedInterval ?? (paid ? currentInterval : 'month'));
 
   return (
     <PageContainer className="max-w-3xl">
@@ -116,6 +137,25 @@ export function BillingView() {
         </p>
       </section>
 
+      {b.subscription.managed && (
+        <section className="flex items-start justify-between gap-4 rounded-lg border p-4">
+          <div>
+            <div className="text-sm font-medium">True up new rooms</div>
+            <p className="text-sm text-muted-foreground">
+              When rooms are added part-way through a billing period, charge for them straight away
+              pro rata to the end of the period. From the next billing date they are billed with the
+              rest of your rooms. Off: the pro rata charge appears on your next invoice.
+            </p>
+          </div>
+          <Switch
+            aria-label="True up new rooms"
+            checked={b.subscription.trueUp}
+            disabled={trueUp.isPending}
+            onCheckedChange={(enabled) => trueUp.mutate({ orgId, enabled })}
+          />
+        </section>
+      )}
+
       {!b.available && (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
           Payments aren’t set up on this Kestrel server yet, so plans can’t be changed here. Add the
@@ -123,10 +163,62 @@ export function BillingView() {
         </p>
       )}
 
+      <div className="flex flex-wrap items-center gap-3">
+        <div
+          role="group"
+          aria-label="Billing interval"
+          className="inline-flex rounded-md border p-0.5"
+        >
+          {(['month', 'year'] as const).map((i) => (
+            <button
+              key={i}
+              type="button"
+              aria-pressed={interval === i}
+              disabled={i === 'year' && !b.yearlyAvailable}
+              onClick={() => setPickedInterval(i)}
+              className={cn(
+                'rounded px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50',
+                interval === i ? 'bg-muted font-medium' : 'text-muted-foreground',
+              )}
+            >
+              {i === 'month' ? 'Monthly' : 'Yearly'}
+            </button>
+          ))}
+        </div>
+        {!b.yearlyAvailable && (
+          <span className="text-sm text-muted-foreground">Yearly billing isn’t set up yet.</span>
+        )}
+        {paid && live && interval !== currentInterval && (
+          <span className="text-sm text-muted-foreground">
+            Changing between monthly and yearly restarts your billing date and is charged now, with
+            credit for unused time.
+          </span>
+        )}
+      </div>
+
+      {live && paid ? (
+        b.subscription.anchorFirstOfMonth && (
+          <p className="text-sm text-muted-foreground">
+            Billed on the 1st of each month. The billing date can’t be changed on a running
+            subscription.
+          </p>
+        )
+      ) : (
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4"
+            checked={anchor}
+            onChange={(ev) => setAnchor(ev.target.checked)}
+          />
+          Bill on the 1st of each month (first period charged pro rata)
+        </label>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2">
         {PAID_PLANS.map((plan: PaidPlan) => {
           const p = PLAN_FEATURES[plan];
-          const current = e.plan === plan;
+          const current = e.plan === plan && (!live || currentInterval === interval);
           return (
             <section
               key={plan}
@@ -145,7 +237,14 @@ export function BillingView() {
               <Button
                 variant={current ? 'outline' : 'default'}
                 disabled={current || !b.available || subscribe.isPending}
-                onClick={() => subscribe.mutate({ orgId, plan })}
+                onClick={() =>
+                  subscribe.mutate({
+                    orgId,
+                    plan,
+                    interval,
+                    ...(!(live && paid) && anchor ? { anchorFirstOfMonth: true } : {}),
+                  })
+                }
               >
                 {subscribe.isPending && subscribe.variables?.plan === plan && <Spinner />}
                 {current ? 'Your plan' : paid ? `Switch to ${p.label}` : `Choose ${p.label}`}

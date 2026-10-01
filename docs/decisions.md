@@ -951,3 +951,11 @@ Not done: photo upload for checklist items, the visit being done offline on a ph
 | ID | Decision | Who | Why |
 | --- | --- | --- | --- |
 | RS-19 | **A room that a shared monitored device is linked to counts as a monitored room**, even with no device of its own, so it is charged and counts against the plan's limit like any other (`monitoredRoomIds` reads `DeviceRoom`). A room linked only to a recorded asset, or a staging or combined room, is still free. Linking a monitored device to a room that is not monitored yet is refused when it would take the organisation over its limit, and the billing quantity is synced after. This closes the open point in RS-11 | user | The room is being monitored |
+
+### Built: SMS alerts and true up (2026-10-01)
+
+- **TM-14** Text message (SMS) alerts are a **Pro** channel (via Twilio: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`; skipped as "not set up" without them), up to 5 numbers per channel and 100 texts per organisation per day
+- **TM-15** Optional **true up** (owner switch on the billing page): rooms added mid-cycle are invoiced at once pro rata to the period end (Stripe `always_invoice`), then billed in full from the next renewal. Off by default; removals still credit on the next invoice
+
+- **TM-16** Optional **yearly billing** for both plans (`STRIPE_PRICE_BASIC_YEARLY`, `STRIPE_PRICE_PRO_YEARLY`; the toggle is offered only when both are set). The interval is read back from the subscription price and kept on `OrgBilling.billingInterval`. Switching between monthly and yearly restarts the billing date and is charged now with credit for unused time (Stripe `billing_cycle_anchor: now`, `always_invoice`); a plan change within the same interval keeps the date
+- **TM-17** Optional **billing on the 1st of the month**, for new subscriptions only (a checkbox before the first subscription; resubscribing after a cancel counts as new). The first period is charged pro rata (Checkout `billing_cycle_anchor` at 00:00 UTC on the next 1st). It is stored on `OrgBilling.anchorFirstOfMonth`, shown read-only afterwards and refused while a live subscription exists; existing subscriptions keep their date
