@@ -130,6 +130,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
             ...(canSupport ? [{ label: 'Devices', href: `${base}/devices` }] : []),
             { label: 'Usage', href: `${base}/usage` },
             { label: 'Calendar', href: `${base}/calendar` },
+            { label: 'Timeline', href: `${base}/timeline` },
             { label: 'Maintenance', href: `${base}/maintenance`, locked: !maintenance },
             { label: 'Monitoring', href: `${base}/monitoring` },
             ...(canEdit ? [{ label: 'Settings', href: `${base}/settings` }] : []),

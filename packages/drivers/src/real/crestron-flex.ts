@@ -8,6 +8,7 @@ import type {
 } from '@kestrel/model';
 import { BaseDriver } from './base';
 import {
+  ConsoleError,
   CrestronConsole,
   parseJoinAddress,
   parseJoinValue,
@@ -28,6 +29,9 @@ import type { DriverContext } from './types';
 // builds), its peripherals (microphone, speaker, camera, display) and the room (occupancy, people
 // count). A peripheral that stops being healthy can be alerted on by watching its reserved join
 // as a control point, for example `{ "join": "S27702" }` expecting "Healthy".
+
+/** How often the identity and Ethernet details are read again. */
+const NETWORK_EVERY_MS = 10 * 60_000;
 
 const DIGITAL = {
   inMeeting: 27767,
@@ -55,9 +59,20 @@ const ANALOG = {
   speakerVolume: 17348,
 } as const;
 
+/** What the unit says about itself and its wired network, read from the console. */
+export interface NetworkReading {
+  mac?: string;
+  serial?: string;
+  ip?: string;
+  hostname?: string;
+  /** The wired "Ethernet" adapter only, as label -> value (Wi-Fi, Bluetooth and others are left out). */
+  ethernet?: Record<string, string>;
+}
+
 interface Reading {
   version: string;
   uptime: string;
+  net?: NetworkReading;
   d: Partial<Record<keyof typeof DIGITAL, boolean>>;
   s: Partial<Record<keyof typeof SERIAL, string>>;
   a: Partial<Record<keyof typeof ANALOG, number>>;
@@ -89,10 +104,61 @@ export function flexOccupied(
   return occupied;
 }
 
+/** The value after the first colon of "MAC Address: 90-8D-..." or "Hostname : MTR-1", or undefined. */
+const afterColon = (reply: string): string | undefined => {
+  const m = /^[^:\r\n]+:[ \t]*(\S.*?)[ \t]*$/m.exec(reply);
+  return m?.[1];
+};
+
+/** "90-8D-6E-95-91-26" -> "90:8D:6E:95:91:26". */
+export function parseMac(reply: string): string | undefined {
+  const m = /\b([0-9A-Fa-f]{2}(?:[-:][0-9A-Fa-f]{2}){5})\b/.exec(reply);
+  return m?.[1]!.toUpperCase().replace(/-/g, ':');
+}
+
+export function parseSerial(reply: string): string | undefined {
+  const v = afterColon(reply);
+  return v && /^[\w-]{4,40}$/.test(v) ? v : undefined;
+}
+
+export function parseIp(reply: string): string | undefined {
+  return /\b((?:\d{1,3}\.){3}\d{1,3})\b/.exec(reply)?.[1];
+}
+
+export function parseHostname(reply: string): string | undefined {
+  const v = afterColon(reply);
+  return v && /^[\w.-]{1,63}$/.test(v) ? v : undefined;
+}
+
+/**
+ * The wired adapter out of the `est` printout (an ipconfig listing): the section called
+ * "Ethernet adapter Ethernet:" and nothing else. Values keep their text, minus "(Preferred)".
+ */
+export function parseEthernet(reply: string): Record<string, string> | undefined {
+  const head = /^Ethernet adapter Ethernet:[ \t]*$/im.exec(reply);
+  if (!head) return undefined;
+  const rest = reply.slice(head.index + head[0].length);
+  // The section runs to the next adapter heading.
+  const next = /^(?:Ethernet|Wireless LAN|Tunnel) adapter .+:[ \t]*$/im.exec(rest);
+  const out: Record<string, string> = {};
+  for (const line of (next ? rest.slice(0, next.index) : rest).split(/\r?\n/)) {
+    const m = /^\s+(.+?)[ .]*:[ \t]*(.*?)\s*$/.exec(line);
+    if (m && m[2]) out[m[1]!.trim()] = m[2].replace(/\(Preferred\)\s*$/i, '').trim();
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 export function flexDetails(r: Reading): DeviceDetailSection[] {
   const firmware = /\[v([\d.]+)/.exec(r.version)?.[1];
   const id = /@E-([0-9A-Fa-f]{12})/.exec(r.version)?.[1];
-  const mac = id?.toUpperCase().match(/../g)?.join(':');
+  // The console's own answer wins; the address inside the version text is the fallback.
+  const mac = r.net?.mac ?? id?.toUpperCase().match(/../g)?.join(':');
+  const eth = r.net?.ethernet;
+  const link = eth
+    ? /^disconnected/i.test(eth['Media State'] ?? '')
+      ? undefined
+      : true
+    : undefined;
   const ran = /running for (.+?)\r?\n/i.exec(r.uptime + '\n')?.[1]?.trim();
   const since = /last started on:\s*(.+?)\s*$/im.exec(r.uptime)?.[1];
   const row = (label: string, value: string | undefined, status?: DetailStatus) =>
@@ -109,10 +175,30 @@ export function flexDetails(r: Reading): DeviceDetailSection[] {
       rows: [
         { label: 'Model', value: 'Crestron Flex UC-Engine (Teams Rooms)' },
         ...row('Firmware', firmware),
+        ...row('Serial number', r.net?.serial),
         ...row('MAC address', mac),
+        ...row('Hostname', r.net?.hostname),
+        ...row('IP address', r.net?.ip ?? eth?.['IPv4 Address']),
         ...row('Running for', ran),
         ...row('Last started', since),
       ],
+    },
+    {
+      title: 'Ethernet',
+      rows: eth
+        ? [
+            ...row('Adapter', eth['Description']),
+            ...row('Link', link === undefined ? 'Disconnected' : 'Connected', yes(link)),
+            ...row('DHCP', eth['DHCP Enabled']),
+            ...row('IPv4 address', eth['IPv4 Address']),
+            ...row('Subnet mask', eth['Subnet Mask']),
+            ...row('Default gateway', eth['Default Gateway']),
+            ...row('DHCP server', eth['DHCP Server']),
+            ...row('DNS servers', eth['DNS Servers']),
+            ...row('Lease obtained', eth['Lease Obtained']),
+            ...row('Lease expires', eth['Lease Expires']),
+          ]
+        : [],
     },
     {
       title: 'Teams Rooms app',
@@ -157,6 +243,8 @@ export class CrestronFlexDriver extends BaseDriver {
   private console: CrestronConsole | null = null;
   private poller: ReturnType<typeof setInterval> | null = null;
   private busy = false;
+  /** Serial, MAC, address and Ethernet settings change rarely: read every few minutes, not each poll. */
+  private net: { at: number; data: NetworkReading } | null = null;
 
   constructor(device: Device, ctx: DriverContext) {
     super(device, ctx);
@@ -186,10 +274,39 @@ export class CrestronFlexDriver extends BaseDriver {
     this.poller = null;
     this.console?.close();
     this.console = null;
+    this.net = null;
   }
 
   private async join(kind: JoinKind, join: number) {
     return parseJoinValue(kind, await this.session().run(`show${kind} ${join}`));
+  }
+
+  /**
+   * What the unit says about itself and its wired network (`maca`, `serial`, `ipa`, `hostname`,
+   * `est`). A command an older firmware does not know simply gives nothing: the rest still shows.
+   * A lost connection is not hidden, so it still takes the device offline.
+   */
+  private async readNetwork(): Promise<NetworkReading> {
+    const keep = this.net;
+    if (keep && Date.now() - keep.at < NETWORK_EVERY_MS) return keep.data;
+    const c = this.session();
+    const ask = async (command: string) => {
+      try {
+        return await c.run(command);
+      } catch (e) {
+        if (e instanceof ConsoleError) throw e;
+        return '';
+      }
+    };
+    const data: NetworkReading = {
+      mac: parseMac(await ask('maca')),
+      serial: parseSerial(await ask('serial')),
+      ip: parseIp(await ask('ipa')),
+      hostname: parseHostname(await ask('hostname')),
+      ethernet: parseEthernet(await ask('est')),
+    };
+    this.net = { at: Date.now(), data };
+    return data;
   }
 
   private async read(): Promise<Reading> {
@@ -197,6 +314,7 @@ export class CrestronFlexDriver extends BaseDriver {
     const reading: Reading = {
       version: await c.run('version'),
       uptime: await c.run('uptime'),
+      net: await this.readNetwork(),
       d: {},
       s: {},
       a: {},

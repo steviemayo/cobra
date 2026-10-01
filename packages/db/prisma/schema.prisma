@@ -1053,6 +1053,30 @@ model RoomSchedule {
   @@index([orgId])
 }
 
+// Every booking Kestrel has seen on a room's calendar, kept after the meeting so a fault can be
+// compared with what was on (the room timeline). Written by the calendar job from the same read as
+// RoomSchedule; bookings still to come are replaced or removed when the calendar changes, past ones
+// are never touched, and rows older than 90 days are deleted. Private meetings are stored without
+// their title or organiser. No relations, like RoomSchedule.
+model RoomBooking {
+  id        String   @id @default(uuid()) @db.Uuid
+  roomId    String   @db.Uuid
+  orgId     String   @db.Uuid
+  /// The calendar's id for the meeting (an occurrence of a repeat has its own).
+  eventId   String
+  title     String
+  organiser String?
+  private   Boolean  @default(false)
+  startsAt  DateTime
+  endsAt    DateTime
+  seenAt    DateTime
+
+  @@unique([roomId, eventId, startsAt])
+  @@index([roomId, startsAt])
+  @@index([orgId])
+  @@index([endsAt])
+}
+
 // ---- Marketplace -------------------------------------------------------------------------------
 
 // A room design shared by one organisation with others. `model` is a snapshot with every device
