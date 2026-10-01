@@ -174,8 +174,14 @@ export class WindowsUpdater implements Updater {
       join(dir, 'request.json'),
       JSON.stringify({ version: order.version, sha256: order.bundle.sha256, zip }),
     );
-    // The installed script may be older than this gateway: use the one that came with this bundle.
-    if (existsSync(this.layout.bundled)) copyFileSync(this.layout.bundled, this.layout.installed);
+    // The service account cannot write to the install folder (only administrators can), so this
+    // copy is a courtesy for installs that can. It must never stop the update: update.ps1 runs as
+    // the system and refreshes itself from the verified bundle once the new version is healthy.
+    try {
+      if (existsSync(this.layout.bundled)) copyFileSync(this.layout.bundled, this.layout.installed);
+    } catch {
+      // The installed script is used as it is.
+    }
     io.progress({ state: 'staged', version: order.version });
 
     // The task runs as SYSTEM outside this process, which it is about to stop and replace.
