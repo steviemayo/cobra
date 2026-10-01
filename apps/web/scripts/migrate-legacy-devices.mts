@@ -43,7 +43,7 @@ for (const room of rooms) {
   }
   const model = parsed.data;
   const drivers = manifest?.drivers ?? {};
-  let bound: Awaited<ReturnType<typeof resolveBindings>> = null;
+  let bound: Awaited<ReturnType<typeof resolveBindings>>;
   try {
     bound = await resolveBindings(db, room.orgId, room.id, key, model);
   } catch (e) {
