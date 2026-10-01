@@ -132,6 +132,8 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `asked for a support callout: ${s(meta.title)}`;
     case 'callout.pay':
       return 'opened payment for a support callout quote';
+    case 'callout.to_kestrel':
+      return 'sent a callout to Kestrel instead of the service provider';
     case 'callout.cancel':
       return 'cancelled a support callout';
     case 'latency.limits':

@@ -14,7 +14,7 @@ import {
   removeStaff,
   setStaff,
 } from '../staff-team';
-import { StaffRole } from '@kestrel/model';
+import { StaffRole, mspFromRoute } from '@kestrel/model';
 import { realCalloutStripe } from '../callout-stripe';
 import { orgTimezone, siteTimezone } from '../site-zone';
 import { OrgDeletionError, restoreOrg, scheduleDeletion } from '../org-deletion';
@@ -561,7 +561,11 @@ export const staffRouter = router({
     list: staffProcedure
       .input(
         z
-          .object({ status: z.array(z.string()).optional(), orgId: z.string().uuid().optional() })
+          .object({
+            status: z.array(z.string()).optional(),
+            orgId: z.string().uuid().optional(),
+            ticketId: z.string().uuid().optional(),
+          })
           .default({}),
       )
       .query(async ({ input }) => {
@@ -574,6 +578,11 @@ export const staffRouter = router({
           where: { id: { in: rows.flatMap((r) => (r.roomId ? [r.roomId] : [])) } },
           select: { id: true, name: true },
         });
+        // Callouts with a service provider are shown to Kestrel for monitoring: who has them.
+        const providers = await db.org.findMany({
+          where: { id: { in: [...new Set(rows.flatMap((r) => mspFromRoute(r.routedTo) ?? []))] } },
+          select: { id: true, name: true },
+        });
         return {
           defaultRateCents: Number(process.env.KESTREL_CALLOUT_RATE_CENTS) || null,
           callouts: await Promise.all(
@@ -583,6 +592,8 @@ export const staffRouter = router({
                 ? await siteTimezone(db, r.siteId)
                 : await orgTimezone(db, r.orgId),
               orgName: orgs.find((o) => o.id === r.orgId)?.name ?? 'Unknown',
+              providerName:
+                providers.find((o) => o.id === (mspFromRoute(r.routedTo) ?? ''))?.name ?? null,
               roomName: rooms.find((x) => x.id === r.roomId)?.name ?? null,
             })),
           ),

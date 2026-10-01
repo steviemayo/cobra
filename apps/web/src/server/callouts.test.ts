@@ -10,6 +10,7 @@ import {
   refundLateCancellation,
   requestCallout,
   sendQuote,
+  sendToKestrel,
   startPayment,
   type CalloutDb,
   type CalloutStripe,
@@ -451,5 +452,203 @@ describe('completing', () => {
     await expect(completeCallout(asDb(w), s, done(id, 2), NOW)).rejects.toThrow('paid booking');
     const id2 = await booked(world(), 5);
     expect(id2).toBeTruthy();
+  });
+});
+
+describe('requesting from a ticket, and where a callout goes', () => {
+  const PROVIDER = 'msp:99999999-9999-4999-8999-999999999999';
+  const withProvider = async (): Promise<string | null> => PROVIDER;
+  const noProvider = async (): Promise<string | null> => null;
+
+  const incidentTicket = (w: W, over: Record<string, unknown> = {}) => {
+    const row = {
+      id: 'tk1',
+      orgId: ORG,
+      roomId: ROOM,
+      incidentId: 'inc1',
+      title: 'RMC4 is offline',
+      status: 'open',
+      routedTo: 'org',
+      ...over,
+    };
+    w.ticket.rows.push(row);
+    return row;
+  };
+  const from = (w: W, over: Record<string, unknown> = {}, find = noProvider) =>
+    requestCallout(
+      asDb(w),
+      {
+        orgId: ORG,
+        ticketId: 'tk1',
+        title: 'Replace RMC4',
+        details: 'It has been offline since the morning',
+        preferredDates: 'Tuesday am',
+        userId: STAFF,
+        email: 'pat@example.com',
+        ...over,
+      },
+      NOW,
+      find,
+    );
+
+  it('writes the request on the existing ticket and sends it to Kestrel, keeping its own record linked to it', async () => {
+    const w = world();
+    incidentTicket(w);
+    const c = await from(w);
+    expect(c).toMatchObject({
+      ticketId: 'tk1',
+      ownsTicket: false,
+      routedTo: 'kestrel',
+      roomId: ROOM,
+      siteId: SITE,
+      incidentId: 'inc1',
+      status: 'requested',
+    });
+    // No second ticket: the conversation stays on the one that is there.
+    expect(w.ticket.rows).toHaveLength(1);
+    expect(w.ticket.rows[0]).toMatchObject({ routedTo: 'kestrel', escalatedBy: STAFF });
+    const said = w.ticketComment.rows[0]!;
+    expect(said).toMatchObject({ ticketId: 'tk1', visibility: 'public', fromStaff: false });
+    expect(String(said.body)).toContain('Callout requested: Replace RMC4');
+    expect(String(said.body)).toContain('Preferred times: Tuesday am');
+  });
+
+  it('later quotes are written on that ticket, and it is not closed when the callout ends', async () => {
+    const w = world();
+    incidentTicket(w);
+    const c = await from(w);
+    await sendQuote(
+      asDb(w),
+      c.id,
+      { hours: 2, rateCents: 15000, scheduledFor: at(5), staffUserId: STAFF },
+      NOW,
+    );
+    expect(w.ticketComment.rows.some((r) => String(r.body).startsWith('Quote for'))).toBe(true);
+    const { s } = fakeStripe();
+    await cancelByCustomer(asDb(w), s, { id: c.id, orgId: ORG }, NOW);
+    expect(row(w, c.id).status).toBe('cancelled');
+    // The incident ticket carries on: only a callout that opened its own ticket closes it.
+    expect(w.ticket.rows[0]!.status).toBe('open');
+  });
+
+  it('an old ticket that was resolved is open again, and a closed one must be reopened first', async () => {
+    const w = world();
+    incidentTicket(w, { status: 'resolved' });
+    await from(w);
+    expect(w.ticket.rows[0]!.status).toBe('open');
+    const w2 = world();
+    incidentTicket(w2, { status: 'closed' });
+    await expect(from(w2)).rejects.toThrow(/Reopen the ticket/);
+  });
+
+  it('refuses a second open callout for the same ticket, and a ticket from another organisation', async () => {
+    const w = world();
+    incidentTicket(w);
+    await from(w);
+    await expect(from(w)).rejects.toThrow(/already open for this ticket/);
+    const w2 = world();
+    incidentTicket(w2, { orgId: OTHER });
+    await expect(from(w2)).rejects.toThrow(/not in this organisation/);
+  });
+
+  it('goes to the service provider that covers it, with the ticket, and is not for Kestrel to quote', async () => {
+    const w = world();
+    incidentTicket(w);
+    const c = await from(w, {}, withProvider);
+    expect(c.routedTo).toBe(PROVIDER);
+    expect(w.ticket.rows[0]).toMatchObject({ routedTo: PROVIDER });
+    expect(w.ticket.rows[0]!.escalatedBy).toBeUndefined();
+    await expect(
+      sendQuote(
+        asDb(w),
+        c.id,
+        { hours: 2, rateCents: 15000, scheduledFor: at(5), staffUserId: STAFF },
+        NOW,
+      ),
+    ).rejects.toThrow(/service provider/);
+    const { s } = fakeStripe();
+    await expect(
+      completeCallout(asDb(w), s, { id: c.id, actualHours: 1, staffUserId: STAFF }, NOW),
+    ).rejects.toThrow(/service provider/);
+    await expect(cancelByStaff(asDb(w), s, { id: c.id, reason: 'x' }, NOW)).rejects.toThrow(
+      /service provider/,
+    );
+  });
+
+  it('a callout with its own new ticket follows the same rule', async () => {
+    const w = world();
+    const c = await requestCallout(
+      asDb(w),
+      { orgId: ORG, roomId: ROOM, title: 'Projector', details: 'Dead', userId: STAFF, email: null },
+      NOW,
+      withProvider,
+    );
+    expect(c).toMatchObject({ routedTo: PROVIDER, ownsTicket: true });
+    expect(w.ticket.rows[0]).toMatchObject({ routedTo: PROVIDER });
+    expect(w.ticket.rows[0]!.escalatedAt).toBeUndefined();
+    const none = world();
+    const k = await requestCallout(
+      asDb(none),
+      { orgId: ORG, title: 'Projector', details: 'Dead', userId: STAFF, email: null },
+      NOW,
+      noProvider,
+    );
+    expect(k.routedTo).toBe('kestrel');
+    expect(none.ticket.rows[0]).toMatchObject({ routedTo: 'kestrel' });
+  });
+
+  it('an owner or dev can send it to Kestrel instead of the provider; anyone else cannot', async () => {
+    const base = { orgId: ORG, title: 'P', details: 'D', userId: STAFF, email: null };
+    const c = await requestCallout(
+      asDb(world()),
+      { ...base, roomId: ROOM, sendTo: 'kestrel', canChooseKestrel: true },
+      NOW,
+      withProvider,
+    );
+    expect(c.routedTo).toBe('kestrel');
+    await expect(
+      requestCallout(
+        asDb(world()),
+        { ...base, roomId: ROOM, sendTo: 'kestrel', canChooseKestrel: false },
+        NOW,
+        withProvider,
+      ),
+    ).rejects.toThrow(/Only an owner or dev/);
+    // With no provider there is nothing to choose between: it is Kestrel's whoever asks.
+    await expect(
+      requestCallout(
+        asDb(world()),
+        { ...base, sendTo: 'kestrel', canChooseKestrel: false },
+        NOW,
+        noProvider,
+      ),
+    ).resolves.toMatchObject({ routedTo: 'kestrel' });
+  });
+
+  it('a request with a provider can be moved to Kestrel before it is quoted, taking its ticket along', async () => {
+    const w = world();
+    incidentTicket(w);
+    const c = await from(w, {}, withProvider);
+    const res = await sendToKestrel(
+      asDb(w),
+      { id: c.id, orgId: ORG, userId: STAFF, email: 'pat@example.com' },
+      NOW,
+    );
+    expect(res).toMatchObject({ ticketId: 'tk1' });
+    expect(row(w, c.id).routedTo).toBe('kestrel');
+    expect(w.ticket.rows[0]).toMatchObject({ routedTo: 'kestrel', escalatedBy: STAFF });
+    expect(String(w.ticketComment.rows.at(-1)!.body)).toContain('sent to Kestrel support instead');
+    // Kestrel can now quote it.
+    await expect(
+      sendQuote(
+        asDb(w),
+        c.id,
+        { hours: 2, rateCents: 15000, scheduledFor: at(5), staffUserId: STAFF },
+        NOW,
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      sendToKestrel(asDb(w), { id: c.id, orgId: ORG, userId: STAFF, email: null }, NOW),
+    ).rejects.toThrow(/already with Kestrel/);
   });
 });

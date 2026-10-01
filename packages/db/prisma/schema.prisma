@@ -1684,6 +1684,13 @@ model Callout {
   roomId         String?  @db.Uuid
   /// The ticket that carries the conversation with staff.
   ticketId       String?  @db.Uuid
+  /// True when the callout opened its own ticket (and closes it when it ends). False when it was
+  /// requested from a ticket that already existed (an incident's), which carries on after the callout.
+  ownsTicket     Boolean  @default(true)
+  /// Who deals with it: "kestrel" (quote, prepay, invoice through Kestrel) or "msp:<org id>", a service
+  /// provider that covers the room, site or organisation. Kestrel can see every callout; only the
+  /// ones with Kestrel are quoted and billed here. An owner or dev can send one to Kestrel instead.
+  routedTo       String   @default("kestrel")
   incidentId     String?  @db.Uuid
   title          String
   details        String

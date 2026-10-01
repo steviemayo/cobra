@@ -400,7 +400,8 @@ export function StaffCallouts() {
                   <div className="font-medium">{c.title}</div>
                   <div className="text-xs text-muted-foreground">
                     {c.orgName}
-                    {c.roomName ? ` · ${c.roomName}` : ''} · requested {dateTime(c.createdAt, c.timezone)}
+                    {c.roomName ? ` · ${c.roomName}` : ''} · requested{' '}
+                    {dateTime(c.createdAt, c.timezone)}
                     {c.ticketId && (
                       <>
                         {' · '}
@@ -411,7 +412,11 @@ export function StaffCallouts() {
                     )}
                   </div>
                 </div>
-                <Badge variant="outline">{LABEL[c.status] ?? c.status}</Badge>
+                <Badge variant="outline">
+                  {c.routedTo !== 'kestrel' && c.status === 'requested'
+                    ? `With ${c.providerName ?? 'a service provider'}`
+                    : (LABEL[c.status] ?? c.status)}
+                </Badge>
               </div>
               <p className="whitespace-pre-line text-sm text-muted-foreground">{c.details}</p>
               {c.preferredDates && <p className="text-sm">Preferred times: {c.preferredDates}</p>}
@@ -442,36 +447,46 @@ export function StaffCallouts() {
                   {c.refundedCents ? ` Refunded ${dollars(c.refundedCents)}.` : ''}
                 </p>
               )}
+              {c.routedTo !== 'kestrel' && (
+                <p className="text-sm text-muted-foreground">
+                  With {c.providerName ?? 'a service provider'}, who deal with the quote and
+                  invoice. Shown here for monitoring. The owner can send it to Kestrel instead.
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
-                {(c.status === 'requested' || c.status === 'quoted') && (
-                  <Button size="sm" onClick={() => setAction({ kind: 'quote', row: c })}>
-                    {c.status === 'quoted' ? 'Change quote' : 'Send quote'}
-                  </Button>
-                )}
-                {c.status === 'booked' && (
+                {c.routedTo === 'kestrel' &&
+                  (c.status === 'requested' || c.status === 'quoted') && (
+                    <Button size="sm" onClick={() => setAction({ kind: 'quote', row: c })}>
+                      {c.status === 'quoted' ? 'Change quote' : 'Send quote'}
+                    </Button>
+                  )}
+                {c.routedTo === 'kestrel' && c.status === 'booked' && (
                   <Button size="sm" onClick={() => setAction({ kind: 'complete', row: c })}>
                     Complete
                   </Button>
                 )}
-                {(c.status === 'requested' || c.status === 'quoted') && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setAction({ kind: 'decline', row: c })}
-                  >
-                    Decline
-                  </Button>
-                )}
-                {['requested', 'quoted', 'booked'].includes(c.status) && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setAction({ kind: 'cancel', row: c })}
-                  >
-                    Cancel
-                  </Button>
-                )}
-                {c.status === 'cancelled' &&
+                {c.routedTo === 'kestrel' &&
+                  (c.status === 'requested' || c.status === 'quoted') && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setAction({ kind: 'decline', row: c })}
+                    >
+                      Decline
+                    </Button>
+                  )}
+                {c.routedTo === 'kestrel' &&
+                  ['requested', 'quoted', 'booked'].includes(c.status) && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setAction({ kind: 'cancel', row: c })}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                {c.routedTo === 'kestrel' &&
+                  c.status === 'cancelled' &&
                   c.cancelledBy === 'customer' &&
                   c.paidAt &&
                   !c.refundedCents && (

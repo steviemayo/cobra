@@ -31,6 +31,7 @@ export function StaffTicket({ ticketId }: { ticketId: string }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const me = useQuery(trpc.staff.me.queryOptions());
+  const callouts = useQuery(trpc.staff.callouts.list.queryOptions({ ticketId }));
   const ticket = useQuery({
     ...trpc.staff.tickets.get.queryOptions({ ticketId }),
     refetchInterval: 15_000,
@@ -198,6 +199,26 @@ export function StaffTicket({ ticketId }: { ticketId: string }) {
         </div>
 
         <aside className="space-y-4">
+          {(callouts.data?.callouts.length ?? 0) > 0 && (
+            <Field label="Callouts">
+              <div className="space-y-2">
+                {callouts.data!.callouts.map((c) => (
+                  <Link
+                    key={c.id}
+                    href="/staff/callouts"
+                    className="block rounded-md border px-2.5 py-1.5 text-sm hover:bg-muted/50"
+                  >
+                    <div className="truncate font-medium">{c.title}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {c.routedTo !== 'kestrel'
+                        ? `With ${c.providerName ?? 'a service provider'} (monitoring)`
+                        : c.status}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </Field>
+          )}
           <Field label="Organisation">
             <div className="space-y-1 text-sm">
               <Link href={`/staff/orgs/${t.orgId}`} className="hover:underline">

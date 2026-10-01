@@ -40,22 +40,50 @@ const TONE: Record<string, string> = {
   declined: 'text-muted-foreground',
 };
 
-function RequestDialog({ onClose }: { onClose: () => void }) {
+/** What a callout is requested from: an existing ticket, whose conversation and record it joins. */
+export interface CalloutFrom {
+  ticketId: string;
+  title: string;
+  details: string;
+  roomId: string | null;
+}
+
+export function RequestDialog({ onClose, from }: { onClose: () => void; from?: CalloutFrom }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const { orgId } = useOrg();
   const rooms = useRoomsOverview();
-  const [title, setTitle] = useState('');
-  const [details, setDetails] = useState('');
-  const [roomId, setRoomId] = useState('none');
+  const [title, setTitle] = useState(from?.title ?? '');
+  const [details, setDetails] = useState(from?.details ?? '');
+  const [roomId, setRoomId] = useState(from?.roomId ?? 'none');
+  const [sendTo, setSendTo] = useState<'default' | 'kestrel'>('default');
+  // Where it will go: the service provider that covers the room (or ticket), else Kestrel.
+  const dest = useQuery(
+    trpc.callout.destination.queryOptions({
+      orgId,
+      roomId: roomId === 'none' ? null : roomId,
+      ticketId: from?.ticketId ?? null,
+    }),
+  );
+  const provider = dest.data?.providerName ?? null;
+  const toProvider = !!provider && sendTo === 'default';
   const [preferred, setPreferred] = useState('');
   const [contactName, setContactName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const create = useMutation(
     trpc.callout.request.mutationOptions({
-      onSuccess: async () => {
-        await qc.invalidateQueries({ queryKey: trpc.callout.list.queryKey() });
-        toast.success('Callout requested. Kestrel will reply with availability and a quote.');
+      onSuccess: async (r) => {
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: trpc.callout.list.queryKey() }),
+          qc.invalidateQueries({ queryKey: trpc.callout.forTicket.queryKey() }),
+          qc.invalidateQueries({ queryKey: trpc.ticket.get.queryKey() }),
+          qc.invalidateQueries({ queryKey: trpc.ticket.list.queryKey() }),
+        ]);
+        toast.success(
+          r.routedTo === 'kestrel'
+            ? 'Callout requested. Kestrel will reply with availability and a quote.'
+            : `Callout requested. ${provider ?? 'Your service provider'} will reply, and Kestrel can see it.`,
+        );
         onClose();
       },
     }),
@@ -72,6 +100,8 @@ function RequestDialog({ onClose }: { onClose: () => void }) {
               title,
               details,
               roomId: roomId === 'none' ? null : roomId,
+              ticketId: from?.ticketId ?? null,
+              sendTo: provider ? sendTo : 'default',
               preferredDates: preferred || null,
               contactName: contactName || null,
               contactPhone: contactPhone || null,
@@ -79,11 +109,14 @@ function RequestDialog({ onClose }: { onClose: () => void }) {
           }}
         >
           <DialogHeader>
-            <DialogTitle>Request a Kestrel callout</DialogTitle>
+            <DialogTitle>
+              {from ? 'Request a callout for this ticket' : 'Request a callout'}
+            </DialogTitle>
             <DialogDescription>
-              A technician attends on site. Kestrel replies with availability and a quote. You pay
-              up front to secure the booking, and can cancel for a full refund up to 48 hours
-              before.
+              {toProvider
+                ? `A technician attends on site. This goes to ${provider}, who cover this, and Kestrel can see it. They reply on the ticket with availability and a quote.`
+                : 'A technician attends on site. Kestrel replies with availability and a quote. You pay up front to secure the booking, and can cancel for a full refund up to 48 hours before.'}
+              {from && ' The request, quote and updates are kept on the ticket.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
@@ -110,19 +143,35 @@ function RequestDialog({ onClose }: { onClose: () => void }) {
               onChange={(e) => setDetails(e.target.value)}
             />
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
+          {provider && dest.data?.canChooseKestrel && (
             <div className="space-y-1.5">
-              <Label>Room (optional)</Label>
+              <Label>Send it to</Label>
               <SimpleSelect
                 className="w-full"
-                value={roomId}
-                onValueChange={setRoomId}
+                value={sendTo}
+                onValueChange={(v) => setSendTo(v as 'default' | 'kestrel')}
                 options={[
-                  { value: 'none', label: 'Not about one room' },
-                  ...(rooms.data ?? []).map((r) => ({ value: r.id, label: r.name })),
+                  { value: 'default', label: `${provider} (your service provider)` },
+                  { value: 'kestrel', label: 'Kestrel support instead' },
                 ]}
               />
             </div>
+          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {!from?.roomId && (
+              <div className="space-y-1.5">
+                <Label>Room (optional)</Label>
+                <SimpleSelect
+                  className="w-full"
+                  value={roomId}
+                  onValueChange={setRoomId}
+                  options={[
+                    { value: 'none', label: 'Not about one room' },
+                    ...(rooms.data ?? []).map((r) => ({ value: r.id, label: r.name })),
+                  ]}
+                />
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="co-when">Preferred times</Label>
               <Input
@@ -160,7 +209,7 @@ function RequestDialog({ onClose }: { onClose: () => void }) {
             </Button>
             <Button type="submit" disabled={create.isPending || !title.trim() || !details.trim()}>
               {create.isPending && <Spinner />}
-              Send request
+              {toProvider ? `Send to ${provider}` : 'Send request'}
             </Button>
           </div>
         </form>
@@ -199,6 +248,16 @@ function CalloutCard({
   const { orgId, canEdit } = useOrg();
   const [cancelling, setCancelling] = useState(false);
   const refresh = () => qc.invalidateQueries({ queryKey: trpc.callout.list.queryKey() });
+  const toKestrel = useMutation(
+    trpc.callout.sendToKestrel.mutationOptions({
+      onSuccess: async () => {
+        await refresh();
+        toast.success('Sent to Kestrel. They will reply with availability and a quote.');
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const withProvider = c.routedTo !== 'kestrel';
   const pay = useMutation(
     trpc.callout.pay.mutationOptions({
       onSuccess: (r) => {
@@ -226,15 +285,46 @@ function CalloutCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="font-medium">{c.title}</div>
-          <div className="text-xs text-muted-foreground">Requested {dateTime(c.createdAt, c.timezone)}</div>
+          <div className="text-xs text-muted-foreground">
+            Requested {dateTime(c.createdAt, c.timezone)}
+          </div>
         </div>
         <Badge variant="outline" className={TONE[c.status] ?? ''}>
-          {c.statusLabel}
+          {withProvider && c.status === 'requested'
+            ? `With ${c.providerName ?? 'your service provider'}`
+            : c.statusLabel}
         </Badge>
       </div>
       <p className="whitespace-pre-line text-sm text-muted-foreground">{c.details}</p>
 
-      {c.status === 'requested' && (
+      {c.status === 'requested' && withProvider && (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            With {c.providerName ?? 'your service provider'}, who cover this. They reply on{' '}
+            {c.ticketId ? (
+              <Link href={orgPath(orgId, `/tickets/${c.ticketId}`)} className="underline">
+                the ticket
+              </Link>
+            ) : (
+              'the ticket'
+            )}{' '}
+            with availability and a quote. Kestrel can see it.
+          </p>
+          {canEdit && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={toKestrel.isPending}
+              onClick={() => toKestrel.mutate({ orgId, calloutId: c.id })}
+            >
+              {toKestrel.isPending && <Spinner />}
+              Send to Kestrel instead
+            </Button>
+          )}
+        </div>
+      )}
+
+      {c.status === 'requested' && !withProvider && (
         <p className="text-sm text-muted-foreground">
           Kestrel will reply on{' '}
           {c.ticketId ? (
@@ -251,7 +341,8 @@ function CalloutCard({
       {c.status === 'quoted' && (
         <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
           <p className="text-sm">
-            Proposed time: <b>{c.scheduledFor ? dateTime(c.scheduledFor, c.timezone) : 'to be agreed'}</b>
+            Proposed time:{' '}
+            <b>{c.scheduledFor ? dateTime(c.scheduledFor, c.timezone) : 'to be agreed'}</b>
           </p>
           <Quote c={c} />
           {c.quoteNote && <p className="text-sm text-muted-foreground">{c.quoteNote}</p>}
@@ -280,7 +371,10 @@ function CalloutCard({
       {c.status === 'booked' && (
         <div className="space-y-1 rounded-lg border bg-primary/5 p-3 text-sm">
           <p>
-            Booked for <b>{c.scheduledFor ? dateTime(c.scheduledFor, c.timezone) : 'a time to be confirmed'}</b>
+            Booked for{' '}
+            <b>
+              {c.scheduledFor ? dateTime(c.scheduledFor, c.timezone) : 'a time to be confirmed'}
+            </b>
             . Paid {dollars(c.paidCents ?? 0)} including GST. A tax invoice was emailed to you.
           </p>
           <p className="text-xs text-muted-foreground">

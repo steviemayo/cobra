@@ -16,6 +16,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { dateTime } from '@/components/common/health';
 import { useTRPC } from '@/trpc/client';
+import { RequestDialog } from './callouts';
 import { PRIORITY_LABEL, TICKET_STATUS_LABEL, TicketStatus } from './tickets';
 
 const ROOT_CAUSE_OPTIONS = [
@@ -35,6 +36,11 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const { orgId, role, canSupport, user } = useOrg();
+  const [requestingCallout, setRequestingCallout] = useState(false);
+  const callouts = useQuery({
+    ...trpc.callout.forTicket.queryOptions({ orgId, ticketId }),
+    refetchInterval: 15_000,
+  });
   const ticket = useQuery({
     ...trpc.ticket.get.queryOptions({ orgId, ticketId }),
     refetchInterval: 10_000,
@@ -219,6 +225,35 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
         </div>
 
         <aside className="space-y-4">
+          {((callouts.data?.length ?? 0) > 0 || canSupport) && (
+            <Field label="Callouts">
+              <div className="space-y-2">
+                {(callouts.data ?? []).map((c) => (
+                  <Link
+                    key={c.id}
+                    href={orgPath(orgId, '/callouts')}
+                    className="block rounded-md border px-2.5 py-1.5 text-sm hover:bg-muted/50"
+                  >
+                    <div className="truncate font-medium">{c.title}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {c.routedTo !== 'kestrel' && c.status === 'requested'
+                        ? `With ${c.providerName ?? 'your service provider'}`
+                        : c.statusLabel}
+                    </div>
+                  </Link>
+                ))}
+                {canSupport &&
+                  t.status !== 'closed' &&
+                  !(callouts.data ?? []).some((c) =>
+                    ['requested', 'quoted', 'booked'].includes(c.status),
+                  ) && (
+                    <Button size="sm" variant="outline" onClick={() => setRequestingCallout(true)}>
+                      Request a callout
+                    </Button>
+                  )}
+              </div>
+            </Field>
+          )}
           {canSupport ? (
             <>
               {t.sla && (
@@ -325,6 +360,17 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
           )}
         </aside>
       </div>
+      {requestingCallout && (
+        <RequestDialog
+          onClose={() => setRequestingCallout(false)}
+          from={{
+            ticketId,
+            title: t.title.replace(/^Callout request: /, ''),
+            details: t.body,
+            roomId: t.room?.id ?? null,
+          }}
+        />
+      )}
       <ConfirmDialog
         open={confirmEscalate}
         onOpenChange={setConfirmEscalate}
