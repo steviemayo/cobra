@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { open, seal, signDeviceSet } from '@kestrel/crypto';
-import type { Prisma, PrismaClient } from '@kestrel/db';
+import { Prisma, type PrismaClient } from '@kestrel/db';
 import {
   ASSET_FIELDS,
   DEVICE_FEEDBACK_FIELDS,
@@ -25,7 +25,7 @@ import {
   type MonitoringDb,
 } from './monitoring';
 import { evaluateConfig, type ConfigDb, type EnforceItem } from './config-service';
-import { applyWatchedPoints, pointValuesPatch, pointsOf } from './device-points';
+import { applyWatchedPoints, pointValuesPatch, pointsOf, validatePoints } from './device-points';
 import { recordLatency, type LatencyDb } from './latency';
 import type { SigningKey } from './signing';
 
@@ -634,6 +634,26 @@ export async function updateDevice(
       patch.control = parsed.data as Prisma.InputJsonValue;
       if (upgrade) patch.kind = 'active';
       bump = true;
+      // Control points the new driver can't read are dropped, with what was read for them.
+      const kept = pointsOf(row.points);
+      if (kept.length > 0 && validatePoints(parsed.data, kept) !== null) {
+        patch.points = [] as unknown as Prisma.InputJsonValue;
+        patch.pointValues = Prisma.DbNull;
+        await log(
+          db,
+          row.orgId,
+          row.id,
+          {
+            type: 'field_changed',
+            field: 'control points',
+            oldValue: `${kept.length}`,
+            newValue: '0',
+            source: 'manual',
+            actorId: input.actorId,
+          },
+          now,
+        );
+      }
       await log(
         db,
         row.orgId,
