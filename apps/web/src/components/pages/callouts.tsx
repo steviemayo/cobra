@@ -11,6 +11,7 @@ import { dateTime } from '@/components/common/health';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { orgPath, useOrg } from '@/components/shell/org-context';
+import { CalloutActions, CalloutHistory } from './callout-actions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -34,6 +35,7 @@ type Callout = RouterOutputs['callout']['list']['callouts'][number];
 
 const TONE: Record<string, string> = {
   quoted: 'border-primary text-primary',
+  scheduled: 'border-primary bg-primary/10 text-primary',
   booked: 'border-primary bg-primary/10 text-primary',
   completed: 'text-muted-foreground',
   cancelled: 'text-muted-foreground',
@@ -248,15 +250,6 @@ function CalloutCard({
   const { orgId, canEdit } = useOrg();
   const [cancelling, setCancelling] = useState(false);
   const refresh = () => qc.invalidateQueries({ queryKey: trpc.callout.list.queryKey() });
-  const toKestrel = useMutation(
-    trpc.callout.sendToKestrel.mutationOptions({
-      onSuccess: async () => {
-        await refresh();
-        toast.success('Sent to Kestrel. They will reply with availability and a quote.');
-      },
-      onError: (e) => toast.error(e.message),
-    }),
-  );
   const withProvider = c.routedTo !== 'kestrel';
   const pay = useMutation(
     trpc.callout.pay.mutationOptions({
@@ -279,7 +272,7 @@ function CalloutCard({
       onError: (e) => toast.error(e.message),
     }),
   );
-  const open = ['requested', 'quoted', 'booked'].includes(c.status);
+  const open = ['requested', 'quoted', 'booked', 'scheduled'].includes(c.status);
   return (
     <li className="space-y-3 px-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -298,29 +291,28 @@ function CalloutCard({
       <p className="whitespace-pre-line text-sm text-muted-foreground">{c.details}</p>
 
       {c.status === 'requested' && withProvider && (
-        <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">
-            With {c.providerName ?? 'your service provider'}, who cover this. They reply on{' '}
-            {c.ticketId ? (
-              <Link href={orgPath(orgId, `/tickets/${c.ticketId}`)} className="underline">
-                the ticket
-              </Link>
-            ) : (
-              'the ticket'
-            )}{' '}
-            with availability and a quote. Kestrel can see it.
+        <p className="text-sm text-muted-foreground">
+          With {c.providerName ?? 'your service provider'}, who cover this. They reply on{' '}
+          {c.ticketId ? (
+            <Link href={orgPath(orgId, `/tickets/${c.ticketId}`)} className="underline">
+              the ticket
+            </Link>
+          ) : (
+            'the ticket'
+          )}{' '}
+          with availability and a quote. Kestrel can see it.
+        </p>
+      )}
+
+      {c.status === 'scheduled' && (
+        <div className="space-y-1 rounded-lg border bg-primary/5 p-3 text-sm">
+          <p>
+            {c.providerName ?? 'Your service provider'} will visit{' '}
+            <b>
+              {c.scheduledFor ? dateTime(c.scheduledFor, c.timezone) : 'at a time to be confirmed'}
+            </b>
+            . Nothing is paid through Kestrel: they deal with the invoice.
           </p>
-          {canEdit && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={toKestrel.isPending}
-              onClick={() => toKestrel.mutate({ orgId, calloutId: c.id })}
-            >
-              {toKestrel.isPending && <Spinner />}
-              Send to Kestrel instead
-            </Button>
-          )}
         </div>
       )}
 
@@ -388,7 +380,10 @@ function CalloutCard({
       {c.status === 'completed' && (
         <div className="space-y-1 text-sm">
           <p>
-            Worked {c.actualHours} hours{c.hours ? ` (${c.hours} prepaid)` : ''}.
+            {c.completedByName ? `${c.completedByName} completed it. ` : ''}
+            {c.actualHours
+              ? `Worked ${c.actualHours} hours${c.hours ? ` (${c.hours} prepaid)` : ''}.`
+              : ''}
             {c.invoicedCents ? ` Invoice for the extra time: ${dollars(c.invoicedCents)}.` : ''}
             {c.refundedCents ? ` Refunded for unused time: ${dollars(c.refundedCents)}.` : ''}
           </p>
@@ -414,6 +409,9 @@ function CalloutCard({
           {c.paidAt && !c.refundedCents ? ' The prepayment was not refunded.' : ''}
         </p>
       )}
+
+      <CalloutActions c={c} />
+      <CalloutHistory c={c} />
 
       {open && canEdit && (
         <div>

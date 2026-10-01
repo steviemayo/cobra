@@ -3,6 +3,7 @@ import {
   bestMspRole,
   effectiveMspRole,
   grantTakesTickets,
+  mspFromRoute,
   lowestMspRole,
   mspRoute,
   type GrantRole,
@@ -538,4 +539,49 @@ export async function mspTickets(
         slaUrgency(a.sla) - slaUrgency(b.sla) ||
         a.createdAt.getTime() - b.createdAt.getTime(),
     );
+}
+
+/**
+ * Whether a route names a service provider with an active connection to this organisation that takes
+ * tickets (and, if the connection is limited to some sites, covers this site). Used before a callout
+ * is handed to one.
+ */
+export async function providerCovers(
+  db: MspDb,
+  customerOrgId: string,
+  route: string,
+  siteId: string | null,
+  now = new Date(),
+): Promise<boolean> {
+  const mspOrgId = mspFromRoute(route);
+  if (!mspOrgId) return false;
+  const g = await db.mspGrant.findFirst({
+    where: { customerOrgId, mspOrgId, status: 'active' },
+  });
+  if (!g || !grantTakesTickets(g.role as GrantRole)) return false;
+  if (g.endsAt && g.endsAt.getTime() <= now.getTime()) return false;
+  return g.siteIds.length === 0 || (!!siteId && g.siteIds.includes(siteId));
+}
+
+/** The providers that cover an organisation and take tickets, for a person choosing where a callout goes. */
+export async function coveringProviders(db: MspDb, customerOrgId: string, now = new Date()) {
+  const grants = (
+    await db.mspGrant.findMany({
+      where: { customerOrgId, status: 'active' },
+      orderBy: { createdAt: 'asc' },
+    })
+  ).filter(
+    (g) =>
+      grantTakesTickets(g.role as GrantRole) && (!g.endsAt || g.endsAt.getTime() > now.getTime()),
+  );
+  const orgs = await db.org.findMany({
+    where: { id: { in: grants.map((g) => g.mspOrgId) } },
+    select: { id: true, name: true },
+  });
+  return grants.map((g) => ({
+    route: mspRoute(g.mspOrgId),
+    mspOrgId: g.mspOrgId,
+    name: orgs.find((o) => o.id === g.mspOrgId)?.name ?? 'Service provider',
+    siteIds: g.siteIds,
+  }));
 }

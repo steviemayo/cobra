@@ -16,6 +16,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { dateTime } from '@/components/common/health';
 import { useTRPC } from '@/trpc/client';
+import { CalloutActions, CalloutHistory } from './callout-actions';
 import { RequestDialog } from './callouts';
 import { PRIORITY_LABEL, TICKET_STATUS_LABEL, TicketStatus } from './tickets';
 
@@ -229,18 +230,18 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
             <Field label="Callouts">
               <div className="space-y-2">
                 {(callouts.data ?? []).map((c) => (
-                  <Link
-                    key={c.id}
-                    href={orgPath(orgId, '/callouts')}
-                    className="block rounded-md border px-2.5 py-1.5 text-sm hover:bg-muted/50"
-                  >
-                    <div className="truncate font-medium">{c.title}</div>
+                  <div key={c.id} className="space-y-1.5 rounded-md border px-2.5 py-2 text-sm">
+                    <Link href={orgPath(orgId, '/callouts')} className="block hover:underline">
+                      <div className="truncate font-medium">{c.title}</div>
+                    </Link>
                     <div className="text-xs text-muted-foreground">
                       {c.routedTo !== 'kestrel' && c.status === 'requested'
                         ? `With ${c.providerName ?? 'your service provider'}`
                         : c.statusLabel}
                     </div>
-                  </Link>
+                    <CalloutActions c={c} size="xs" />
+                    <CalloutHistory c={c} />
+                  </div>
                 ))}
                 {canSupport &&
                   t.status !== 'closed' &&

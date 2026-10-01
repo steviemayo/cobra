@@ -22,7 +22,9 @@ export const MIN_HOURS = 0.5;
 export const MAX_HOURS = 40;
 export const CURRENCY = 'aud';
 
-export const OPEN_STATUSES = ['requested', 'quoted', 'booked'] as const;
+export const OPEN_STATUSES = ['requested', 'quoted', 'booked', 'scheduled'] as const;
+/** Where a callout can still change hands: nothing is paid or being settled. */
+export const TRANSFERABLE = ['requested', 'quoted', 'scheduled'] as const;
 
 /** The pieces of Stripe the callout flow needs, so tests can stand in for it. */
 export interface CalloutStripe {
@@ -40,6 +42,8 @@ export interface CalloutStripe {
     successUrl: string;
     cancelUrl: string;
   }): Promise<{ id: string; url: string }>;
+  /** Stops a payment page that is open, so a quote that has changed hands or changed price cannot be paid. */
+  expireCheckout(sessionId: string): Promise<void>;
   /** The invoice a paid Checkout session issued, if it is not known yet. */
   prepaymentInvoice(sessionId: string): Promise<string | null>;
   /** Credits part (or all) of the prepayment invoice and refunds it to the card. Amount is ex GST. */
@@ -123,6 +127,10 @@ async function loadKestrel(db: CalloutDb, id: string, orgId?: string): Promise<R
 // ---- The customer asks -----------------------------------------------------------------------------
 
 export const ROUTE_KESTREL = 'kestrel';
+
+function requestedEntry(now: Date, email: string | null) {
+  return { at: now.toISOString(), kind: 'requested', by: email ?? 'the organisation' };
+}
 
 export interface RequestInput {
   orgId: string;
@@ -233,6 +241,7 @@ export async function requestCallout(
         ticketId: from.id,
         ownsTicket: false,
         routedTo,
+        history: [requestedEntry(now, input.email)] as never,
         incidentId,
         title,
         details,
@@ -276,6 +285,7 @@ export async function requestCallout(
       ticketId: ticket.id,
       ownsTicket: true,
       routedTo,
+      history: [requestedEntry(now, input.email)] as never,
       incidentId,
       title,
       details,
@@ -290,12 +300,135 @@ export async function requestCallout(
   return callout;
 }
 
-// ---- Sending it to Kestrel instead of the service provider ---------------------------------------------
+// ---- History, transfers and the service provider's own work ---------------------------------------------
+
+export interface HistoryEntry {
+  at: string;
+  kind: 'requested' | 'transferred' | 'scheduled' | 'completed';
+  from?: string;
+  to?: string;
+  /** Who did it: a person's email, or a service provider's or Kestrel's name. */
+  by: string;
+  note?: string;
+}
+
+const historyOf = (c: { history?: unknown }): HistoryEntry[] =>
+  Array.isArray(c.history) ? (c.history as HistoryEntry[]) : [];
+
+/** The words for who has a callout: Kestrel, or a provider by name. */
+export const holderName = (route: string, names: Record<string, string> = {}) =>
+  route === ROUTE_KESTREL ? 'Kestrel' : (names[route] ?? 'the service provider');
+
+export interface Actor {
+  kind: 'customer' | 'provider' | 'kestrel';
+  userId: string | null;
+  email: string | null;
+  /** For a provider: its name. For Kestrel: "Kestrel support". */
+  label: string;
+}
 
 /**
- * An owner or dev sends a callout that is with the organisation's service provider to Kestrel
- * instead, while it is still a request. The ticket goes with it, and Kestrel are told on it.
+ * Moves a callout between Kestrel and a service provider, whoever asks (the organisation's owner or
+ * dev, the provider handing it back, or Kestrel staff). Only while nothing is paid or being settled:
+ * a paid booking has to be cancelled and refunded first. A Kestrel quote does not travel (the
+ * provider quotes in its own way), so it is cleared. The ticket goes with it, a public comment says
+ * what happened and who did it, and it is added to the callout's own history.
+ * `isProvider` says whether a route names a provider that covers this organisation and takes tickets.
  */
+export async function transferCallout(
+  db: CalloutDb,
+  input: {
+    id: string;
+    orgId?: string;
+    to: string;
+    by: Actor;
+    note?: string | null;
+    names?: Record<string, string>;
+    isProvider: (route: string) => Promise<boolean>;
+    /** Needed to stop a payment page that is open for a Kestrel quote. */
+    stripe?: CalloutStripe;
+  },
+  now = new Date(),
+) {
+  const c = await load(db, input.id, input.orgId);
+  if (!(TRANSFERABLE as readonly string[]).includes(c.status))
+    throw new CalloutError(
+      c.status === 'booked'
+        ? 'It is paid for. Cancel it (with the refund) before moving it'
+        : 'It can only be moved while it is a request, a quote waiting for payment, or a scheduled visit',
+    );
+  if (c.routedTo === input.to) throw new CalloutError(`This callout is already with ${holderName(input.to, input.names)}`);
+  if (input.to !== ROUTE_KESTREL && !(await input.isProvider(input.to)))
+    throw new CalloutError('That service provider does not cover this organisation');
+  // A payment page may be open for the Kestrel quote. It is stopped first, so a quote that has changed
+  // hands cannot be paid afterwards; if it was paid a moment ago, the move is refused.
+  if (c.status === 'quoted' && c.stripeSessionId) {
+    if (!input.stripe) throw new CalloutError('A payment page is open for this quote. Try again in a moment');
+    try {
+      await input.stripe.expireCheckout(c.stripeSessionId);
+    } catch {
+      throw new CalloutError('A payment is in progress for this quote. Try again in a moment, and refresh the page');
+    }
+  }
+  const names = { ...input.names };
+  const note = input.note?.trim() || undefined;
+  // Read before the update: the row is changed below.
+  const fromRoute = c.routedTo;
+  const entry: HistoryEntry = {
+    at: now.toISOString(),
+    kind: 'transferred',
+    from: fromRoute,
+    to: input.to,
+    by: input.by.kind === 'customer' ? (input.by.email ?? 'the organisation') : input.by.label,
+    ...(note ? { note } : {}),
+  };
+  await db.callout.update({
+    where: { id: c.id },
+    data: {
+      routedTo: input.to,
+      status: 'requested',
+      history: [...historyOf(c), entry] as never,
+      // A quote or a visit arranged by the one that had it does not carry over.
+      hours: null,
+      rateCents: null,
+      subtotalCents: null,
+      gstCents: null,
+      totalCents: null,
+      quoteNote: null,
+      quotedAt: null,
+      quotedBy: null,
+      scheduledFor: null,
+      scheduledEnd: null,
+      stripeSessionId: null,
+    },
+  });
+  if (c.ticketId) {
+    await db.ticket.update({
+      where: { id: c.ticketId },
+      data: {
+        routedTo: input.to,
+        updatedAt: now,
+        ...(input.to === ROUTE_KESTREL
+          ? { escalatedAt: now, escalatedBy: input.by.userId }
+          : {}),
+      },
+    });
+    await db.ticketComment.create({
+      data: {
+        orgId: c.orgId,
+        ticketId: c.ticketId,
+        authorId: input.by.userId,
+        authorEmail: input.by.email,
+        fromStaff: input.by.kind === 'kestrel',
+        body: `The callout “${c.title}” was moved from ${holderName(fromRoute, names)} to ${holderName(input.to, names)} by ${entry.by}.${note ? `\n\n${note}` : ''}`,
+        visibility: 'public',
+      },
+    });
+  }
+  return { orgId: c.orgId, ticketId: c.ticketId, from: fromRoute, to: input.to, title: c.title };
+}
+
+/** The organisation's owner or dev sends a callout that is with the service provider to Kestrel. */
 export async function sendToKestrel(
   db: CalloutDb,
   input: { id: string; orgId: string; userId: string; email: string | null },
@@ -303,19 +436,68 @@ export async function sendToKestrel(
 ) {
   const c = await load(db, input.id, input.orgId);
   if (c.routedTo === ROUTE_KESTREL) throw new CalloutError('This callout is already with Kestrel');
-  if (c.status !== 'requested')
-    throw new CalloutError('It can only be moved to Kestrel before a quote is under way');
-  await db.callout.update({ where: { id: c.id }, data: { routedTo: ROUTE_KESTREL } });
-  if (c.ticketId) {
-    await db.ticket.update({
-      where: { id: c.ticketId },
-      data: {
-        routedTo: ROUTE_KESTREL,
-        escalatedAt: now,
-        escalatedBy: input.userId,
-        updatedAt: now,
-      },
-    });
+  return transferCallout(
+    db,
+    {
+      id: input.id,
+      orgId: input.orgId,
+      to: ROUTE_KESTREL,
+      by: { kind: 'customer', userId: input.userId, email: input.email, label: input.email ?? 'the organisation' },
+      isProvider: async () => false,
+    },
+    now,
+  );
+}
+
+/** Loads a callout that a service provider holds, and refuses anyone else's. */
+async function loadForProvider(db: CalloutDb, id: string, route: string, orgId: string): Promise<Row> {
+  const c = await load(db, id, orgId);
+  if (c.routedTo !== route) throw new CalloutError('This callout is not with your service provider');
+  return c;
+}
+
+/**
+ * The service provider fixes the time of the visit. There is no payment through Kestrel: the callout
+ * is "scheduled", the customer is told on the ticket, and it can still be moved or cancelled.
+ */
+export async function providerSchedule(
+  db: CalloutDb,
+  input: {
+    id: string;
+    orgId: string;
+    route: string;
+    providerName: string;
+    scheduledFor: Date;
+    scheduledEnd?: Date | null;
+    note?: string | null;
+    userId: string;
+    email: string | null;
+    zone: string;
+  },
+  now = new Date(),
+) {
+  const c = await loadForProvider(db, input.id, input.route, input.orgId);
+  if (c.status !== 'requested' && c.status !== 'scheduled')
+    throw new CalloutError('A visit can only be scheduled while the callout is open');
+  if (input.scheduledFor.getTime() < now.getTime() - 60_000)
+    throw new CalloutError('Choose a time that has not passed');
+  const note = input.note?.trim() || undefined;
+  const entry: HistoryEntry = {
+    at: now.toISOString(),
+    kind: 'scheduled',
+    by: input.providerName,
+    ...(note ? { note } : {}),
+  };
+  await db.callout.update({
+    where: { id: c.id },
+    data: {
+      status: 'scheduled',
+      scheduledFor: input.scheduledFor,
+      scheduledEnd: input.scheduledEnd ?? null,
+      history: [...historyOf(c), entry] as never,
+    },
+  });
+  if (c.ticketId)
     await db.ticketComment.create({
       data: {
         orgId: c.orgId,
@@ -323,11 +505,65 @@ export async function sendToKestrel(
         authorId: input.userId,
         authorEmail: input.email,
         fromStaff: false,
-        body: `This callout was sent to Kestrel support instead of the service provider: ${c.title}`,
+        body: `${input.providerName} scheduled a visit for “${c.title}”: ${formatInZone(input.scheduledFor, input.zone)}.${note ? `\n\n${note}` : ''}`,
         visibility: 'public',
       },
     });
-  }
+  return { orgId: c.orgId, ticketId: c.ticketId };
+}
+
+/**
+ * The service provider says the work is done: hours worked and what was done. Nothing is charged
+ * through Kestrel. It is kept on the callout and written on the ticket, which is resolved only if
+ * the callout opened it.
+ */
+export async function providerComplete(
+  db: CalloutDb,
+  input: {
+    id: string;
+    orgId: string;
+    route: string;
+    providerName: string;
+    actualHours?: number | null;
+    note: string;
+    userId: string;
+    email: string | null;
+  },
+  now = new Date(),
+) {
+  const c = await loadForProvider(db, input.id, input.route, input.orgId);
+  if (c.status !== 'requested' && c.status !== 'scheduled')
+    throw new CalloutError('Only an open callout can be completed');
+  const note = input.note.trim();
+  if (!note) throw new CalloutError('Say what was done: the customer sees it');
+  if (input.actualHours != null && !(input.actualHours > 0 && input.actualHours <= 200))
+    throw new CalloutError('Hours must be more than 0 and no more than 200');
+  const entry: HistoryEntry = { at: now.toISOString(), kind: 'completed', by: input.providerName, note };
+  await db.callout.update({
+    where: { id: c.id },
+    data: {
+      status: 'completed',
+      actualHours: input.actualHours ?? null,
+      completionNote: note,
+      completedAt: now,
+      completedBy: input.userId,
+      completedByName: input.providerName,
+      history: [...historyOf(c), entry] as never,
+    },
+  });
+  if (c.ticketId)
+    await db.ticketComment.create({
+      data: {
+        orgId: c.orgId,
+        ticketId: c.ticketId,
+        authorId: input.userId,
+        authorEmail: input.email,
+        fromStaff: false,
+        body: `${input.providerName} completed the callout “${c.title}”${input.actualHours != null ? ` (${input.actualHours} hours)` : ''}.\n\n${note}`,
+        visibility: 'public',
+      },
+    });
+  await closeTicket(db, c, 'resolved', now);
   return { orgId: c.orgId, ticketId: c.ticketId };
 }
 
@@ -343,8 +579,17 @@ export interface QuoteInput {
 }
 
 /** Offers (or re-offers, until it is paid) a time and a price. The customer is told on the ticket. */
-export async function sendQuote(db: CalloutDb, id: string, q: QuoteInput, now = new Date()) {
+export async function sendQuote(
+  db: CalloutDb,
+  id: string,
+  q: QuoteInput,
+  now = new Date(),
+  /** Stops the payment page opened for the old price, so it cannot be paid. */
+  stripe?: CalloutStripe,
+) {
   const c = await loadKestrel(db, id);
+  if (c.stripeSessionId && stripe)
+    await stripe.expireCheckout(c.stripeSessionId).catch(() => undefined);
   if (c.status !== 'requested' && c.status !== 'quoted')
     throw new CalloutError('A quote can only be sent before the booking is paid');
   if (!validHours(q.hours))
@@ -748,6 +993,7 @@ export const STATUS_LABEL: Record<string, string> = {
   requested: 'Waiting for a quote',
   quoted: 'Quote ready',
   booked: 'Booked and paid',
+  scheduled: 'Visit scheduled',
   completing: 'Being completed',
   cancelling: 'Being cancelled',
   completed: 'Completed',
