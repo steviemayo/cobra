@@ -19,6 +19,7 @@ import { driverRouter } from './driver';
 import { gatewayRouter } from './gateway';
 import { inviteRouter } from './invite';
 import { joinRequestRouter } from './join-request';
+import { latencyRouter } from './latency';
 import { memberRouter } from './member';
 import { monitoringRouter } from './monitoring';
 import { orgRouter } from './org';
@@ -44,6 +45,7 @@ export const appRouter = router({
   billing: billingRouter,
   driver: driverRouter,
   calendar: calendarRouter,
+  latency: latencyRouter,
   msp: mspRouter,
   staff: staffRouter,
   binding: bindingRouter,

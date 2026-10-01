@@ -126,6 +126,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `started a purchase of “${s(meta.name)}”`;
     case 'calendar.connect':
       return `connected the ${s(meta.provider) === 'graph' ? 'Microsoft 365' : 'Google'} calendar “${s(meta.name)}”`;
+    case 'latency.limits':
+      return 'changed the network health limits';
+    case 'latency.reset':
+      return 'reset the network health limits to the defaults';
     case 'calendar.update':
       return `updated the calendar profile “${s(meta.name)}”`;
     case 'calendar.remove':

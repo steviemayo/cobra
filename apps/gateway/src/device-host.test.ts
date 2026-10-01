@@ -48,6 +48,7 @@ vi.mock('@kestrel/drivers/real', () => ({
 }));
 
 const { DeviceHost, SETTLE_MS } = await import('./device-host');
+const { Prober } = await import('./probe');
 
 // Long enough after a device opened that it counts as settled.
 const LATER = () => Date.now() + SETTLE_MS + 1_000;
@@ -82,6 +83,38 @@ function set(
 
 beforeEach(() => {
   built.length = 0;
+});
+
+describe('DeviceHost response times', () => {
+  it('pings a device at its own address and puts the answers in its report', async () => {
+    const asked: string[] = [];
+    const prober = new Prober(async (host) => {
+      asked.push(host);
+      return 12;
+    });
+    const host = new DeviceHost(silentLogger, prober);
+    host.apply(set('v1', [{ id: A, host: '10.0.0.7' }]));
+    await prober.round();
+    await prober.round();
+    expect(asked).toEqual(['10.0.0.7', '10.0.0.7']);
+    const report = host.reports(LATER())[0]!;
+    expect(report.latency).toEqual({ sent: 2, ok: 2, minMs: 12, avgMs: 12, maxMs: 12 });
+    // The window starts over with each report.
+    expect(host.reports(LATER())[0]!.latency).toBeUndefined();
+  });
+
+  it('stops pinging a device that is removed', async () => {
+    const asked: string[] = [];
+    const prober = new Prober(async (h) => {
+      asked.push(h);
+      return 1;
+    });
+    const host = new DeviceHost(silentLogger, prober);
+    host.apply(set('v1', [{ id: A }]));
+    host.apply(set('v2', []));
+    await prober.round();
+    expect(asked).toEqual([]);
+  });
 });
 
 describe('DeviceHost', () => {

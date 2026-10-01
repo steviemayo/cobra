@@ -33,6 +33,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { plural } from '@/lib/format';
 import { useEstate, useInvalidateEstate } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
+import { SiteNetwork } from './network-health';
 import { AreasPanel, SiteGateways, SiteRooms } from './site-areas';
 
 export function SiteDetailView({ siteId }: { siteId: string }) {
@@ -110,6 +111,8 @@ export function SiteDetailView({ siteId }: { siteId: string }) {
       />
 
       <AreasPanel siteId={site.id} />
+
+      <SiteNetwork siteId={site.id} />
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Rooms</h2>

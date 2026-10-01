@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/common/empty-state';
 import { SeverityPill, dateTime } from '@/components/common/health';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { Section } from '@/components/common/section';
+import { DeviceResponse } from './network-health';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Badge } from '@/components/ui/badge';
@@ -830,7 +831,8 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
           </TabsContent>
         )}
         {d.kind === 'active' && (
-          <TabsContent value="charts" className="pt-4">
+          <TabsContent value="charts" className="space-y-6 pt-4">
+            <DeviceResponse deviceId={d.id} />
             <DeviceHistoryCharts deviceId={d.id} />
           </TabsContent>
         )}
