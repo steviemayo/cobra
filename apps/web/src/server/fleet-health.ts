@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@kestrel/db';
 import { effectiveStatus } from './gateway-status';
-import { latestVersions, updateStatus, type Channel } from './gateway-updates';
+import { publishedVersions, updateStatus, type Channel } from './gateway-updates';
 
 // What is wrong across every customer right now, for the staff portal. Read only. It shows names
 // of gateways and rooms (operational metadata), never room designs, credentials or people.
@@ -92,9 +92,10 @@ export interface FleetHealth {
 export async function fleetHealth(
   db: FleetDb,
   now = new Date(),
-  latest: Record<Channel, string | null> = latestVersions(),
+  latest?: Record<Channel, string | null>,
 ): Promise<FleetHealth> {
   const since = new Date(now.getTime() - 7 * DAY);
+  const newest = latest ?? (await publishedVersions());
   const [orgs, gateways, sites, rooms, incidents, deployments, tickets] = await Promise.all([
     db.org.findMany({ where: { kind: 'customer' } }),
     db.gateway.findMany({}),
@@ -113,7 +114,7 @@ export async function fleetHealth(
   const gws = mine(gateways).map((g) => ({
     g,
     status: effectiveStatus(g, now.getTime()),
-    update: updateStatus(g, latest),
+    update: updateStatus(g, newest),
   }));
   const offline = gws.filter((x) => x.status === 'offline');
   const behind = gws.filter((x) => x.update.status === 'behind');
