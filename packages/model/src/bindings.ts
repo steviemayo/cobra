@@ -246,6 +246,8 @@ export const GATEWAY_FEATURES = [
   'discovery',
   'firmware',
   'self-update',
+  'device-set',
+  'config-enforce',
 ] as const;
 export type GatewayFeature = (typeof GATEWAY_FEATURES)[number];
 

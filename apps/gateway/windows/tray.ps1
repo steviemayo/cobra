@@ -28,12 +28,17 @@ function Write-Log([string] $line) {
 }
 
 function Start-Gateway {
+  # An update that died would leave its lock behind and keep the gateway off for ever; ignore one that is old.
+  if ((Test-Path $updateLock) -and ((Get-Date) - (Get-Item $updateLock).LastWriteTime).TotalMinutes -gt 20) {
+    Remove-Item -Force $updateLock -ErrorAction SilentlyContinue
+  }
   if ((Test-Path $updateLock) -or $script:stopped) { return }
   if ((Test-Path $log) -and (Get-Item $log).Length -gt 10MB) { Move-Item -Force $log "$log.old" }
 
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = Join-Path $app 'runtime\node.exe'
-  $psi.Arguments = '--disable-warning=ExperimentalWarning --import tsx src/main.ts'
+  $entry = if (Test-Path (Join-Path $app 'dist\main.mjs')) { 'dist\main.mjs' } else { '--import tsx src/main.ts' }
+  $psi.Arguments = "--disable-warning=ExperimentalWarning $entry"
   $psi.WorkingDirectory = $app
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true

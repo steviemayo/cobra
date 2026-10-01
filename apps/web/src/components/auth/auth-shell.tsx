@@ -53,25 +53,25 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
           {children}
         </div>
         <p className="text-xs text-muted-foreground">
-          Kestrel · AV control deployment and monitoring
+          Kestrel · AV monitoring, management and analytics
         </p>
       </div>
       <aside className="hidden flex-col justify-between border-l bg-sidebar p-12 lg:flex">
         <div className="max-w-md space-y-3">
           <h2 className="text-balance text-2xl font-semibold tracking-tight">
-            Design a room once. Deploy it everywhere.
+            Every room, every device, one clear picture.
           </h2>
           <p className="text-sm leading-relaxed text-muted-foreground">
-            Model devices and connections, generate a control interface people can use without
-            training, and release it to on-site gateways with rollback.
+            Monitor your AV equipment, keep an asset register, hold settings in line, and see how
+            your rooms are really used.
           </p>
         </div>
         <Schematic />
         <dl className="grid max-w-md grid-cols-3 gap-6 text-sm">
           {[
-            ['Model', 'Devices, routes and activities'],
-            ['Release', 'Signed, versioned, reversible'],
             ['Monitor', 'Status per room and device'],
+            ['Manage', 'Assets, settings and maintenance'],
+            ['Understand', 'How each room is used'],
           ].map(([k, v]) => (
             <div key={k}>
               <dt className="font-medium">{k}</dt>

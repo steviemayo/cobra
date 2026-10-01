@@ -16,16 +16,23 @@ import type { DriverContext } from './types';
 
 // Q-SYS Core over QRC (Q-SYS Remote Control): JSON-RPC 2.0 over TCP port 1710, every message ended
 // by a null byte. The Core closes a connection that stays silent for 60 seconds, so the driver
-// polls the gain component (which also refreshes what the panel shows) well inside that.
+// polls well inside that. The driver's own job is the connection: logon, keep-alive (`NoOp`), the
+// engine status, and reconnecting. What to watch inside the Core is added as control points.
 //
 // Settings: host, port (1710), username, password (only if the Core requires a logon),
-//   gainComponent ("gain"), gainControl ("gain"), muteControl ("mute"),
-//   minDb (-40) and maxDb (0): the volume scale, 0-100 on the panel is minDb-maxDb on the Core,
-//   snapshotBank (1) and snapshotRamp (2 s) for presets, pollMs (5000), timeoutMs (3000).
+//   pollMs (2000 with control points, else 5000), timeoutMs (3000), snapshotBank (1) and
+//   snapshotRamp (2 s) for presets. Older room designs may also set gainComponent, gainControl
+//   ("gain"), muteControl ("mute"), minDb (-40) and maxDb (0): a gain component the panel volume
+//   and mute act on, read on every poll. A device with no gainComponent reads no gain at all.
 //
-// Control points: a device can also list named controls to drive (docs/driver-classes.md). A point's
-// address is a component and a control. A point with the role "room volume" or "room mute" is what
-// the panel volume and mute act on; without one, the gain component above is used (as before).
+// Control points (docs/driver-classes.md): a point is a named component's control (address:
+// component and control, for example a gain's "gain" and "mute", or a router's "select.2") or a named
+// control on its own (address: control only; Boolean, Integer or Text, set valueType). They are read
+// through ONE change group: `ChangeGroup.AddComponentControl` for each component's controls and
+// `ChangeGroup.AddControl` for the named controls, then `ChangeGroup.Poll` on every tick, which
+// answers with only what changed since the last poll (the first poll answers with everything). The
+// group is built again after every reconnect, and when a poll says the Core no longer has it. A point
+// with the role "room volume" or "room mute" is also what the panel volume and mute act on.
 //
 // Routing on a DSP is part of the Q-SYS design, so `route` and `power` are accepted and do nothing.
 //
@@ -54,6 +61,17 @@ interface QrcControl {
   Value?: number | boolean | string;
   ValueMin?: number;
   ValueMax?: number;
+}
+
+/** The Core answered, but with an error: it is reachable, whatever it thought of the request. */
+class QrcError extends Error {}
+
+/** One entry of a ChangeGroup.Poll answer: a named control, or a control of a named component. */
+interface QrcChange {
+  Component?: string;
+  Name: string;
+  Value?: number | boolean | string;
+  String?: string;
 }
 
 interface QrcComponent {
@@ -86,9 +104,13 @@ export class QsysDriver extends BaseDriver {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
   private poller: ReturnType<typeof setInterval> | null = null;
+  private warnedReply = false;
   private readonly reconnect = new Reconnect(() => this.open());
   /** Goes up on every write, so a read that began before one is not allowed to overwrite it. */
   private writes = 0;
+  /** True once this connection's change group is built; false after a drop or a Core that lost it. */
+  private grouped = false;
+  private warnedMissing = new Set<string>();
 
   constructor(device: Device, ctx: DriverContext) {
     super(device, ctx);
@@ -111,11 +133,19 @@ export class QsysDriver extends BaseDriver {
   private roleOf(role: ControlPoint['role']) {
     return this.points.find((p) => p.role === role);
   }
+  /** A point's component (blank for a named control on its own) and control. */
   private address(point: Pick<ControlPoint, 'address'>): { component: string; control: string } {
     const component = String(point.address.component ?? '');
     const control = String(point.address.control ?? '');
-    if (!component || !control) this.fail('the control point has no component and control');
+    if (!control) this.fail('the control point has no control name');
     return { component, control };
+  }
+  private get groupId() {
+    return `kestrel-${this.device.id.slice(0, 8)}`;
+  }
+  /** The gain component older room designs read on every poll. Not set: none is read. */
+  private get legacyGain() {
+    return !!this.setting<string>('gainComponent', '');
   }
   /** Room volume and mute come from points when there are some, else from the gain component. */
   private get usesPoints() {
@@ -138,7 +168,10 @@ export class QsysDriver extends BaseDriver {
     if (!this.setting<string>('host', '')) return;
     this.reconnect.restart();
     this.open();
-    const every = Math.min(this.setting<number>('pollMs', 5000), 30_000);
+    const every = Math.min(
+      this.setting<number>('pollMs', this.points.length ? 2000 : 5000),
+      30_000,
+    );
     this.poller = setInterval(() => void this.refresh(), every);
     this.poller.unref?.();
   }
@@ -147,6 +180,9 @@ export class QsysDriver extends BaseDriver {
     if (this.poller) clearInterval(this.poller);
     this.poller = null;
     this.reconnect.stop();
+    // Tidy the change group while the connection is still there; the Core drops it anyway.
+    if (this.grouped)
+      void this.rpc('ChangeGroup.Destroy', { Id: this.groupId }).catch(() => undefined);
     this.drop(new Error('closed'));
   }
 
@@ -191,6 +227,7 @@ export class QsysDriver extends BaseDriver {
   private drop(reason: Error) {
     const socket = this.socket;
     this.socket = null;
+    this.grouped = false;
     this.buffer = '';
     socket?.destroy();
     for (const [id, p] of this.pending) {
@@ -225,7 +262,7 @@ export class QsysDriver extends BaseDriver {
       this.pending.delete(msg.id);
       clearTimeout(p.timer);
       if (msg.error)
-        p.reject(new Error(`${this.device.name}: ${msg.error.message ?? 'Q-SYS error'}`));
+        p.reject(new QrcError(`${this.device.name}: ${msg.error.message ?? 'Q-SYS error'}`));
       else p.resolve(msg.result);
     }
   }
@@ -248,36 +285,85 @@ export class QsysDriver extends BaseDriver {
     });
   }
 
-  /** Reads every control point, one request per component. */
-  private async readPoints() {
-    const byComponent = new Map<string, ControlPoint[]>();
+  /**
+   * Builds the change group: one `ChangeGroup.AddComponentControl` per component and one
+   * `ChangeGroup.AddControl` for every named control. A component or control the Core does not have
+   * is left out (and logged once) so one wrong name does not stop the rest being read.
+   */
+  private async registerGroup() {
+    const Id = this.groupId;
+    await this.rpc('ChangeGroup.Destroy', { Id }).catch(() => undefined);
+    const byComponent = new Map<string, Set<string>>();
+    const named = new Set<string>();
     for (const p of this.points) {
-      const { component } = this.address(p);
-      byComponent.set(component, [...(byComponent.get(component) ?? []), p]);
+      const { component, control } = this.address(p);
+      if (component)
+        byComponent.set(component, (byComponent.get(component) ?? new Set()).add(control));
+      else named.add(control);
     }
-    for (const [component, points] of byComponent) {
-      const epoch = this.writes;
-      const res = (await this.rpc('Component.Get', {
-        Name: component,
-        Controls: points.map((p) => ({ Name: this.address(p).control })),
-      })) as { Controls?: QrcControl[] };
-      if (this.writes !== epoch) continue; // something was set while this was being read: the read is stale
-      const byName = new Map((res.Controls ?? []).map((c) => [c.Name, c.Value]));
-      this.update((s) => {
-        for (const p of points) {
-          const v = byName.get(this.address(p).control);
-          if (v === undefined) continue;
-          s.points[p.id] = this.fromNative(p, v);
-          if (p.role === 'room_volume' && typeof v === 'number') s.volume = pointToLevel(p, v);
-          if (p.role === 'room_mute') s.muted = v === true || v === 1;
+    const tried = async (what: string, call: () => Promise<unknown>) => {
+      try {
+        await call();
+      } catch (e) {
+        if (!(e instanceof QrcError)) throw e;
+        if (!this.warnedMissing.has(what)) {
+          this.warnedMissing.add(what);
+          this.ctx.log('warn', 'Q-SYS has no such control to watch', {
+            device: this.device.name,
+            what,
+            error: String(e),
+          });
         }
-      });
-    }
+      }
+    };
+    for (const [component, controls] of byComponent)
+      await tried(component, () =>
+        this.rpc('ChangeGroup.AddComponentControl', {
+          Id,
+          Component: { Name: component, Controls: [...controls].map((Name) => ({ Name })) },
+        }),
+      );
+    if (named.size)
+      await tried('named controls', () =>
+        this.rpc('ChangeGroup.AddControl', { Id, Controls: [...named] }),
+      );
+    this.grouped = true;
+  }
+
+  /** Asks the change group what changed. The first poll after building it answers with everything. */
+  private async pollGroup() {
+    const res = (await this.rpc('ChangeGroup.Poll', { Id: this.groupId })) as
+      { Changes?: QrcChange[] } | undefined;
+    const changes = res?.Changes ?? [];
+    if (changes.length === 0) return;
+    this.update((s) => {
+      for (const c of changes) {
+        const value = c.Value !== undefined ? c.Value : c.String;
+        if (value === undefined) continue;
+        for (const p of this.points) {
+          const a = this.address(p);
+          if (a.control !== c.Name || a.component !== (c.Component ?? '')) continue;
+          s.points[p.id] = this.fromNative(p, value);
+          if (p.role === 'room_volume' && typeof value === 'number')
+            s.volume = pointToLevel(p, value);
+          if (p.role === 'room_mute') s.muted = value === true || value === 1;
+        }
+      }
+    });
   }
 
   private fromNative(p: ControlPoint, v: number | boolean | string): number | boolean | string {
     if (p.type === 'level') return typeof v === 'number' ? pointToLevel(p, v) : 0;
     if (p.type === 'mute') return v === true || v === 1;
+    // A Q-SYS Boolean control answers 1 or 0 (or true or false) depending on how it is read.
+    if (p.valueType === 'boolean') return v === true || v === 1 || v === 'true' || v === '1';
+    if (
+      (p.valueType === 'integer' || p.valueType === 'float') &&
+      typeof v === 'string' &&
+      v.trim() !== '' &&
+      !Number.isNaN(Number(v))
+    )
+      return Number(v);
     return v;
   }
 
@@ -291,7 +377,12 @@ export class QsysDriver extends BaseDriver {
     this.writes++;
     if (p.type === 'meter') this.fail('a meter is read only');
     const { component, control } = this.address(p);
-    await this.rpc('Component.Set', { Name: component, Controls: [{ Name: control, Value: this.toNative(p, value) }] });
+    if (component)
+      await this.rpc('Component.Set', {
+        Name: component,
+        Controls: [{ Name: control, Value: this.toNative(p, value) }],
+      });
+    else await this.rpc('Control.Set', { Name: control, Value: this.toNative(p, value) });
     this.update((s) => {
       s.points[p.id] = p.type === 'mute' ? this.fromNative(p, this.toNative(p, value)) : value;
       if (p.role === 'room_volume') s.volume = Number(value);
@@ -331,8 +422,7 @@ export class QsysDriver extends BaseDriver {
   /** Lists one named component's controls. */
   async discoverControls(component: string): Promise<DiscoveredControl[]> {
     const res = (await this.rpc('Component.GetControls', { Name: component })) as
-      | { Controls?: QrcControl[] }
-      | undefined;
+      { Controls?: QrcControl[] } | undefined;
     return (res?.Controls ?? []).map((c) => ({
       name: c.Name,
       ...(c.Type ? { type: c.Type } : {}),
@@ -341,13 +431,28 @@ export class QsysDriver extends BaseDriver {
   }
 
   /** Reads one control point, to check it exists and learn its range. */
-  async readPoint(point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>): Promise<PointReading> {
+  async readPoint(
+    point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>,
+  ): Promise<PointReading> {
     const { component, control } = this.address(point);
-    const res = (await this.rpc('Component.Get', { Name: component, Controls: [{ Name: control }] })) as {
-      Controls?: QrcControl[];
-    };
-    const found = (res.Controls ?? []).find((c) => c.Name === control);
-    if (!found || found.Value === undefined) this.fail(`there is no control "${control}" on "${component}"`);
+    let found: QrcControl | undefined;
+    if (component) {
+      const res = (await this.rpc('Component.Get', {
+        Name: component,
+        Controls: [{ Name: control }],
+      })) as { Controls?: QrcControl[] };
+      found = (res.Controls ?? []).find((c) => c.Name === control);
+    } else {
+      // A named control on its own: Control.Get takes the names and answers with one entry each.
+      const res = (await this.rpc('Control.Get', [control])) as QrcControl[] | undefined;
+      found = (res ?? []).find((c) => c.Name === control);
+    }
+    if (!found || found.Value === undefined)
+      this.fail(
+        component
+          ? `there is no control "${control}" on "${component}"`
+          : `there is no named control "${control}"`,
+      );
     const value = found.Value;
     if (point.type === 'level')
       return {
@@ -362,8 +467,13 @@ export class QsysDriver extends BaseDriver {
   private async refresh(first = false) {
     if (!this.socket) return;
     try {
-      if (this.points.length > 0) await this.readPoints();
-      if (this.usesPoints) {
+      if (this.points.length > 0) {
+        if (!this.grouped) await this.registerGroup();
+        await this.pollGroup();
+      }
+      if (this.usesPoints || !this.legacyGain) {
+        // The poll is the keep-alive when there are points; with none, say NoOp.
+        if (this.points.length === 0) await this.rpc('NoOp', {});
         this.update((s) => {
           s.online = true;
         });
@@ -385,13 +495,19 @@ export class QsysDriver extends BaseDriver {
         if (muted !== undefined) s.muted = muted === true || muted === 1;
       });
     } catch (e) {
-      if (first)
-        this.ctx.log('warn', 'Q-SYS did not answer', {
+      // A Core that replies with an error (no such component, no such control) is up: the design just
+      // lacks what was asked for. Only silence, or a lost connection, means it is not there.
+      const reachable = e instanceof QrcError;
+      // The Core answered but no longer has the change group (a design reload): build it again.
+      if (reachable) this.grouped = false;
+      if (first || (reachable && !this.warnedReply))
+        this.ctx.log('warn', reachable ? 'Q-SYS answered with an error' : 'Q-SYS did not answer', {
           device: this.device.name,
           error: String(e),
         });
+      if (reachable) this.warnedReply = true;
       this.update((s) => {
-        s.online = false;
+        s.online = reachable;
       });
     }
   }

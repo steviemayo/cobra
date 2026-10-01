@@ -12,15 +12,11 @@ import {
   Cpu,
   DoorOpen,
   LayoutDashboard,
-  LayoutTemplate,
   LifeBuoy,
-  Link2,
   Moon,
   Plus,
-  Rocket,
   Router,
   Settings,
-  Store,
   Users,
   BarChart3,
   FileText,
@@ -96,11 +92,6 @@ export function CommandMenu({ children }: { children: React.ReactNode }) {
                 <DoorOpen /> Rooms
               </CommandItem>
               {canEdit && (
-                <CommandItem onSelect={() => go('/templates')}>
-                  <LayoutTemplate /> Templates
-                </CommandItem>
-              )}
-              {canEdit && (
                 <CommandItem onSelect={() => go('/drivers')}>
                   <Cpu /> Custom drivers
                 </CommandItem>
@@ -112,17 +103,6 @@ export function CommandMenu({ children }: { children: React.ReactNode }) {
               )}
               <CommandItem onSelect={() => go('/gateways')}>
                 <Router /> Gateways
-              </CommandItem>
-              <CommandItem onSelect={() => go('/deployments')}>
-                <Rocket /> Deployments
-              </CommandItem>
-              {canEdit && (
-                <CommandItem onSelect={() => go('/marketplace')}>
-                  <Store /> Marketplace
-                </CommandItem>
-              )}
-              <CommandItem onSelect={() => go('/groups')}>
-                <Link2 /> Room groups
               </CommandItem>
               <CommandItem onSelect={() => go('/monitoring')}>
                 <Activity /> Monitoring

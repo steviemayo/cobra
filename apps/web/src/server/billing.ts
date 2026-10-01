@@ -14,7 +14,8 @@ import {
 // The override table is optional so callers (and tests) that only deal in plans need not have it.
 export type EntitlementDb = Pick<PrismaClient, 'orgBilling' | 'org'> &
   Partial<Pick<PrismaClient, 'orgLicenseOverride'>>;
-export type BillingDb = EntitlementDb & Pick<PrismaClient, 'stripeEvent' | 'room'>;
+export type BillingDb = EntitlementDb &
+  Pick<PrismaClient, 'stripeEvent' | 'room' | 'device' | 'deviceStatus'>;
 
 export interface PriceMap {
   basic?: string;
@@ -79,6 +80,49 @@ export function roomLimitMessage(e: Entitlements): string {
   return e.maxRooms === 0
     ? 'Your trial has ended, so no new rooms can be added. Subscribe to add more.'
     : `Your plan includes ${e.maxRooms} rooms. Subscribe to add more.`;
+}
+
+/**
+ * The rooms an organisation pays for: those with at least one monitored (active) device. A room of
+ * only recorded assets, or with nothing in it, is free. Devices still inside older room designs
+ * count until they are moved into the register. Staging and combined rooms are never counted.
+ */
+export async function monitoredRoomIds(
+  db: Pick<PrismaClient, 'device' | 'deviceStatus' | 'room'>,
+  orgId: string,
+): Promise<Set<string>> {
+  const [devices, legacy, rooms] = await Promise.all([
+    db.device.findMany({ where: { orgId, kind: 'active' } }),
+    db.deviceStatus.findMany({ where: { orgId } }),
+    db.room.findMany({ where: { orgId } }),
+  ]);
+  const billed = new Set(
+    rooms.filter((r) => !['staging', 'combined'].includes(r.kind ?? 'standard')).map((r) => r.id),
+  );
+  const ids = new Set<string>();
+  for (const d of devices) if (d.roomId && billed.has(d.roomId)) ids.add(d.roomId);
+  for (const d of legacy) if (billed.has(d.roomId)) ids.add(d.roomId);
+  return ids;
+}
+
+/** What to tell someone who cannot start monitoring another room. */
+export function monitorLimitMessage(e: Entitlements): string {
+  return e.maxRooms === 0
+    ? 'Your trial has ended, so no more rooms can be monitored. Subscribe to add more.'
+    : `Your plan includes ${e.maxRooms} monitored rooms. A room is monitored once it has a networked device with a driver. Subscribe to add more.`;
+}
+
+/** Whether a device may start being monitored in a room: rooms already monitored are free to add to. */
+export async function canMonitorRoom(
+  db: Pick<PrismaClient, 'device' | 'deviceStatus' | 'room'>,
+  orgId: string,
+  e: Entitlements,
+  roomId: string | null,
+): Promise<boolean> {
+  if (e.maxRooms === null) return true;
+  if (!roomId) return true; // not in a room, so not charged until it is
+  const current = await monitoredRoomIds(db, orgId);
+  return current.has(roomId) || current.size < e.maxRooms;
 }
 
 /** Whether another room may be added, given how many the organisation has. */

@@ -72,6 +72,10 @@ model Org {
   grantsToProviders   MspGrant[]            @relation("CustomerSide")
   grantsFromCustomers MspGrant[]            @relation("MspSide")
   calendars           CalendarConnection[]
+  callouts            Callout[]
+  latencyBuckets      LatencyBucket[]
+  latencyHours        LatencyHour[]
+  latencySettings     OrgLatencySettings?
   listings            MarketplaceListing[]
   purchases           MarketplacePurchase[]
   customDrivers       CustomDriver[]
@@ -79,6 +83,9 @@ model Org {
   credentialSets      CredentialSet[]
   siteDevices         SiteDevice[]
   joinRequests        JoinRequest[]
+  areas               Area[]
+  devices             Device[]
+  deviceEvents        DeviceEvent[]
 }
 
 model Member {
@@ -96,17 +103,21 @@ model Member {
 }
 
 model Site {
-  id        String   @id @default(uuid()) @db.Uuid
-  orgId     String   @db.Uuid
-  name      String
-  timezone  String   @default("Australia/Sydney")
-  createdAt DateTime @default(now())
+  id               String   @id @default(uuid()) @db.Uuid
+  orgId            String   @db.Uuid
+  name             String
+  timezone         String   @default("Australia/Sydney")
+  /// The gateway that polls devices with no gateway of their own and no room gateway. Null: the oldest at the site.
+  defaultGatewayId String?  @db.Uuid
+  createdAt        DateTime @default(now())
 
   org         Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
   gateways    Gateway[]
   rooms       Room[]
   groups      RoomGroup[]
   siteDevices SiteDevice[]
+  areas       Area[]
+  devices     Device[]
 
   @@index([orgId])
 }
@@ -139,10 +150,11 @@ model Gateway {
   lastSeenAt           DateTime?
   createdAt            DateTime       @default(now())
 
-  org    Org            @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site   Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  rooms  Room[]
-  events GatewayEvent[]
+  org     Org            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site    Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  rooms   Room[]
+  events  GatewayEvent[]
+  devices Device[]
 
   @@index([orgId])
   @@index([siteId])
@@ -192,6 +204,14 @@ model Room {
   memberRoomIds           String[]  @default([]) @db.Uuid
   /// A room that is only watched: its design warnings are not shown as something to fix.
   monitorOnly             Boolean   @default(false)
+  /// The area (building, level, zone) the room sits in, when the customer groups rooms that way.
+  areaId                  String?   @db.Uuid
+  /// Free labels for cross-cutting groups ("boardroom", "VIP").
+  tags                    String[]  @default([])
+  /// The calendar profile this room reads its bookings with, and the room's own calendar in it (the
+  /// room mailbox address for Microsoft 365, the calendar id for Google).
+  calendarConnectionId    String?   @db.Uuid
+  calendarResource        String?
   /// Hash of the secret webhook callers present. Null until someone generates one.
   hookSecretHash          String?
   desiredReleaseId        String?   @db.Uuid
@@ -205,10 +225,13 @@ model Room {
   reportedAt              DateTime?
   updatedAt               DateTime  @default(now()) @updatedAt
 
-  org               Org                @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site              Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  gateway           Gateway?           @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
-  group             RoomGroup?         @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  org               Org                 @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site              Site                @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  gateway           Gateway?            @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  group             RoomGroup?          @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  area              Area?               @relation(fields: [areaId], references: [id], onDelete: SetNull)
+  calendar          CalendarConnection? @relation(fields: [calendarConnectionId], references: [id], onDelete: SetNull)
+  assets            Device[]
   draft             RoomDraft?
   binding           RoomBinding?
   releases          Release[]
@@ -222,6 +245,7 @@ model Room {
   @@index([orgId])
   @@index([siteId])
   @@index([groupId])
+  @@index([areaId])
 }
 
 // A room's addresses and logins, kept apart from its design so templates carry none of them, an IP
@@ -689,6 +713,13 @@ model Ticket {
   escalatedBy    String?   @db.Uuid
   /// A Kestrel staff member (StaffUser.userId) working the ticket.
   staffAssignee  String?   @db.Uuid
+  /// The device the ticket is about, so its history shows repairs. Set from the incident when there is one.
+  deviceId       String?   @db.Uuid
+  /// The auto-ticket rule that raised it, and whether the rule has since escalated it.
+  ruleId         String?   @db.Uuid
+  ruleEscalated  Boolean   @default(false)
+  /// What turned out to be wrong, chosen when it is resolved.
+  rootCause      String?
 
   org      Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
   room     Room?           @relation(fields: [roomId], references: [id], onDelete: SetNull)
@@ -861,6 +892,11 @@ model MspGrant {
   endedBy        String?   @db.Uuid
   /// The customer's owner chose to show this provider's name, logo and colour in its portal and on its panels.
   useBrand       Boolean   @default(false)
+  /// The connection ends by itself at this time. Null: no end date.
+  endsAt         DateTime?
+  /// The provider's own notes about this customer, for sorting and filtering its portfolio.
+  accountManager String?
+  tags           String[]  @default([])
 
   msp      Org @relation("MspSide", fields: [mspOrgId], references: [id], onDelete: Cascade)
   customer Org @relation("CustomerSide", fields: [customerOrgId], references: [id], onDelete: Cascade)
@@ -944,7 +980,9 @@ model RoomDivider {
 
 // ---- Calendars ---------------------------------------------------------------------------------
 
-// How Kestrel reads an organisation's room calendars. `sealed` is the credentials, encrypted with
+// A calendar profile: how Kestrel reads an organisation's room calendars. An organisation can have
+// several (more than one Microsoft 365 tenant, Google as well); each room picks one and names its
+// own calendar. `sealed` is the credentials, encrypted with
 // KESTREL_SECRETS_KEY; they are never sent to a browser. provider: graph or google.
 model CalendarConnection {
   id        String   @id @default(uuid()) @db.Uuid
@@ -954,9 +992,10 @@ model CalendarConnection {
   sealed    String
   createdAt DateTime @default(now())
 
-  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  org   Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  rooms Room[]
 
-  @@unique([orgId, provider])
+  @@unique([orgId, name])
 }
 
 // A meeting that has already started a room's calendar trigger, so it never runs twice.
@@ -1095,4 +1134,602 @@ model TrialClaim {
   domainKey String?  @unique
   orgId     String?  @db.Uuid
   createdAt DateTime @default(now())
+}
+
+// ---- v2 (docs/pivot-monitoring.md): areas, devices as assets, device history -----------------------
+
+/// A grouping of rooms inside a site that the customer chooses: a building, a level, a wing. Nests
+/// (max depth 3, enforced in code). Rooms may sit in one area or none.
+model Area {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  siteId    String   @db.Uuid
+  parentId  String?  @db.Uuid
+  name      String
+  /// What this level is called ("Building", "Level", "Zone"). Free text, shown as a small label.
+  label     String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  org      Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site     Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  parent   Area?  @relation("AreaTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children Area[] @relation("AreaTree")
+  rooms    Room[]
+
+  @@unique([siteId, parentId, name])
+  @@index([orgId])
+  @@index([siteId])
+}
+
+/// A physical thing in a room, monitored or not. `active` devices are polled by a gateway through a
+/// driver; `passive` ones are asset records only (a fixed source, a laptop, a camera, a media player)
+/// and never show online or offline. This replaces the device list that used to live inside a room's
+/// design. Which gateway polls an active device: its own `gatewayId`, else its room's, else the
+/// site's default (resolved in code, see docs/pivot-monitoring.md).
+model Device {
+  id              String  @id @default(uuid()) @db.Uuid
+  orgId           String  @db.Uuid
+  siteId          String  @db.Uuid
+  /// The room it is in. Null for a spare or a device shared by several rooms.
+  roomId          String? @db.Uuid
+  name            String
+  /// active or passive
+  kind            String  @default("passive")
+  /// The device category (display, camera, dsp, laptop, media_player, ...).
+  category        String
+  /// Active only: { kind: "driver", driverId } or { kind: "generic", protocol }.
+  control         Json?
+  /// Active only: design settings the driver reads (not addresses or logins).
+  settings        Json    @default("{}")
+  /// Active only: addresses, setting key -> value.
+  values          Json    @default("{}")
+  /// Active only: logins sealed with KESTREL_SECRETS_KEY. Never sent to a browser.
+  sealed          String?
+  credentialSetId String? @db.Uuid
+  /// Active only: the gateway that polls it. Null: the room's gateway, then the site's.
+  gatewayId       String? @db.Uuid
+  /// Goes up whenever anything a gateway needs (driver, address, login) changes.
+  version         Int     @default(1)
+
+  // Asset record. The value here is the one shown; `provenance` says where each came from.
+  make              String?
+  model             String?
+  serial            String?
+  mac               String?
+  ip                String?
+  firmware          String?
+  assetTag          String?
+  /// in_service, spare, in_repair, retired
+  status            String    @default("in_service")
+  installedOn       DateTime? @db.Date
+  warrantyEndsOn    DateTime? @db.Date
+  endOfLifeOn       DateTime? @db.Date
+  supplier          String?
+  notes             String?
+  /// field -> { source: "discovered" | "manual", discovered?: value the device reported when it
+  /// disagrees with the manual value, at: ISO time, by?: user id }.
+  provenance        Json      @default("{}")
+  /// The identity this record had before a confirmed replacement (old serial, mac, model, date).
+  retiredIdentities Json      @default("[]")
+  /// Set when a serial, MAC or model changed and nobody has said "replaced" or "correction" yet.
+  swapPending       Boolean   @default(false)
+  /// The configuration profile this device is held to, and settings of its own that add to or replace the profile.
+  profileId         String?   @db.Uuid
+  configParams      Json      @default("[]")
+  /// field -> { drifted, desired, actual, since, attempts, lastEnforcedAt }: what the last reading said about each held setting.
+  configState       Json      @default("{}")
+
+  // Live state, written by heartbeats. online / offline. "unknown" is worked out at read time from
+  // its gateway.
+  online        Boolean?
+  since         DateTime?
+  lastSeenAt    DateTime?
+  feedback      Json?
+  details       Json?
+  firmwareSince DateTime?
+  /// Active only: the control points read on it (a DSP's gain blocks, routers, named controls) and what each is watched for. See ControlPoint.
+  points        Json      @default("[]")
+  /// What each point read at the last heartbeat, by point id.
+  pointValues   Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  org     Org           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site    Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  room    Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  gateway Gateway?      @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  events  DeviceEvent[]
+
+  @@index([orgId])
+  @@index([siteId])
+  @@index([roomId])
+  @@index([gatewayId])
+}
+
+/// Append-only history of one device: field changes (old to new, who or what), moves, gateway
+/// changes, swaps, and events copied in from elsewhere (incidents, PM results, drift). Kept for the
+/// life of the device, not the 90 day telemetry window.
+model DeviceEvent {
+  id       String   @id @default(uuid()) @db.Uuid
+  orgId    String   @db.Uuid
+  deviceId String   @db.Uuid
+  /// created, field_changed, moved, gateway_changed, swap_flagged, swap_confirmed, swap_dismissed,
+  /// upgraded, status_changed, note
+  type     String
+  field    String?
+  oldValue String?
+  newValue String?
+  /// discovered, manual or system
+  source   String   @default("system")
+  actorId  String?  @db.Uuid
+  data     Json?
+  at       DateTime @default(now())
+
+  org    Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([deviceId, at])
+}
+
+// ---- v2 analytics (docs/pivot-monitoring.md, "Analytics") -----------------------------------------
+
+/// One change of a device reading, kept 90 days: what usage sessions and device charts are built from.
+/// `field` is a feedback field (power, input, muted, volume, occupied, ...) or "online". `value` is text
+/// ("on", "true", "62") so one table holds every kind.
+model DeviceHistory {
+  id       String   @id @default(uuid()) @db.Uuid
+  orgId    String   @db.Uuid
+  deviceId String   @db.Uuid
+  roomId   String?  @db.Uuid
+  field    String
+  value    String
+  at       DateTime @default(now())
+
+  @@index([deviceId, field, at])
+  @@index([roomId, at])
+  @@index([orgId, at])
+}
+
+/// What counts as a room being in use: a rule over device readings. Org default (roomId null) or
+/// one room's own. kind is "av" (equipment in use) or "occupied" (people there).
+model UsageDefinition {
+  id             String   @id @default(uuid()) @db.Uuid
+  orgId          String   @db.Uuid
+  roomId         String?  @db.Uuid
+  kind           String
+  /// A UsageRule tree (packages/model/src/usage.ts).
+  rule           Json
+  /// A gap shorter than this does not end a session.
+  holdOffSeconds Int      @default(180)
+  /// A session shorter than this is not counted.
+  minOnSeconds   Int      @default(60)
+  updatedBy      String?  @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([orgId, roomId, kind])
+  @@index([orgId])
+}
+
+/// When the organisation counts a room as available for utilisation: days of the week (0 = Sunday)
+/// and hours in the site's own time zone.
+model UsageSettings {
+  orgId     String   @id @db.Uuid
+  workDays  Int[]    @default([1, 2, 3, 4, 5])
+  workStart String   @default("08:00")
+  workEnd   String   @default("18:00")
+  updatedAt DateTime @updatedAt
+}
+
+/// A day of one room's usage, kept 13 months after the raw history is gone.
+model RoomUsageDay {
+  roomId         String   @db.Uuid
+  kind           String
+  day            DateTime @db.Date
+  orgId          String   @db.Uuid
+  /// Minutes in use, in total and inside working hours.
+  minutes        Int
+  workMinutes    Int
+  sessions       Int
+  longestMinutes Int
+  /// Minutes in use in each hour of the day (24 numbers), for the busy-hours view.
+  hours          Int[]
+
+  @@id([roomId, kind, day])
+  @@index([orgId, day])
+}
+
+// ---- v2 configuration (docs/pivot-monitoring.md, "Configuration and deployment") -------------------
+
+/// A named set of desired device settings that many devices can be held to. `params` is a list of
+/// { field, value, mode } (packages/model/src/config.ts). `version` goes up on every change.
+model ConfigProfile {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  name        String
+  description String?
+  /// A device category this profile is meant for (a hint for pickers), or null for any.
+  category    String?
+  params      Json     @default("[]")
+  version     Int      @default(1)
+  createdBy   String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([orgId, name])
+  @@index([orgId])
+}
+
+/// A copy of what a device said about itself at a moment: readings, details, firmware and its
+/// non-secret settings. One per device can be the baseline drift is measured from.
+model DeviceSnapshot {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String   @db.Uuid
+  deviceId   String   @db.Uuid
+  /// manual, scheduled, before_deploy, after_deploy
+  reason     String   @default("manual")
+  data       Json
+  isBaseline Boolean  @default(false)
+  note       String?
+  takenBy    String?  @db.Uuid
+  takenAt    DateTime @default(now())
+
+  @@index([deviceId, takenAt])
+  @@index([orgId])
+}
+
+/// One push of a profile to some devices: a canary first, then the rest, with the snapshots taken
+/// before so it can be rolled back.
+model ConfigDeploy {
+  id             String   @id @default(uuid()) @db.Uuid
+  orgId          String   @db.Uuid
+  profileId      String   @db.Uuid
+  profileName    String
+  profileVersion Int
+  deviceIds      String[] @default([]) @db.Uuid
+  canaryIds      String[] @default([]) @db.Uuid
+  /// canary (waiting for a go-ahead), done, rolled_back
+  stage          String   @default("done")
+  /// deviceId -> the snapshot taken before this deploy touched it.
+  snapshots      Json     @default("{}")
+  note           String?
+  createdBy      String?  @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([orgId, createdAt])
+}
+
+// ---- v2 support (docs/pivot-monitoring.md, "Support") ----------------------------------------------
+
+/// A time when nothing raised about a site, room or device should alert or open a ticket, and that
+/// is left out of availability. Repeats daily or weekly when `repeat` says so.
+model MaintenanceWindow {
+  id          String    @id @default(uuid()) @db.Uuid
+  orgId       String    @db.Uuid
+  name        String
+  /// org, site, room or device
+  scope       String
+  scopeId     String?   @db.Uuid
+  startsAt    DateTime
+  endsAt      DateTime
+  /// none, daily or weekly: the same hours again, until `repeatUntil` if set.
+  repeat      String    @default("none")
+  repeatUntil DateTime?
+  reason      String?
+  createdBy   String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+
+  @@index([orgId, startsAt])
+}
+
+/// Turns an incident into a ticket by itself. First matching rule (by sortOrder) wins.
+model TicketRule {
+  id                   String   @id @default(uuid()) @db.Uuid
+  orgId                String   @db.Uuid
+  name                 String
+  enabled              Boolean  @default(true)
+  sortOrder            Int      @default(0)
+  /// Incident kinds to match (empty: any).
+  kinds                String[] @default([])
+  /// info, warning or critical: matches this severity and above.
+  minSeverity          String   @default("warning")
+  /// Only incidents at these sites (empty: any).
+  siteIds              String[] @default([]) @db.Uuid
+  /// The incident must have been open this long first.
+  afterMinutes         Int      @default(10)
+  priority             String   @default("normal")
+  /// org, kestrel or msp:<org id>
+  routeTo              String   @default("org")
+  /// If the ticket has had no reply after this many minutes, raise it to escalatePriority and send it to escalateTo. 0: never.
+  escalateAfterMinutes Int      @default(0)
+  escalatePriority     String   @default("high")
+  escalateTo           String   @default("kestrel")
+  createdAt            DateTime @default(now())
+
+  @@index([orgId, sortOrder])
+}
+
+/// Where tickets are mirrored to: a webhook (any service desk), a demo desk, or an inbound-only mail address.
+model ItsmConnector {
+  id           String   @id @default(uuid()) @db.Uuid
+  orgId        String   @db.Uuid
+  name         String
+  /// webhook, demo or email_in
+  type         String
+  enabled      Boolean  @default(true)
+  /// webhook: { url }. Nothing secret here.
+  config       Json     @default("{}")
+  /// Sealed with KESTREL_SECRETS_KEY: the secret used to sign outbound calls.
+  sealedSecret String?
+  /// Hash of the secret an external system presents when it calls Kestrel.
+  inboundHash  String?
+  createdBy    String?  @db.Uuid
+  createdAt    DateTime @default(now())
+
+  @@index([orgId])
+}
+
+/// A ticket and its counterpart in an external service desk.
+model ItsmLink {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  ticketId    String   @db.Uuid
+  connectorId String   @db.Uuid
+  externalRef String
+  lastStatus  String?
+  lastSyncAt  DateTime @default(now())
+
+  @@unique([ticketId, connectorId])
+  @@index([connectorId, externalRef])
+}
+
+model ItsmSyncLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  connectorId String   @db.Uuid
+  ticketId    String?  @db.Uuid
+  /// out or in
+  direction   String
+  ok          Boolean
+  summary     String
+  at          DateTime @default(now())
+
+  @@index([connectorId, at])
+}
+
+// ---- v2 register issues and preventative maintenance ---------------------------------------------
+
+/// A frozen, numbered, signed copy of the asset register (or a PM report). See docs/pivot-monitoring.md.
+model RegisterIssue {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  /// register or pm_report
+  kind      String   @default("register")
+  number    Int
+  /// org, site or area
+  scope     String   @default("org")
+  scopeId   String?  @db.Uuid
+  title     String
+  payload   Json
+  hash      String
+  signature String
+  keyId     String
+  takenBy   String?  @db.Uuid
+  takenAt   DateTime @default(now())
+
+  @@unique([orgId, kind, number])
+  @@index([orgId, takenAt])
+}
+
+model PmTemplate {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  name      String
+  /// room or device
+  appliesTo String   @default("room")
+  /// For device templates: the category it is for.
+  category  String?
+  /// [{ id, label, type: passfail | number | text | photo, unit?, min?, max?, auto? }]
+  items     Json     @default("[]")
+  version   Int      @default(1)
+  createdBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, name])
+  @@index([orgId])
+}
+
+model PmSchedule {
+  id               String    @id @default(uuid()) @db.Uuid
+  orgId            String    @db.Uuid
+  templateId       String    @db.Uuid
+  roomId           String?   @db.Uuid
+  deviceId         String?   @db.Uuid
+  intervalDays     Int
+  nextDueOn        DateTime  @db.Date
+  /// How many days before it is due it shows as due soon.
+  leadDays         Int       @default(7)
+  assigneeUserId   String?   @db.Uuid
+  /// A service provider organisation doing the visit, when it is not one of the customer's own people.
+  assigneeMspOrgId String?   @db.Uuid
+  enabled          Boolean   @default(true)
+  lastRunOn        DateTime? @db.Date
+  createdBy        String?   @db.Uuid
+  createdAt        DateTime  @default(now())
+
+  @@index([orgId, nextDueOn])
+  @@index([roomId])
+}
+
+/// One completed (or in-progress) check. Once signed it is never edited.
+model PmRun {
+  id              String    @id @default(uuid()) @db.Uuid
+  orgId           String    @db.Uuid
+  scheduleId      String?   @db.Uuid
+  templateId      String    @db.Uuid
+  templateName    String
+  templateVersion Int
+  roomId          String?   @db.Uuid
+  deviceId        String?   @db.Uuid
+  /// draft or signed
+  status          String    @default("draft")
+  /// [{ itemId, label, type, result, note?, auto?: { value, at } }]
+  results         Json      @default("[]")
+  failedCount     Int       @default(0)
+  /// The date the check was due when it was signed off, to tell on time from late.
+  dueOn           DateTime? @db.Date
+  notes           String?
+  startedBy       String?   @db.Uuid
+  signedBy        String?   @db.Uuid
+  signedByName    String?
+  signedAt        DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([roomId])
+  @@index([deviceId])
+}
+
+/// How often an organisation wants a register issue taken by itself. One row per organisation.
+model RegisterSchedule {
+  orgId        String    @id @db.Uuid
+  everyDays    Int
+  lastIssuedAt DateTime?
+  updatedAt    DateTime  @updatedAt
+}
+
+// ---- Response times ----------------------------------------------------------------------------
+
+// How devices answered the gateway's pings, summed into 5-minute buckets per device (heartbeats add
+// to the current bucket). Kept 7 days; after that only the hourly rollup remains.
+model LatencyBucket {
+  deviceId String   @db.Uuid
+  bucket   DateTime
+  orgId    String   @db.Uuid
+  siteId   String   @db.Uuid
+  /// Pings sent and answered in the bucket, and the round-trip times of the answered ones.
+  sent     Int
+  ok       Int
+  sumMs    Float
+  minMs    Float?
+  maxMs    Float?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@id([deviceId, bucket])
+  @@index([orgId, bucket])
+  @@index([siteId, bucket])
+}
+
+// The same, one row per device per hour, built from the buckets. Kept for the retention window.
+model LatencyHour {
+  deviceId String   @db.Uuid
+  bucket   DateTime
+  orgId    String   @db.Uuid
+  siteId   String   @db.Uuid
+  sent     Int
+  ok       Int
+  sumMs    Float
+  minMs    Float?
+  maxMs    Float?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@id([deviceId, bucket])
+  @@index([orgId, bucket])
+  @@index([siteId, bucket])
+}
+
+// An organisation's own limits for "slow" and "dropping pings". A null field uses Kestrel's default;
+// deleting the row resets them all.
+model OrgLatencySettings {
+  orgId         String   @id @db.Uuid
+  /// Slow when the recent average is this many times the device's usual.
+  factor        Float?
+  /// ...and at least this many milliseconds more than usual.
+  minIncreaseMs Float?
+  /// Slow whatever the usual: the average over the last 15 minutes is above this.
+  highMs        Float?
+  /// Dropping pings when this share (percent) of the last 15 minutes' pings had no answer.
+  lossPercent   Float?
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// ---- Support callouts --------------------------------------------------------------------------
+
+// A request for a Kestrel technician to attend a site. The customer asks, staff reply with
+// availability and a quote (hours at an hourly rate, plus GST), the customer prepays through Stripe
+// Checkout to secure the booking, and when the work is done staff enter the hours actually worked:
+// extra time is invoiced, unused time is credited and refunded. A linked ticket carries the
+// conversation. status: requested, quoted, booked (paid), completed, cancelled, declined.
+model Callout {
+  id             String   @id @default(uuid()) @db.Uuid
+  orgId          String   @db.Uuid
+  siteId         String?  @db.Uuid
+  roomId         String?  @db.Uuid
+  /// The ticket that carries the conversation with staff.
+  ticketId       String?  @db.Uuid
+  incidentId     String?  @db.Uuid
+  title          String
+  details        String
+  /// When the customer would like someone (free text: "Tuesday morning, before 10").
+  preferredDates String?
+  contactName    String?
+  contactPhone   String?
+  createdBy      String?  @db.Uuid
+  createdByEmail String?
+  status         String   @default("requested")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
+
+  // The quote. Money is in cents of `currency`; the rate and subtotal exclude GST.
+  hours         Float?
+  rateCents     Int?
+  subtotalCents Int?
+  gstCents      Int?
+  totalCents    Int?
+  currency      String    @default("aud")
+  quoteNote     String?
+  quotedAt      DateTime?
+  quotedBy      String?   @db.Uuid
+  /// The time staff offer. It becomes the booking when the quote is paid.
+  scheduledFor  DateTime?
+  scheduledEnd  DateTime?
+
+  // The prepayment (Stripe Checkout, which also issues the tax invoice for it).
+  stripeSessionId  String?   @unique
+  paymentIntentId  String?
+  prepaidInvoiceId String?
+  paidCents        Int?
+  paidAt           DateTime?
+
+  // The work done, and what followed from it.
+  actualHours     Float?
+  completionNote  String?
+  completedAt     DateTime?
+  completedBy     String?   @db.Uuid
+  /// Extra time beyond the quote: an invoice for the difference.
+  stripeInvoiceId String?
+  invoiceUrl      String?
+  invoicedCents   Int?
+  /// Unused time, or a cancellation: a credit note against the prepayment, refunded to the card.
+  creditNoteId    String?
+  refundedCents   Int?
+
+  cancelledAt  DateTime?
+  /// customer or staff
+  cancelledBy  String?
+  cancelReason String?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status, createdAt])
+  @@index([status, createdAt])
 }

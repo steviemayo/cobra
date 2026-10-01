@@ -1,5 +1,6 @@
 import { db } from '@kestrel/db';
 import { priceMapFromEnv, handleStripeEvent } from '@/server/billing';
+import { fulfilCallout, type CalloutSession } from '@/server/callouts';
 import { fulfilOrder, type MarketplaceSession } from '@/server/marketplace';
 import { getStripe } from '@/server/stripe';
 
@@ -24,6 +25,12 @@ export async function POST(req: Request) {
     const session = event.data.object as unknown as MarketplaceSession;
     if (session.metadata?.kind === 'marketplace')
       return Response.json({ received: true, result: await fulfilOrder(db, session) });
+  }
+  // So are callout prepayments: paying books the callout.
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object as unknown as CalloutSession;
+    if (session.metadata?.kind === 'callout')
+      return Response.json({ received: true, result: await fulfilCallout(db, session) });
   }
   const result = await handleStripeEvent(db, event, priceMapFromEnv());
   return Response.json({ received: true, result });

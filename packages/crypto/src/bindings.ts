@@ -1,5 +1,11 @@
 import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
-import { BindingsPayload, SignedBindings, type PublicKey } from '@kestrel/model';
+import {
+  BindingsPayload,
+  DeviceSetPayload,
+  SignedBindings,
+  SignedDeviceSet,
+  type PublicKey,
+} from '@kestrel/model';
 import { ANY_KEY_ID, hashManifest } from './manifest';
 
 /** Signs a room's bindings the way a manifest is signed: Ed25519 over the hash of the canonical JSON. */
@@ -47,5 +53,30 @@ export function verifyBindings(raw: unknown, trusted: PublicKey[]): VerifyBindin
   if (!valid) return { ok: false, reason: 'bad_signature' };
   const parsed = SignedBindings.safeParse(raw);
   if (!parsed.success) return { ok: false, reason: 'invalid_bindings' };
+  return { ok: true, signed: parsed.data };
+}
+
+/** Signs the set of devices a gateway polls, the same way. */
+export function signDeviceSet(
+  input: unknown,
+  key: { privateKeyPem: string; keyId: string },
+): SignedDeviceSet {
+  const payload = DeviceSetPayload.parse(input);
+  const hash = hashManifest(payload);
+  const signature = sign(null, Buffer.from(hash), createPrivateKey(key.privateKeyPem)).toString('base64');
+  return { payload, hash, signature, keyId: key.keyId };
+}
+
+export type VerifyDeviceSetResult =
+  | { ok: true; signed: SignedDeviceSet }
+  | { ok: false; reason: 'malformed' | 'hash_mismatch' | 'unknown_key' | 'bad_signature' | 'invalid_device_set' };
+
+/** Checks a device set exactly as received, then parses it. A gateway refuses anything else. */
+export function verifyDeviceSet(raw: unknown, trusted: PublicKey[]): VerifyDeviceSetResult {
+  const r = verifyBindings(raw, trusted);
+  // Reuse the hash and signature checks; only the payload shape differs.
+  if (!r.ok && r.reason !== 'invalid_bindings') return { ok: false, reason: r.reason };
+  const parsed = SignedDeviceSet.safeParse(raw);
+  if (!parsed.success) return { ok: false, reason: 'invalid_device_set' };
   return { ok: true, signed: parsed.data };
 }

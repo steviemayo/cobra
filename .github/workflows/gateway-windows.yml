@@ -49,12 +49,16 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --filter "@kestrel/gateway..." --filter "@kestrel/panel-app..."
       - run: pnpm --filter @kestrel/panel-app build
+      - name: Compile the gateway
+        run: pnpm --filter @kestrel/gateway build
       - name: Assemble the bundle
         run: |
           # Native modules (serial ports) are installed for this platform, which is why this runs on Windows.
           # A flat node_modules keeps paths short enough for Windows PowerShell 5.1 to unzip on the gateway.
           pnpm --config.node-linker=hoisted --filter @kestrel/gateway deploy --prod bundle/app
           Copy-Item -Recurse apps/panel/dist bundle/app/panel
+          # The compiled gateway: the service runs this, not the TypeScript source, which is slow to start.
+          Copy-Item -Recurse apps/gateway/dist bundle/app/dist
           Copy-Item -Recurse apps/gateway/windows bundle/app/windows
           $version = (Select-String -Path apps/gateway/src/config.ts -Pattern "GATEWAY_VERSION = '([^']+)'").Matches[0].Groups[1].Value
           Set-Content -Path bundle/app/VERSION -Value $version -NoNewline

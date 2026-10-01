@@ -181,7 +181,7 @@ function NewRoomDialog({
         onOpenChange(false);
         setName('');
         setPickedSite('');
-        router.push(orgPath(orgId, `/rooms/${room.id}/design`));
+        router.push(orgPath(orgId, `/rooms/${room.id}/devices`));
       },
     }),
   );

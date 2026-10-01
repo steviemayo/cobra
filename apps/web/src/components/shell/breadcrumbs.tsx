@@ -70,7 +70,7 @@ export function Breadcrumbs() {
     if (tab) crumbs.push({ label: ROOM_TAB_LABEL[tab] ?? tab });
   }
   if (section === 'drivers' && id === 'guide') crumbs.push({ label: 'How-to guide' });
-  if (section === 'settings' && id)crumbs.push({ label: id === 'activity' ? 'Activity log' : id });
+  if (section === 'settings' && id) crumbs.push({ label: id === 'activity' ? 'Activity log' : id });
 
   return (
     <Breadcrumb className="min-w-0">

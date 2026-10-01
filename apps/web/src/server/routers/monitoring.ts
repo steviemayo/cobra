@@ -8,7 +8,9 @@ import { writeAudit } from '../audit';
 import { deviceFeedbackDailyHistory, deviceFeedbackHistory } from '../device-feedback-history';
 import { firmwareReport } from '../firmware-report';
 import { maybeSweep } from '../monitoring';
+import { estateOverview } from '../estate-overview';
 import { orgDevices, orgOverview, sharedInRoom } from '../monitoring-queries';
+import { affectedForRooms } from '../room-schedule';
 import { SITE_SCOPED, siteFilter, type SiteScope } from '../site-scope';
 import { featureProcedure, requireRole, router } from '../trpc';
 import { validTimeZone } from '../usage-analytics';
@@ -53,6 +55,16 @@ export const monitoringRouter = router({
       const jobs = await maybeSweep(db);
       if (jobs.length) after(() => deliverAlerts(db, jobs));
       return orgOverview(db, ctx.orgId, new Date(), ctx.siteScope);
+    }),
+
+  // The v2 Overview: the whole estate (sites, areas, rooms, devices, gateways) in one query.
+  estate: monitoringProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId }))
+    .query(async ({ ctx }) => {
+      const jobs = await maybeSweep(db);
+      if (jobs.length) after(() => deliverAlerts(db, jobs));
+      return estateOverview(db, ctx.orgId, new Date(), ctx.siteScope);
     }),
 
   // Every device across the org, flattened, for the org-wide "Devices" list. Polled the same as
@@ -200,7 +212,19 @@ export const monitoringRouter = router({
         select: { id: true, name: true },
       });
       const roomName = new Map(rooms.map((r) => [r.id, r.name]));
+      // Meetings the open incidents may disturb, from the rooms' calendars.
+      const impact = await affectedForRooms(
+        db,
+        ctx.orgId,
+        [
+          ...new Set(
+            rows.filter((r) => r.status === 'open').flatMap((r) => (r.roomId ? [r.roomId] : [])),
+          ),
+        ],
+        new Date(),
+      );
       return rows.map((r) => ({
+        impact: r.status === 'open' && r.roomId ? (impact.get(r.roomId) ?? null) : null,
         id: r.id,
         kind: r.kind,
         severity: r.severity,
@@ -214,6 +238,19 @@ export const monitoringRouter = router({
         occurrences: r.occurrences,
         acknowledged: r.acknowledgedAt !== null,
       }));
+    }),
+
+  // For a room's card: the meetings its open incidents may disturb, or null when it has none open.
+  roomImpact: monitoringProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, roomId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const room = await assertScopedRoom(ctx.orgId, input.roomId, ctx.siteScope);
+      const open = await db.incident.count({
+        where: { orgId: ctx.orgId, roomId: room.id, status: 'open' },
+      });
+      if (open === 0) return null;
+      return (await affectedForRooms(db, ctx.orgId, [room.id], new Date())).get(room.id) ?? null;
     }),
 
   acknowledge: monitoringProcedure

@@ -26,7 +26,10 @@ export function DriversView() {
   const [problems, setProblems] = useState<string[]>([]);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const one = useQuery({
-    ...trpc.driver.get.queryOptions({ orgId, driverId: selected && selected !== 'new' ? selected : '00000000-0000-4000-8000-000000000000' }),
+    ...trpc.driver.get.queryOptions({
+      orgId,
+      driverId: selected && selected !== 'new' ? selected : '00000000-0000-4000-8000-000000000000',
+    }),
     enabled: !!selected && selected !== 'new',
   });
 
@@ -45,7 +48,9 @@ export function DriversView() {
   }, [text]);
   const commands = useMemo(() => (parsed.ok ? preview(parsed.value) : []), [parsed]);
 
-  const check = useMutation(trpc.driver.check.mutationOptions({ onSuccess: (r) => setProblems(r.problems) }));
+  const check = useMutation(
+    trpc.driver.check.mutationOptions({ onSuccess: (r) => setProblems(r.problems) }),
+  );
   const save = useMutation(
     trpc.driver.save.mutationOptions({
       onSuccess: async (res) => {
@@ -76,7 +81,10 @@ export function DriversView() {
         description="Teach Kestrel to talk to a device it doesn’t know. A driver is a description of the device’s commands, not code, so it can only ever talk to that device."
         actions={
           <>
-            <Link href={orgPath(orgId, '/drivers/guide')} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+            <Link
+              href={orgPath(orgId, '/drivers/guide')}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
               <BookOpen data-icon="inline-start" /> How-to guide
             </Link>
             <Button size="sm" onClick={() => setSelected('new')}>
@@ -90,7 +98,11 @@ export function DriversView() {
           {list.isPending ? (
             <Skeleton className="h-32 w-full" />
           ) : list.data?.length === 0 && selected !== 'new' ? (
-            <EmptyState icon={Cpu} title="No drivers yet" description="Start from an example and change it." />
+            <EmptyState
+              icon={Cpu}
+              title="No drivers yet"
+              description="Start from an example and change it."
+            />
           ) : (
             <ul className="space-y-1">
               {list.data?.map((d) => (
@@ -98,7 +110,10 @@ export function DriversView() {
                   <button
                     type="button"
                     onClick={() => setSelected(d.id)}
-                    className={cn('flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-muted', selected === d.id && 'bg-muted')}
+                    className={cn(
+                      'flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-muted',
+                      selected === d.id && 'bg-muted',
+                    )}
                   >
                     <span>{d.name}</span>
                     <span className="text-xs text-muted-foreground">v{d.latestVersion}</span>
@@ -128,7 +143,9 @@ export function DriversView() {
             )}
             {commands.length > 0 && (
               <div className="rounded-lg border">
-                <div className="border-b bg-muted/40 px-3 py-1.5 text-xs font-medium">What it would send (sample values)</div>
+                <div className="border-b bg-muted/40 px-3 py-1.5 text-xs font-medium">
+                  What it would send (sample values)
+                </div>
                 <ul className="divide-y font-mono text-xs">
                   {commands.map((c) => (
                     <li key={c.key} className="flex gap-3 px-3 py-1.5">
@@ -140,23 +157,37 @@ export function DriversView() {
               </div>
             )}
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" disabled={!parsed.ok || check.isPending} onClick={() => parsed.ok && check.mutate({ orgId, spec: parsed.value })}>
+              <Button
+                variant="outline"
+                disabled={!parsed.ok || check.isPending}
+                onClick={() => parsed.ok && check.mutate({ orgId, spec: parsed.value })}
+              >
                 {check.isPending && <Spinner />}
                 Check
               </Button>
-              <Button disabled={!parsed.ok || save.isPending} onClick={() => parsed.ok && save.mutate({ orgId, spec: parsed.value })}>
+              <Button
+                disabled={!parsed.ok || save.isPending}
+                onClick={() => parsed.ok && save.mutate({ orgId, spec: parsed.value })}
+              >
                 {save.isPending && <Spinner />}
                 Save
               </Button>
-              {check.data?.ok && problems.length === 0 && <span className="text-sm text-success">Looks good</span>}
+              {check.data?.ok && problems.length === 0 && (
+                <span className="text-sm text-success">Looks good</span>
+              )}
               {selected !== 'new' && one.data && (
-                <Button variant="ghost" className="ml-auto" onClick={() => setDeleting({ id: one.data!.id, name: one.data!.name })}>
+                <Button
+                  variant="ghost"
+                  className="ml-auto"
+                  onClick={() => setDeleting({ id: one.data!.id, name: one.data!.name })}
+                >
                   <Trash2 data-icon="inline-start" /> Delete
                 </Button>
               )}
             </div>
             <p className="text-xs text-muted-foreground">
-              Every save is a new version. A room’s release keeps the version it was published with, so editing a driver never changes a room that is already running.
+              Every save is a new version. A room’s release keeps the version it was published with,
+              so editing a driver never changes a room that is already running.
             </p>
           </div>
         )}

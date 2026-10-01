@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ActivityFeed } from '@/components/common/activity-feed';
+import { NetworkHealthSettings } from './network-health';
 import { ApiKeysSetting } from '@/components/common/api-keys-setting';
 import { AuditExportButtons } from '@/components/common/audit-export-buttons';
 import {
@@ -77,6 +78,7 @@ export function GeneralSettings() {
       </form>
       <OrgBrandingForm />
       <CalendarSettings />
+      <NetworkHealthSettings />
       <ApiKeysSetting />
       {org.kind !== 'msp' && <ServiceProvidersSetting />}
       <StaffAccessSetting />
@@ -175,7 +177,7 @@ export function ActivityLog() {
   );
 }
 
-/** Lets rooms start themselves when a meeting begins in their calendar. */
+/** Calendar profiles: each room picks one and names its own calendar (Room > Settings). */
 function CalendarSettings() {
   const trpc = useTRPC();
   const qc = useQueryClient();
@@ -195,7 +197,7 @@ function CalendarSettings() {
         setSecret('');
         setKey('');
         await refresh();
-        toast.success('Calendar connected');
+        toast.success('Calendar profile added');
       },
     }),
   );
@@ -203,7 +205,7 @@ function CalendarSettings() {
     trpc.calendar.remove.mutationOptions({
       onSuccess: async () => {
         await refresh();
-        toast.success('Calendar disconnected');
+        toast.success('Calendar profile removed');
       },
       onError: (e) => toast.error(e.message),
     }),
@@ -216,15 +218,14 @@ function CalendarSettings() {
       <div>
         <h2 className="text-sm font-medium">Calendars</h2>
         <p className="text-sm text-muted-foreground">
-          Connect Microsoft 365 or Google so a room can start itself when a meeting begins in its
-          calendar. Add a calendar trigger to the room’s design and give it the room’s calendar
-          address.
+          Add a profile for each calendar service you use (for example Microsoft 365 and Google, or
+          two Microsoft 365 tenants). Then open a room’s settings, choose a profile and enter the
+          room’s own calendar address.
         </p>
         <p className="text-sm text-muted-foreground">
-          The same calendar is shown on the room’s panel: what is on now (title, organiser, start
-          and end), when the room is next free, or when the next meeting is. Kestrel only reads
-          calendars. Meetings marked private or confidential show as “Private meeting”, with no
-          title or organiser.
+          Kestrel shows each room’s week, warns about meetings a fault may affect, and checks
+          bookings when you plan maintenance. It only reads calendars. Meetings marked private or
+          confidential show as “Busy”, with no title or organiser.
         </p>
       </div>
       {!info.data.available && (
@@ -239,7 +240,8 @@ function CalendarSettings() {
               <span>
                 {c.name}{' '}
                 <span className="text-muted-foreground">
-                  ({c.provider === 'graph' ? 'Microsoft 365' : 'Google'})
+                  ({c.provider === 'graph' ? 'Microsoft 365' : 'Google'}, {c.rooms}{' '}
+                  {c.rooms === 1 ? 'room' : 'rooms'})
                 </span>
               </span>
               <Button
@@ -249,7 +251,7 @@ function CalendarSettings() {
                 disabled={remove.isPending}
                 onClick={() => remove.mutate({ orgId, connectionId: c.id })}
               >
-                Disconnect
+                Remove
               </Button>
             </li>
           ))}
@@ -351,13 +353,13 @@ function CalendarSettings() {
             </div>
           )}
           <p className="text-xs text-muted-foreground">
-            Kestrel only reads meeting start times. Credentials are encrypted before they are stored
-            and never shown again.
+            Kestrel only reads meetings. Credentials are encrypted before they are stored and never
+            shown again.
           </p>
           {connect.error && <p className="text-sm text-destructive">{connect.error.message}</p>}
           <Button type="submit" disabled={connect.isPending || !label.trim()}>
             {connect.isPending && <Spinner />}
-            Connect calendar
+            Add profile
           </Button>
         </form>
       )}

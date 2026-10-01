@@ -6,29 +6,37 @@ import { usePathname } from 'next/navigation';
 import {
   Activity,
   AlertTriangle,
+  CalendarCheck,
+  CalendarOff,
+  ClipboardCheck,
+  FileCheck2,
+  GitCompare,
+  History,
+  ListChecks,
+  Package,
+  Plug,
+  Sigma,
+  SlidersHorizontal,
   BellRing,
   Building2,
   CircuitBoard,
   ChevronRight,
+  Layers,
   Cpu,
   KeyRound,
-  Server,
-  Link2,
   DoorOpen,
   LayoutDashboard,
-  LayoutTemplate,
   LifeBuoy,
   Lock,
   type LucideIcon,
   Plus,
-  Rocket,
   Router,
   Settings,
-  Store,
   Users,
   Handshake,
   BarChart3,
   FileText,
+  Wrench,
 } from 'lucide-react';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
 import { useBilling } from '@/components/common/plan-gate';
@@ -53,7 +61,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useEstate } from '@/lib/use-estate';
+import { useEstate, useEstateOverview } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
 import { useDialogs } from './dialogs';
@@ -122,7 +130,10 @@ function NavItem({
 function EstateTree() {
   const { orgId } = useOrg();
   const pathname = usePathname();
-  const { sites, rooms, roomsBySite, live, isPending } = useEstate();
+  const { sites, rooms, roomsBySite, isPending } = useEstate();
+  const estate = useEstateOverview();
+  const health = new Map((estate.data?.rooms ?? []).map((r) => [r.id, r.health]));
+  const areas = estate.data?.areas ?? [];
   const [manual, setManual] = useState<Record<string, boolean>>({});
 
   const activeSiteId = (() => {
@@ -142,6 +153,48 @@ function EstateTree() {
 
   if (sites.length === 0)
     return <p className="px-2 py-1 text-xs text-muted-foreground">No sites yet.</p>;
+
+  // Rooms with no area first, then each area (and the areas inside it) with its rooms.
+  const renderTree = (siteRooms: typeof rooms, siteAreas: typeof areas) => {
+    const room = (r: (typeof rooms)[number], depth: number) => {
+      const href = orgPath(orgId, `/rooms/${r.id}`);
+      const h = health.get(r.id);
+      return (
+        <SidebarMenuSubItem key={r.id} style={{ paddingLeft: depth * 10 }}>
+          <SidebarMenuSubButton
+            isActive={pathname === href || pathname.startsWith(`${href}/`)}
+            render={<Link href={href} />}
+          >
+            <HealthDot level={h?.level ?? 'unknown'} />
+            <span title={h?.reasons[0]}>{r.name}</span>
+          </SidebarMenuSubButton>
+        </SidebarMenuSubItem>
+      );
+    };
+    const area = (a: (typeof areas)[number], depth: number): React.ReactNode => (
+      <li key={a.id} className="list-none">
+        <div
+          className="flex items-center gap-1.5 px-2 pt-1.5 pb-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+          style={{ paddingLeft: 8 + depth * 10 }}
+          title={a.label ?? undefined}
+        >
+          <Layers className="size-3" />
+          <span className="truncate">{a.name}</span>
+        </div>
+        <ul className="m-0 list-none p-0">
+          {siteRooms.filter((r) => r.areaId === a.id).map((r) => room(r, depth + 1))}
+          {siteAreas.filter((c) => c.parentId === a.id).map((c) => area(c, depth + 1))}
+        </ul>
+      </li>
+    );
+    const inArea = new Set(siteAreas.map((a) => a.id));
+    return (
+      <>
+        {siteRooms.filter((r) => !r.areaId || !inArea.has(r.areaId)).map((r) => room(r, 0))}
+        {siteAreas.filter((a) => !a.parentId || !inArea.has(a.parentId)).map((a) => area(a, 0))}
+      </>
+    );
+  };
 
   return (
     <SidebarMenu>
@@ -178,21 +231,10 @@ function EstateTree() {
                 {siteRooms.length === 0 && (
                   <li className="px-2 py-1 text-xs text-muted-foreground">No rooms</li>
                 )}
-                {siteRooms.map((r) => {
-                  const href = orgPath(orgId, `/rooms/${r.id}`);
-                  const health = live.get(r.id)?.health;
-                  return (
-                    <SidebarMenuSubItem key={r.id}>
-                      <SidebarMenuSubButton
-                        isActive={pathname === href || pathname.startsWith(`${href}/`)}
-                        render={<Link href={href} />}
-                      >
-                        <HealthDot level={health?.level ?? 'unknown'} />
-                        <span title={health?.reasons[0]}>{r.name}</span>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                  );
-                })}
+                {renderTree(
+                  siteRooms,
+                  areas.filter((a) => a.siteId === site.id),
+                )}
               </SidebarMenuSub>
             </AnimatedCollapse>
           </SidebarMenuItem>
@@ -230,6 +272,8 @@ interface NavEntry {
   exact?: boolean;
   count?: number;
   locked?: boolean;
+  /** A v2 page not built yet: listed disabled with a Soon badge. */
+  soon?: boolean;
 }
 
 /**
@@ -322,9 +366,15 @@ export function AppSidebar() {
   const trpc = useTRPC();
   // What the plan includes. Until it loads nothing is locked, so the menu does not flash.
   const plan = useBilling().data?.entitlements;
-  const control = plan?.control ?? true;
-  const marketplace = plan?.marketplaceBuy ?? true;
   const drivers = plan?.driverCreate ?? true;
+  // What each plan includes, so the pages it does not are still listed, with a lock.
+  const has = {
+    configuration: plan?.configuration ?? true,
+    maintenance: plan?.maintenance ?? true,
+    registerIssues: plan?.registerIssues ?? true,
+    serviceDesk: plan?.serviceDesk ?? true,
+    usageDefinitions: plan?.usageDefinitions ?? true,
+  };
   // People from the company asking to join, waiting for an owner.
   const joinRequests = useQuery({
     ...trpc.joinRequest.count.queryOptions({ orgId }),
@@ -342,41 +392,98 @@ export function AppSidebar() {
     canSupport && { href: `${base}/sites`, icon: Building2, label: 'All sites' },
     { href: `${base}/rooms`, icon: DoorOpen, label: 'All rooms' },
   ]);
+  // v2 pivot (PV-13, step M0). Routes for Templates, Marketplace, Room groups, Deployments and
+  // Shared devices still exist until the staged removal but are no longer linked from here.
+  // Items with `soon` are the new v2 pages, built in later steps (docs/pivot-monitoring.md).
   const monitor = entries([
     { href: `${base}/monitoring`, icon: Activity, label: 'Monitoring' },
     canSupport && { href: `${base}/incidents`, icon: AlertTriangle, label: 'Incidents' },
     canSeeTeam && full && { href: `${base}/alerts`, icon: BellRing, label: 'Alerts' },
-    { href: `${base}/usage`, icon: BarChart3, label: 'Usage' },
-    full && { href: `${base}/reports`, icon: FileText, label: 'Reports' },
-  ]);
-  const design = entries([
-    canEdit &&
-      full && {
-        href: `${base}/templates`,
-        icon: LayoutTemplate,
-        label: 'Templates',
-        locked: !control,
-      },
-    canEdit &&
-      full && {
-        href: `${base}/marketplace`,
-        icon: Store,
-        label: 'Marketplace',
-        locked: !marketplace,
-      },
-    canSupport &&
-      full && { href: `${base}/groups`, icon: Link2, label: 'Room groups', locked: !control },
-  ]);
-  const devices = entries([
     canSupport && { href: `${base}/gateways`, icon: Router, label: 'Gateways' },
-    canSupport && full && { href: `${base}/deployments`, icon: Rocket, label: 'Deployments' },
-    canEdit && full && { href: `${base}/shared-devices`, icon: Server, label: 'Shared devices' },
+    canEdit &&
+      full && {
+        href: `${base}/maintenance-windows`,
+        icon: CalendarOff,
+        label: 'Maintenance windows',
+      },
+  ]);
+  const assets = entries([
+    canSupport && { href: `${base}/assets`, icon: Package, label: 'Register' },
+    canEdit &&
+      full && {
+        href: `${base}/register-issues`,
+        icon: FileCheck2,
+        label: 'Register issues',
+        locked: !has.registerIssues,
+      },
     canEdit && full && { href: `${base}/credentials`, icon: KeyRound, label: 'Shared logins' },
     canSupport && { href: `${base}/firmware`, icon: CircuitBoard, label: 'Firmware' },
     canEdit &&
       full && { href: `${base}/drivers`, icon: Cpu, label: 'Custom drivers', locked: !drivers },
   ]);
-  const support = entries([{ href: `${base}/tickets`, icon: LifeBuoy, label: 'Support' }]);
+  const maintenance = entries([
+    canSupport && {
+      href: `${base}/pm/schedule`,
+      icon: CalendarCheck,
+      label: 'Schedule',
+      locked: !has.maintenance,
+    },
+    canSupport && {
+      href: `${base}/pm/records`,
+      icon: ClipboardCheck,
+      label: 'PM records',
+      locked: !has.maintenance,
+    },
+    canEdit &&
+      full && {
+        href: `${base}/pm/templates`,
+        icon: ListChecks,
+        label: 'PM templates',
+        locked: !has.maintenance,
+      },
+  ]);
+  const configuration = entries([
+    canSupport && {
+      href: `${base}/config/profiles`,
+      icon: SlidersHorizontal,
+      label: 'Profiles',
+      locked: !has.configuration,
+    },
+    canSupport && {
+      href: `${base}/config/drift`,
+      icon: GitCompare,
+      label: 'Snapshots and drift',
+      locked: !has.configuration,
+    },
+    canSupport && {
+      href: `${base}/config/changes`,
+      icon: History,
+      label: 'Changes',
+      locked: !has.configuration,
+    },
+  ]);
+  const analytics = entries([
+    { href: `${base}/usage`, icon: BarChart3, label: 'Usage' },
+    canEdit &&
+      full && {
+        href: `${base}/room-definitions`,
+        icon: Sigma,
+        label: 'Room definitions',
+        locked: !has.usageDefinitions,
+      },
+    full && { href: `${base}/reports`, icon: FileText, label: 'Reports' },
+  ]);
+  const support = entries([
+    { href: `${base}/tickets`, icon: LifeBuoy, label: 'Tickets' },
+    { href: `${base}/callouts`, icon: Wrench, label: 'Callouts' },
+    canEdit &&
+      full && {
+        href: `${base}/integrations`,
+        icon: Plug,
+        label: 'Integrations',
+        locked: !has.serviceDesk,
+      },
+  ]);
 
   return (
     <Sidebar collapsible="icon">
@@ -386,23 +493,35 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {isMsp ? (
+        {/* A service provider looks after customers and also has an estate of its own (its Internal estate). */}
+        {isMsp && (
           <SidebarGroup>
-            <SidebarGroupLabel>Service provider</SidebarGroupLabel>
+            <SidebarGroupLabel>Customers</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                <NavItem href={`${base}/msp`} icon={Handshake} label="Customers" exact />
+                <NavItem href={`${base}/msp`} icon={Handshake} label="Portfolio" exact />
+                <NavItem
+                  href={`${base}/msp/incidents`}
+                  icon={AlertTriangle}
+                  label="All incidents"
+                />
                 <NavItem href={`${base}/msp/tickets`} icon={LifeBuoy} label="Support queue" />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-        ) : (
+        )}
+        {
           <>
             {full && (
               <SidebarGroup>
                 <SidebarGroupContent>
                   <SidebarMenu>
-                    <NavItem href={base} icon={LayoutDashboard} label="Overview" exact />
+                    <NavItem
+                      href={base}
+                      icon={LayoutDashboard}
+                      label={isMsp ? 'Internal estate' : 'Overview'}
+                      exact
+                    />
                   </SidebarMenu>
                 </SidebarGroupContent>
               </SidebarGroup>
@@ -428,11 +547,13 @@ export function AppSidebar() {
               </div>
             </NavGroup>
             <NavGroup id="monitor" label="Monitor" defaultOpen items={monitor} />
-            <NavGroup id="design" label="Design and deploy" items={design} />
-            <NavGroup id="devices" label="Devices and network" items={devices} />
+            <NavGroup id="assets" label="Assets" items={assets} />
+            <NavGroup id="maintenance" label="Maintenance" items={maintenance} />
+            <NavGroup id="configuration" label="Configuration" items={configuration} />
+            <NavGroup id="analytics" label="Analytics" items={analytics} />
             <NavGroup id="support" label="Support" defaultOpen items={support} />
           </>
-        )}
+        }
 
         {canSeeTeam && !scoped && (
           <SidebarGroup>

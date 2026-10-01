@@ -86,11 +86,21 @@ export async function inviteMsp(
     },
   });
   await writeAudit(
-    { orgId: customer.id, actorId: args.by.userId, action: 'msp.invite', meta: { msp: msp.name, role: args.role } },
+    {
+      orgId: customer.id,
+      actorId: args.by.userId,
+      action: 'msp.invite',
+      meta: { msp: msp.name, role: args.role },
+    },
     db,
   );
   await writeAudit(
-    { orgId: msp.id, actorId: null, action: 'msp.invited', meta: { customer: customer.name, role: args.role } },
+    {
+      orgId: msp.id,
+      actorId: null,
+      action: 'msp.invited',
+      meta: { customer: customer.name, role: args.role },
+    },
     db,
   );
   return { id: grant.id };
@@ -120,7 +130,10 @@ export async function respondToInvite(
   ]);
   const action = args.accept ? 'msp.accepted' : 'msp.declined';
   await writeAudit({ orgId: g.customerOrgId, actorId: null, action, meta: { msp: msp?.name } }, db);
-  await writeAudit({ orgId: g.mspOrgId, actorId: args.by, action, meta: { customer: customer?.name } }, db);
+  await writeAudit(
+    { orgId: g.mspOrgId, actorId: args.by, action, meta: { customer: customer?.name } },
+    db,
+  );
 }
 
 /** Either side ends the relationship (or the customer withdraws a pending invitation). */
@@ -182,6 +195,7 @@ export interface CustomerGrantView {
   /** The owner chose to show this provider's name, logo and colour. */
   useBrand: boolean;
   createdAt: Date;
+  endsAt: Date | null;
 }
 
 /** The providers a customer has invited or works with. */
@@ -205,6 +219,7 @@ export async function grantsForCustomer(
     status: g.status,
     siteNames: g.siteIds.map((id) => siteName.get(id) ?? 'Unknown site'),
     useBrand: !!g.useBrand,
+    endsAt: g.endsAt,
     createdAt: g.createdAt,
   }));
 }
@@ -292,13 +307,17 @@ export async function mspAccess(
     },
   });
   const roleIn = new Map(memberships.map((m) => [m.orgId, m.role as OrgRole]));
+  const now = Date.now();
   const found = resolve(
-    grants.map((g) => ({
-      memberRole: roleIn.get(g.mspOrgId)!,
-      grant: g.role as GrantRole,
-      mspOrgId: g.mspOrgId,
-      siteIds: g.siteIds,
-    })),
+    // A connection past its end date no longer counts, even before the daily clean-up ends it.
+    grants
+      .filter((g) => !g.endsAt || g.endsAt.getTime() > now)
+      .map((g) => ({
+        memberRole: roleIn.get(g.mspOrgId)!,
+        grant: g.role as GrantRole,
+        mspOrgId: g.mspOrgId,
+        siteIds: g.siteIds,
+      })),
   );
   if (!found) return null;
   // Name the provider that gave the role, for the banner and the activity log.

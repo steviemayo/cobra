@@ -54,7 +54,13 @@ interface QrcServer {
 }
 
 async function fakeQsys(
-  opts: { user?: string; password?: string; silent?: boolean; pushEngineStatus?: boolean } = {},
+  opts: {
+    user?: string;
+    password?: string;
+    silent?: boolean;
+    pushEngineStatus?: boolean;
+    noGain?: boolean;
+  } = {},
 ): Promise<QrcServer> {
   const requests: QrcServer['requests'] = [];
   const controls = new Map<string, number | boolean>([
@@ -69,7 +75,9 @@ async function fakeQsys(
     let authed = !opts.user;
     socket.on('error', () => undefined);
     if (opts.pushEngineStatus)
-      socket.write(JSON.stringify({ jsonrpc: '2.0', method: 'EngineStatus', params: ENGINE_STATUS }) + '\0');
+      socket.write(
+        JSON.stringify({ jsonrpc: '2.0', method: 'EngineStatus', params: ENGINE_STATUS }) + '\0',
+      );
     socket.on('data', (chunk: string) => {
       buf += chunk;
       let i: number;
@@ -99,7 +107,9 @@ async function fakeQsys(
           fail('Logon required');
           continue;
         }
-        if (msg.method === 'Component.Get') {
+        if (msg.method === 'Component.Get' && opts.noGain) {
+          fail(`Component '${String(msg.params.Name)}' does not exist`);
+        } else if (msg.method === 'Component.Get') {
           const cs = (msg.params.Controls as { Name: string }[]).map((c) => ({
             Name: c.Name,
             Value: controls.get(c.Name),
@@ -145,7 +155,15 @@ async function fakeQsys(
 }
 
 const qsysDevice = (port: number, extra: Record<string, unknown> = {}) =>
-  device('dsp', 'qsys-core', { host: '127.0.0.1', port, timeoutMs: 400, pollMs: 100, ...extra });
+  device('dsp', 'qsys-core', {
+    host: '127.0.0.1',
+    port,
+    timeoutMs: 400,
+    pollMs: 100,
+    // The older way: a gain component the panel volume acts on. A bare Core reads none.
+    gainComponent: 'gain',
+    ...extra,
+  });
 
 describe('Q-SYS Core driver', () => {
   it('is what a device asks for by driver id', () => {
@@ -234,6 +252,16 @@ describe('Q-SYS Core driver', () => {
       { name: 'gain', type: 'Float', value: -20 },
       { name: 'mute', type: 'Boolean', value: false },
     ]);
+  });
+
+  it('stays online when the design has no gain component: the Core answered, it just has nothing to read', async () => {
+    const core = await fakeQsys({ noGain: true });
+    const d = new QsysDriver(qsysDevice(core.port), ctx);
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    await wait(300);
+    expect(d.getState().online).toBe(true);
   });
 
   it('logs on when the Core asks for credentials, and stays offline when they are wrong', async () => {
@@ -598,7 +626,7 @@ describe('Blustream DA11ABL-WP-V2 driver', () => {
     expect(createDriver(wallPlateDevice(1), ctx)).toBeInstanceOf(BlustreamDa11ablDriver);
   });
 
-  it('routes by the port id\'s digit, mutes and sets volume without waiting for a reply', async () => {
+  it("routes by the port id's digit, mutes and sets volume without waiting for a reply", async () => {
     const wp = await fakeWallPlate('Connected\r\n');
     const d = new BlustreamDa11ablDriver(wallPlateDevice(wp.port), ctx);
     drivers.push(d);
@@ -696,7 +724,9 @@ describe('Blustream ACM1000 driver', () => {
   });
 
   it('counts the inputs and outputs it sees in the status reply, and keeps the raw text', async () => {
-    const acm = await fakeAcm('IN 001 Online\r\nIN 002 Online\r\nOUT 001 FR 001\r\nOUT 002 FR 001\r\n');
+    const acm = await fakeAcm(
+      'IN 001 Online\r\nIN 002 Online\r\nOUT 001 FR 001\r\nOUT 002 FR 001\r\n',
+    );
     const d = new BlustreamAcm1000Driver(acmDevice(acm.port), ctx);
     drivers.push(d);
     d.start();
@@ -721,5 +751,25 @@ describe('Blustream ACM1000 driver', () => {
     d.start();
     await wait(200);
     expect(d.getState().online).toBe(false);
+  });
+});
+
+describe('Q-SYS Core driver as a monitored device', () => {
+  it('only keeps the connection: logon, engine status and NoOp, and reads no gain', async () => {
+    const core = await fakeQsys();
+    const d = new QsysDriver(
+      device('dsp', 'qsys-core', {
+        host: '127.0.0.1',
+        port: core.port,
+        timeoutMs: 400,
+        pollMs: 100,
+      }),
+      ctx,
+    );
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    await until(() => core.requests.some((r) => r.method === 'NoOp'));
+    expect(core.requests.map((r) => r.method)).not.toContain('Component.Get');
   });
 });

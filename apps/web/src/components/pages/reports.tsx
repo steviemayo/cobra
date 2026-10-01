@@ -13,11 +13,19 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { percent, plural } from '@/lib/format';
 import { useTRPC } from '@/trpc/client';
 
-const duration = (m: number) => (m >= 120 ? `${Math.round((m / 60) * 10) / 10} h` : `${Math.round(m)} min`);
+const duration = (m: number) =>
+  m >= 120 ? `${Math.round((m / 60) * 10) / 10} h` : `${Math.round(m)} min`;
 const KIND: Record<string, string> = {
   device_offline: 'Device stopped answering',
   gateway_offline: 'Gateway went quiet',
@@ -26,17 +34,31 @@ const KIND: Record<string, string> = {
   point_alert: 'Watched value out of bounds',
 };
 const date = (iso: string, tz: string) =>
-  new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: tz });
+  new Date(iso).toLocaleString('en-AU', {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: tz,
+  });
 
 /** The last four months, this one first. */
 function monthOptions(tz: string) {
   const now = new Date();
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: 'numeric' }).formatToParts(now);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: 'numeric',
+  }).formatToParts(now);
   let y = Number(parts.find((p) => p.type === 'year')!.value);
   let m = Number(parts.find((p) => p.type === 'month')!.value);
   return Array.from({ length: 4 }, () => {
     const value = `${y}-${m}`;
-    const label = new Date(Date.UTC(y, m - 1, 15)).toLocaleString('en-AU', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    const label = new Date(Date.UTC(y, m - 1, 15)).toLocaleString('en-AU', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
     if (--m === 0) {
       m = 12;
       y--;
@@ -88,14 +110,25 @@ function ScheduleCard() {
             {s.lastSentMonth && ` Last sent for ${s.lastSentMonth}.`}
           </p>
         </div>
-        <Switch checked={enabled} onCheckedChange={(on) => setDraft({ enabled: on, recipients })} aria-label="Send monthly report" />
+        <Switch
+          checked={enabled}
+          onCheckedChange={(on) => setDraft({ enabled: on, recipients })}
+          aria-label="Send monthly report"
+        />
       </div>
       {!s.emailReady && (
-        <p className="rounded-md bg-warning/10 px-3 py-2 text-sm">Email is not set up on this Kestrel server yet, so nothing will be sent.</p>
+        <p className="rounded-md bg-warning/10 px-3 py-2 text-sm">
+          Email is not set up on this Kestrel server yet, so nothing will be sent.
+        </p>
       )}
       <div className="space-y-1.5">
         <Label htmlFor="report-to">Who gets it (separate addresses with commas)</Label>
-        <Input id="report-to" value={recipients} onChange={(e) => setDraft({ enabled, recipients: e.target.value })} placeholder="manager@example.com, it@example.com" />
+        <Input
+          id="report-to"
+          value={recipients}
+          onChange={(e) => setDraft({ enabled, recipients: e.target.value })}
+          placeholder="manager@example.com, it@example.com"
+        />
       </div>
       <Button
         size="sm"
@@ -123,7 +156,10 @@ export function ReportsView() {
   const options = useMemo(() => monthOptions(tz), [tz]);
   const [choice, setChoice] = useState(options[1]?.value ?? options[0]!.value);
   const [year, month] = choice.split('-').map(Number) as [number, number];
-  const report = useQuery({ ...trpc.report.monthly.queryOptions({ orgId, year, month, tz }), staleTime: 60_000 });
+  const report = useQuery({
+    ...trpc.report.monthly.queryOptions({ orgId, year, month, tz }),
+    staleTime: 60_000,
+  });
   const send = useMutation(
     trpc.report.emailMe.mutationOptions({
       onSuccess: (r) => toast.success(`Sent to ${r.sentTo}`),
@@ -140,7 +176,11 @@ export function ReportsView() {
       <style>{`@media print { [data-slot="sidebar-wrapper"] > [data-slot="sidebar"], [data-slot="sidebar-gap"], [data-slot="sidebar-container"], header.sticky { display: none !important; } }`}</style>
       <PageHeader
         title={r ? `${r.label} report` : 'Monthly report'}
-        description={r ? `${r.orgName}. Use, reliability and support for the month.` : 'Use, reliability and support for a month.'}
+        description={
+          r
+            ? `${r.orgName}. Use, reliability and support for the month.`
+            : 'Use, reliability and support for a month.'
+        }
         actions={
           <div className="flex items-center gap-2 print:hidden">
             <SimpleSelect size="sm" value={choice} onValueChange={setChoice} options={options} />
@@ -148,7 +188,12 @@ export function ReportsView() {
               <Printer /> Print or save as PDF
             </Button>
             {canEmail && (
-              <Button size="sm" variant="outline" disabled={send.isPending} onClick={() => send.mutate({ orgId, year, month, tz })}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={send.isPending}
+                onClick={() => send.mutate({ orgId, year, month, tz })}
+              >
                 <Mail /> Email me a copy
               </Button>
             )}
@@ -161,18 +206,35 @@ export function ReportsView() {
       ) : report.isError ? (
         <p className="text-sm text-destructive">{report.error.message}</p>
       ) : !r || !s ? null : s.rooms === 0 ? (
-        <EmptyState icon={FileText} title="No rooms yet" description="A report needs rooms that have been deployed and used." />
+        <EmptyState
+          icon={FileText}
+          title="No rooms yet"
+          description="A report needs rooms that have been deployed and used."
+        />
       ) : (
         <>
           {r.beyondRetention && (
             <p className="rounded-md bg-warning/10 px-3 py-2 text-sm">
-              Part of this month is older than the history Kestrel keeps (90 days), so the figures may be low.
+              Part of this month is older than the history Kestrel keeps (90 days), so the figures
+              may be low.
             </p>
           )}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Stat label="Hours in use" value={String(s.hoursInUse)} hint={`${plural(s.sessions, 'session')} in ${plural(s.rooms, 'room')}`} />
-            <Stat label="Business hours in use" value={percent(s.avgUtilisation)} hint="average per room" />
-            <Stat label="Time out of service" value={duration(s.downtimeMinutes)} hint={`${plural(s.incidentsOpened, 'problem')} came up`} />
+            <Stat
+              label="Hours in use"
+              value={String(s.hoursInUse)}
+              hint={`${plural(s.sessions, 'session')} in ${plural(s.rooms, 'room')}`}
+            />
+            <Stat
+              label="Business hours in use"
+              value={percent(s.avgUtilisation)}
+              hint="average per room"
+            />
+            <Stat
+              label="Time out of service"
+              value={duration(s.downtimeMinutes)}
+              hint={`${plural(s.incidentsOpened, 'problem')} came up`}
+            />
             <Stat
               label="Support requests"
               value={String(s.ticketsOpened)}
@@ -206,8 +268,12 @@ export function ReportsView() {
                 {r.usage.rooms.map((x) => (
                   <TableRow key={x.roomId}>
                     <TableCell className="font-medium">{x.name}</TableCell>
-                    <TableCell className="text-right tabular-nums">{percent(x.utilisation)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{Math.round(x.inUseMinutes / 6) / 10}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {percent(x.utilisation)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {Math.round(x.inUseMinutes / 6) / 10}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">{x.sessions}</TableCell>
                   </TableRow>
                 ))}
@@ -218,8 +284,11 @@ export function ReportsView() {
           <Section title="Reliability">
             <div className="space-y-3 px-4 py-3 text-sm">
               <p>
-                {plural(s.incidentsOpened, 'problem')} came up and {s.incidentsResolved} {s.incidentsResolved === 1 ? 'was' : 'were'} resolved
-                {s.avgResolveMinutes !== null && `, taking ${duration(s.avgResolveMinutes)} on average`}.
+                {plural(s.incidentsOpened, 'problem')} came up and {s.incidentsResolved}{' '}
+                {s.incidentsResolved === 1 ? 'was' : 'were'} resolved
+                {s.avgResolveMinutes !== null &&
+                  `, taking ${duration(s.avgResolveMinutes)} on average`}
+                .
               </p>
             </div>
             <Table>
@@ -234,8 +303,12 @@ export function ReportsView() {
                 {r.availability.map((a) => (
                   <TableRow key={a.roomId}>
                     <TableCell className="font-medium">{a.name}</TableCell>
-                    <TableCell className="text-right tabular-nums">{percent(a.availability, 2)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{a.downtimeMinutes > 0 ? duration(a.downtimeMinutes) : '—'}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {percent(a.availability, 2)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {a.downtimeMinutes > 0 ? duration(a.downtimeMinutes) : '—'}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -246,7 +319,10 @@ export function ReportsView() {
             <Section title="Problems this month">
               <ul className="divide-y">
                 {r.incidents.map((i, n) => (
-                  <li key={`${i.openedAt}-${n}`} className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-2.5 text-sm">
+                  <li
+                    key={`${i.openedAt}-${n}`}
+                    className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-2.5 text-sm"
+                  >
                     <span>
                       <span className="font-medium">{i.title}</span>
                       <span className="text-muted-foreground">
@@ -256,7 +332,8 @@ export function ReportsView() {
                       </span>
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      {date(i.openedAt, r.tz)} · {i.resolvedAt ? `out ${duration(i.minutes)}` : 'still open'}
+                      {date(i.openedAt, r.tz)} ·{' '}
+                      {i.resolvedAt ? `out ${duration(i.minutes)}` : 'still open'}
                     </span>
                   </li>
                 ))}
@@ -265,7 +342,8 @@ export function ReportsView() {
           )}
 
           <p className="text-xs text-muted-foreground">
-            Times are in {r.tz}. Business hours are Monday to Friday, 8am to 6pm. Generated {date(r.generatedAt, r.tz)}.
+            Times are in {r.tz}. Business hours are Monday to Friday, 8am to 6pm. Generated{' '}
+            {date(r.generatedAt, r.tz)}.
           </p>
           {isOwner && <ScheduleCard />}
         </>

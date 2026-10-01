@@ -2,28 +2,20 @@ import { z } from 'zod';
 import type { PublicKey } from '@kestrel/model';
 import { BUILT_IN_MANIFEST_KEYS } from './trusted-keys';
 
-export const GATEWAY_VERSION = '0.3.3';
+export const GATEWAY_VERSION = '0.4.0';
 
 const Env = z.object({
   /** Base URL of the Kestrel cloud, e.g. https://app.kestrel.example */
   KESTREL_CLOUD_URL: z.string().url(),
   /** One-time enrolment token from the portal. Only needed until the gateway has enrolled. */
   KESTREL_ENROLL_TOKEN: z.string().optional(),
-  /** Where the credential, cached manifests and telemetry buffer live. Mount a volume here. */
+  /** Where the credential, the saved device list and the telemetry buffer live. Mount a volume here. */
   KESTREL_DATA_DIR: z.string().default('./data'),
+  /** The local status and admin page. (Named for the panel it once served; the name is kept so installs keep working.) */
   KESTREL_PANEL_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   KESTREL_PANEL_HOST: z.string().default('0.0.0.0'),
-  /** Built panel web app served to touch panels. */
-  KESTREL_PANEL_DIR: z.string().default('../panel/dist'),
-  /**
-   * off: real devices only. all: every device simulated (demo, no hardware).
-   * missing: real drivers where configured, simulated for the rest.
-   */
-  KESTREL_SIMULATE: z.enum(['off', 'all', 'missing']).default('off'),
   /** Optional pinned public key (PEM), trusted in addition to keys the cloud hands out. */
   KESTREL_PUBLIC_KEY: z.string().optional(),
-  /** How long a new release gets to reach its devices before it is refused and the old one kept. */
-  KESTREL_HEALTH_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(300).default(15),
   /**
    * Container installs only: where the updater (Watchtower's HTTP API) can be asked to update this
    * gateway, and the token it expects. Without them a container cannot update itself.
@@ -51,16 +43,13 @@ export interface GatewayConfig {
   dataDir: string;
   panelPort: number;
   panelHost: string;
-  panelDir: string;
-  simulate: 'off' | 'all' | 'missing';
   pinnedPublicKey?: string;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   version: string;
-  healthTimeoutMs?: number;
   updateUrl?: string;
   updateToken?: string;
   allowedHosts?: string[];
-  /** Signing keys this gateway trusts for releases and bindings. Empty or absent: trust what the cloud sends (tests, demos). */
+  /** Signing keys this gateway trusts for device lists and update bundles. Empty or absent: trust what the cloud sends (tests, demos). */
   trustedKeys?: PublicKey[];
   /** Also trust keys the cloud sends, on top of `trustedKeys`. */
   trustCloudKeys?: boolean;
@@ -79,12 +68,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     dataDir: e.KESTREL_DATA_DIR,
     panelPort: e.KESTREL_PANEL_PORT,
     panelHost: e.KESTREL_PANEL_HOST,
-    panelDir: e.KESTREL_PANEL_DIR,
-    simulate: e.KESTREL_SIMULATE,
     pinnedPublicKey: e.KESTREL_PUBLIC_KEY,
     logLevel: e.KESTREL_LOG_LEVEL,
     version: GATEWAY_VERSION,
-    healthTimeoutMs: e.KESTREL_HEALTH_TIMEOUT_SECONDS * 1000,
     updateUrl: e.KESTREL_UPDATE_URL,
     updateToken: e.KESTREL_UPDATE_TOKEN,
     allowedHosts: (e.KESTREL_ALLOWED_HOSTS ?? '')

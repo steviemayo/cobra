@@ -9,9 +9,6 @@ export const metadata: Metadata = { title: 'Overview' };
 
 export default async function OverviewPage({ params }: { params: Promise<{ orgId: string }> }) {
   const { orgId } = await params;
-  // A service provider has no estate of its own: it lands on its customers.
-  const org = await db.org.findFirst({ where: { id: orgId }, select: { kind: true } });
-  if (org?.kind === 'msp') redirect(`/o/${orgId}/msp`);
   // A provider limited to some sites has no whole-organisation overview: it starts at its rooms.
   const supabase = await createSupabaseServer();
   const { data } = await supabase.auth.getUser();

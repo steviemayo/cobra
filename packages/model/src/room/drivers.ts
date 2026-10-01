@@ -34,6 +34,11 @@ const QSYS_CONTROL = [
   { key: 'component', label: 'Component name' },
   { key: 'control', label: 'Control name' },
 ];
+/** A named control stands alone; a named component's control is addressed by both. */
+const QSYS_NAMED = [
+  { key: 'component', label: 'Component name (blank for a named control)', optional: true },
+  { key: 'control', label: 'Control name' },
+];
 const TESIRA_CHANNEL = [
   { key: 'tag', label: 'Instance tag' },
   { key: 'index', label: 'Channel' },
@@ -271,16 +276,16 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     },
   },
   'qsys-core': {
-    name: 'Q-SYS Core (gain component)',
+    name: 'Q-SYS Core',
     description:
-      'Volume and mute through a gain component on a Q-SYS Core, over QRC. 0-100 on the panel maps to minDb..maxDb. Routing is part of the Q-SYS design.',
+      'A Q-SYS Core over QRC (port 1710). The driver keeps the connection and reports whether the Core answers and its engine status. Then add the control points to watch: named components (gain: gain and mute; router: select.1 to select.n) and named controls (on or off, a whole number, or text). They are read through a change group, so only what changes is sent. Routing is part of the Q-SYS design.',
     class: 'point_based',
     features: ['level', 'mute', 'preset'],
     settings: [
       { key: 'host', label: 'Core address', scope: 'binding', required: true },
       { key: 'username', label: 'Logon name (if the Core needs one)', scope: 'binding' },
       { key: 'password', label: 'Password (if the Core needs one)', scope: 'secret' },
-      { key: 'gainComponent', label: 'Gain component name', scope: 'design', required: true },
+      { key: 'gainComponent', label: 'Gain component name (older room designs only)', scope: 'design' },
       { key: 'gainControl', label: 'Gain control name', scope: 'design' },
       { key: 'muteControl', label: 'Mute control name', scope: 'design' },
       { key: 'minDb', label: 'Level at 0 on the panel (dB)', scope: 'design' },
@@ -291,16 +296,11 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
       mute: QSYS_CONTROL,
       select: QSYS_CONTROL,
       meter: QSYS_CONTROL,
-      generic: QSYS_CONTROL,
+      generic: QSYS_NAMED,
     },
     categories: ['audio_matrix'],
     example: {
       host: '<Core IP>',
-      gainComponent: 'gain',
-      gainControl: 'gain',
-      muteControl: 'mute',
-      minDb: -40,
-      maxDb: 0,
     },
   },
   'crestron-4series': {

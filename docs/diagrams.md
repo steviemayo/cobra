@@ -1,5 +1,9 @@
 # Kestrel — Workflow & Pipeline Diagrams (Mermaid)
 
+> ## PIVOT 2026-09-30: sections 1-30 draw v1 (control platform first)
+> Sections that stay valid in v2: 2 (gateway enrolment), 6 (telemetry, in part), 7 (remote command), 9 (CI/CD), 27-30 (gateway operations, device details). Sections 11-26 (room modelling, generated UI, combined rooms, panel access, simulator) are **parked with the control platform**. The v2 diagrams are "Part v2" at the end of this file (sections 31-37).
+
+
 > Brought up to date with what is built on 2026-09-28 (sections 2, 3, 4, 8, 9, 23 and 25 were rewritten; 27 to 30 are new). **[A]** marks an assumption or something not built. Renders in GitHub/VS Code Mermaid preview. Decisions behind each diagram: `docs/decisions.md`; build status: `docs/plan.md`.
 
 ## 1. System Components
@@ -680,4 +684,161 @@ flowchart LR
   API --> ROOMMON[Room monitoring page: click a device to expand]
   API --> FWPAGE[Firmware page: mixed versions flagged]
   EV --> HIST[History chart: minutes per value per day]
+```
+
+
+---
+
+# Part v2: Monitoring, Configuration, Support, Analytics (pivot 2026-09-30)
+
+## 31. Delineation: v1 to v2
+
+```mermaid
+flowchart LR
+  subgraph V1[v1 control platform - parked, tag control-platform-v1]
+    DES[Room designer] --> REL[Signed room program] --> RT[Gateway room runtime] --> PNL[Generated panel]
+  end
+  subgraph V2[v2 monitor and manage]
+    AST[Device assets active and passive] --> MON[Monitoring and incidents]
+    AST --> CFG[Config profiles snapshots drift]
+    MON --> SUP[Tickets and ITSM]
+    MON --> ANA[Usage analytics]
+  end
+  V1 -. later add-on sits on top of the device model .-> V2
+```
+
+## 32. Domain model (v2)
+
+```mermaid
+erDiagram
+  ORG ||--o{ SITE : has
+  SITE ||--o{ AREA : has
+  AREA ||--o{ AREA : contains
+  SITE ||--o{ ROOM : has
+  AREA |o--o{ ROOM : groups
+  ROOM ||--o{ DEVICE : contains
+  SITE ||--o{ GATEWAY : has
+  GATEWAY |o--o{ DEVICE : polls
+  GATEWAY |o--o{ ROOM : default_for
+  DEVICE ||--o{ SNAPSHOT : captured
+  DEVICE }o--o| PROFILE : held_to
+  ROOM ||--o{ IN_USE_DEFINITION : defines
+  ROOM ||--o{ SESSION : derived
+  ROOM ||--o{ INCIDENT : raises
+  INCIDENT |o--o| TICKET : escalates_to
+  ORG ||--o{ MSP_GRANT : grants
+```
+
+`DEVICE.kind` is `active` (driver, address, gateway, polled) or `passive` (asset fields only).
+
+## 33. Which gateway polls a device
+
+```mermaid
+flowchart TD
+  D[Device] --> Q1{Device has its own gateway?}
+  Q1 -- yes --> G1[Use it]
+  Q1 -- no --> Q2{Room has a gateway?}
+  Q2 -- yes --> G2[Use room gateway]
+  Q2 -- no --> G3[Use site default gateway]
+  G1 & G2 & G3 --> H[Heartbeat carries per-device state]
+  H --> S{Gateway reachable?}
+  S -- no --> U[Device unknown, one gateway incident]
+  S -- yes --> OO[Device online or offline]
+```
+
+## 34. Configuration: enforce, snapshot, drift
+
+```mermaid
+flowchart LR
+  P[Profile: watch / enforce / apply once] --> DEP[Staged deploy with dry-run diff]
+  DEP --> DEV[Device]
+  DEV -->|poll| GW[Gateway] --> CL[Cloud]
+  CL --> SNAP[Snapshot, baseline]
+  CL --> DIFF{Live differs from baseline or profile?}
+  DIFF -- watch --> ALERT[Changed event and alert]
+  DIFF -- enforce --> FIX[Revert, audit, incident after retries]
+  DIFF -- accept --> NB[New baseline]
+```
+
+## 35. Analytics: from device points to room usage
+
+```mermaid
+flowchart LR
+  DP[Device points: power, signal, occupancy, call] --> EV[Change events, 90 days raw]
+  EV --> RULE[In use rule tree with debounce]
+  RULE --> SES[Sessions: start, end, duration]
+  SES --> KPI[Utilisation, peak hours, after-hours, insights]
+  EV --> ROLL[Rollups kept 13 months]
+```
+
+## 36. Service provider estates
+
+```mermaid
+flowchart TD
+  MSP[Provider org] --> INT[Internal estate: own sites, own plan]
+  MSP --> CUS[Customers portfolio]
+  CUS --> C1[Customer A: grant scope site/area/room]
+  CUS --> C2[Customer B]
+  CUS --> ALL[All customers: incidents, tickets, alerts with Customer column]
+  C1 -->|scopes whole app| APP[Normal org UI with provider banner]
+  INT -. never mixed .- CUS
+```
+
+## 37. Incident to ITSM
+
+```mermaid
+flowchart LR
+  INC[Incident] --> R{Auto-ticket rule or manual}
+  R --> T[Ticket]
+  T --> RT{Routing rule}
+  RT -- internal --> IN[Customer team]
+  RT -- provider --> PR[Service provider queue]
+  RT -- Kestrel --> ST[Kestrel staff]
+  T <-->|externalRef, status and comment sync| ITSM[Customer ITSM]
+  MW[Maintenance window] -.suppresses.-> INC
+```
+
+## 38. Asset register: discovered, manual, issued
+
+```mermaid
+flowchart LR
+  DRV[Active device via driver: serial, MAC, IP, firmware, model] -->|discovered| REG[(Asset register)]
+  MAN[Person: fills gaps, passive devices] -->|manual| REG
+  MAN -->|override| MISM{Disagrees with discovered?}
+  MISM -- yes --> FLAG[Mismatch shown, both kept]
+  REG --> GAP[Gaps and completeness]
+  REG -->|schedule or on demand| ISS[Register issue R1, R2: frozen and Ed25519 signed]
+  ISS --> PDF[PDF, CSV, JSON, verify page]
+  ISS --> DIFF[Diff between issues]
+```
+
+## 39. Preventative maintenance
+
+```mermaid
+flowchart LR
+  TPL[PM template] --> SCH[Room schedule: interval, assignee]
+  SCH --> DUE[Due, overdue on Overview, email]
+  DUE --> RUN[PM run: auto-filled from monitoring plus physical checks]
+  RUN --> SIGN[Sign-off, immutable]
+  SIGN --> ROOM[Room PM history]
+  SIGN --> ORG[Org PM record, signed PM report]
+  RUN -->|failed item| TKT[Ticket, asset status in repair]
+  MW[Maintenance window] -.no alerts during visit.-> RUN
+```
+
+## 40. Device detail and asset history
+
+```mermaid
+flowchart TD
+  REG[Asset register] --> PAGE[Device page]
+  ROOM[Room view] --> PAGE
+  PAGE --> T1[Overview] & T2[Details with provenance] & T3[History charts: driver metrics only] & T4[Configuration] & T5[Maintenance] & T6[Asset history] & T7[Incidents and tickets]
+  DRV[Driver declares history metrics] --> T3
+  EVT[(Device event log, append-only)] --> T6
+  POLL[Poll: serial, MAC, model, firmware] --> CHG{Identity field changed?}
+  MANUAL[Manual edit] --> CHG
+  CHG -- yes --> EVT
+  CHG -- serial, MAC or model --> SWAP[Possible swap notice]
+  SWAP --> R[Replaced: old identity retired] & C[Correction: no swap]
+  PM[Failed PM item] --> EVT
 ```

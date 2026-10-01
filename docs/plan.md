@@ -1,5 +1,9 @@
 # Kestrel — Build Plan (phased)
 
+> ## PIVOT 2026-09-30: this plan is v1 (control platform first) and is now frozen
+> Kestrel now leads with **monitoring, configuration/deployment, support and analytics**; the control platform and generated panel are deferred to a later add-on. **Everything below this box is v1 history** (phases 0-7, steps B-Y). The live plan is `docs/pivot-monitoring.md` (steps M0-M7). Decisions: `docs/decisions.md` PV-1 onward. Diagrams: `docs/diagrams.md` part "v2". The last v1 commit is to be tagged `control-platform-v1` before any removal.
+
+
 > Proposed. Each phase ends in something demoable. MVP = Phases 0–4 (+ thin slice of 5).
 
 ## Key Architectural Bets

@@ -6,6 +6,7 @@ import { CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmptyState } from '@/components/common/empty-state';
 import { INCIDENT_KIND_LABEL, SeverityPill, dateTime } from '@/components/common/health';
+import { MeetingsAtRisk } from '@/components/common/meetings-at-risk';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { orgPath, useOrg } from '@/components/shell/org-context';
@@ -95,6 +96,7 @@ export function IncidentsView() {
                   {i.occurrences > 1 && ` · came back ${i.occurrences - 1}×`}
                 </div>
                 {i.detail && <p className="text-sm text-muted-foreground">{i.detail}</p>}
+                {i.impact && <MeetingsAtRisk impact={i.impact} compact />}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {i.status === 'open' && canSupport && !i.acknowledged && (

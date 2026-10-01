@@ -74,14 +74,29 @@ export const siteRouter = router({
         siteId: z.string().uuid(),
         name: name.optional(),
         timezone: timezone.optional(),
+        /** The gateway that polls devices with no gateway of their own. Null: the site's oldest. */
+        defaultGatewayId: z.string().uuid().nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
       const site = await findSite(ctx.orgId, input.siteId);
+      if (input.defaultGatewayId) {
+        const gw = await db.gateway.findFirst({
+          where: { id: input.defaultGatewayId, orgId: ctx.orgId, siteId: site.id },
+        });
+        if (!gw)
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'That gateway is not at this site' });
+      }
       const updated = await db.site.update({
         where: { id: site.id },
-        data: { name: input.name ?? site.name, timezone: input.timezone ?? site.timezone },
+        data: {
+          name: input.name ?? site.name,
+          timezone: input.timezone ?? site.timezone,
+          ...(input.defaultGatewayId !== undefined
+            ? { defaultGatewayId: input.defaultGatewayId }
+            : {}),
+        },
       });
       await writeAudit({
         orgId: ctx.orgId,

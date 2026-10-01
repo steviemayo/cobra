@@ -15,6 +15,7 @@ import { applyCommandResults, takePendingCommands } from './commands';
 import { updateStep } from './gateway-update-service';
 import { applyReport, promoteDue } from './deployment-service';
 import { deliverAlerts } from './alerts';
+import { deviceSetVersion, ingestDeviceReports, signedDeviceSetFor } from './devices';
 import { getEntitlements } from './billing';
 import { groupsForGateway, recordDividers } from './gateway-groups';
 import { hasWaitingIntents, watchedRooms } from './control-service';
@@ -48,6 +49,14 @@ export type Db = Pick<
   | 'credentialSet'
   | 'siteDevice'
   | 'roomSchedule'
+  | 'device'
+  | 'deviceEvent'
+  | 'deviceHistory'
+  | 'configProfile'
+  | 'deviceSnapshot'
+  | 'configDeploy'
+  | 'area'
+  | 'site'
 >;
 type GatewayRow = NonNullable<Awaited<ReturnType<Db['gateway']['findFirst']>>>;
 export interface Result {
@@ -122,7 +131,13 @@ export async function enroll(db: Db, raw: unknown, keys: PublicKey[]): Promise<R
   });
   if (count === 0) return fail(401, 'This enrolment token is invalid, expired or already used');
   await writeAudit(
-    { orgId: gw.orgId, actorId: null, action: 'gateway.enroll', target: gw.id, meta: { name: gw.name, hostname } },
+    {
+      orgId: gw.orgId,
+      actorId: null,
+      action: 'gateway.enroll',
+      target: gw.id,
+      meta: { name: gw.name, hostname },
+    },
     db,
   );
   return {
@@ -235,6 +250,12 @@ export async function heartbeat(
   const entitlements = await getEntitlements(db, gw.orgId, now);
   const monitored = entitlements.monitoring;
   const jobs = monitored ? await recordReports(db, gw, parsed.data.rooms, now) : [];
+  let enforce: { deviceId: string; command: unknown }[] = [];
+  if (monitored) {
+    const ingested = await ingestDeviceReports(db, gw, parsed.data.devices, now);
+    jobs.push(...ingested.jobs);
+    enforce = ingested.enforce;
+  }
   await recordDividers(db, gw, parsed.data.dividers);
   await applyCommandResults(db, gw.id, parsed.data.commandResults, now);
   jobs.push(...(await maybeSweep(db, now)));
@@ -254,7 +275,13 @@ export async function heartbeat(
         keys.map((k) => k.keyId),
         await groupsForGateway(db, gw),
       ),
+      // Only a gateway that says it runs device sets is told about one.
+      ...(parsed.data.features.includes('device-set')
+        ? { deviceSetVersion: await deviceSetVersion(db, gw) }
+        : {}),
       serverTime: now.toISOString(),
+      // Only a gateway that says it can put settings back is sent them.
+      enforce: parsed.data.features.includes('config-enforce') ? enforce : [],
       commands,
       watch: await watchedRooms(db, gw.id, now),
       pollNow: await hasWaitingIntents(db, gw.id, now),
@@ -268,6 +295,23 @@ export async function heartbeat(
     },
     after: jobs.length ? () => deliverAlerts(db, jobs) : undefined,
   };
+}
+
+/**
+ * The devices this gateway polls on their own, signed, with addresses and logins merged in.
+ * Anything sent here could open a device, so it is never cached and never logged.
+ */
+export async function deviceSet(
+  db: Db,
+  gw: GatewayRow,
+  signing: SigningKey | null,
+): Promise<Result> {
+  if (!signing) return fail(503, 'The cloud has no signing key configured yet');
+  try {
+    return { status: 200, body: await signedDeviceSetFor(db, gw, signing) };
+  } catch {
+    return fail(503, 'The cloud cannot open these devices’ logins right now');
+  }
 }
 
 export async function config(db: Db, gw: GatewayRow, keys: PublicKey[]): Promise<Result> {

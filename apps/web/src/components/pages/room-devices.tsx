@@ -1,13 +1,13 @@
 'use client';
-import Link from 'next/link';
 import { useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Cpu, Search } from 'lucide-react';
-import { DEVICE_CATALOG, type Device } from '@kestrel/model';
+import { AlertTriangle, Package, Plus } from 'lucide-react';
+import { assetCategoryLabel } from '@kestrel/model';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer } from '@/components/common/page-header';
 import { orgPath, useOrg } from '@/components/shell/org-context';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -17,47 +17,36 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { useEstate } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
-import { DiscoverDevicesDialog } from './device-discovery';
+import { AddDeviceDialog } from './assets';
+import { DeviceStateBadge } from './device-detail';
 import { useRoom } from './room-shell';
 
-function controlLabel(d: Device): string {
-  if (!d.control) return DEVICE_CATALOG[d.category].controllable ? 'Not set' : 'None needed';
-  return d.control.kind === 'driver'
-    ? `Driver: ${d.control.driverId}`
-    : `Generic ${d.control.protocol.toUpperCase()}`;
-}
-
-export function RoomDevices({ roomId }: { roomId: string }) {
+/** The devices in one room, monitored or only recorded. The same rows as the asset register. */
+export function RoomDeviceList({ roomId, compact }: { roomId: string; compact?: boolean }) {
   const trpc = useTRPC();
   const { orgId, canSupport } = useOrg();
+  const { sites, rooms } = useEstate();
   const { room } = useRoom(roomId);
-  const [finding, setFinding] = useState(false);
-  const draft = useQuery({ ...trpc.draft.get.queryOptions({ orgId, roomId }), staleTime: 0 });
-  const designHref = orgPath(orgId, `/rooms/${roomId}/design`);
+  const devices = useQuery({
+    ...trpc.device.list.queryOptions({ orgId, roomId }),
+    refetchInterval: 15_000,
+  });
+  const [adding, setAdding] = useState(false);
+
+  if (devices.isPending) return <Skeleton className="h-24 w-full" />;
+  if (devices.isError) return <p className="text-sm text-destructive">{devices.error.message}</p>;
 
   return (
-    <PageContainer className="pt-5">
-      {canSupport && (
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          {!room?.gateway && <span className="text-xs text-muted-foreground">Choose a gateway in settings to look for devices.</span>}
-          <Button variant="outline" size="sm" disabled={!room?.gateway || room.gateway.status !== 'online'} onClick={() => setFinding(true)}>
-            <Search /> Find devices on the network
-          </Button>
-        </div>
-      )}
-      <DiscoverDevicesDialog roomId={roomId} open={finding} onOpenChange={setFinding} />
-      {draft.isPending ? (
-        <Skeleton className="h-40 w-full" />
-      ) : !draft.data || draft.data.model.devices.length === 0 ? (
+    <div className="space-y-3">
+      {devices.data.length === 0 ? (
         <EmptyState
-          icon={Cpu}
-          title="No devices modelled"
-          description="Add devices in the designer and they’ll be listed here."
+          icon={Package}
+          title="No devices in this room"
+          description="Add the equipment in the room. A networked device with a driver is monitored; anything else is recorded as an asset."
           action={
-            <Link href={designHref} className={buttonVariants()}>
-              Open designer
-            </Link>
+            canSupport ? <Button onClick={() => setAdding(true)}>Add a device</Button> : undefined
           }
         />
       ) : (
@@ -66,37 +55,74 @@ export function RoomDevices({ roomId }: { roomId: string }) {
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
                 <TableHead>Device</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Control</TableHead>
-                <TableHead className="text-right">Inputs</TableHead>
-                <TableHead className="text-right">Outputs</TableHead>
+                <TableHead>State</TableHead>
+                {!compact && <TableHead>Make / model</TableHead>}
+                {!compact && <TableHead>Serial</TableHead>}
+                <TableHead>Gateway</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {draft.data.model.devices.map((d) => {
-                const unset = DEVICE_CATALOG[d.category].controllable && !d.control;
-                return (
-                  <TableRow key={d.id}>
-                    <TableCell className="font-medium">{d.name}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {DEVICE_CATALOG[d.category].label}
+              {devices.data.map((d) => (
+                <TableRow key={d.id}>
+                  <TableCell className="font-medium">
+                    <Link
+                      href={orgPath(orgId, `/devices/${d.id}`)}
+                      className="inline-flex items-center gap-2 hover:underline"
+                    >
+                      {d.name}
+                      {d.swapPending && <AlertTriangle className="size-3.5 text-warning" />}
+                    </Link>
+                    <div className="text-xs font-normal text-muted-foreground">
+                      {assetCategoryLabel(d.category)}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <DeviceStateBadge state={d.state} />
+                  </TableCell>
+                  {!compact && (
+                    <TableCell className="text-sm">
+                      {[d.make, d.model].filter(Boolean).join(' ') || (
+                        <span className="text-muted-foreground">–</span>
+                      )}
                     </TableCell>
-                    <TableCell className={unset ? 'text-destructive' : 'text-muted-foreground'}>
-                      {controlLabel(d)}
+                  )}
+                  {!compact && (
+                    <TableCell className="font-mono text-xs">
+                      {d.serial ?? <span className="text-muted-foreground">–</span>}
                     </TableCell>
-                    <TableCell className="tabular text-right">
-                      {d.ports.filter((p) => p.direction === 'in').length}
-                    </TableCell>
-                    <TableCell className="tabular text-right">
-                      {d.ports.filter((p) => p.direction === 'out').length}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+                  )}
+                  <TableCell className="text-sm text-muted-foreground">
+                    {d.kind === 'passive' ? '–' : (d.gatewayName ?? 'Unassigned')}
+                    {d.gatewayOverride && <span className="text-xs"> (set on device)</span>}
+                  </TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </div>
       )}
+      {canSupport && devices.data.length > 0 && (
+        <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+          <Plus data-icon="inline-start" /> Add device
+        </Button>
+      )}
+      {adding && room && (
+        <AddDeviceDialog
+          sites={sites}
+          rooms={rooms}
+          siteId={room.siteId}
+          roomId={roomId}
+          onClose={() => setAdding(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+export function RoomDevices({ roomId }: { roomId: string }) {
+  return (
+    <PageContainer className="pt-5">
+      <RoomDeviceList roomId={roomId} />
     </PageContainer>
   );
 }

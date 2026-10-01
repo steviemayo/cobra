@@ -2,8 +2,7 @@ import 'server-only';
 import Stripe from 'stripe';
 import { headers } from 'next/headers';
 import type { PaidPlan } from '@kestrel/model';
-import { ensureBilling, priceMapFromEnv, type BillingDb } from './billing';
-import { billedRooms } from './room-kinds';
+import { ensureBilling, monitoredRoomIds, priceMapFromEnv, type BillingDb } from './billing';
 
 export class BillingNotConfigured extends Error {
   constructor(what = 'Billing') {
@@ -21,7 +20,7 @@ export function getStripe(): Stripe {
 }
 
 /** The portal's public address, from config or from the request that is being served. */
-async function baseUrl(): Promise<string> {
+export async function baseUrl(): Promise<string> {
   const configured = process.env.NEXT_PUBLIC_APP_URL;
   if (configured) return configured.replace(/\/$/, '');
   const h = await headers();
@@ -89,12 +88,12 @@ export async function billingPortalUrl(db: BillingDb, orgId: string): Promise<st
   return session.url;
 }
 
-/** Keeps the billed quantity equal to the number of rooms. Safe to call after every room change. */
+/** Keeps the billed quantity equal to the number of monitored rooms. Safe to call after every device change. */
 export async function syncQuantity(db: BillingDb, orgId: string): Promise<void> {
   if (!stripeConfigured()) return;
   const billing = await ensureBilling(db, orgId);
   if (!billing.stripeSubscriptionId || !billing.stripeItemId || !PAYING.has(billing.status)) return;
-  const rooms = Math.max(1, await db.room.count({ where: { orgId, ...billedRooms } }));
+  const rooms = Math.max(1, (await monitoredRoomIds(db, orgId)).size);
   if (rooms === billing.quantity) return;
   await getStripe().subscriptionItems.update(billing.stripeItemId, {
     quantity: rooms,

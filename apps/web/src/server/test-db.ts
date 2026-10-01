@@ -50,6 +50,7 @@ export function matches(row: Row, where: Row = {}): boolean {
           (!('gt' in c) || t > at(c.gt!))
         );
     }
+    if (cond instanceof Date && v instanceof Date) return v.getTime() === cond.getTime();
     return v === cond;
   });
 }

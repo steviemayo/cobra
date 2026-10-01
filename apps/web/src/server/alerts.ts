@@ -6,8 +6,11 @@ import { getEntitlements, type EntitlementDb } from './billing';
 import { SEVERITY_RANK, type AlertJob, type Severity } from './monitoring';
 import { pinnedFetch, postJson, postSigned, resolveAll, type Lookup } from './outbound';
 import { sendEmail } from './resend';
+import { affectedForRooms, type Impact } from './room-schedule';
 
-export type AlertDb = Pick<PrismaClient, 'alertChannel' | 'alertDelivery' | 'incident' | 'room'>;
+// `site` and `roomSchedule` are only needed to say which meetings a fault may affect.
+export type AlertDb = Pick<PrismaClient, 'alertChannel' | 'alertDelivery' | 'incident' | 'room'> &
+  Partial<Pick<PrismaClient, 'site' | 'roomSchedule'>>;
 
 export const CHANNEL_TYPES = ['email', 'teams', 'webhook', 'itsm'] as const;
 export type ChannelType = (typeof CHANNEL_TYPES)[number];
@@ -45,9 +48,23 @@ export interface AlertMessage {
     room: string | null;
     openedAt: string;
     resolvedAt: string | null;
+    /**
+     * Meetings in the room's calendar that this may disturb (on now or starting in the next 12
+     * hours). Private meetings have no title or organiser. Absent when the room has no calendar.
+     */
+    impact?: Impact;
   };
   portalUrl: string | null;
 }
+
+const impactText = (m: AlertMessage): string =>
+  m.incident.impact?.lines.length
+    ? [
+        'This may affect:',
+        ...m.incident.impact.lines.map((l) => `- ${l}`),
+        ...(m.incident.impact.more ? [`- and ${m.incident.impact.more} more`] : []),
+      ].join('\n')
+    : '';
 
 /** The destination isn't set up, so nothing was tried. Recorded as skipped, not failed. */
 export class NotConfigured extends Error {}
@@ -97,7 +114,7 @@ export async function send(s: Senders, config: ChannelConfig, m: AlertMessage): 
         ...payload(m),
         ticket: {
           short_description: headline(m),
-          description: m.incident.detail ?? '',
+          description: [m.incident.detail ?? '', impactText(m)].filter(Boolean).join('\n\n'),
           urgency:
             m.incident.severity === 'critical' ? 1 : m.incident.severity === 'warning' ? 2 : 3,
           state: m.event === 'resolved' ? 'resolved' : 'new',
@@ -137,6 +154,15 @@ export async function send(s: Senders, config: ChannelConfig, m: AlertMessage): 
                 ...(m.incident.detail
                   ? [{ type: 'TextBlock', wrap: true, text: m.incident.detail }]
                   : []),
+                ...(impactText(m)
+                  ? [
+                      {
+                        type: 'TextBlock',
+                        wrap: true,
+                        text: impactText(m).replaceAll('\n', '\n\n'),
+                      },
+                    ]
+                  : []),
               ],
               actions: m.portalUrl
                 ? [{ type: 'Action.OpenUrl', title: 'Open in Kestrel', url: m.portalUrl }]
@@ -152,6 +178,7 @@ export async function send(s: Senders, config: ChannelConfig, m: AlertMessage): 
         headline(m),
         m.incident.room ? `Room: ${m.incident.room}` : '',
         m.incident.detail ?? '',
+        impactText(m),
         m.portalUrl ?? '',
       ]
         .filter(Boolean)
@@ -282,6 +309,7 @@ async function buildMessage(
   event: AlertMessage['event'],
   env: Record<string, string | undefined>,
   roomNames = new Map<string, string | null>(),
+  now = new Date(),
 ): Promise<AlertMessage> {
   let room: string | null = null;
   if (incident.roomId) {
@@ -292,9 +320,21 @@ async function buildMessage(
       );
     room = roomNames.get(incident.roomId) ?? null;
   }
+  let impact: Impact | undefined;
+  if (incident.roomId && (event === 'opened' || event === 'reminder')) {
+    try {
+      impact = (await affectedForRooms(db, incident.orgId, [incident.roomId], now)).get(
+        incident.roomId,
+      );
+    } catch (e) {
+      // The calendar is only extra context: the alert goes out without it.
+      console.error('[alerts] could not look up affected meetings', e);
+    }
+  }
   return {
     event,
     incident: {
+      ...(impact ? { impact } : {}),
       id: incident.id,
       kind: incident.kind,
       severity: incident.severity as Severity,
@@ -322,7 +362,7 @@ export async function deliverAlerts(
     try {
       const incident = await db.incident.findFirst({ where: { id: job.incidentId } });
       if (!incident) continue;
-      const msg = await buildMessage(db, incident, job.event, s.env);
+      const msg = await buildMessage(db, incident, job.event, s.env, undefined, now);
       const channels = await db.alertChannel.findMany({
         where: { orgId: incident.orgId, enabled: true },
       });
@@ -407,7 +447,7 @@ export async function deliverDue(
           now,
         });
         if (!due) continue;
-        const msg = await buildMessage(db, incident, due, s.env, roomNames);
+        const msg = await buildMessage(db, incident, due, s.env, roomNames, now);
         if ((await deliverToChannel(db, ch, msg, incident.id, s, now)).status === 'sent') sent++;
       } catch (e) {
         console.error('[alerts] due delivery failed', e);

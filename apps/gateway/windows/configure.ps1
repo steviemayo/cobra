@@ -54,6 +54,13 @@ function Stop-Everything {
     & $ServiceExe stop 2>$null
     & $ServiceExe uninstall 2>$null
   }
+  # A service left behind by an install that is gone, or one the wrapper could not remove, would block
+  # the new one from being made. Ask Windows directly, and wait for it to let go.
+  if (Get-Service -Name KestrelGateway -ErrorAction SilentlyContinue) {
+    Stop-Service -Name KestrelGateway -Force -ErrorAction SilentlyContinue
+    & sc.exe delete KestrelGateway 2>$null | Out-Null
+    for ($i = 0; $i -lt 30 -and (Get-Service -Name KestrelGateway -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Seconds 1 }
+  }
   Remove-ItemProperty -Path $RunKeyPath -Name $RunValueName -ErrorAction SilentlyContinue
   Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -like "*$([regex]::Escape($TrayScript))*" } |
@@ -66,6 +73,21 @@ function Stop-Everything {
   }
 }
 Stop-Everything
+# The gateway's process can outlive its service for a moment; wait for it, or its files stay locked.
+for ($i = 0; $i -lt 20; $i++) {
+  $left = @(Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like (Join-Path $InstallDir '*') })
+  if ($left.Count -eq 0) { break }
+  $left | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 500
+}
+
+# Leftovers of an earlier run that would confuse this one: an update that was half done, an update lock
+# that holds the tray's watchdog off for ever, and a staged update nobody finished.
+foreach ($stale in (Join-Path $InstallDir 'app.new'), (Join-Path $InstallDir 'app.old')) {
+  if (Test-Path $stale) { Remove-Item -Recurse -Force $stale -ErrorAction SilentlyContinue }
+}
+Remove-Item -Force (Join-Path $DataDir 'update.lock') -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force (Join-Path $DataDir 'update') -ErrorAction SilentlyContinue
 
 # Settings the running gateway, and the service/tray that starts it, read. The token is only needed
 # for the first start.
@@ -105,7 +127,9 @@ if ($Mode -eq 'Service') {
     "    <env name=`"$($parts[0])`" value=`"$(XmlEscape $parts[1])`"/>"
   }) -join "`n"
   $template = Get-Content (Join-Path $app 'windows\service.xml.template') -Raw
-  $xml = $template.Replace('__ENV__', $envXml).Replace('__LOGPATH__', (XmlEscape (Join-Path $DataDir 'logs')))
+  # The compiled gateway starts in about a second; the TypeScript source (older bundles) takes far longer.
+  $entry = if (Test-Path (Join-Path $app 'dist\main.mjs')) { 'dist\main.mjs' } else { '--import tsx src/main.ts' }
+  $xml = $template.Replace('__ARGS__', "--disable-warning=ExperimentalWarning $entry").Replace('__ENV__', $envXml).Replace('__LOGPATH__', (XmlEscape (Join-Path $DataDir 'logs')))
   Set-Content -Path $ServiceXml -Value $xml -Encoding UTF8
   # The service's settings hold the enrolment token, so they are as private as gateway.env.
   Protect-KestrelFile -Path $ServiceXml
@@ -132,9 +156,14 @@ if ($Mode -eq 'Service') {
   & $ServiceExe start
   if ($leastPrivilege) {
     $up = $false
-    for ($i = 0; $i -lt 22 -and -not $up; $i++) {
+    # A first start can be slow on a busy machine (and much slower for an older, uncompiled bundle).
+    for ($i = 0; $i -lt 60 -and -not $up; $i++) {
       Start-Sleep -Seconds 2
-      try { $up = (Invoke-WebRequest -Uri "http://127.0.0.1:$PanelPort/health" -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200 } catch { }
+      # The gateway moves to the next port if its usual one is taken, so look at a few.
+      foreach ($p in $PanelPort..($PanelPort + 9)) {
+        try { if ((Invoke-WebRequest -Uri "http://127.0.0.1:$p/health" -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { $up = $true; break } } catch { }
+      }
+      if ((Get-Service -Name KestrelGateway).Status -eq 'Stopped') { break }  # it has already given up; no point waiting
     }
     if (-not $up) {
       Write-Warning 'The gateway did not start under its own account, so it is being set to run as the system instead.'
