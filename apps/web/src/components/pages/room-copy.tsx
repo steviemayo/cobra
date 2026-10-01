@@ -4,7 +4,14 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { expandPattern, rewritePoints, rewriteText, stepAddress, type ControlPoint } from '@kestrel/model';
+import {
+  expandPattern,
+  parseSheet,
+  rewritePoints,
+  rewriteText,
+  stepAddress,
+  type ControlPoint,
+} from '@kestrel/model';
 import { PageContainer } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { orgPath, useOrg } from '@/components/shell/org-context';
@@ -12,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { Textarea } from '@/components/ui/textarea';
 import { useInvalidateEstate, useSites } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
@@ -83,6 +91,38 @@ function generate(
   });
 }
 
+/**
+ * Rows from a paste: the first cell is the room's name, the rest are the addresses the monitored devices
+ * need, in the order the devices are listed (each device's own fields, one after the other).
+ */
+function fromSheet(
+  shape: Shape,
+  rows: string[][],
+  o: { find: string; replace: string },
+): CopyDraft[] {
+  const base = generate(shape, {
+    count: rows.length,
+    start: 1,
+    pattern: '{n}',
+    find: o.find,
+    replace: o.replace,
+    addresses: {},
+  });
+  return base.map((draft, i) => {
+    const cells = rows[i]!.slice(1);
+    let next = 0;
+    const devices = { ...draft.devices };
+    for (const d of shape.devices) {
+      if (d.kind !== 'active') continue;
+      const x = devices[d.id]!;
+      const values = { ...x.values };
+      for (const f of d.binding) values[f.key] = cells[next++] ?? '';
+      devices[d.id] = { ...x, values };
+    }
+    return { ...draft, name: rows[i]![0]!, devices };
+  });
+}
+
 function clean(values: Record<string, string>) {
   return Object.fromEntries(Object.entries(values).filter(([, v]) => v.trim() !== ''));
 }
@@ -118,6 +158,7 @@ export function RoomCopy({ roomId, shapeId }: { roomId?: string; shapeId?: strin
   const [find, setFind] = useState('');
   const [replace, setReplace] = useState('');
   const [addresses, setAddresses] = useState<Record<string, { start: string; step: number }>>({});
+  const [paste, setPaste] = useState('');
   const [drafts, setDrafts] = useState<CopyDraft[]>([]);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [result, setResult] = useState<RouterOutputs['room']['copy'] | null>(null);
@@ -320,6 +361,33 @@ export function RoomCopy({ roomId, shapeId }: { roomId?: string; shapeId?: strin
         >
           {drafts.length ? 'Start the rows again' : 'Make the rows'}
         </Button>
+        <div className="space-y-1.5 border-t pt-4">
+          <Label htmlFor="copy-paste">Or paste rows from a spreadsheet</Label>
+          <Textarea
+            id="copy-paste"
+            rows={4}
+            value={paste}
+            placeholder={`Room name${active.flatMap((d) => d.binding.map(() => '\taddress')).join('') || ''}`}
+            onChange={(e) => setPaste(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            One room per line, cells separated by tabs or commas: the room’s name, then{' '}
+            {active.flatMap((d) => d.binding.map((f) => `${d.name} ${f.label.toLowerCase()}`)).join(', ') ||
+              'nothing else'}
+            .
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!siteId || parseSheet(paste).length === 0}
+            onClick={() => {
+              setDrafts(fromSheet(s, parseSheet(paste), { find, replace }));
+              setResult(null);
+            }}
+          >
+            Make the rows from the paste
+          </Button>
+        </div>
       </section>
 
       {drafts.map((c, i) => {

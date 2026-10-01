@@ -395,7 +395,7 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   'blustream-pwr': {
     name: 'Blustream IEC power controller (PWR2/4/8IEC)',
     description:
-      'Blustream PWR2IEC, PWR4IEC and PWR8IEC power controllers over the Telnet console. Switches every outlet or one outlet, and reads back each outlet’s state, whether something is connected to it, and its current, power and energy use, plus the unit’s firmware, address and system status. Checked against a real PWR4IEC; the other two sizes are expected to answer the same way.',
+      'Blustream PWR2IEC, PWR4IEC and PWR8IEC power controllers over the Telnet console. Switches every outlet or one outlet, and reads back each outlet’s state, whether something is connected to it, and its current, power and energy use, plus the unit’s firmware, address and system status. Each outlet can be watched as a control point, so one controller shared by several rooms gives each room its own outlets. Checked against a real PWR4IEC; the other two sizes are expected to answer the same way.',
     class: 'relay',
     features: ['on_off'],
     settings: [
@@ -403,6 +403,12 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
       { key: 'port', label: 'Port (23)', scope: 'binding' },
       { key: 'pollMs', label: 'How often to read the controller (ms)', scope: 'design' },
     ],
+    points: {
+      generic: [
+        { key: 'outlet', label: 'Outlet number' },
+        { key: 'field', label: 'Reading: state, load, amps, watts, kwh or volts' },
+      ],
+    },
     categories: ['power_outlet'],
     example: { host: '<controller IP>' },
   },

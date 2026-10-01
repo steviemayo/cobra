@@ -46,3 +46,19 @@ export function rewritePoints(
     ),
   }));
 }
+
+/**
+ * Rows pasted from a spreadsheet or a CSV: one room per line, cells separated by tabs (a paste from a
+ * spreadsheet) or commas. A first line whose first cell is "name", "room" or "room name" is a heading and is skipped.
+ * Quotes around a cell are removed. Returns the cells of each line, blank lines left out.
+ */
+export function parseSheet(text: string): string[][] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
+  const split = (l: string) =>
+    (l.includes('\t') ? l.split('\t') : l.split(',')).map((c) =>
+      c.trim().replace(/^"(.*)"$/, '$1').trim(),
+    );
+  const rows = lines.map(split);
+  if (rows[0] && /^(room( name)?|name)$/i.test(rows[0][0] ?? '')) rows.shift();
+  return rows.filter((r) => (r[0] ?? '') !== '');
+}

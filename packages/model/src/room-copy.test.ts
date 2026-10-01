@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { expandPattern, rewritePoints, rewriteText } from './room-copy';
+import { expandPattern, parseSheet, rewritePoints, rewriteText } from './room-copy';
 import type { ControlPoint } from './room/points';
 
 const point = (over: Partial<ControlPoint> = {}): ControlPoint => ({
@@ -40,5 +40,18 @@ describe('room copy helpers', () => {
     const original = point();
     rewritePoints([original], { find: 'Room1', replace: 'Room9' }, 1);
     expect(original.name).toBe('Room1 volume');
+  });
+
+  it('reads rows pasted from a spreadsheet or a CSV, skipping a heading and blank lines', () => {
+    const pasted = ['Room\tDSP\tDisplay', 'Room 2\t10.0.0.2\t10.0.1.2', '', 'Room 3\t10.0.0.3\t10.0.1.3', ''];
+    expect(parseSheet(pasted.join('\n'))).toEqual([
+      ['Room 2', '10.0.0.2', '10.0.1.2'],
+      ['Room 3', '10.0.0.3', '10.0.1.3'],
+    ]);
+    expect(parseSheet('"Room A", 10.0.0.5\r\nRoom B,10.0.0.6')).toEqual([
+      ['Room A', '10.0.0.5'],
+      ['Room B', '10.0.0.6'],
+    ]);
+    expect(parseSheet('')).toEqual([]);
   });
 });

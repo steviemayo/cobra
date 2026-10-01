@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { STARTER_TEMPLATES, type Device } from '@kestrel/model';
-import { BlustreamPwrDriver, parsePwrStatus } from './blustream-pwr';
+import { BlustreamPwrDriver, parsePwrStatus, pwrPointValue } from './blustream-pwr';
 import { BUILT_IN_DRIVER_IDS, createDriver } from './registry';
 import type { DriverContext } from './types';
 
@@ -134,6 +134,41 @@ describe('Blustream PWR driver', () => {
     await until(() => p.sent.length > 0);
     await wait(300);
     expect(d.getState().online).toBe(false);
+    d.close();
+  });
+});
+
+describe('outlet control points', () => {
+  const r = parsePwrStatus(STATUS);
+  it('read an outlet’s state, load and electrical figures', () => {
+    expect(pwrPointValue({ outlet: '1', field: 'state' }, r)).toBe(true);
+    expect(pwrPointValue({ outlet: '2', field: 'state' }, r)).toBe(false);
+    expect(pwrPointValue({ outlet: '2', field: 'load' }, r)).toBe(false);
+    expect(pwrPointValue({ outlet: '3', field: 'load' }, r)).toBe(true);
+    expect(pwrPointValue({ outlet: 3, field: 'watts' }, r)).toBe(65.689);
+    expect(pwrPointValue({ outlet: '4', field: 'amps' }, r)).toBe(0.152);
+    expect(pwrPointValue({ outlet: '3' }, r)).toBe(true);
+  });
+  it('are undefined for an outlet or reading that is not there', () => {
+    expect(pwrPointValue({ outlet: '9', field: 'state' }, r)).toBeUndefined();
+    expect(pwrPointValue({ outlet: '1', field: 'bogus' }, r)).toBeUndefined();
+  });
+
+  it('are reported by the driver, one value per point, and can be read to check them', async () => {
+    const p = await fakePwr();
+    const dev = {
+      ...device(p.port),
+      points: [
+        { id: 'hall-power', name: 'Hall projector', type: 'generic', address: { outlet: '3', field: 'state' } },
+        { id: 'hall-watts', name: 'Hall draw', type: 'generic', address: { outlet: '3', field: 'watts' } },
+      ],
+    } as Device;
+    const d = new BlustreamPwrDriver(dev, ctx);
+    d.start();
+    await until(() => d.getState().online);
+    expect(d.getState().points).toEqual({ 'hall-power': true, 'hall-watts': 65.689 });
+    expect(await d.readPoint({ type: 'generic', address: { outlet: '4', field: 'watts' } })).toEqual({ value: 27.649 });
+    await expect(d.readPoint({ type: 'generic', address: { outlet: '9' } })).rejects.toThrow('not found');
     d.close();
   });
 });
