@@ -62,6 +62,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `created room “${s(meta.name)}” in ${s(meta.site)}`;
     case 'room.duplicate':
       return `copied room “${s(meta.from)}” to a new room “${s(meta.name)}”`;
+    case 'room.copy': {
+      const rooms = Array.isArray(meta.rooms) ? meta.rooms.map((r) => `“${s(r)}”`) : [];
+      return `made ${rooms.length} cop${rooms.length === 1 ? 'y' : 'ies'} of room “${s(meta.from)}”: ${rooms.join(', ')}`;
+    }
     case 'room.staging_copy':
       return `made a staging copy of room “${s(meta.from)}” called “${s(meta.name)}”`;
     case 'room.staging_promote':

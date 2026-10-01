@@ -12,7 +12,6 @@ import { useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ROOM_TYPE_LABEL } from '@/lib/format';
 import { useEstate } from '@/lib/use-estate';
 
 const ALL = 'all';
@@ -23,7 +22,6 @@ export function RoomsView() {
   const { sites, rooms, live, isPending } = useEstate();
   const [query, setQuery] = useState('');
   const [site, setSite] = useState(ALL);
-  const [type, setType] = useState(ALL);
   const [design, setDesign] = useState<DesignHealth | typeof ALL>(ALL);
   const [status, setStatus] = useState<HealthLevel | typeof ALL>(ALL);
 
@@ -33,13 +31,12 @@ export function RoomsView() {
       (r) =>
         (!q || r.name.toLowerCase().includes(q) || r.site.name.toLowerCase().includes(q)) &&
         (site === ALL || r.siteId === site) &&
-        (type === ALL || r.type === type) &&
         (design === ALL || designHealth(r.draft, r.monitorOnly) === design) &&
         (status === ALL || live.get(r.id)?.health.level === status),
     );
-  }, [rooms, query, site, type, design, status, live]);
+  }, [rooms, query, site, design, status, live]);
 
-  const filtering = query || site !== ALL || type !== ALL || design !== ALL || status !== ALL;
+  const filtering = query || site !== ALL || design !== ALL || status !== ALL;
 
   return (
     <PageContainer>
@@ -91,15 +88,6 @@ export function RoomsView() {
               ]}
             />
             <SimpleSelect
-              value={type}
-              onValueChange={setType}
-              options={[
-                { value: ALL, label: 'All types' },
-                { value: 'meeting', label: ROOM_TYPE_LABEL.meeting },
-                { value: 'training', label: ROOM_TYPE_LABEL.training },
-              ]}
-            />
-            <SimpleSelect
               value={status}
               onValueChange={setStatus}
               options={[
@@ -129,7 +117,6 @@ export function RoomsView() {
                 onClick={() => {
                   setQuery('');
                   setSite(ALL);
-                  setType(ALL);
                   setDesign(ALL);
                   setStatus(ALL);
                 }}
