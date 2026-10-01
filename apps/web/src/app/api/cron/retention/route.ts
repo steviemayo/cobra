@@ -3,6 +3,7 @@ import { cronAuthorised } from '@/server/cron-auth';
 import { pruneAudit } from '@/server/audit-retention';
 import { pruneUnclaimed } from '@/server/gateway-announce';
 import { runReportSchedules } from '@/server/report-delivery';
+import { purgeDueOrgs } from '@/server/org-deletion';
 import { pruneOldData } from '@/server/retention';
 import { pruneUsage, rollupUsage } from '@/server/usage-service';
 import { getEntitlements } from '@/server/billing';
@@ -40,7 +41,11 @@ export async function GET(req: Request) {
     error: e instanceof Error ? e.message : String(e),
   }));
   // A scheduled snapshot of every monitored device, so there is something to compare with.
-  const snapshots = await snapshotAll(db, new Date(), async (orgId) => (await getEntitlements(db, orgId)).configuration).catch((e: unknown) => ({
+  const snapshots = await snapshotAll(
+    db,
+    new Date(),
+    async (orgId) => (await getEntitlements(db, orgId)).configuration,
+  ).catch((e: unknown) => ({
     error: e instanceof Error ? e.message : String(e),
   }));
   // Overdue maintenance becomes an info notice, and any register issue on a schedule is taken.
@@ -60,8 +65,13 @@ export async function GET(req: Request) {
   const grants = await expireGrants(db as never).catch((e: unknown) => ({
     error: e instanceof Error ? e.message : String(e),
   }));
+  // Organisations whose 30 days are up are deleted for good (each one tried again next time if it fails).
+  const orgsPurged = await purgeDueOrgs(db).catch((e: unknown) => ({
+    error: e instanceof Error ? e.message : String(e),
+  }));
   return Response.json({
     ...res,
+    orgsPurged,
     grants,
     snapshots,
     pm,

@@ -202,6 +202,12 @@ export function describeStaffAudit(action: string, meta: Record<string, unknown>
       return `changed how long the activity log is kept (${s(meta.from)} to ${s(meta.to)} days)`;
     case 'org.audit_export':
       return `downloaded the activity log (${s(meta.rows)} rows)`;
+    case 'org.delete.schedule':
+      return `scheduled the organisation for deletion on ${s(meta.deleteAfter).slice(0, 10)}: “${s(meta.reason)}”`;
+    case 'org.delete.restore':
+      return 'restored the organisation before it was deleted';
+    case 'org.delete.purge':
+      return `deleted the organisation “${s(meta.name)}” for good`;
     case 'staff.add':
       return `gave ${s(meta.email)} staff access (${Array.isArray(meta.roles) ? meta.roles.join(', ') : ''})`;
     case 'staff.set_roles':

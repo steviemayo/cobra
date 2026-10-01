@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { ActivityFeed } from '@/components/common/activity-feed';
 import { NetworkHealthSettings } from './network-health';
 import { ApiKeysSetting } from '@/components/common/api-keys-setting';
+import { DeleteOrgSetting } from '@/components/common/delete-org-setting';
 import { AuditExportButtons } from '@/components/common/audit-export-buttons';
 import {
   BrandingFields,
@@ -82,6 +83,7 @@ export function GeneralSettings() {
       <ApiKeysSetting />
       {org.kind !== 'msp' && <ServiceProvidersSetting />}
       <StaffAccessSetting />
+      <DeleteOrgSetting />
     </PageContainer>
   );
 }

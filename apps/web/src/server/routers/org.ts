@@ -13,6 +13,7 @@ import {
 import { OrgBranding, readOrgBranding } from '../panel-settings';
 import { makeRateLimiter } from '../rate-limit';
 import { setStaffAccessBlocked } from '../support-sessions';
+import { requestDeletion } from '../org-deletion';
 import { authedProcedure, orgProcedure, requireRole, router } from '../trpc';
 
 const name = z.string().trim().min(1).max(100);
@@ -54,7 +55,9 @@ export const orgRouter = router({
       const person = personOf(ctx.user);
       const claimed = input.kind === 'customer' && (await claimTrial(db, person));
       const trial = input.kind === 'msp' || claimed ? 'granted' : 'used';
-      const trialEndsAt = new Date(Date.now() + (trial === 'granted' ? TRIAL_DAYS * 86_400_000 : 0));
+      const trialEndsAt = new Date(
+        Date.now() + (trial === 'granted' ? TRIAL_DAYS * 86_400_000 : 0),
+      );
       let org;
       try {
         org = await db.org.create({
@@ -139,5 +142,28 @@ export const orgRouter = router({
         meta: { name: org.name },
       });
       return org;
+    }),
+
+  // An owner asks for the organisation to be deleted. Nothing is deleted: it opens a ticket for
+  // Kestrel staff, who confirm it and schedule the deletion themselves.
+  requestDeletion: orgProcedure
+    .input(z.object({ orgId: z.string().uuid(), reason: z.string().trim().max(500).default('') }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      const res = await requestDeletion(db, {
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        email: ctx.user.email ?? null,
+        reason: input.reason,
+      });
+      if (!res.alreadyRequested)
+        await writeAudit({
+          orgId: ctx.orgId,
+          actorId: ctx.user.id,
+          action: 'org.delete.request',
+          target: ctx.orgId,
+          meta: { ticketId: res.ticketId },
+        });
+      return res;
     }),
 });

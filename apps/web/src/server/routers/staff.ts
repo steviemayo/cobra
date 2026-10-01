@@ -16,6 +16,7 @@ import {
 } from '../staff-team';
 import { StaffRole } from '@kestrel/model';
 import { realCalloutStripe } from '../callout-stripe';
+import { OrgDeletionError, restoreOrg, scheduleDeletion } from '../org-deletion';
 import {
   CalloutError,
   cancelByStaff,
@@ -25,7 +26,7 @@ import {
   refundLateCancellation,
   sendQuote,
 } from '../callouts';
-import { BillingNotConfigured } from '../stripe';
+import { BillingNotConfigured, getStripe } from '../stripe';
 import { orgDetail, orgDirectory, recordStaffAudit, mfaRequired } from '../staff';
 import {
   AnnounceError,
@@ -81,6 +82,7 @@ function asTrpc(e: unknown): never {
     e instanceof RetentionError ||
     e instanceof TeamError ||
     e instanceof CalloutError ||
+    e instanceof OrgDeletionError ||
     e instanceof BillingNotConfigured
   )
     throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
@@ -708,5 +710,61 @@ export const staffRouter = router({
           return asTrpc(e);
         }
       }),
+  }),
+
+  // Deleting an organisation (docs/decisions.md OD-1..): admin only. Scheduling switches it off at
+  // once and it is deleted for good after 30 days, unless restored first. Both are audited.
+  deletion: router({
+    schedule: staffProcedure
+      .input(
+        z.object({
+          orgId,
+          confirmName: z.string().max(200),
+          reason: z.string().trim().min(1).max(300),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'admin');
+        try {
+          const res = await scheduleDeletion(
+            db,
+            {
+              cancelSubscription: async (id) => void (await getStripe().subscriptions.cancel(id)),
+            },
+            { ...input, staffUserId: ctx.staff.userId },
+          );
+          await recordStaffAudit(db, {
+            staffUserId: ctx.staff.userId,
+            action: 'org.delete.schedule',
+            orgId: input.orgId,
+            target: input.orgId,
+            meta: {
+              reason: input.reason,
+              deleteAfter: res.deleteAfter.toISOString(),
+              gatewaysReleased: res.gatewaysReleased,
+              subscriptionCancelled: res.subscriptionCancelled,
+            },
+          });
+          return res;
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    restore: staffProcedure.input(z.object({ orgId })).mutation(async ({ ctx, input }) => {
+      requireStaffRole(ctx.staff, 'admin');
+      try {
+        await restoreOrg(db, { orgId: input.orgId });
+        await recordStaffAudit(db, {
+          staffUserId: ctx.staff.userId,
+          action: 'org.delete.restore',
+          orgId: input.orgId,
+          target: input.orgId,
+        });
+        return { ok: true };
+      } catch (e) {
+        return asTrpc(e);
+      }
+    }),
   }),
 });
