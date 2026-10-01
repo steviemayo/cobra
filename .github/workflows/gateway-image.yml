@@ -79,7 +79,7 @@ jobs:
             type=raw,value=beta,enable=${{ github.ref == 'refs/heads/dev' }}
             type=match,pattern=gateway-v(.*),group=1
             type=sha
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
