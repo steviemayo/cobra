@@ -140,14 +140,47 @@ describe('a gateway announcing itself', () => {
         id: `r${i}`,
         installId: `i${i}`,
         secretHash: 'x',
+        status: i === 0 ? 'dismissed' : 'open', // the oldest (r0) is dismissed: both pools are evictable
+        publicIp: `10.0.${i % 200}.${i % 250}`,
+        firstSeenAt: T0,
+        lastSeenAt: at(i * 1000), // r0 is the oldest
+      });
+    // A real, new install still gets in: the one least likely to matter (oldest, unclaimed) makes
+    // room for it, rather than the whole endpoint refusing every new gateway once it fills up.
+    const res = await announce(full.db, hello(), { ip: '198.51.100.9', key: KEY }, T0);
+    expect(res.status).toBe(200);
+    expect(full.unclaimedGateway.rows).toHaveLength(MAX_OPEN_UNCLAIMED);
+    expect(full.unclaimedGateway.rows.find((r) => r.id === 'r0')).toBeUndefined();
+    expect(full.unclaimedGateway.rows.find((r) => r.installId === 'install-abcdefghijklmnop')).toBeTruthy();
+  });
+
+  it('never evicts a gateway staff have already claimed to make room', async () => {
+    const full = world();
+    // r0 is claimed and the oldest row of all; r1..r500 (500 of them) are open and newer, so the
+    // cap is reached by the open ones alone.
+    full.unclaimedGateway.rows.push({
+      id: 'r0',
+      installId: 'i0',
+      secretHash: 'x',
+      status: 'claimed',
+      publicIp: '10.0.0.1',
+      firstSeenAt: T0,
+      lastSeenAt: T0,
+    });
+    for (let i = 1; i <= MAX_OPEN_UNCLAIMED; i++)
+      full.unclaimedGateway.rows.push({
+        id: `r${i}`,
+        installId: `i${i}`,
+        secretHash: 'x',
         status: 'open',
         publicIp: `10.0.${i % 200}.${i % 250}`,
         firstSeenAt: T0,
-        lastSeenAt: T0,
+        lastSeenAt: at(i * 1000),
       });
-    expect((await announce(full.db, hello(), { ip: '198.51.100.9', key: KEY }, T0)).status).toBe(
-      429,
-    );
+    const res = await announce(full.db, hello(), { ip: '198.51.100.9', key: KEY }, T0);
+    expect(res.status).toBe(200);
+    expect(full.unclaimedGateway.rows.find((r) => r.id === 'r0')).toBeTruthy();
+    expect(full.unclaimedGateway.rows.find((r) => r.id === 'r1')).toBeUndefined();
   });
 });
 

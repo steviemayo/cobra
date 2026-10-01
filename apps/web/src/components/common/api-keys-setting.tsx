@@ -62,16 +62,20 @@ export function ApiKeysSetting() {
 
   // Not on this plan: say nothing here; the rest of Settings is unaffected.
   if (keys.isPending || keys.isError) return null;
-  const active = keys.data.filter((k) => !k.revokedAt && (!k.expiresAt || new Date(k.expiresAt).getTime() > Date.now()));
+  const active = keys.data.filter(
+    (k) => !k.revokedAt && (!k.expiresAt || new Date(k.expiresAt).getTime() > Date.now()),
+  );
 
   return (
     <section className="space-y-4 border-t pt-6">
       <div>
         <h2 className="text-sm font-medium">API keys</h2>
         <p className="text-sm text-muted-foreground">
-          Let your own systems (a building system, a dashboard, a script) read your rooms and problems. Keys can look but not
-          change anything. Send one as <code className="text-xs">Authorization: Bearer &lt;key&gt;</code> to{' '}
-          <code className="text-xs">/api/v1/rooms</code> or <code className="text-xs">/api/v1/incidents</code>.
+          Let your own systems (a building system, a dashboard, a script) read your rooms and
+          problems. Keys can look but not change anything. Send one as{' '}
+          <code className="text-xs">Authorization: Bearer &lt;key&gt;</code> to{' '}
+          <code className="text-xs">/api/v1/rooms</code> or{' '}
+          <code className="text-xs">/api/v1/incidents</code>.
         </p>
       </div>
 
@@ -79,7 +83,12 @@ export function ApiKeysSetting() {
         <div className="space-y-2 rounded-md border border-success/40 bg-success/5 p-3">
           <p className="text-sm font-medium">Copy your new key now. It will not be shown again.</p>
           <div className="flex gap-2">
-            <Input readOnly value={fresh} className="font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
+            <Input
+              readOnly
+              value={fresh}
+              className="font-mono text-xs"
+              onFocus={(e) => e.currentTarget.select()}
+            />
             <Button
               type="button"
               variant="outline"
@@ -123,12 +132,22 @@ export function ApiKeysSetting() {
         className="flex flex-wrap items-end gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          create.mutate({ orgId, name, expiresInDays: expiry === 'never' ? null : (Number(expiry) as 30 | 90 | 365) });
+          create.mutate({
+            orgId,
+            name,
+            expiresInDays: expiry === 'never' ? null : (Number(expiry) as 30 | 90 | 365),
+          });
         }}
       >
         <div className="min-w-48 flex-1 space-y-1.5">
           <Label htmlFor="key-name">Name</Label>
-          <Input id="key-name" required placeholder="Building management system" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input
+            id="key-name"
+            required
+            placeholder="Building management system"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="key-expiry">Expires</Label>

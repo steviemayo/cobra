@@ -206,6 +206,31 @@ const raw: unknown[] = [
     },
   },
   {
+    // Blustream PWR8IEC IEC power controller (8 outlets; the 2- and 4-outlet PWR2IEC/PWR4IEC share
+    // the same command set, just with fewer of the outlets below actually wired to anything).
+    // ASCII console over Telnet, checked against Blustream's command reference. The reference does
+    // not show reply text for any command, so nothing is read back: a command counts as done once
+    // it is sent, and "online" only means the gateway could open the connection.
+    id: 'blustream-pwr8iec',
+    class: 'relay',
+    features: ['on_off'],
+    name: 'Blustream PWR8IEC power controller',
+    description:
+      'Blustream PWR8IEC / PWR4IEC / PWR2IEC IEC power controllers, over the Telnet console (port 23). "Power" switches every outlet at once; the per-outlet commands (command.outlet1_on, command.outlet1_off, and so on up to outlet8) switch one, for however many the physical unit has.',
+    transport: { type: 'tcp', port: 23, terminator: '\r\n', timeoutMs: 3000 },
+    commands: {
+      'power.on': { send: 'ALLOUT ON' },
+      'power.off': { send: 'ALLOUT OFF' },
+      ...Object.fromEntries(
+        Array.from({ length: 8 }, (_, i) => i + 1).flatMap((n) => [
+          [`command.outlet${n}_on`, { send: `OUTLET ${n} ON` }],
+          [`command.outlet${n}_off`, { send: `OUTLET ${n} OFF` }],
+        ]),
+      ),
+    },
+    feedback: { poll: [], patterns: [] },
+  },
+  {
     // Kramer matrix switchers over Protocol 3000 (TCP 5000, commands ended by CR). `#ROUTE layer,dest,src`
     // is answered `~nn@ROUTE layer,dest,src`; layer 1 is video. Checked against Kramer's Protocol 3000
     // reference.

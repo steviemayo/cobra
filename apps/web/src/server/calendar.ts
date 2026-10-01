@@ -203,6 +203,7 @@ export async function meetingsBetween(
   to: Date,
   deps: Deps,
   now = Date.now(),
+  limit = MAX_MEETINGS * 2,
 ): Promise<Meeting[]> {
   const shape = (
     id: string,
@@ -237,7 +238,7 @@ export async function meetingsBetween(
       'id,subject,organizer,start,end,isCancelled,isAllDay,sensitivity',
     );
     url.searchParams.set('$orderby', 'start/dateTime');
-    url.searchParams.set('$top', String(MAX_MEETINGS * 2));
+    url.searchParams.set('$top', String(limit));
     const res = await deps.fetch(url, {
       headers: { authorization: `Bearer ${token}`, prefer: 'outlook.timezone="UTC"' },
       signal: AbortSignal.timeout(10_000),
@@ -275,7 +276,7 @@ export async function meetingsBetween(
   url.searchParams.set('timeMax', to.toISOString());
   url.searchParams.set('singleEvents', 'true');
   url.searchParams.set('orderBy', 'startTime');
-  url.searchParams.set('maxResults', String(MAX_MEETINGS * 2));
+  url.searchParams.set('maxResults', String(limit));
   const res = await deps.fetch(url, {
     headers: { authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(10_000),
@@ -302,6 +303,21 @@ export async function meetingsBetween(
           e.organizer?.displayName || e.organizer?.email,
         ),
   );
+}
+
+/** A saved profile's credentials, opened. Null when it can't be read (wrong key, damaged). */
+export function openProfile(
+  c: { provider: string; sealed: string },
+  secretsKey: string,
+): CalendarCredentials | null {
+  try {
+    return CalendarCredentials.parse({
+      provider: c.provider,
+      ...JSON.parse(open(c.sealed, secretsKey)),
+    });
+  } catch {
+    return null;
+  }
 }
 
 /** Checks the credentials by signing in. Used when someone adds a connection. */

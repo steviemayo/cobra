@@ -1,7 +1,8 @@
-import { chmodSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { SignedManifest, TelemetryEvent } from '@kestrel/model';
+import type { Logger } from './log';
 
 const MAX_UNSENT = 20_000;
 
@@ -16,6 +17,17 @@ export class Store {
     // The credential and the room's device logins live in here: private to the account running the gateway.
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path);
+    try {
+      this.init(path);
+    } catch (e) {
+      // A constructor that throws leaves the file open, and an open file cannot be moved or deleted on
+      // Windows: the damaged state would then have to be removed by hand.
+      this.db.close();
+      throw e;
+    }
+  }
+
+  private init(path: string) {
     if (path !== ':memory:' && process.platform !== 'win32') chmodSync(path, 0o600);
     this.db.exec(`
       PRAGMA journal_mode = WAL;
@@ -37,6 +49,14 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS telemetry_unsent ON telemetry (sent, id);
     `);
+  }
+
+  /** Throws if the file is damaged or cannot be written. */
+  selfCheck() {
+    const row = this.db.prepare('PRAGMA quick_check').get() as { quick_check?: string } | undefined;
+    if (row && row.quick_check !== 'ok') throw new Error(`the state file is damaged (${row.quick_check})`);
+    this.set('selfcheck', new Date().toISOString());
+    this.delete('selfcheck');
   }
 
   close() {
@@ -157,5 +177,58 @@ export class Store {
 
   unsentCount(): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM telemetry WHERE sent = 0').get() as { n: number }).n;
+  }
+}
+
+/**
+ * Opens the gateway's store and proves it can be read and written before anything relies on it. A
+ * file that is damaged (a power cut mid-write, a disk problem) or that this account cannot write
+ * (left behind by an earlier install that ran as someone else) would otherwise crash the gateway on
+ * every start, for ever. It is set aside as `gateway.db.broken-<time>` and a fresh one is made: the
+ * gateway then enrols or announces again, which is what wiping the folder by hand would do, without
+ * anyone having to. If even that cannot be done it runs from memory, so devices are still watched.
+ */
+export function openStore(path: string, log: Logger): Store {
+  const attempt = (): Store => {
+    const store = new Store(path);
+    try {
+      store.selfCheck();
+    } catch (e) {
+      try {
+        store.close();
+      } catch {
+        // already unusable
+      }
+      throw e;
+    }
+    return store;
+  };
+  try {
+    return attempt();
+  } catch (first) {
+    log('error', 'The gateway’s saved state could not be used; setting it aside and starting fresh', {
+      file: path,
+      error: first instanceof Error ? first.message : String(first),
+    });
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  for (const suffix of ['', '-wal', '-shm']) {
+    const file = path + suffix;
+    if (!existsSync(file)) continue;
+    try {
+      renameSync(file, `${path}.broken-${stamp}${suffix}`);
+    } catch (e) {
+      log('warn', 'Could not move a damaged state file aside', { file, error: String(e) });
+    }
+  }
+  try {
+    return attempt();
+  } catch (second) {
+    log('error', 'Could not make a new state file either; running without saving anything', {
+      file: path,
+      error: second instanceof Error ? second.message : String(second),
+      hint: 'Check that the account the gateway runs as can write to its data folder',
+    });
+    return new Store(':memory:');
   }
 }

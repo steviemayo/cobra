@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   PAID_MAX_ROOMS,
+  PLAN_FEATURES,
+  PLAN_LABEL,
   TRIAL_MAX_ROOMS,
   alertChannelAllowed,
   entitlementsFor,
@@ -19,7 +21,7 @@ const state = (over: Partial<BillingState> = {}): BillingState => ({
 });
 
 describe('entitlements', () => {
-  it('gives a trial control, monitoring and every alert channel, but not the marketplace, limited to five rooms', () => {
+  it('gives a trial every feature and alert channel except the marketplace, limited to five rooms', () => {
     const e = entitlementsFor(state(), NOW);
     expect(e).toMatchObject({
       plan: 'trial',
@@ -31,7 +33,15 @@ describe('entitlements', () => {
       maxRooms: TRIAL_MAX_ROOMS,
       trialDaysLeft: 10,
     });
-    expect(e.marketplaceBuy || e.marketplacePublish || e.driverCreate).toBe(false);
+    expect(e.marketplaceBuy || e.marketplacePublish).toBe(false);
+    expect(e).toMatchObject({
+      configuration: true,
+      registerIssues: true,
+      maintenance: true,
+      serviceDesk: true,
+      usageDefinitions: true,
+      driverCreate: true,
+    });
   });
 
   it('drops to monitoring only when the trial ends: no control, alerts, analytics or new rooms', () => {
@@ -133,6 +143,60 @@ describe('entitlements', () => {
       expect(alertChannelAllowed(ended, t), t).toBe(false);
     }
     expect(alertChannelAllowed(ended, 'email')).toBe(false);
+  });
+});
+
+describe('Essentials and Pro (v2)', () => {
+  const paying = (plan: 'basic' | 'pro') =>
+    entitlementsFor({ plan, status: 'active', trialEndsAt: null }, NOW);
+
+  it('Essentials has monitoring, the register, alerts by email and usage, but none of the Pro features', () => {
+    const e = paying('basic');
+    expect(e).toMatchObject({
+      monitoring: true,
+      alerts: true,
+      analytics: true,
+      allAlertChannels: false,
+    });
+    expect(
+      e.configuration ||
+        e.registerIssues ||
+        e.maintenance ||
+        e.serviceDesk ||
+        e.usageDefinitions ||
+        e.driverCreate,
+    ).toBe(false);
+  });
+
+  it('Pro adds configuration, signed register issues, maintenance, service desks, own definitions and every alert channel', () => {
+    expect(paying('pro')).toMatchObject({
+      configuration: true,
+      registerIssues: true,
+      maintenance: true,
+      serviceDesk: true,
+      usageDefinitions: true,
+      allAlertChannels: true,
+    });
+  });
+
+  it('an ended trial and a lapsed subscription switch the Pro features off but keep monitoring', () => {
+    const ended = entitlementsFor(
+      { plan: 'trial', status: 'none', trialEndsAt: new Date(NOW.getTime() - 1000) },
+      NOW,
+    );
+    expect(ended).toMatchObject({
+      monitoring: true,
+      configuration: false,
+      maintenance: false,
+      registerIssues: false,
+    });
+    const lapsed = entitlementsFor({ plan: 'pro', status: 'canceled', trialEndsAt: null }, NOW);
+    expect(lapsed).toMatchObject({ monitoring: true, configuration: false, serviceDesk: false });
+  });
+
+  it('calls the lower plan Essentials', () => {
+    expect(PLAN_LABEL.basic).toBe('Essentials');
+    expect(PLAN_FEATURES.basic.label).toBe('Essentials');
   });
 });
 

@@ -104,4 +104,9 @@ export const INCIDENT_KIND_LABEL: Record<string, string> = {
   room_fault: 'Room fault',
   deploy_failed: 'Release refused',
   point_alert: 'Watched value out of bounds',
+  config_drift: 'Setting changed',
+  config_enforce_failed: 'Setting could not be put back',
+  pm_overdue: 'Maintenance overdue',
+  latency_high: 'Slow responses',
+  network_degraded: 'Network slow',
 };

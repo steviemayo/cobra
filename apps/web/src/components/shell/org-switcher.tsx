@@ -46,19 +46,37 @@ export function OrgSwitcher() {
             <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-64">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Organisations</DropdownMenuLabel>
-              {orgs.map((o) => (
+            {(() => {
+              // Your own organisations first (a provider's is its Internal estate), then customers you work in through a provider.
+              const own = orgs.filter((o) => !o.via);
+              const customers = orgs.filter((o) => o.via);
+              const item = (o: (typeof orgs)[number]) => (
                 <DropdownMenuItem key={o.id} onClick={() => router.push(orgPath(o.id))}>
                   <OrgAvatar name={o.name} />
                   <span className="flex-1 truncate">{o.name}</span>
-                  {o.via && (
+                  {o.via ? (
                     <span className="truncate text-xs text-muted-foreground">via {o.via}</span>
-                  )}
+                  ) : o.kind === 'msp' ? (
+                    <span className="truncate text-xs text-muted-foreground">Internal estate</span>
+                  ) : null}
                   {o.id === org.id && <Check className="size-4" />}
                 </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
+              );
+              return (
+                <>
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Organisations</DropdownMenuLabel>
+                    {own.map(item)}
+                  </DropdownMenuGroup>
+                  {customers.length > 0 && (
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Customers</DropdownMenuLabel>
+                      {customers.map(item)}
+                    </DropdownMenuGroup>
+                  )}
+                </>
+              );
+            })()}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => router.push('/onboarding?new=1')}>
               <Plus className="size-4" />

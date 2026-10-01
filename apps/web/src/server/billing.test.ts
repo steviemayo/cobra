@@ -2,6 +2,8 @@ import Stripe from 'stripe';
 import { describe, expect, it } from 'vitest';
 import { entitlementsFor } from '@kestrel/model';
 import {
+  canMonitorRoom,
+  monitoredRoomIds,
   applyStripeSubscription,
   canAddRoom,
   ensureBilling,
@@ -260,5 +262,39 @@ describe('Stripe signatures', () => {
     await expect(
       stripe.webhooks.constructEventAsync(payload + ' ', good, secret),
     ).rejects.toThrow();
+  });
+});
+
+describe('monitored rooms (what is charged)', () => {
+  const ORG2 = '11111111-1111-4111-8111-111111111111';
+  const world = () => {
+    const room = table([
+      { id: 'r1', orgId: ORG2, kind: 'standard' },
+      { id: 'r2', orgId: ORG2, kind: 'standard' },
+      { id: 'r3', orgId: ORG2, kind: 'staging' },
+      { id: 'r4', orgId: ORG2, kind: 'standard' },
+    ]);
+    const device = table([
+      { id: 'd1', orgId: ORG2, roomId: 'r1', kind: 'active' },
+      { id: 'd2', orgId: ORG2, roomId: 'r1', kind: 'active' },
+      { id: 'd3', orgId: ORG2, roomId: 'r2', kind: 'passive' },
+      { id: 'd4', orgId: ORG2, roomId: 'r3', kind: 'active' },
+    ]);
+    const deviceStatus = table([{ id: 's1', orgId: ORG2, roomId: 'r4' }]);
+    return { room, device, deviceStatus } as never;
+  };
+
+  it('counts a room once it has a monitored device, however many, and not recorded-only or staging rooms', async () => {
+    const ids = await monitoredRoomIds(world(), ORG2);
+    expect([...ids].sort()).toEqual(['r1', 'r4']);
+  });
+
+  it('lets a monitored room take more devices, and stops a new room over the limit', async () => {
+    const e = { maxRooms: 2 } as never;
+    expect(await canMonitorRoom(world(), ORG2, e, 'r1')).toBe(true);
+    expect(await canMonitorRoom(world(), ORG2, e, 'r2')).toBe(false);
+    expect(await canMonitorRoom(world(), ORG2, { maxRooms: 3 } as never, 'r2')).toBe(true);
+    expect(await canMonitorRoom(world(), ORG2, { maxRooms: null } as never, 'r2')).toBe(true);
+    expect(await canMonitorRoom(world(), ORG2, e, null)).toBe(true);
   });
 });

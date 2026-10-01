@@ -1,10 +1,8 @@
 import { hostname as machineName } from 'node:os';
 import { isIP } from 'node:net';
-
-// A web page can reach a gateway on the customer's network from a browser that is on it: it can open
-// a WebSocket to the panel from any origin, and with DNS rebinding it can make the browser treat
-// the gateway as the page's own site. Two checks close that: the Host header must be a name the
-// gateway is meant to be reached by, and a WebSocket must come from a page the gateway itself served.
+// A web page can reach a gateway on the customer's network from a browser that is on it: with DNS
+// rebinding it can make the browser treat the gateway as the page's own site. The Host header must
+// be a name the gateway is meant to be reached by.
 
 /** The host part of a Host header, lower case, without the port or IPv6 brackets. */
 export function hostOnly(header: string | undefined): string | null {
@@ -42,21 +40,3 @@ export function makeHostCheck(
     return listed.some((p) => p === '*' || p === name || (p.startsWith('*.') && name.endsWith(p.slice(1))));
   };
 }
-
-/**
- * A WebSocket opened by a page must come from a page this gateway served: its Origin has the same
- * host as the request. No Origin at all means a program rather than a browser, which is allowed
- * (a web page cannot leave it out).
- */
-export function sameOrigin(origin: string | undefined, hostHeader: string | undefined): boolean {
-  if (origin === undefined) return true;
-  try {
-    return new URL(origin).host.toLowerCase() === (hostHeader ?? '').trim().toLowerCase();
-  } catch {
-    return false;
-  }
-}
-
-/** Physical things a panel can move. One at a time per room, and each is logged with who asked. */
-export const ACTUATOR_INTENTS: ReadonlySet<string> = new Set(['divider.set', 'mover.run']);
-export const ACTUATOR_MIN_INTERVAL_MS = 2000;

@@ -44,10 +44,13 @@ export function publicPanel(p: StoredPanel) {
 
 export const PanelInput = z.object({
   mode: z.enum(['open', 'pin']),
-  /** New PIN (4-8 digits). Omit to keep the current one. */
+  /**
+   * New PIN (6-8 digits; a room already using a shorter one keeps it until it is changed). Omit to
+   * keep the current one.
+   */
   pin: z
     .string()
-    .regex(/^\d{4,8}$/, 'PIN must be 4 to 8 digits')
+    .regex(/^\d{6,8}$/, 'PIN must be 6 to 8 digits')
     .optional(),
   trustedIps: z.array(z.string().trim().min(2).max(45)).max(50).default([]),
   branding: PanelBranding,

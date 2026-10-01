@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import type { Prisma, PrismaClient } from '@kestrel/db';
+import type { PrismaClient } from '@kestrel/db';
 import type { PanelBranding } from '@kestrel/model';
+import { writeAudit } from './audit';
 import { readOrgBranding } from './panel-settings';
 
 // White label for service providers. A provider sets how it presents itself (a name, a logo and a
@@ -40,18 +41,6 @@ export interface PortalBrand {
   accent?: string;
 }
 
-async function audit(
-  db: BrandDb,
-  orgId: string,
-  actorId: string | null,
-  action: string,
-  meta: Record<string, unknown>,
-) {
-  await db.auditLog.create({
-    data: { orgId, actorId, action, target: orgId, meta: meta as Prisma.InputJsonValue },
-  });
-}
-
 export async function getProviderBrand(
   db: BrandDb,
   mspOrgId: string,
@@ -75,7 +64,7 @@ export async function saveProviderBrand(
   if (await db.providerBrand.findFirst({ where: { mspOrgId: args.mspOrgId } }))
     await db.providerBrand.update({ where: { mspOrgId: args.mspOrgId }, data });
   else await db.providerBrand.create({ data: { mspOrgId: args.mspOrgId, ...data } });
-  await audit(db, args.mspOrgId, args.actorId, 'msp.brand', { name: data.name });
+  await writeAudit({ orgId: args.mspOrgId, actorId: args.actorId, action: 'msp.brand', meta: { name: data.name } }, db);
   return data;
 }
 
@@ -100,9 +89,15 @@ export async function setUseBrand(
       data: { useBrand: false },
     });
   await db.mspGrant.update({ where: { id: grant.id }, data: { useBrand: args.on } });
-  await audit(db, args.customerOrgId, args.actorId, args.on ? 'msp.brand_on' : 'msp.brand_off', {
-    msp: provider?.name,
-  });
+  await writeAudit(
+    {
+      orgId: args.customerOrgId,
+      actorId: args.actorId,
+      action: args.on ? 'msp.brand_on' : 'msp.brand_off',
+      meta: { msp: provider?.name },
+    },
+    db,
+  );
 }
 
 /**

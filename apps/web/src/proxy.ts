@@ -2,7 +2,15 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { staffHostVerdict } from '@/lib/staff-host';
 
-const PUBLIC_PREFIXES = ['/login', '/signup', '/forgot-password', '/auth/', '/invite/', '/c/'];
+const PUBLIC_PREFIXES = [
+  '/login',
+  '/signup',
+  '/forgot-password',
+  '/auth/',
+  '/invite/',
+  '/c/',
+  '/verify',
+];
 const GUEST_ONLY = ['/login', '/signup', '/forgot-password'];
 
 export async function proxy(request: NextRequest) {

@@ -2,17 +2,15 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { DoorOpen, MoreHorizontal, PencilRuler, Trash2 } from 'lucide-react';
+import { useMutation } from '@tanstack/react-query';
+import { DoorOpen, MoreHorizontal, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useBilling } from '@/components/common/plan-gate';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { NavTabs } from '@/components/common/nav-tabs';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/common/page-header';
-import { SyncBadge } from '@/components/common/deploy-status';
-import { DesignBadge } from '@/components/common/status';
+import { useBilling } from '@/components/common/plan-gate';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
@@ -37,18 +35,12 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
   const router = useRouter();
   const pathname = usePathname();
   const { orgId, canEdit, canSupport } = useOrg();
-  // Without control (Basic, an ended trial) the simulator and control tabs stay visible but locked.
-  const control = useBilling().data?.entitlements.control ?? true;
+  const maintenance = useBilling().data?.entitlements.maintenance ?? true;
   const { room, isPending } = useRoom(roomId);
   const onDesign = pathname.endsWith('/design') || pathname.endsWith('/simulate');
   const shellWidth = onDesign ? 'max-w-none' : 'max-w-6xl';
   const invalidate = useInvalidateEstate();
   const [deleting, setDeleting] = useState(false);
-  const deploy = useQuery({
-    ...trpc.deployment.roomStatus.queryOptions({ orgId, roomId }),
-    refetchInterval: (q) => (q.state.data?.state === 'deploying' ? 3_000 : 15_000),
-  });
-
   const del = useMutation(
     trpc.room.delete.mutationOptions({
       onSuccess: async () => {
@@ -110,25 +102,10 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
               <span aria-hidden className="text-muted-foreground/50">
                 ·
               </span>
-              <DesignBadge draft={room.draft} monitorOnly={room.monitorOnly} />
-              {deploy.data && room.gateway && (
-                <>
-                  <span aria-hidden className="text-muted-foreground/50">
-                    ·
-                  </span>
-                  <SyncBadge state={deploy.data.state} />
-                </>
-              )}
             </>
           }
           actions={
             <>
-              {!onDesign && canSupport && (
-                <Link href={`${base}/design`} className={buttonVariants({ size: 'sm' })}>
-                  <PencilRuler data-icon="inline-start" />
-                  {canEdit ? 'Open designer' : 'View design'}
-                </Link>
-              )}
               {canEdit && (
                 <DropdownMenu>
                   <DropdownMenuTrigger
@@ -152,17 +129,13 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
         />
         <NavTabs
           tabs={[
-            ...(canSupport
-              ? [
-                  { label: 'Overview', href: base, exact: true },
-                  { label: 'Design', href: `${base}/design` },
-                  { label: 'Simulate', href: `${base}/simulate`, locked: !control },
-                  { label: 'Devices', href: `${base}/devices` },
-                  { label: 'Deployments', href: `${base}/deployments` },
-                  { label: 'Commissioning', href: `${base}/commissioning` },
-                ]
-              : []),
-            { label: 'Control', href: `${base}/control`, locked: !control },
+            // v2 pivot (PV-1, step M0): the designer, simulator, control, deploy and commissioning
+            // tabs are hidden with the control platform. Routes stay until the staged removal.
+            { label: 'Overview', href: base, exact: true },
+            ...(canSupport ? [{ label: 'Devices', href: `${base}/devices` }] : []),
+            { label: 'Usage', href: `${base}/usage` },
+            { label: 'Calendar', href: `${base}/calendar` },
+            { label: 'Maintenance', href: `${base}/maintenance`, locked: !maintenance },
             { label: 'Monitoring', href: `${base}/monitoring` },
             ...(canEdit ? [{ label: 'Settings', href: `${base}/settings` }] : []),
           ]}

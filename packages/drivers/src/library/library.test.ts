@@ -42,7 +42,7 @@ const httpServer = async (handler: http.RequestListener) => {
 
 describe('bundled drivers', () => {
   it('are all valid driver specs', () => {
-    expect(Object.keys(LIBRARY).sort()).toEqual(['lib:cisco-roomos', 'lib:extron-sis', 'lib:kramer-p3000', 'lib:lg-signage', 'lib:lutron-lip', 'lib:shelly-relay', 'lib:sony-bravia']);
+    expect(Object.keys(LIBRARY).sort()).toEqual(['lib:blustream-pwr8iec', 'lib:cisco-roomos', 'lib:extron-sis', 'lib:kramer-p3000', 'lib:lg-signage', 'lib:lutron-lip', 'lib:shelly-relay', 'lib:sony-bravia']);
     for (const spec of Object.values(LIBRARY)) expect(checkDriverSpec(spec).ok, spec.id).toBe(true);
   });
 
@@ -95,6 +95,27 @@ describe('bundled drivers', () => {
     await d.send({ type: 'command', name: 'up', args: {} });
     expect(urls).toContain('/relay/0?turn=on&timer=25');
     expect(urls).toContain('/relay/1?turn=on&timer=25');
+  });
+
+  it('Blustream PWR8IEC switches all outlets together, or one at a time', async () => {
+    const seen: string[] = [];
+    const server = createServer((s) => {
+      s.on('error', () => undefined);
+      s.on('data', (c) => seen.push(...c.toString().split('\r\n').filter(Boolean)));
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    closers.push(() => server.close());
+    const port = (server.address() as { port: number }).port;
+    const d = createDriver(dev('lib:blustream-pwr8iec', { host: '127.0.0.1', port }), ctx)!;
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    await d.send({ type: 'power', on: true });
+    await d.send({ type: 'command', name: 'outlet3_off', args: {} });
+    await d.send({ type: 'command', name: 'outlet8_on', args: {} });
+    await until(() => seen.length >= 3);
+    expect(seen).toEqual(['ALLOUT ON', 'OUTLET 3 OFF', 'OUTLET 8 ON']);
+    expect(d.getState().power).toBe('on');
   });
 
   it('Cisco sends its XML with the credentials from its settings', async () => {

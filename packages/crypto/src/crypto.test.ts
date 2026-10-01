@@ -213,7 +213,9 @@ describe('phone access tokens', () => {
     expect(verifyAccess(secret, 'session', t, now)).toBeNull();
     expect(verifyAccess(generateSecret(), 'join', t, now)).toBeNull();
     expect(verifyAccess(secret, 'join', t.replace(room, other), now)).toBeNull();
-    expect(verifyAccess(secret, 'join', t.replace(String(now + 600), String(now + 6000)), now)).toBeNull();
+    expect(
+      verifyAccess(secret, 'join', t.replace(String(now + 600), String(now + 6000)), now),
+    ).toBeNull();
   });
 
   it('read a token’s room without trusting it, and reject junk', () => {
@@ -221,5 +223,40 @@ describe('phone access tokens', () => {
     for (const bad of ['', 'nope', `${room}.abc.xyz`, `${room}.${now}.short`, `${room}.${now}`])
       expect(parseAccess(bad), bad).toBeNull();
     expect(verifyAccess(secret, 'join', 'junk', now)).toBeNull();
+  });
+});
+
+describe('signed documents', () => {
+  it('verifies what it signed, and refuses a changed payload, another purpose, or another key', async () => {
+    const { signDocument, verifyDocument, generateKeyPair } = await import('./index');
+    const a = generateKeyPair();
+    const b = generateKeyPair();
+    const trusted = [{ keyId: 'k1', publicKeyPem: a.publicKeyPem }];
+    const doc = signDocument(
+      'register_issue',
+      { number: 1, rows: [{ id: 'x', serial: 'S1' }] },
+      { privateKeyPem: a.privateKeyPem, keyId: 'k1' },
+    );
+    expect(verifyDocument(doc, 'register_issue', trusted).ok).toBe(true);
+    const changed = structuredClone(doc);
+    (changed.payload.rows[0] as { serial: string }).serial = 'S2';
+    expect(verifyDocument(changed, 'register_issue', trusted)).toMatchObject({
+      ok: false,
+      reason: 'hash_mismatch',
+    });
+    expect(verifyDocument(doc, 'pm_report', trusted)).toMatchObject({
+      ok: false,
+      reason: 'wrong_purpose',
+    });
+    expect(
+      verifyDocument(doc, 'register_issue', [{ keyId: 'k1', publicKeyPem: b.publicKeyPem }]),
+    ).toMatchObject({ ok: false, reason: 'bad_signature' });
+    expect(
+      verifyDocument(doc, 'register_issue', [{ keyId: 'other', publicKeyPem: a.publicKeyPem }]),
+    ).toMatchObject({ ok: false, reason: 'unknown_key' });
+    expect(verifyDocument({ nope: true }, 'register_issue', trusted)).toMatchObject({
+      ok: false,
+      reason: 'malformed',
+    });
   });
 });

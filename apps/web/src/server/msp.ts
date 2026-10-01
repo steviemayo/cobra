@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from '@kestrel/db';
+import type { PrismaClient } from '@kestrel/db';
 import {
   bestMspRole,
   effectiveMspRole,
@@ -9,6 +9,7 @@ import {
   type OrgRole,
   type TicketSla,
 } from '@kestrel/model';
+import { writeAudit } from './audit';
 import { effectiveStatus } from './gateway-status';
 import { clearStaleAssignees } from './ticket-assignees';
 import { slaForTicket, slaUrgency } from './tickets';
@@ -38,18 +39,6 @@ const LIVE = ['pending', 'active'];
 
 /** A short code the provider gives customers so they can invite it: its organisation id. */
 export const providerCode = (mspOrgId: string) => mspOrgId;
-
-async function audit(
-  db: MspDb,
-  orgId: string,
-  actorId: string | null,
-  action: string,
-  meta: Record<string, unknown>,
-) {
-  await db.auditLog.create({
-    data: { orgId, actorId, action, target: orgId, meta: meta as Prisma.InputJsonValue },
-  });
-}
 
 /** A customer's owner invites a provider. The provider still has to accept. */
 export async function inviteMsp(
@@ -96,8 +85,24 @@ export async function inviteMsp(
       invitedByEmail: args.by.email,
     },
   });
-  await audit(db, customer.id, args.by.userId, 'msp.invite', { msp: msp.name, role: args.role });
-  await audit(db, msp.id, null, 'msp.invited', { customer: customer.name, role: args.role });
+  await writeAudit(
+    {
+      orgId: customer.id,
+      actorId: args.by.userId,
+      action: 'msp.invite',
+      meta: { msp: msp.name, role: args.role },
+    },
+    db,
+  );
+  await writeAudit(
+    {
+      orgId: msp.id,
+      actorId: null,
+      action: 'msp.invited',
+      meta: { customer: customer.name, role: args.role },
+    },
+    db,
+  );
   return { id: grant.id };
 }
 
@@ -124,8 +129,11 @@ export async function respondToInvite(
     db.org.findFirst({ where: { id: g.customerOrgId } }),
   ]);
   const action = args.accept ? 'msp.accepted' : 'msp.declined';
-  await audit(db, g.customerOrgId, null, action, { msp: msp?.name });
-  await audit(db, g.mspOrgId, args.by, action, { customer: customer?.name });
+  await writeAudit({ orgId: g.customerOrgId, actorId: null, action, meta: { msp: msp?.name } }, db);
+  await writeAudit(
+    { orgId: g.mspOrgId, actorId: args.by, action, meta: { customer: customer?.name } },
+    db,
+  );
 }
 
 /** Either side ends the relationship (or the customer withdraws a pending invitation). */
@@ -156,14 +164,24 @@ export async function endGrant(
     db.org.findFirst({ where: { id: g.customerOrgId } }),
   ]);
   const byCustomer = args.orgId === g.customerOrgId;
-  await audit(db, g.customerOrgId, byCustomer ? args.by : null, 'msp.ended', {
-    msp: msp?.name,
-    by: byCustomer ? 'you' : 'the service provider',
-  });
-  await audit(db, g.mspOrgId, byCustomer ? null : args.by, 'msp.ended', {
-    customer: customer?.name,
-    by: byCustomer ? 'the customer' : 'you',
-  });
+  await writeAudit(
+    {
+      orgId: g.customerOrgId,
+      actorId: byCustomer ? args.by : null,
+      action: 'msp.ended',
+      meta: { msp: msp?.name, by: byCustomer ? 'you' : 'the service provider' },
+    },
+    db,
+  );
+  await writeAudit(
+    {
+      orgId: g.mspOrgId,
+      actorId: byCustomer ? null : args.by,
+      action: 'msp.ended',
+      meta: { customer: customer?.name, by: byCustomer ? 'the customer' : 'you' },
+    },
+    db,
+  );
 }
 
 export interface CustomerGrantView {
@@ -177,6 +195,7 @@ export interface CustomerGrantView {
   /** The owner chose to show this provider's name, logo and colour. */
   useBrand: boolean;
   createdAt: Date;
+  endsAt: Date | null;
 }
 
 /** The providers a customer has invited or works with. */
@@ -200,6 +219,7 @@ export async function grantsForCustomer(
     status: g.status,
     siteNames: g.siteIds.map((id) => siteName.get(id) ?? 'Unknown site'),
     useBrand: !!g.useBrand,
+    endsAt: g.endsAt,
     createdAt: g.createdAt,
   }));
 }
@@ -287,13 +307,17 @@ export async function mspAccess(
     },
   });
   const roleIn = new Map(memberships.map((m) => [m.orgId, m.role as OrgRole]));
+  const now = Date.now();
   const found = resolve(
-    grants.map((g) => ({
-      memberRole: roleIn.get(g.mspOrgId)!,
-      grant: g.role as GrantRole,
-      mspOrgId: g.mspOrgId,
-      siteIds: g.siteIds,
-    })),
+    // A connection past its end date no longer counts, even before the daily clean-up ends it.
+    grants
+      .filter((g) => !g.endsAt || g.endsAt.getTime() > now)
+      .map((g) => ({
+        memberRole: roleIn.get(g.mspOrgId)!,
+        grant: g.role as GrantRole,
+        mspOrgId: g.mspOrgId,
+        siteIds: g.siteIds,
+      })),
   );
   if (!found) return null;
   // Name the provider that gave the role, for the banner and the activity log.

@@ -18,8 +18,24 @@ describe('safeNext', () => {
       '',
       null,
       undefined,
+      '/\t/evil.com',
+      '/\n/evil.com',
+      '/\r/evil.com',
+      '/\u0000/evil.com',
+      '/\t\tevil.com',
     ])
       expect(safeNext(bad), String(bad)).toBe('/');
+  });
+
+  it('keeps the query and hash of a same-site path', () => {
+    expect(safeNext('/o/abc/rooms?x=1#y')).toBe('/o/abc/rooms?x=1#y');
+  });
+
+  it('does not confuse an ordinary path for an open redirect just because it looks like one', () => {
+    // These stay on our own origin as literal path segments; they are not bypasses.
+    expect(safeNext('/@evil.com')).toBe('/@evil.com');
+    expect(safeNext('/.evil.com')).toBe('/.evil.com');
+    expect(safeNext('/%09/evil.com')).toBe('/%09/evil.com');
   });
 
   it('uses the given fallback', () => {

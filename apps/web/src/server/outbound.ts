@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { request as httpsRequest, type RequestOptions } from 'node:https';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
@@ -224,4 +225,25 @@ export async function postJson(
     signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`The destination answered HTTP ${res.status}`);
+}
+
+/**
+ * POSTs a JSON payload to a user-supplied address, HMAC-signing it when a secret is set (webhooks
+ * and Teams URLs; a receiver checks `x-kestrel-signature` to confirm it came from Kestrel).
+ */
+export async function postSigned(
+  d: PostDeps,
+  rawUrl: string,
+  payload: unknown,
+  secret?: string,
+): Promise<void> {
+  const body = JSON.stringify(payload);
+  const headers: Record<string, string> = {};
+  if (secret) {
+    const ts = String(Math.floor(Date.now() / 1000));
+    headers['x-kestrel-timestamp'] = ts;
+    headers['x-kestrel-signature'] =
+      `sha256=${createHmac('sha256', secret).update(`${ts}.${body}`).digest('hex')}`;
+  }
+  await postJson(d, rawUrl, body, headers);
 }

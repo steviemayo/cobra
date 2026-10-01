@@ -1,5 +1,9 @@
 # Kestrel — Build Plan (phased)
 
+> ## PIVOT 2026-09-30: this plan is v1 (control platform first) and is now frozen
+> Kestrel now leads with **monitoring, configuration/deployment, support and analytics**; the control platform and generated panel are deferred to a later add-on. **Everything below this box is v1 history** (phases 0-7, steps B-Y). The live plan is `docs/pivot-monitoring.md` (steps M0-M7). Decisions: `docs/decisions.md` PV-1 onward. Diagrams: `docs/diagrams.md` part "v2". The last v1 commit is to be tagged `control-platform-v1` before any removal.
+
+
 > Proposed. Each phase ends in something demoable. MVP = Phases 0–4 (+ thin slice of 5).
 
 ## Key Architectural Bets
@@ -687,24 +691,9 @@ Where the status of a step lives: this table for what and what is left, `docs/de
 
 ### Security review: pending issues (2026-09-28)
 
-The critical and high findings are fixed (`docs/decisions.md` Step V). These are the **medium** ones, agreed to be done later; the evidence and the recommended fix for each is in `docs/security-audit-2026-09-28.md`. The low ones (L1 to L10) are listed there too. When one is picked up, fix every instance the report lists, with a test that fails if a new instance skips it.
+The critical and high findings are fixed (`docs/decisions.md` Step V). The medium findings (M1 to M12) are now fixed too (`docs/decisions.md` Step W); the evidence and original recommended fix for each is still in `docs/security-audit-2026-09-28.md`. Two pieces were deliberately left open rather than half-fixed, both recorded in Step W: **M5** has no session revocation or per-room phone-control switch yet (needs a schema change); **M10**'s admin page still serves over plain HTTP on the LAN (a loopback-default-with-opt-in or a TLS story both need a product decision first). The low findings (L1 to L10) are listed in the audit doc and still pending.
 
-| # | Pending issue | Instances to fix together |
-|---|---|---|
-| M1 | Open redirect after sign-in: `safeNext` accepts `/\t/evil.com` | `lib/auth-redirect.ts` and every reader of `next`: login form, signup form, invite accept, SSO redirect, auth callback |
-| M2 | No security headers on the portal (CSP, frame-ancestors, nosniff, Permissions-Policy) | `next.config.ts` `headers()` for the whole web app |
-| M3 | No effective rate limiting (the one limiter is per process and runs after authentication) | enrolment, announce, `invite.preview`, webhook hooks, phone join, API-key authentication, `org.create`, `join-request.create` |
-| M4 | Panel PIN: per-address lockout, short PINs, PIN hash inside manifests readable by org members; rooms default to open | `panel-server.ts`, `panel-settings.ts`, the manifest's `panel.access` |
-| M5 | Phone-control sessions last 2 hours, cannot be revoked, allow every panel action including walls and lifts | `phone-control.ts`, `control-service.ts` |
-| M6 | Alert emails go to unverified addresses with user-controlled text (a relay from Kestrel's sending domain) | `alerts.ts` email sender, the three Resend senders (also the DRY sweep) |
-| M7 | Dependencies: `@fastify/static` in the gateway (traversal was tested and blocked); no `pnpm audit`, Dependabot or CodeQL in CI | gateway `package.json`, `.github/workflows` |
-| M8 | CI and supply chain: actions pinned by tag, no `permissions` on `ci.yml`, unsigned installer and Docker images, mutable rolling releases, Watchtower (unmaintained) with the Docker socket, Docker updates not verified | all three workflows, `docker-compose.yml`, `setup.iss` |
-| M9 | Custom-driver regexes are only syntax-checked (ReDoS stalls a gateway) | `driver-spec.ts`, `declarative.ts`, `generic-tcp.ts`, `serial.ts`, `driver-example.ts` |
-| M10 | Gateway local admin page over plain HTTP on the LAN; status page lists room ids | `local-admin.ts` |
-| M11 | Announce endpoint can be filled to its cap (blocks real installs); address taken from a forwarded header; size check trusts `content-length` | `gateway-announce.ts`, the announce route |
-| M12 | A dev-role user can point a gateway at any address, including loopback and link-local | `commands.ts` (test device, verify point), the generic TCP and REST drivers |
-
-Also still open from Step V: a first-run PIN for rooms with walls or lifts (V-4), key rotation statements and anti-rollback for room releases, code signing for the installer, and the DRY sweep, which waits until these are done.
+Next: the DRY sweep, which waited until the mediums landed.
 
 ### Small fixes to fit in anywhere
 

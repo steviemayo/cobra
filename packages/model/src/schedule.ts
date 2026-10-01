@@ -19,6 +19,10 @@ export type Meeting = z.infer<typeof Meeting>;
 export const MAX_MEETINGS = 20;
 export const Meetings = z.array(Meeting).max(MAX_MEETINGS);
 
+/** The most meetings Kestrel keeps for one room: about two weeks of bookings, for the week view. */
+export const MAX_STORED_MEETINGS = 300;
+export const StoredMeetings = z.array(Meeting).max(MAX_STORED_MEETINGS);
+
 /** A room's meetings as the cloud hands them to a gateway. */
 export const RoomMeetings = z.object({ roomId: z.string().uuid(), meetings: Meetings });
 export type RoomMeetings = z.infer<typeof RoomMeetings>;

@@ -50,6 +50,7 @@ export function matches(row: Row, where: Row = {}): boolean {
           (!('gt' in c) || t > at(c.gt!))
         );
     }
+    if (cond instanceof Date && v instanceof Date) return v.getTime() === cond.getTime();
     return v === cond;
   });
 }
@@ -63,7 +64,17 @@ const compare = (a: unknown, b: unknown) => {
 export function table(rows: Row[], uniqueOn?: string[]) {
   return {
     rows,
-    findFirst: async ({ where }: { where?: Row }) => rows.find((r) => matches(r, where)) ?? null,
+    findFirst: async ({
+      where,
+      orderBy,
+    }: { where?: Row; orderBy?: Record<string, 'asc' | 'desc'> } = {}) => {
+      const hit = rows.filter((r) => matches(r, where));
+      if (orderBy) {
+        const [[key, dir]] = Object.entries(orderBy) as [[string, 'asc' | 'desc']];
+        hit.sort((a, b) => compare(a[key], b[key]) * (dir === 'desc' ? -1 : 1));
+      }
+      return hit[0] ?? null;
+    },
     findMany: async ({
       where,
       orderBy,

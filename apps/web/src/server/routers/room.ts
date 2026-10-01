@@ -2,23 +2,17 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
-import { generateSecret, hashSecret } from '@kestrel/crypto';
 import { RoomModel, RoomType } from '@kestrel/model';
 import { writeAudit } from '../audit';
-import { canAddRoom, getEntitlements, roomLimitMessage } from '../billing';
+import { getEntitlements, roomLimitMessage } from '../billing';
 import { checkDeployable } from '../deploy-check';
 import { sharedGatewayProblem } from '../site-devices';
 import { createDeployment } from '../deployment-service';
-import { DuplicateRoomError, duplicateRoom } from '../duplicate-room';
 import { effectiveStatus } from '../gateway-service';
-import { PanelInput, applyPanelInput, publicPanel, readPanel } from '../panel-settings';
 import { summariseDraft } from '../room-summary';
 import { syncQuantity } from '../stripe';
 import { SITE_SCOPED, siteFilter } from '../site-scope';
 import { orgProcedure, requireRole, router } from '../trpc';
-import { designOnly } from './room-model-helpers';
-import { promoteStaging, PromoteError } from '../promote-staging';
-import { STAGING, billedRooms } from '../room-kinds';
 
 const orgId = z.string().uuid();
 const roomId = z.string().uuid();
@@ -158,12 +152,9 @@ export const roomRouter = router({
       requireRole(ctx.role, ['owner', 'dev']);
       const site = await assertSite(ctx.orgId, input.siteId);
       const entitlements = await getEntitlements(db, ctx.orgId);
-      if (
-        !canAddRoom(
-          entitlements,
-          await db.room.count({ where: { orgId: ctx.orgId, ...billedRooms } }),
-        )
-      )
+      // A room is free until it has a monitored device (see monitoredRoomIds), so only an ended
+      // trial stops one being added.
+      if (entitlements.maxRooms === 0)
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: roomLimitMessage(entitlements),
@@ -185,125 +176,6 @@ export const roomRouter = router({
         ),
       );
       return room;
-    }),
-
-  // A new room at the same site with this room's design and gateway. Addresses are not copied;
-  // the shared logins chosen are.
-  duplicate: orgProcedure
-    .input(z.object({ orgId, roomId, name, staging: z.boolean().default(false) }))
-    .mutation(async ({ ctx, input }) => {
-      requireRole(ctx.role, ['owner', 'dev']);
-      const source = await findRoom(ctx.orgId, input.roomId);
-      if (input.staging && source.kind === STAGING)
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'A staging room cannot have a staging copy of its own.',
-        });
-      if (source.kind === 'combined')
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'A combined room is made from its room group and cannot be copied.',
-        });
-      const draft = await db.roomDraft.findFirst({
-        where: { roomId: source.id, orgId: ctx.orgId },
-      });
-      if (!draft)
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'This room has no design to copy yet',
-        });
-      // A staging room is free, so only a live copy counts against the plan.
-      const entitlements = input.staging ? null : await getEntitlements(db, ctx.orgId);
-      if (
-        entitlements &&
-        !canAddRoom(
-          entitlements,
-          await db.room.count({ where: { orgId: ctx.orgId, ...billedRooms } }),
-        )
-      )
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: roomLimitMessage(entitlements),
-        });
-      const model = await designOnly(ctx.orgId, RoomModel.parse(draft.model));
-      let copy;
-      try {
-        copy = await db.$transaction((tx) =>
-          duplicateRoom(tx as unknown as Parameters<typeof duplicateRoom>[0], {
-            orgId: ctx.orgId,
-            source: {
-              id: source.id,
-              siteId: source.siteId,
-              type: source.type,
-              gatewayId: source.gatewayId,
-            },
-            name: input.name,
-            model,
-            userId: ctx.user.id,
-            kind: input.staging ? 'staging' : 'standard',
-          }),
-        );
-      } catch (e) {
-        if (e instanceof DuplicateRoomError)
-          throw new TRPCError({ code: 'CONFLICT', message: e.message });
-        throw e;
-      }
-      await writeAudit({
-        orgId: ctx.orgId,
-        actorId: ctx.user.id,
-        action: input.staging ? 'room.staging_copy' : 'room.duplicate',
-        target: copy.id,
-        meta: { name: copy.name, from: source.name },
-      });
-      if (!input.staging)
-        after(() =>
-          syncQuantity(db, ctx.orgId).catch((e) =>
-            console.error('[billing] quantity sync failed', e),
-          ),
-        );
-      return copy;
-    }),
-
-  // Put a staging room's design into a live room's working draft. Publishes and deploys nothing; the
-  // live room's draft is kept as a saved version first. Addresses are not copied.
-  promoteStaging: orgProcedure
-    .input(z.object({ orgId, roomId, targetRoomId: roomId }))
-    .mutation(async ({ ctx, input }) => {
-      requireRole(ctx.role, ['owner', 'dev']);
-      const staging = await findRoom(ctx.orgId, input.roomId);
-      const draft = await db.roomDraft.findFirst({
-        where: { roomId: staging.id, orgId: ctx.orgId },
-      });
-      if (!draft)
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'This room has no design to promote yet',
-        });
-      const model = await designOnly(ctx.orgId, RoomModel.parse(draft.model));
-      try {
-        const result = await promoteStaging(db, {
-          orgId: ctx.orgId,
-          stagingId: staging.id,
-          targetId: input.targetRoomId,
-          model,
-          userId: ctx.user.id,
-        });
-        if (result.changed) {
-          const target = await findRoom(ctx.orgId, input.targetRoomId);
-          await writeAudit({
-            orgId: ctx.orgId,
-            actorId: ctx.user.id,
-            action: 'room.staging_promote',
-            target: target.id,
-            meta: { staging: staging.name, room: target.name },
-          });
-        }
-        return result;
-      } catch (e) {
-        if (e instanceof PromoteError)
-          throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
-        throw e;
-      }
     }),
 
   update: orgProcedure
@@ -412,78 +284,5 @@ export const roomRouter = router({
       for (const target of targets)
         await applyGateway(ctx.orgId, ctx.user.id, target, input.gatewayId, gatewayName);
       return { ok: true };
-    }),
-
-  // Webhook triggers: the names the design listens for, and whether a secret has been set.
-  hookInfo: orgProcedure.input(z.object({ orgId, roomId })).query(async ({ ctx, input }) => {
-    requireRole(ctx.role, ['owner', 'dev']);
-    const room = await db.room.findFirst({
-      where: { id: input.roomId, orgId: ctx.orgId },
-      select: { hookSecretHash: true },
-    });
-    if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
-    const draft = await db.roomDraft.findFirst({
-      where: { roomId: input.roomId, orgId: ctx.orgId },
-      select: { model: true },
-    });
-    const triggers =
-      (draft?.model as { triggers?: { type: string; hookName?: string; enabled?: boolean }[] })
-        ?.triggers ?? [];
-    return {
-      hasSecret: !!room.hookSecretHash,
-      hooks: triggers.flatMap((t) => (t.type === 'webhook' && t.hookName ? [t.hookName] : [])),
-    };
-  }),
-
-  // Shown once. Generating a new one stops the old one working straight away.
-  rotateHookSecret: orgProcedure
-    .input(z.object({ orgId, roomId }))
-    .mutation(async ({ ctx, input }) => {
-      requireRole(ctx.role, ['owner', 'dev']);
-      const room = await findRoom(ctx.orgId, input.roomId);
-      const secret = generateSecret(24);
-      await db.room.update({
-        where: { id: room.id },
-        data: { hookSecretHash: hashSecret(secret) },
-      });
-      await writeAudit({
-        orgId: ctx.orgId,
-        actorId: ctx.user.id,
-        action: 'room.hook_secret',
-        target: room.id,
-        meta: { room: room.name },
-      });
-      return { secret };
-    }),
-
-  getPanel: orgProcedure.input(z.object({ orgId, roomId })).query(async ({ ctx, input }) => {
-    requireRole(ctx.role, ['owner', 'dev']);
-    return publicPanel(readPanel((await findRoom(ctx.orgId, input.roomId)).panel));
-  }),
-
-  // Panel access and branding. Takes effect from the next release.
-  setPanel: orgProcedure
-    .input(PanelInput.extend({ orgId, roomId }))
-    .mutation(async ({ ctx, input }) => {
-      requireRole(ctx.role, ['owner', 'dev']);
-      const room = await findRoom(ctx.orgId, input.roomId);
-      let next;
-      try {
-        next = applyPanelInput(readPanel(room.panel), input);
-      } catch (e) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: e instanceof Error ? e.message : 'Invalid',
-        });
-      }
-      await db.room.update({ where: { id: room.id }, data: { panel: next } });
-      await writeAudit({
-        orgId: ctx.orgId,
-        actorId: ctx.user.id,
-        action: 'room.panel',
-        target: room.id,
-        meta: { room: room.name, mode: next.access.mode },
-      });
-      return publicPanel(next);
     }),
 });

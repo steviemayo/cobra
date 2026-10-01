@@ -4,6 +4,8 @@ import { DeclarativeDriver } from './declarative';
 import { GenericTcpDriver } from './generic-tcp';
 import { genericRestDriver } from './generic-rest';
 import { AVOIP_SWITCHER_IDS } from './avoip';
+import { BlustreamAcm1000Driver } from './blustream-acm1000';
+import { BlustreamDa11ablDriver } from './blustream-da11abl';
 import { Crestron4SeriesDriver } from './crestron-4series';
 import { CrestronFlexDriver } from './crestron-flex';
 import { CrestronOccupancyDriver } from './crestron-occupancy';
@@ -59,6 +61,8 @@ const BUILT_IN: Record<string, (device: Device, ctx: DriverContext) => DeviceDri
   'crestron-tsw': (d, c) => new CrestronTswDriver(d, c),
   'crestron-flex': (d, c) => new CrestronFlexDriver(d, c),
   'crestron-occupancy': (d, c) => new CrestronOccupancyDriver(d, c),
+  'blustream-da11abl': (d, c) => new BlustreamDa11ablDriver(d, c),
+  'blustream-acm1000': (d, c) => new BlustreamAcm1000Driver(d, c),
 };
 export const BUILT_IN_DRIVER_IDS = [
   ...Object.keys(BUILT_IN),

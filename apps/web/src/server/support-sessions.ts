@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@kestrel/db';
 import { hasStaffRole } from '@kestrel/model';
+import { writeAudit } from './audit';
 import { recordStaffAudit, type StaffDb } from './staff';
 
 // Support sessions ("view-as"): a staff member working inside a customer's organisation. Every
@@ -141,15 +142,16 @@ export async function startSession(
   });
   // What the customer sees. Unlike a licence adjustment, the reason is shown: it is support work
   // done inside their organisation, and they should know why.
-  await db.auditLog.create({
-    data: {
+  await writeAudit(
+    {
       orgId: input.orgId,
       actorId: null,
       action: 'staff.session.start',
       target: row.id,
       meta: { staff: true, mode: input.mode, minutes: input.minutes, reason, ticketId },
     },
-  });
+    db,
+  );
   await recordStaffAudit(db as unknown as StaffDb, {
     staffUserId: staff.userId,
     action: 'session.start',
@@ -170,15 +172,10 @@ export async function endSession(
   });
   if (!row || row.endedAt) return;
   await db.supportSession.update({ where: { id: row.id }, data: { endedAt: now } });
-  await db.auditLog.create({
-    data: {
-      orgId: row.orgId,
-      actorId: null,
-      action: 'staff.session.end',
-      target: row.id,
-      meta: { staff: true, mode: row.mode },
-    },
-  });
+  await writeAudit(
+    { orgId: row.orgId, actorId: null, action: 'staff.session.end', target: row.id, meta: { staff: true, mode: row.mode } },
+    db,
+  );
   await recordStaffAudit(db as unknown as StaffDb, {
     staffUserId: args.staffUserId,
     action: 'session.end',
@@ -209,15 +206,10 @@ export async function setStaffAccessBlocked(
   args: { orgId: string; blocked: boolean; actorId: string },
 ): Promise<void> {
   await db.org.update({ where: { id: args.orgId }, data: { staffAccessBlocked: args.blocked } });
-  await db.auditLog.create({
-    data: {
-      orgId: args.orgId,
-      actorId: args.actorId,
-      action: 'org.staff_access',
-      target: args.orgId,
-      meta: { blocked: args.blocked },
-    },
-  });
+  await writeAudit(
+    { orgId: args.orgId, actorId: args.actorId, action: 'org.staff_access', meta: { blocked: args.blocked } },
+    db,
+  );
 }
 
 /** Open tickets of an organisation, for linking to a session. */

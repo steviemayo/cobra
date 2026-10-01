@@ -34,6 +34,11 @@ const QSYS_CONTROL = [
   { key: 'component', label: 'Component name' },
   { key: 'control', label: 'Control name' },
 ];
+/** A named control stands alone; a named component's control is addressed by both. */
+const QSYS_NAMED = [
+  { key: 'component', label: 'Component name (blank for a named control)', optional: true },
+  { key: 'control', label: 'Control name' },
+];
 const TESIRA_CHANNEL = [
   { key: 'tag', label: 'Instance tag' },
   { key: 'index', label: 'Channel' },
@@ -184,6 +189,16 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     categories: ['screen', 'lifter'],
     example: { host: '<relay IP>', seconds: 30 },
   },
+  'lib:blustream-pwr8iec': {
+    name: 'Blustream PWR8IEC power controller',
+    description:
+      'Blustream PWR8IEC / PWR4IEC / PWR2IEC IEC power controllers, over Telnet. Switch every outlet at once, or add a command action for one outlet (command.outlet1_on, command.outlet1_off, up to outlet8) for whichever the physical unit has.',
+    class: 'relay',
+    features: ['on_off'],
+    settings: [{ key: 'host', label: 'Controller address', scope: 'binding', required: true }],
+    categories: ['power_outlet'],
+    example: { host: '<controller IP>' },
+  },
   'lib:lutron-lip': {
     name: 'Lutron lighting (Integration Protocol)',
     description: 'Lutron processors: switch and dim a zone, press a keypad button for a scene.',
@@ -261,16 +276,16 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     },
   },
   'qsys-core': {
-    name: 'Q-SYS Core (gain component)',
+    name: 'Q-SYS Core',
     description:
-      'Volume and mute through a gain component on a Q-SYS Core, over QRC. 0-100 on the panel maps to minDb..maxDb. Routing is part of the Q-SYS design.',
+      'A Q-SYS Core over QRC (port 1710). The driver keeps the connection and reports whether the Core answers and its engine status. Then add the control points to watch: named components (gain: gain and mute; router: select.1 to select.n) and named controls (on or off, a whole number, or text). They are read through a change group, so only what changes is sent. Routing is part of the Q-SYS design.',
     class: 'point_based',
     features: ['level', 'mute', 'preset'],
     settings: [
       { key: 'host', label: 'Core address', scope: 'binding', required: true },
       { key: 'username', label: 'Logon name (if the Core needs one)', scope: 'binding' },
       { key: 'password', label: 'Password (if the Core needs one)', scope: 'secret' },
-      { key: 'gainComponent', label: 'Gain component name', scope: 'design', required: true },
+      { key: 'gainComponent', label: 'Gain component name (older room designs only)', scope: 'design' },
       { key: 'gainControl', label: 'Gain control name', scope: 'design' },
       { key: 'muteControl', label: 'Mute control name', scope: 'design' },
       { key: 'minDb', label: 'Level at 0 on the panel (dB)', scope: 'design' },
@@ -281,16 +296,11 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
       mute: QSYS_CONTROL,
       select: QSYS_CONTROL,
       meter: QSYS_CONTROL,
-      generic: QSYS_CONTROL,
+      generic: QSYS_NAMED,
     },
     categories: ['audio_matrix'],
     example: {
       host: '<Core IP>',
-      gainComponent: 'gain',
-      gainControl: 'gain',
-      muteControl: 'mute',
-      minDb: -40,
-      maxDb: 0,
     },
   },
   'crestron-4series': {
@@ -338,6 +348,32 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     points: { generic: CRESTRON_FLEX_JOIN },
     categories: ['conference_system'],
     example: { host: '<UC-Engine IP>', username: 'admin', password: '<password>' },
+  },
+  'blustream-acm1000': {
+    name: 'Blustream ACM1000 virtual AVoIP matrix',
+    description:
+      'A Blustream ACM1000 AVoIP matrix, controlled as one box: the commissioner’s own scan/assign step wires up the encoders and decoders on the ACM1000 itself, so Kestrel only routes on the ACM1000 and never touches the endpoints. Reports how many inputs and outputs it has seen. Not yet verified against real hardware.',
+    class: 'avoip_switching',
+    features: ['route'],
+    settings: [
+      { key: 'host', label: 'ACM1000 address', scope: 'binding', required: true },
+      { key: 'pollMs', label: 'How often to refresh the port list (ms)', scope: 'design' },
+    ],
+    categories: ['video_matrix'],
+    example: { host: '<ACM1000 IP>' },
+  },
+  'blustream-da11abl': {
+    name: 'Blustream DA11ABL-WP-V2 Bluetooth wall plate',
+    description:
+      'A Bluetooth and analogue audio wall plate. Routes the room’s output from its analogue input or a paired phone (route port "in1" is analogue, "in2" is Bluetooth), and reports Bluetooth connection status and the paired device’s name. Not yet verified against real hardware.',
+    class: 'video_switching',
+    features: ['route'],
+    settings: [
+      { key: 'host', label: 'Wall plate address', scope: 'binding', required: true },
+      { key: 'pollMs', label: 'How often to check Bluetooth status (ms)', scope: 'design' },
+    ],
+    categories: ['audio_matrix'],
+    example: { host: '<wall plate IP>' },
   },
   'crestron-occupancy': {
     name: 'Crestron occupancy sensor',

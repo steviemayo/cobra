@@ -1,46 +1,137 @@
 'use client';
+import { useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
-import { validateRoomModel } from '@kestrel/engine';
-import { useMemo } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRight } from 'lucide-react';
+import { toast } from 'sonner';
+import { HealthPill } from '@/components/common/health';
+import { MeetingsAtRisk } from '@/components/common/meetings-at-risk';
 import { PageContainer } from '@/components/common/page-header';
-import { DesignBadge } from '@/components/common/status';
+import { Section } from '@/components/common/section';
+import { SimpleSelect } from '@/components/common/simple-select';
 import { orgPath, useOrg } from '@/components/shell/org-context';
-import { buttonVariants } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { timeAgo } from '@/lib/format';
-import { cn } from '@/lib/utils';
+import { plural } from '@/lib/format';
 import { useTRPC } from '@/trpc/client';
-import { ReleasePanel } from './room-releases';
+import { RoomDeviceList } from './room-devices';
 import { useRoom } from './room-shell';
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="text-right">{children}</dd>
-    </div>
-  );
-}
+const NO_AREA = '__none';
 
-function Panel({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
+/** Where the room sits: its area in the site, and free tags. */
+function LocationPanel({ roomId, siteId }: { roomId: string; siteId: string }) {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const { orgId, canSupport } = useOrg();
+  const { room } = useRoom(roomId);
+  const areas = useQuery(trpc.area.list.queryOptions({ orgId, siteId }));
+  const [tags, setTags] = useState<string | null>(null);
+  const place = useMutation(
+    trpc.area.placeRoom.mutationOptions({
+      onSuccess: async () => {
+        toast.success('Saved');
+        setTags(null);
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: trpc.room.overview.queryKey() }),
+          qc.invalidateQueries({ queryKey: trpc.monitoring.estate.queryKey() }),
+        ]);
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  if (!room) return null;
+  const options = [
+    { value: NO_AREA, label: 'No area' },
+    ...(areas.data ?? []).map((a) => ({
+      value: a.id,
+      label: `${a.label ? `${a.label}: ` : ''}${a.name}`,
+    })),
+  ];
+  const currentTags = room.tags ?? [];
+  const editing = tags !== null;
   return (
-    <section className="overflow-hidden rounded-lg border">
-      <div className="flex items-center justify-between border-b bg-muted/40 px-4 py-2.5">
-        <h2 className="text-sm font-medium">{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
+    <Section title="Location">
+      <dl className="divide-y">
+        <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+          <dt className="text-muted-foreground">Site</dt>
+          <dd>
+            <Link href={orgPath(orgId, `/sites/${siteId}`)} className="hover:underline">
+              {room.site.name}
+            </Link>
+          </dd>
+        </div>
+        <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+          <dt className="text-muted-foreground">Area</dt>
+          <dd>
+            {canSupport && (areas.data?.length ?? 0) > 0 ? (
+              <SimpleSelect
+                size="sm"
+                className="w-48"
+                value={room.areaId ?? NO_AREA}
+                onValueChange={(v) =>
+                  place.mutate({ orgId, roomId, areaId: v === NO_AREA ? null : v })
+                }
+                options={options}
+              />
+            ) : (
+              <span>{options.find((o) => o.value === (room.areaId ?? NO_AREA))?.label}</span>
+            )}
+          </dd>
+        </div>
+        <div className="space-y-2 px-4 py-2.5 text-sm">
+          <div className="flex items-center justify-between gap-4">
+            <dt className="text-muted-foreground">Tags</dt>
+            {canSupport && !editing && (
+              <Button size="xs" variant="ghost" onClick={() => setTags(currentTags.join(', '))}>
+                Edit
+              </Button>
+            )}
+          </div>
+          <dd>
+            {editing ? (
+              <div className="flex gap-2">
+                <Input
+                  value={tags}
+                  onChange={(e) => setTags(e.target.value)}
+                  placeholder="boardroom, VIP"
+                  className="h-8"
+                  aria-label="Tags, separated by commas"
+                />
+                <Button
+                  size="sm"
+                  disabled={place.isPending}
+                  onClick={() =>
+                    place.mutate({
+                      orgId,
+                      roomId,
+                      tags: tags
+                        .split(',')
+                        .map((t) => t.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                >
+                  Save
+                </Button>
+              </div>
+            ) : currentTags.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {currentTags.map((t) => (
+                  <Badge key={t} variant="outline" className="font-normal">
+                    {t}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <span className="text-muted-foreground">None</span>
+            )}
+          </dd>
+        </div>
+      </dl>
+    </Section>
   );
 }
 
@@ -48,115 +139,83 @@ export function RoomOverview({ roomId }: { roomId: string }) {
   const trpc = useTRPC();
   const { orgId } = useOrg();
   const { room } = useRoom(roomId);
-  const draft = useQuery({
-    ...trpc.draft.get.queryOptions({ orgId, roomId }),
-    staleTime: 0,
+  const estate = useQuery({
+    ...trpc.monitoring.estate.queryOptions({ orgId }),
+    staleTime: 15_000,
+    refetchInterval: 15_000,
+    retry: false,
   });
-  const versions = useQuery(trpc.draft.versions.queryOptions({ orgId, roomId }));
-  const issues = useMemo(
-    () => (draft.data ? validateRoomModel(draft.data.model).issues : []),
-    [draft.data],
-  );
+  const impact = useQuery({
+    ...trpc.monitoring.roomImpact.queryOptions({ orgId, roomId }),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: false,
+  });
   if (!room) return null;
-  const designHref = orgPath(orgId, `/rooms/${roomId}/design`);
+  const live = estate.data?.rooms.find((r) => r.id === roomId);
 
   return (
     <PageContainer className="pt-5">
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="min-w-0 space-y-6">
-          <Panel
-            title="Design"
-            action={
-              <Link
-                href={designHref}
-                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-              >
-                Open designer <ArrowRight className="size-3" />
-              </Link>
-            }
-          >
-            {draft.isPending ? (
-              <Skeleton className="m-4 h-24" />
-            ) : !room.draft ? (
-              <div className="space-y-3 px-4 py-6">
-                <p className="text-sm text-muted-foreground">
-                  This room hasn’t been designed yet. Start from a template, then add devices and
-                  connections.
-                </p>
-                <Link href={designHref} className={buttonVariants({ size: 'sm' })}>
-                  Start designing
-                </Link>
-              </div>
-            ) : (
-              <dl className="divide-y">
-                <Row label="Status">
-                  <DesignBadge draft={room.draft} monitorOnly={room.monitorOnly} />
-                </Row>
-                <Row label="Devices">
-                  <span className="tabular">{room.draft.devices}</span>
-                </Row>
-                <Row label="Activities">
-                  <span className="tabular">{room.draft.activities}</span>
-                </Row>
-                <Row label="Revision">
-                  <span className="tabular">{room.draft.revision}</span>
-                </Row>
-                <Row label="Last edited">{timeAgo(room.draft.updatedAt)}</Row>
-              </dl>
-            )}
-          </Panel>
-
-          {issues.length > 0 && (
-            <Panel title={`Design checks (${issues.length})`}>
-              <ul className="divide-y">
-                {issues.slice(0, 8).map((i, n) => (
-                  <li key={n} className="flex items-start gap-3 px-4 py-2.5 text-sm">
-                    <span
-                      aria-hidden
-                      className={cn(
-                        'mt-1.5 size-2 shrink-0 rounded-full',
-                        i.severity === 'error' ? 'bg-destructive' : 'bg-warning',
-                      )}
-                    />
-                    {i.message}
-                  </li>
-                ))}
-              </ul>
-              {issues.length > 8 && (
-                <div className="border-t px-4 py-2.5 text-xs text-muted-foreground">
-                  and {issues.length - 8} more in the designer.
-                </div>
-              )}
-            </Panel>
-          )}
+        <div className="min-w-0 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium">Devices</h2>
+            <Link
+              href={orgPath(orgId, `/rooms/${roomId}/devices`)}
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Full list <ArrowRight className="size-3" />
+            </Link>
+          </div>
+          <RoomDeviceList roomId={roomId} compact />
         </div>
 
         <div className="space-y-6">
-          <ReleasePanel roomId={roomId} />
+          {impact.data && <MeetingsAtRisk impact={impact.data} />}
 
-          <Panel title="Saved versions">
-            {versions.isPending ? (
+          <Section title="Status">
+            {estate.isPending ? (
               <Skeleton className="m-4 h-12" />
-            ) : versions.data?.length ? (
-              <ul className="divide-y">
-                {versions.data.slice(0, 5).map((v) => (
-                  <li
-                    key={v.id}
-                    className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"
-                  >
-                    <span className="min-w-0 truncate">{v.label || 'Untitled version'}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {timeAgo(v.createdAt)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="px-4 py-4 text-xs text-muted-foreground">
-                No versions saved. Use “Save version” in the designer to create a restore point.
+            ) : !live ? (
+              <p className="px-4 py-4 text-sm text-muted-foreground">
+                Live status is not available.
               </p>
+            ) : (
+              <dl className="divide-y">
+                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+                  <dt className="text-muted-foreground">Live status</dt>
+                  <dd>
+                    <HealthPill level={live.health.level} reasons={live.health.reasons} />
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+                  <dt className="text-muted-foreground">Monitored devices</dt>
+                  <dd className="tabular">
+                    {live.devices.active
+                      ? `${live.devices.online} of ${live.devices.active} online`
+                      : 'None'}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+                  <dt className="text-muted-foreground">Recorded assets</dt>
+                  <dd className="tabular">{live.devices.passive}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+                  <dt className="text-muted-foreground">Open incidents</dt>
+                  <dd>
+                    <Link
+                      href={orgPath(orgId, `/rooms/${roomId}/monitoring`)}
+                      className="tabular hover:underline"
+                    >
+                      {plural(live.openIncidents, 'incident')}
+                    </Link>
+                  </dd>
+                </div>
+              </dl>
             )}
-          </Panel>
+          </Section>
+
+          <LocationPanel roomId={roomId} siteId={room.siteId} />
         </div>
       </div>
     </PageContainer>

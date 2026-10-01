@@ -5,7 +5,7 @@ import { TransitionAction } from '../room/groups';
 import { RoomModel } from '../room/room-model';
 import { Meetings, RoomMeetings } from '../schedule';
 import { PanelIntent, PanelViewModel, RoomStatus } from '../runtime/panel';
-import { DeviceDetails, PowerState } from '../runtime/device';
+import { DeviceCommand, DeviceDetails, PowerState } from '../runtime/device';
 
 // Gateway <-> cloud protocol, version 1. The gateway only ever makes outbound HTTPS requests.
 export const PROTOCOL_VERSION = 1;
@@ -126,6 +126,8 @@ export const COMMAND_TYPES = [
   'room_off',
   'verify_point',
   'discover_devices',
+  'discover_components',
+  'discover_controls',
 ] as const;
 export const CommandType = z.enum(COMMAND_TYPES);
 export type CommandType = z.infer<typeof CommandType>;
@@ -159,6 +161,16 @@ export const COMMAND_INFO: Record<
     description:
       'Look for projectors, DSPs and other equipment on the gateway’s own network and report what answers. Only reads; changes nothing.',
     needsDevice: false,
+  },
+  discover_components: {
+    label: 'List a device’s components',
+    description: 'Ask a point-based device what named components it has. Changes nothing.',
+    needsDevice: true,
+  },
+  discover_controls: {
+    label: 'List a component’s controls',
+    description: 'Ask a point-based device what controls one named component has. Changes nothing.',
+    needsDevice: true,
   },
   room_off: {
     label: 'Turn room off',
@@ -229,6 +241,22 @@ export const WatchedPoint = z.object({
 });
 export type WatchedPoint = z.infer<typeof WatchedPoint>;
 
+/**
+ * How a device answered the gateway's pings since the last heartbeat. Absent when the device has no
+ * address to ping, or when it is online but never answers pings (they are blocked), which says
+ * nothing about the network.
+ */
+export const DeviceLatency = z.object({
+  /** Pings sent in this window, and how many were answered. */
+  sent: z.number().int().min(1).max(1000),
+  ok: z.number().int().min(0).max(1000),
+  /** Round-trip times of the answered pings. Absent when none were. */
+  minMs: z.number().min(0).max(60_000).optional(),
+  avgMs: z.number().min(0).max(60_000).optional(),
+  maxMs: z.number().min(0).max(60_000).optional(),
+});
+export type DeviceLatency = z.infer<typeof DeviceLatency>;
+
 export const DeviceReport = z.object({
   deviceId: z.string().min(1).max(100),
   name: z.string().max(200),
@@ -237,8 +265,12 @@ export const DeviceReport = z.object({
   driver: z.string().max(100).optional(),
   /** The firmware version the device reported, if its driver can ask. */
   firmware: z.string().max(100).optional(),
+  /** Ping round-trip times since the last heartbeat, a measure of the network to the device. */
+  latency: DeviceLatency.optional(),
   /** The points this device is watched on. Absent when none are. */
   watched: z.array(WatchedPoint).max(100).optional(),
+  /** What each control point reads now (by point id), as Kestrel shows it: 0 to 100 for a level. Absent when it has none. */
+  points: z.record(z.string().max(100), z.union([z.number(), z.boolean(), z.string().max(500)])).optional(),
   /** Whatever the driver reports back, control or not. Absent when it has nothing to say. */
   feedback: DeviceFeedback.optional(),
   /**
@@ -382,6 +414,10 @@ export const HeartbeatRequest = z.object({
   uptimeSeconds: z.number().int().min(0),
   configVersion: z.string().nullable(),
   rooms: z.array(RoomReport),
+  /** Devices polled on their own (not part of a room's design), by device id. Older gateways send none. */
+  devices: z.array(DeviceReport).max(500).default([]),
+  /** Version of the device set this gateway is running, so the cloud can say when to fetch a new one. */
+  deviceSetVersion: z.string().max(100).optional(),
   /** Outcomes of commands received in earlier heartbeat responses. */
   commandResults: z.array(CommandResult).max(50).default([]),
   /** Which movable walls are open, for the groups this gateway runs. The gateway owns this state. */
@@ -396,7 +432,11 @@ export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
 export const HeartbeatResponse = z.object({
   /** If this differs from the gateway's configVersion it should fetch /config. */
   configVersion: z.string(),
+  /** Version of the device set this gateway should run. If it differs from the gateway's, it fetches /devices. */
+  deviceSetVersion: z.string().optional(),
   serverTime: z.string().datetime(),
+  /** Settings to put back on polled devices now (configuration profiles set to enforce, and pushes). */
+  enforce: z.array(z.object({ deviceId: z.string().uuid(), command: DeviceCommand })).max(200).default([]),
   /** Allowlisted commands to run now. */
   commands: z.array(GatewayCommand).default([]),
   /** Rooms someone is controlling from the portal right now. Non-empty means: start polling fast. */

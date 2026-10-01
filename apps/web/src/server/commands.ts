@@ -7,6 +7,7 @@ import {
   type CommandResult,
   type GatewayCommand,
 } from '@kestrel/model';
+import { writeAudit } from './audit';
 
 // Remote commands. Support asks in the portal; the gateway collects the request in its next
 // heartbeat response (it never accepts inbound connections), runs it if it is on the allowlist,
@@ -71,6 +72,12 @@ export async function requestCommand(
     args.address = text;
   }
 
+  if (type.data === 'discover_controls') {
+    const component = (input.args?.component ?? '').trim();
+    if (!component || component.length > 100) return { ok: false, error: 'That component name is not valid' };
+    args.component = component;
+  }
+
   if (type.data === 'discover_devices' && input.args?.subnet) {
     // One /24 the gateway is on, like 192.168.1. The gateway checks it is one of its own as well.
     if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(input.args.subnet))
@@ -96,15 +103,16 @@ export async function requestCommand(
       createdAt: now,
     },
   });
-  await db.auditLog.create({
-    data: {
+  await writeAudit(
+    {
       orgId: input.orgId,
       actorId: input.requestedBy,
       action: 'command.request',
       target: room.id,
       meta: { commandId: created.id, type: type.data, room: room.name, ...args },
     },
-  });
+    db,
+  );
   return { ok: true, id: created.id };
 }
 
@@ -158,14 +166,15 @@ export async function applyCommandResults(
         finishedAt: now,
       },
     });
-    await db.auditLog.create({
-      data: {
+    await writeAudit(
+      {
         orgId: cmd.orgId,
         actorId: null,
         action: 'command.result',
         target: cmd.roomId,
         meta: { commandId: cmd.id, type: cmd.type, ok: r.ok },
       },
-    });
+      db,
+    );
   }
 }

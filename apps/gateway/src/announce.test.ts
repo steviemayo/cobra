@@ -6,7 +6,6 @@ import { CloudClient } from './cloud';
 import type { GatewayConfig } from './config';
 import { Gateway } from './gateway';
 import { silentLogger } from './log';
-import { RoomHost } from './room-host';
 import { Store } from './store';
 import { CREDENTIAL, ENROLL_TOKEN, FakeCloud } from './test-support/fake-cloud';
 
@@ -14,7 +13,7 @@ import { CREDENTIAL, ENROLL_TOKEN, FakeCloud } from './test-support/fake-cloud';
 
 let dir: string;
 let cloud: FakeCloud;
-const running: { gateway: Gateway; host: RoomHost; store: Store }[] = [];
+const running: { gateway: Gateway; store: Store }[] = [];
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'kestrel-announce-'));
@@ -23,7 +22,6 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const r of running.splice(0)) {
     r.gateway.stop();
-    r.host.shutdown();
     try {
       r.store.close();
     } catch {
@@ -40,17 +38,14 @@ function boot(over: Partial<GatewayConfig> = {}) {
     dataDir: dir,
     panelPort: 0,
     panelHost: '127.0.0.1',
-    panelDir: '',
-    simulate: 'all',
     logLevel: 'error',
     version: '0.0.0-test',
     ...over,
   };
   const store = new Store(join(dir, 'gateway.db'));
-  const host = new RoomHost('all', silentLogger, (e) => store.enqueue(e));
-  const gateway = new Gateway(cfg, store, new CloudClient(cloud.url), host, silentLogger);
-  running.push({ gateway, host, store });
-  return { gateway, host, store };
+  const gateway = new Gateway(cfg, store, new CloudClient(cloud.url), silentLogger);
+  running.push({ gateway, store });
+  return { gateway, store };
 }
 
 describe('a gateway that cannot enrol', () => {

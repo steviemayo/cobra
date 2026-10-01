@@ -3,39 +3,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateKeyPair, signManifest } from '@kestrel/crypto';
-import { STARTER_TEMPLATES } from '@kestrel/model';
 import { CloudClient } from './cloud';
 import type { GatewayConfig } from './config';
 import { Gateway, type LocalStatus } from './gateway';
 import { loadAdminCode } from './local-admin';
 import { silentLogger } from './log';
-import { createPanelServer } from './panel-server';
-import { RoomHost } from './room-host';
+import { createLocalServer } from './local-server';
 import { Store } from './store';
 import { CREDENTIAL, ENROLL_TOKEN, FakeCloud } from './test-support/fake-cloud';
 
-const ROOM = '33333333-3333-4333-8333-333333333331';
 const CODE = 'ABCD-2345';
 const FORM = { 'content-type': 'application/x-www-form-urlencoded' };
-const keys = generateKeyPair();
-
-function signedRoom() {
-  return signManifest(
-    {
-      manifestVersion: 1,
-      orgId: '11111111-1111-4111-8111-111111111111',
-      roomId: ROOM,
-      roomName: 'Boardroom',
-      releaseId: '44444444-4444-4444-8444-444444444441',
-      releaseNumber: 1,
-      createdAt: new Date().toISOString(),
-      model: structuredClone(STARTER_TEMPLATES[0]!.model),
-      panel: { access: { mode: 'open', trustedIps: [] }, branding: {} },
-    },
-    { privateKeyPem: keys.privateKeyPem, keyId: 'k' },
-  );
-}
+const DEV = '00000000-0000-4000-8000-000000000001';
 
 const status = (over: Partial<LocalStatus> = {}): LocalStatus => ({
   version: '1.2.3',
@@ -45,14 +24,13 @@ const status = (over: Partial<LocalStatus> = {}): LocalStatus => ({
   name: null,
   lastContactAt: null,
   problem: null,
-  control: true,
   bufferedEvents: 0,
+  devices: 0,
   update: null,
   ...over,
 });
 
 describe('the local pages', () => {
-  let host: RoomHost;
   let app: FastifyInstance;
   let time: number;
   const gateway = {
@@ -67,18 +45,13 @@ describe('the local pages', () => {
     gateway.status.mockImplementation(() => status());
     gateway.enrolWithToken.mockResolvedValue({ ok: true, name: 'Site gateway' });
     gateway.reset.mockResolvedValue(undefined);
-    host = new RoomHost('all', silentLogger, () => undefined);
-    host.load(signedRoom());
-    app = await createPanelServer({
-      host,
+    app = await createLocalServer({
       log: silentLogger,
-      panelDir: '/nonexistent',
-      admin: { gateway, adminCode: CODE, now: () => time },
+      admin: { gateway, log: silentLogger, adminCode: CODE, now: () => time },
     });
   });
   afterEach(async () => {
     await app.close();
-    host.shutdown();
   });
 
   const post = (url: string, body: string, cookie?: string, headers: Record<string, string> = {}) =>
@@ -98,16 +71,21 @@ describe('the local pages', () => {
     return set.split(';')[0]!;
   }
 
-  it('lists the rooms with their panel links, open to anyone on the network', async () => {
+  it('is open to anyone on the network, with safe headers', async () => {
+    gateway.status.mockImplementation(() => status({ enrolment: 'enrolled', name: 'Site gateway', devices: 3 }));
     const res = await app.inject({ url: '/', headers: { host: '10.0.0.5:8080' } });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain('Boardroom');
-    expect(res.body).toContain(`href="/room/${ROOM}"`);
-    expect(res.body).toContain(`http://10.0.0.5:8080/room/${ROOM}`);
+    expect(res.body).toContain('Site gateway');
+    expect(res.body).toContain('Devices watched');
     expect(res.headers['content-security-policy']).toContain("default-src 'none'");
     expect(res.headers['cache-control']).toBe('no-store');
     // Browsers send "Origin: null" on form posts under no-referrer, which the origin check would refuse.
     expect(res.headers['referrer-policy']).toBe('same-origin');
+  });
+
+  it('answers /health, and refuses a name the gateway is not meant to be reached by', async () => {
+    expect((await app.inject({ url: '/health', headers: { host: 'evil.example.com' } })).statusCode).toBe(200);
+    expect((await app.inject({ url: '/', headers: { host: 'evil.example.com' } })).statusCode).toBe(421);
   });
 
   it('tells an unclaimed gateway’s installer what to give staff', async () => {
@@ -126,7 +104,7 @@ describe('the local pages', () => {
     expect(res.body).not.toContain(CREDENTIAL);
   });
 
-  it('says plainly when an enrolled gateway has lost the cloud, and that rooms keep running', async () => {
+  it('says plainly when an enrolled gateway has lost the cloud, and that devices keep being watched', async () => {
     gateway.status.mockImplementation(() =>
       status({
         enrolment: 'enrolled',
@@ -136,7 +114,7 @@ describe('the local pages', () => {
       }),
     );
     const res = await app.inject({ url: '/' });
-    expect(res.body).toContain('Rooms keep running');
+    expect(res.body).toContain('Devices keep being watched');
     expect(res.body).toContain('1 h ago');
   });
 
@@ -253,7 +231,7 @@ describe('the admin code file', () => {
 describe('changing who a gateway belongs to', () => {
   let dir: string;
   let cloud: FakeCloud;
-  const running: { gateway: Gateway; host: RoomHost; store: Store }[] = [];
+  const running: { gateway: Gateway; store: Store }[] = [];
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'kestrel-local-'));
@@ -262,7 +240,7 @@ describe('changing who a gateway belongs to', () => {
   afterEach(async () => {
     for (const r of running.splice(0)) {
       r.gateway.stop();
-      r.host.shutdown();
+      r.gateway.devices.shutdown();
       r.store.close();
     }
     await cloud.stop();
@@ -275,34 +253,42 @@ describe('changing who a gateway belongs to', () => {
       dataDir: dir,
       panelPort: 0,
       panelHost: '127.0.0.1',
-      panelDir: '',
-      simulate: 'all',
       logLevel: 'error',
       version: '0.0.0-test',
       enrollToken: ENROLL_TOKEN,
     };
     const store = new Store(join(dir, 'gateway.db'));
-    const host = new RoomHost('all', silentLogger, (e) => store.enqueue(e));
-    const gateway = new Gateway(cfg, store, new CloudClient(cloud.url), host, silentLogger);
-    running.push({ gateway, host, store });
-    return { gateway, host, store };
+    const gateway = new Gateway(cfg, store, new CloudClient(cloud.url), silentLogger);
+    running.push({ gateway, store });
+    return { gateway, store };
   }
 
-  async function enrolledWithARoom() {
+  async function enrolledWithADevice() {
+    cloud.deviceSet = {
+      version: 'v1',
+      devices: [
+        {
+          id: DEV,
+          name: 'Lobby display',
+          category: 'display',
+          control: { kind: 'generic', protocol: 'pjlink' },
+          settings: { host: '127.0.0.1', port: 9 },
+        },
+      ],
+    };
     const g = boot();
-    cloud.assign(ROOM, structuredClone(STARTER_TEMPLATES[0]!.model));
     await g.gateway.tick();
-    expect(g.host.ids()).toEqual([ROOM]);
+    expect(g.gateway.devices.size).toBe(1);
     expect(g.gateway.status().enrolment).toBe('enrolled');
     return g;
   }
 
   it('a token that is refused changes nothing', async () => {
-    const { gateway, host, store } = await enrolledWithARoom();
+    const { gateway, store } = await enrolledWithADevice();
     const res = await gateway.enrolWithToken('not-a-real-token-0000');
     expect(res).toMatchObject({ ok: false });
     expect(store.get('credential')).toBe(CREDENTIAL);
-    expect(host.ids()).toEqual([ROOM]);
+    expect(gateway.devices.size).toBe(1);
   });
 
   it('an empty token is refused without asking the cloud', async () => {
@@ -312,15 +298,14 @@ describe('changing who a gateway belongs to', () => {
     expect(cloud.enrols.length).toBe(before);
   });
 
-  it('a good token moves the gateway: the old organisation’s rooms stop and its events are dropped', async () => {
-    const { gateway, host, store } = await enrolledWithARoom();
+  it('a good token moves the gateway: the old organisation’s devices stop and its events are dropped', async () => {
+    const { gateway, store } = await enrolledWithADevice();
     gateway.record({ type: 'gateway.started', data: { old: true } });
     expect(store.unsentCount()).toBeGreaterThan(0);
-    cloud.unassign(ROOM);
+    cloud.deviceSet = null;
     const res = await gateway.enrolWithToken(ENROLL_TOKEN);
     expect(res).toMatchObject({ ok: true, name: 'Test gateway' });
-    expect(host.ids()).toEqual([]);
-    expect(store.loadManifests()).toEqual([]);
+    expect(gateway.devices.size).toBe(0);
     expect(store.get('credential')).toBe(CREDENTIAL);
     expect(gateway.status().enrolment).toBe('enrolled');
     await gateway.tick();
@@ -328,14 +313,12 @@ describe('changing who a gateway belongs to', () => {
   });
 
   it('a reset forgets the organisation and announces as a new unclaimed install', async () => {
-    const { gateway, host, store } = await enrolledWithARoom();
+    const { gateway, store } = await enrolledWithADevice();
     cloud.announceReply = { status: 'unclaimed', retrySeconds: 60 };
     await gateway.reset();
-    expect(host.ids()).toEqual([]);
-    expect(store.loadManifests()).toEqual([]);
+    expect(gateway.devices.size).toBe(0);
     expect(store.get('credential')).toBeNull();
-    expect(store.keysWithPrefix('bindings:')).toEqual([]);
-    expect(store.keysWithPrefix('deployment:')).toEqual([]);
+    expect(store.get('deviceSet')).toBeNull();
 
     await gateway.tick();
     expect(cloud.announces).toHaveLength(1);
@@ -350,7 +333,7 @@ describe('changing who a gateway belongs to', () => {
   });
 
   it('a reset does not use the token in the settings again', async () => {
-    const { gateway } = await enrolledWithARoom();
+    const { gateway } = await enrolledWithADevice();
     const enrols = cloud.enrols.length;
     await gateway.reset();
     await gateway.tick();

@@ -19,6 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { assignChartSlots, chartSlotBg } from '@/lib/chart-colors';
+import { minutesLabel } from '@/lib/format';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
 
@@ -40,12 +41,6 @@ const FIELD_LABEL: Record<string, string> = {
   activeApp: 'App',
 };
 
-const minutesLabel = (m: number): string => {
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const rest = m % 60;
-  return rest ? `${h}h ${rest}m` : `${h}h`;
-};
 const dateLabel = (iso: string) =>
   new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 

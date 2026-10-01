@@ -8,6 +8,9 @@ import { routeForNewTicket } from '../msp';
 import { assigneeLabel, assigneesFor, findAssignee } from '../ticket-assignees';
 import { SITE_SCOPED, roomIdsInScope, ticketVisible } from '../site-scope';
 import { notifyStaff } from '../ticket-notify';
+import { mirrorTicket, type MirrorEvent } from '../itsm-service';
+import { deviceOfSubject } from '../maintenance';
+import { pinnedFetch, resolveAll } from '../outbound';
 import {
   STAFF_LABEL,
   TicketError,
@@ -33,6 +36,35 @@ async function tellStaff(orgId: string, ticketId: string, kind: 'escalated', sni
     snippet,
   });
 }
+
+/** Tells any connected service desk about a ticket event, after the response has gone. Never throws. */
+async function mirror(
+  orgId: string,
+  ticketId: string,
+  event: MirrorEvent,
+  comment?: { body: string; author: string | null },
+) {
+  try {
+    const t = await db.ticket.findFirst({ where: { id: ticketId, orgId } });
+    if (t) await mirrorTicket(db, { fetch: pinnedFetch, resolve: resolveAll }, t, event, comment);
+  } catch {
+    // A service desk being unreachable must never affect the ticket.
+  }
+}
+
+/** What turned out to be wrong, chosen when a ticket is resolved. */
+export const ROOT_CAUSES = [
+  'power',
+  'network',
+  'configuration',
+  'firmware',
+  'hardware_failure',
+  'user_error',
+  'cabling',
+  'third_party',
+  'no_fault_found',
+  'other',
+] as const;
 
 const orgId = z.string().uuid();
 const ticketId = z.string().uuid();
@@ -173,6 +205,8 @@ export const ticketRouter = router({
         priority: t.priority,
         room,
         incidentId: t.incidentId,
+        deviceId: t.deviceId,
+        rootCause: t.rootCause,
         routedTo: t.routedTo,
         escalatedAt: t.escalatedAt,
         createdByEmail: t.createdByEmail,
@@ -209,6 +243,8 @@ export const ticketRouter = router({
         body: z.string().trim().min(1).max(5000),
         roomId: z.string().uuid().optional(),
         incidentId: z.string().uuid().optional(),
+        /** The device it is about, so its history shows repairs. */
+        deviceId: z.string().uuid().optional(),
         priority: z.enum(PRIORITIES).default('normal'),
         // A problem with Kestrel itself rather than with the organisation's own rooms.
         toKestrel: z.boolean().default(false),
@@ -242,6 +278,11 @@ export const ticketRouter = router({
       // Customers can't set urgency above normal, so the urgent queue stays meaningful.
       const priority =
         ctx.role === 'customer_viewer' && input.priority !== 'low' ? 'normal' : input.priority;
+      // A ticket raised from a device's incident is about that device.
+      const linked = input.incidentId
+        ? await db.incident.findFirst({ where: { id: input.incidentId, orgId: ctx.orgId } })
+        : null;
+      const aboutDevice = input.deviceId ?? (linked ? deviceOfSubject(linked.subject) : null);
       const t = await db.ticket.create({
         data: {
           orgId: ctx.orgId,
@@ -249,6 +290,7 @@ export const ticketRouter = router({
           body: input.body,
           roomId: input.roomId ?? null,
           incidentId: input.incidentId ?? null,
+          deviceId: aboutDevice,
           priority,
           createdBy: ctx.user.id,
           createdByEmail: ctx.user.email?.toLowerCase() ?? null,
@@ -265,6 +307,7 @@ export const ticketRouter = router({
         meta: { title: t.title, toKestrel: input.toKestrel },
       });
       if (input.toKestrel) after(() => tellStaff(ctx.orgId, t.id, 'escalated', t.body));
+      after(() => mirror(ctx.orgId, t.id, 'ticket.created'));
       return { id: t.id };
     }),
 
@@ -292,6 +335,13 @@ export const ticketRouter = router({
           visibility: input.internal ? 'internal' : 'public',
         },
       });
+      if (!input.internal)
+        after(() =>
+          mirror(ctx.orgId, t.id, 'ticket.comment', {
+            body: input.body,
+            author: ctx.user.email?.toLowerCase() ?? null,
+          }),
+        );
       // A reply from the customer on a resolved ticket reopens it.
       const reopen =
         ctx.role === 'customer_viewer' && (t.status === 'resolved' || t.status === 'closed');
@@ -301,6 +351,9 @@ export const ticketRouter = router({
       });
       return { ok: true };
     }),
+
+  /** The choices for what was wrong. */
+  rootCauses: orgProcedure.input(z.object({ orgId })).query(() => [...ROOT_CAUSES]),
 
   // Move a ticket between the organisation's own team and its service provider.
   route: orgProcedure
@@ -376,6 +429,7 @@ export const ticketRouter = router({
         status: z.enum(STATUSES).optional(),
         priority: z.enum(PRIORITIES).optional(),
         assignedTo: z.string().uuid().nullable().optional(),
+        rootCause: z.enum(ROOT_CAUSES).nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -403,8 +457,10 @@ export const ticketRouter = router({
           ...(input.status ? { status: input.status, closedAt: closing ? new Date() : null } : {}),
           ...(input.priority ? { priority: input.priority } : {}),
           ...(input.assignedTo !== undefined ? { assignedTo: input.assignedTo } : {}),
+          ...(input.rootCause !== undefined ? { rootCause: input.rootCause } : {}),
         },
       });
+      after(() => mirror(ctx.orgId, t.id, 'ticket.updated'));
       await writeAudit({
         orgId: ctx.orgId,
         actorId: ctx.user.id,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DeviceState, Port } from '@kestrel/model';
-import { deviceFeedback, feedbackChanges } from './room-host';
+import { deviceFeedback, feedbackChanges } from './device-feedback';
 
 const ports: Port[] = [
   { id: 'hdmi1', name: 'HDMI 1', direction: 'in', signal: 'video' },

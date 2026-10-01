@@ -44,7 +44,7 @@ export function SimpleSelect<T extends string>({
       <SelectTrigger id={id} size={size} className={className}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className="w-max min-w-(--anchor-width) max-w-[min(28rem,90vw)]">
         {options.map((o) => (
           <SelectItem key={o.value} value={o.value} disabled={o.disabled}>
             {o.label}

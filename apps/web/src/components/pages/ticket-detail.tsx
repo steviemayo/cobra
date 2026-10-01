@@ -18,6 +18,19 @@ import { dateTime } from '@/components/common/health';
 import { useTRPC } from '@/trpc/client';
 import { PRIORITY_LABEL, TICKET_STATUS_LABEL, TicketStatus } from './tickets';
 
+const ROOT_CAUSE_OPTIONS = [
+  { value: 'power', label: 'Power' },
+  { value: 'network', label: 'Network' },
+  { value: 'configuration', label: 'Configuration' },
+  { value: 'firmware', label: 'Firmware' },
+  { value: 'hardware_failure', label: 'Hardware failure' },
+  { value: 'user_error', label: 'User error' },
+  { value: 'cabling', label: 'Cabling' },
+  { value: 'third_party', label: 'Third party' },
+  { value: 'no_fault_found', label: 'No fault found' },
+  { value: 'other', label: 'Other' },
+] as const;
+
 export function TicketDetail({ ticketId }: { ticketId: string }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
@@ -233,6 +246,21 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                     value: value as 'normal',
                     label,
                   }))}
+                />
+              </Field>
+              <Field label="Root cause">
+                <SimpleSelect
+                  className="w-full"
+                  value={(t.rootCause ?? '__none') as string}
+                  onValueChange={(v) =>
+                    update.mutate({
+                      orgId,
+                      ticketId,
+                      rootCause:
+                        v === '__none' ? null : (v as (typeof ROOT_CAUSE_OPTIONS)[number]['value']),
+                    })
+                  }
+                  options={[{ value: '__none', label: 'Not set' }, ...ROOT_CAUSE_OPTIONS]}
                 />
               </Field>
               {!closed && t.routedTo !== 'kestrel' && (t.providerName || t.providerAvailable) && (
