@@ -2,12 +2,13 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
-import { BUILT_IN_DRIVERS, ControlPoint, DeviceControl, RoomModel, RoomType, settingScope } from '@kestrel/model';
+import { ControlPoint, RoomModel, RoomType } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { getEntitlements, monitoredRoomIds, roomLimitMessage } from '../billing';
-import { pointsOf } from '../device-points';
+import { saveShape, slotToSource, slotsOf } from '../room-shapes';
 import {
   checkCopies,
+  describeSlots,
   loadContext,
   MAX_COPIES,
   writeCopies,
@@ -192,8 +193,27 @@ export const roomRouter = router({
    */
   copyShape: orgProcedure
     .meta(SITE_SCOPED)
-    .input(z.object({ orgId, roomId }))
+    .input(z.object({ orgId, roomId: roomId.optional(), shapeId: z.string().uuid().optional() }))
     .query(async ({ ctx, input }) => {
+      if (input.shapeId) {
+        const shape = await db.roomShape.findFirst({
+          where: { id: input.shapeId, orgId: ctx.orgId },
+        });
+        if (!shape) throw new TRPCError({ code: 'NOT_FOUND', message: 'Shape not found' });
+        return {
+          room: {
+            id: null as string | null,
+            name: shape.name,
+            siteId: null as string | null,
+            gatewayId: null as string | null,
+            areaId: null as string | null,
+            tags: [] as string[],
+          },
+          shape: { id: shape.id, name: shape.name },
+          devices: describeSlots(slotsOf(shape.slots).map(slotToSource)),
+        };
+      }
+      if (!input.roomId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose a room or a shape' });
       const room = await db.room.findFirst({
         where: { id: input.roomId, orgId: ctx.orgId, ...siteFilter(ctx.siteScope) },
         select: { id: true, name: true, siteId: true, gatewayId: true, areaId: true, tags: true },
@@ -204,34 +224,72 @@ export const roomRouter = router({
         orderBy: { createdAt: 'asc' },
       });
       return {
-        room,
-        devices: devices.map((d) => {
-          const control = DeviceControl.safeParse(d.control);
-          const driverId =
-            control.success && control.data.kind === 'driver' ? control.data.driverId : null;
-          const info = driverId ? BUILT_IN_DRIVERS[driverId] : undefined;
-          const need = (secret: boolean) =>
-            (info?.settings ?? [{ key: 'host', label: 'Address', scope: 'binding', required: true }])
-              .filter(
-                (s) =>
-                  s.required && (settingScope(s.key, { scope: s.scope }) === 'secret') === secret,
-              )
-              .map((s) => ({ key: s.key, label: s.label }));
-          return {
-            id: d.id,
-            name: d.name,
-            kind: d.kind,
-            category: d.category,
-            driverName: info?.name ?? (driverId ? driverId : null),
-            // Only active devices have anything to fill in.
-            binding: d.kind === 'active' ? need(false) : [],
-            secret: d.kind === 'active' ? need(true) : [],
-            hasSavedLogin: !!d.credentialSetId,
-            credentialSetId: d.credentialSetId,
-            points: pointsOf(d.points),
-          };
-        }),
+        room: { ...room, id: room.id as string | null, siteId: room.siteId as string | null },
+        shape: null as { id: string; name: string } | null,
+        devices: describeSlots(devices as unknown as SourceDevice[]),
       };
+    }),
+
+  /** The saved shapes of the organisation. */
+  shapes: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
+    const rows = await db.roomShape.findMany({
+      where: { orgId: ctx.orgId },
+      orderBy: { name: 'asc' },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      devices: slotsOf(r.slots).length,
+      createdAt: r.createdAt,
+    }));
+  }),
+
+  /** Keeps a room's devices, drivers, settings and control points (no addresses or logins) as a named shape. */
+  saveShape: orgProcedure
+    .input(
+      z.object({
+        orgId,
+        roomId,
+        name: z.string().trim().min(1).max(100),
+        description: z.string().trim().max(500).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const res = await saveShape(db, {
+        orgId: ctx.orgId,
+        roomId: input.roomId,
+        name: input.name,
+        description: input.description,
+        actorId: ctx.user.id,
+      });
+      if (!res.ok) throw new TRPCError({ code: 'BAD_REQUEST', message: res.message });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'room.shape_save',
+        target: res.value.id,
+        meta: { name: input.name },
+      });
+      return res.value;
+    }),
+
+  deleteShape: orgProcedure
+    .input(z.object({ orgId, shapeId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const shape = await db.roomShape.findFirst({ where: { id: input.shapeId, orgId: ctx.orgId } });
+      if (!shape) throw new TRPCError({ code: 'NOT_FOUND', message: 'Shape not found' });
+      await db.roomShape.delete({ where: { id: shape.id } });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'room.shape_delete',
+        target: shape.id,
+        meta: { name: shape.name },
+      });
+      return { ok: true };
     }),
 
   /**
@@ -242,7 +300,10 @@ export const roomRouter = router({
     .input(
       z.object({
         orgId,
-        sourceRoomId: roomId,
+        sourceRoomId: roomId.optional(),
+        shapeId: z.string().uuid().optional(),
+        /** Where the rooms go, when they are made from a shape. */
+        siteId: z.string().uuid().optional(),
         dryRun: z.boolean().default(false),
         copies: z
           .array(
@@ -268,6 +329,7 @@ export const roomRouter = router({
                       .optional(),
                     credentialSetId: z.string().uuid().nullable().optional(),
                     points: z.array(ControlPoint).max(200).optional(),
+                    linkTo: z.string().uuid().optional(),
                   }),
                 )
                 .max(100),
@@ -279,10 +341,26 @@ export const roomRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
-      const source = await findRoom(ctx.orgId, input.sourceRoomId);
-      const sourceDevices = (await db.device.findMany({
-        where: { orgId: ctx.orgId, roomId: source.id },
-      })) as SourceDevice[];
+      let source: { id: string; name: string; siteId: string; gatewayId: string | null; monitorOnly: boolean };
+      let sourceDevices: SourceDevice[];
+      if (input.shapeId) {
+        const shape = await db.roomShape.findFirst({
+          where: { id: input.shapeId, orgId: ctx.orgId },
+        });
+        if (!shape) throw new TRPCError({ code: 'NOT_FOUND', message: 'Shape not found' });
+        if (!input.siteId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose a site' });
+        const site = await assertSite(ctx.orgId, input.siteId);
+        source = { id: shape.id, name: shape.name, siteId: site.id, gatewayId: null, monitorOnly: false };
+        sourceDevices = slotsOf(shape.slots).map(slotToSource);
+      } else {
+        if (!input.sourceRoomId)
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose a room or a shape' });
+        const room = await findRoom(ctx.orgId, input.sourceRoomId);
+        source = room;
+        sourceDevices = (await db.device.findMany({
+          where: { orgId: ctx.orgId, roomId: room.id },
+        })) as SourceDevice[];
+      }
       const e = await getEntitlements(db, ctx.orgId);
       const monitored = await monitoredRoomIds(db, ctx.orgId);
       const context = await loadContext(db, ctx.orgId, source.siteId, {

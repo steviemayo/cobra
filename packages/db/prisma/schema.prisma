@@ -94,6 +94,7 @@ model Org {
   areas               Area[]
   devices             Device[]
   deviceRooms         DeviceRoom[]
+  roomShapes          RoomShape[]
   deviceEvents        DeviceEvent[]
 }
 
@@ -1279,6 +1280,25 @@ model DeviceRoom {
   @@unique([deviceId, roomId])
   @@index([orgId])
   @@index([roomId])
+}
+
+/// A saved room shape: the devices a room is made of, with their drivers, design settings and control
+/// points, and no address or login. New rooms are made from one (docs/room-shapes-and-shared-devices.md).
+model RoomShape {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  name        String
+  description String?
+  /// The device slots: see ShapeSlot in apps/web/src/server/room-shapes.ts.
+  slots       Json     @default("[]")
+  createdBy   String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, name])
+  @@index([orgId])
 }
 
 /// Append-only history of one device: field changes (old to new, who or what), moves, gateway

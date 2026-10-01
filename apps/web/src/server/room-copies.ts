@@ -27,6 +27,11 @@ export interface DeviceCopyInput {
   credentialSetId?: string | null;
   /** The control points for this room. Replaces the source's when given. */
   points?: ControlPoint[];
+  /**
+   * Do not make a device: link this existing device (a shared one, same driver) to the new room and
+   * add the points to it, each belonging to the new room.
+   */
+  linkTo?: string;
 }
 
 export interface RoomCopyInput {
@@ -65,6 +70,8 @@ export interface CopyContext {
   addresses: Map<string, string>;
   /** Credential sets of the organisation, by id. */
   credentialSets: Set<string>;
+  /** Monitored devices of the organisation a new room may share, by id. */
+  shareable: Map<string, { driverId: string | null; name: string }>;
   /** Areas and gateways of the site. */
   areas: Set<string>;
   gateways: Set<string>;
@@ -145,6 +152,17 @@ export function checkCopies(
       if (src.kind !== 'active') continue;
       monitored = true;
 
+      if (d.linkTo) {
+        const target = ctx.shareable.get(d.linkTo);
+        if (!target) row.problems.push(`“${label}”: the device to share is not there`);
+        else if (target.driverId !== driverIdOf(src.control))
+          row.problems.push(`“${label}”: ${target.name} uses a different driver`);
+        const shared = d.points ?? pointsOf(src.points);
+        const problem = validatePoints(src.control, shared);
+        if (problem) row.problems.push(`“${label}”: ${problem}`);
+        continue;
+      }
+
       const values = d.values ?? {};
       const need = requiredFields(src.control);
       for (const f of need.binding)
@@ -186,7 +204,7 @@ export function checkCopies(
   return { rows, batch };
 }
 
-export type CopyDb = DevicesDb & Pick<PrismaClient, 'room' | 'device'>;
+export type CopyDb = DevicesDb & Pick<PrismaClient, 'room' | 'device' | 'deviceRoom'>;
 
 /** What the estate already holds that a copy must not collide with. */
 export async function loadContext(
@@ -195,7 +213,7 @@ export async function loadContext(
   siteId: string,
   limits: { maxRooms: number | null; monitoredRooms: number },
 ): Promise<CopyContext> {
-  const [rooms, devices, sets, areas, gateways] = await Promise.all([
+  const [rooms, devices, sets, areas, gateways, everyActive] = await Promise.all([
     db.room.findMany({ where: { orgId, siteId }, select: { name: true } }),
     db.device.findMany({
       where: { orgId, siteId, kind: 'active' },
@@ -204,6 +222,10 @@ export async function loadContext(
     db.credentialSet.findMany({ where: { orgId }, select: { id: true } }),
     db.area.findMany({ where: { orgId, siteId }, select: { id: true } }),
     db.gateway.findMany({ where: { orgId, siteId }, select: { id: true } }),
+    db.device.findMany({
+      where: { orgId, kind: 'active' },
+      select: { id: true, name: true, control: true },
+    }),
   ]);
   const addresses = new Map<string, string>();
   for (const d of devices) {
@@ -214,6 +236,9 @@ export async function loadContext(
     roomNames: new Set(rooms.map((r) => r.name.toLowerCase())),
     addresses,
     credentialSets: new Set(sets.map((s) => s.id)),
+    shareable: new Map(
+      everyActive.map((d) => [d.id, { driverId: driverIdOf(d.control), name: `“${d.name}”` }]),
+    ),
     areas: new Set(areas.map((a) => a.id)),
     gateways: new Set(gateways.map((g) => g.id)),
     ...limits,
@@ -253,6 +278,11 @@ export async function writeCopies(
     for (const d of copy.devices) {
       if (d.skip) continue;
       const src = byId.get(d.sourceDeviceId)!;
+      if (d.linkTo) {
+        await linkShared(db, input.orgId, room.id, d.linkTo, d.points ?? pointsOf(src.points));
+        count += 1;
+        continue;
+      }
       const made1 = await createDevice(db, {
         orgId: input.orgId,
         siteId: input.source.siteId,
@@ -285,4 +315,59 @@ export async function writeCopies(
     made.push({ roomId: room.id, name: room.name, devices: count });
   }
   return made;
+}
+
+/** Links an existing device to a new room and gives it that room's own control points. */
+async function linkShared(
+  db: CopyDb,
+  orgId: string,
+  roomId: string,
+  deviceId: string,
+  points: ControlPoint[],
+) {
+  const target = await db.device.findFirst({ where: { id: deviceId, orgId } });
+  if (!target) throw new Error('The device to share is not there');
+  await db.deviceRoom.create({ data: { orgId, deviceId, roomId } });
+  const have = pointsOf(target.points);
+  const taken = new Set(have.map((p) => p.id));
+  const added = points.map((p) => {
+    let id = p.id;
+    for (let n = 2; taken.has(id); n++) id = `${p.id.slice(0, 58)}-${n}`;
+    taken.add(id);
+    return { ...p, id, roomId };
+  });
+  await db.device.update({
+    where: { id: target.id },
+    data: {
+      points: [...have, ...added] as unknown as Prisma.InputJsonValue,
+      version: target.version + 1,
+    },
+  });
+}
+
+/** What the copy page shows for each device of a shape: what must be filled in per room, and its points. */
+export function describeSlots(devices: SourceDevice[]) {
+  return devices.map((d) => {
+    const control = DeviceControl.safeParse(d.control);
+    const driverId =
+      control.success && control.data.kind === 'driver' ? control.data.driverId : null;
+    const info = driverId ? BUILT_IN_DRIVERS[driverId] : undefined;
+    const need = requiredFields(d.control);
+    const label = (key: string) =>
+      info?.settings.find((x) => x.key === key)?.label ?? (key === 'host' ? 'Address' : key);
+    return {
+      id: d.id,
+      name: d.name,
+      kind: d.kind,
+      category: d.category,
+      driverId,
+      driverName: info?.name ?? driverId,
+      // Only active devices have anything to fill in.
+      binding: d.kind === 'active' ? need.binding.map((key) => ({ key, label: label(key) })) : [],
+      secret: d.kind === 'active' ? need.secret.map((key) => ({ key, label: label(key) })) : [],
+      hasSavedLogin: !!d.credentialSetId,
+      credentialSetId: d.credentialSetId,
+      points: pointsOf(d.points),
+    };
+  });
 }

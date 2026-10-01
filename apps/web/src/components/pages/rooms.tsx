@@ -1,5 +1,6 @@
 'use client';
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { DoorOpen, Plus, Search } from 'lucide-react';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
@@ -8,7 +9,7 @@ import { SimpleSelect } from '@/components/common/simple-select';
 import { designHealth, type DesignHealth } from '@/components/common/status';
 import type { HealthLevel } from '@/components/common/health';
 import { useDialogs } from '@/components/shell/dialogs';
-import { useOrg } from '@/components/shell/org-context';
+import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -17,7 +18,7 @@ import { useEstate } from '@/lib/use-estate';
 const ALL = 'all';
 
 export function RoomsView() {
-  const { canEdit } = useOrg();
+  const { orgId, canEdit } = useOrg();
   const { openNewRoom } = useDialogs();
   const { sites, rooms, live, isPending } = useEstate();
   const [query, setQuery] = useState('');
@@ -46,6 +47,13 @@ export function RoomsView() {
         actions={
           canEdit && (
             <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                render={<Link href={orgPath(orgId, '/rooms/shapes')} />}
+              >
+                Room shapes
+              </Button>
               <Button size="sm" onClick={() => openNewRoom()}>
                 <Plus data-icon="inline-start" /> New room
               </Button>
