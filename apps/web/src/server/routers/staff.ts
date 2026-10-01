@@ -14,8 +14,11 @@ import {
   removeStaff,
   setStaff,
 } from '../staff-team';
-import { StaffRole } from '@kestrel/model';
+import { StaffRole, mspFromRoute } from '@kestrel/model';
 import { realCalloutStripe } from '../callout-stripe';
+import { coveringProviders, providerCovers } from '../msp';
+import { orgTimezone, siteTimezone } from '../site-zone';
+import { OrgDeletionError, restoreOrg, scheduleDeletion } from '../org-deletion';
 import {
   CalloutError,
   cancelByStaff,
@@ -24,8 +27,9 @@ import {
   listCallouts,
   refundLateCancellation,
   sendQuote,
+  transferCallout,
 } from '../callouts';
-import { BillingNotConfigured } from '../stripe';
+import { BillingNotConfigured, getStripe, stripeConfigured } from '../stripe';
 import { orgDetail, orgDirectory, recordStaffAudit, mfaRequired } from '../staff';
 import {
   AnnounceError,
@@ -81,6 +85,7 @@ function asTrpc(e: unknown): never {
     e instanceof RetentionError ||
     e instanceof TeamError ||
     e instanceof CalloutError ||
+    e instanceof OrgDeletionError ||
     e instanceof BillingNotConfigured
   )
     throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
@@ -558,7 +563,11 @@ export const staffRouter = router({
     list: staffProcedure
       .input(
         z
-          .object({ status: z.array(z.string()).optional(), orgId: z.string().uuid().optional() })
+          .object({
+            status: z.array(z.string()).optional(),
+            orgId: z.string().uuid().optional(),
+            ticketId: z.string().uuid().optional(),
+          })
           .default({}),
       )
       .query(async ({ input }) => {
@@ -571,13 +580,25 @@ export const staffRouter = router({
           where: { id: { in: rows.flatMap((r) => (r.roomId ? [r.roomId] : [])) } },
           select: { id: true, name: true },
         });
+        // Callouts with a service provider are shown to Kestrel for monitoring: who has them.
+        const providers = await db.org.findMany({
+          where: { id: { in: [...new Set(rows.flatMap((r) => mspFromRoute(r.routedTo) ?? []))] } },
+          select: { id: true, name: true },
+        });
         return {
           defaultRateCents: Number(process.env.KESTREL_CALLOUT_RATE_CENTS) || null,
-          callouts: rows.map((r) => ({
-            ...r,
-            orgName: orgs.find((o) => o.id === r.orgId)?.name ?? 'Unknown',
-            roomName: rooms.find((x) => x.id === r.roomId)?.name ?? null,
-          })),
+          callouts: await Promise.all(
+            rows.map(async (r) => ({
+              ...r,
+              timezone: r.siteId
+                ? await siteTimezone(db, r.siteId)
+                : await orgTimezone(db, r.orgId),
+              orgName: orgs.find((o) => o.id === r.orgId)?.name ?? 'Unknown',
+              providerName:
+                providers.find((o) => o.id === (mspFromRoute(r.routedTo) ?? ''))?.name ?? null,
+              roomName: rooms.find((x) => x.id === r.roomId)?.name ?? null,
+            })),
+          ),
         };
       }),
 
@@ -595,10 +616,13 @@ export const staffRouter = router({
       .mutation(async ({ ctx, input }) => {
         requireAnyStaffRole(ctx.staff, ['support', 'billing']);
         try {
-          const res = await sendQuote(db, input.calloutId, {
-            ...input,
-            staffUserId: ctx.staff.userId,
-          });
+          const res = await sendQuote(
+            db,
+            input.calloutId,
+            { ...input, staffUserId: ctx.staff.userId },
+            new Date(),
+            stripeConfigured() ? realCalloutStripe(db) : undefined,
+          );
           await recordStaffAudit(db, {
             staffUserId: ctx.staff.userId,
             action: 'callout.quote',
@@ -690,6 +714,61 @@ export const staffRouter = router({
         }
       }),
 
+    // The providers that cover an organisation and take tickets, for choosing where a callout goes.
+    destinations: staffProcedure
+      .input(z.object({ orgId: z.string().uuid() }))
+      .query(({ input }) => coveringProviders(db, input.orgId)),
+
+    // Moves a callout between Kestrel and a service provider while nothing is paid. Either way: take
+    // one a provider has, or give one to a provider that covers the organisation.
+    transfer: staffProcedure
+      .input(
+        z.object({
+          calloutId: z.string().uuid(),
+          to: z.string().min(1).max(80),
+          note: z.string().trim().max(500).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireAnyStaffRole(ctx.staff, ['support', 'billing']);
+        try {
+          const c = await db.callout.findFirst({ where: { id: input.calloutId } });
+          if (!c) throw new CalloutError('Callout not found');
+          const names: Record<string, string> = {};
+          for (const route of [c.routedTo, input.to]) {
+            const oid = mspFromRoute(route);
+            if (oid)
+              names[route] =
+                (await db.org.findFirst({ where: { id: oid }, select: { name: true } }))?.name ??
+                'the service provider';
+          }
+          const res = await transferCallout(db, {
+            id: c.id,
+            to: input.to,
+            by: {
+              kind: 'kestrel',
+              userId: ctx.staff.userId,
+              email: ctx.staff.email ?? null,
+              label: 'Kestrel support',
+            },
+            note: input.note,
+            names,
+            isProvider: (route) => providerCovers(db, c.orgId, route, c.siteId),
+            ...(stripeConfigured() ? { stripe: realCalloutStripe(db) } : {}),
+          });
+          await recordStaffAudit(db, {
+            staffUserId: ctx.staff.userId,
+            action: 'callout.transfer',
+            orgId: res.orgId,
+            target: c.id,
+            meta: { from: res.from, to: res.to },
+          });
+          return { to: res.to };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
     refundLate: staffProcedure
       .input(z.object({ calloutId: z.string().uuid() }))
       .mutation(async ({ ctx, input }) => {
@@ -708,5 +787,61 @@ export const staffRouter = router({
           return asTrpc(e);
         }
       }),
+  }),
+
+  // Deleting an organisation (docs/decisions.md OD-1..): admin only. Scheduling switches it off at
+  // once and it is deleted for good after 30 days, unless restored first. Both are audited.
+  deletion: router({
+    schedule: staffProcedure
+      .input(
+        z.object({
+          orgId,
+          confirmName: z.string().max(200),
+          reason: z.string().trim().min(1).max(300),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'admin');
+        try {
+          const res = await scheduleDeletion(
+            db,
+            {
+              cancelSubscription: async (id) => void (await getStripe().subscriptions.cancel(id)),
+            },
+            { ...input, staffUserId: ctx.staff.userId },
+          );
+          await recordStaffAudit(db, {
+            staffUserId: ctx.staff.userId,
+            action: 'org.delete.schedule',
+            orgId: input.orgId,
+            target: input.orgId,
+            meta: {
+              reason: input.reason,
+              deleteAfter: res.deleteAfter.toISOString(),
+              gatewaysReleased: res.gatewaysReleased,
+              subscriptionCancelled: res.subscriptionCancelled,
+            },
+          });
+          return res;
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    restore: staffProcedure.input(z.object({ orgId })).mutation(async ({ ctx, input }) => {
+      requireStaffRole(ctx.staff, 'admin');
+      try {
+        await restoreOrg(db, { orgId: input.orgId });
+        await recordStaffAudit(db, {
+          staffUserId: ctx.staff.userId,
+          action: 'org.delete.restore',
+          orgId: input.orgId,
+          target: input.orgId,
+        });
+        return { ok: true };
+      } catch (e) {
+        return asTrpc(e);
+      }
+    }),
   }),
 });

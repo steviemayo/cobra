@@ -69,6 +69,23 @@ export const DRIVER_OPTIONS = [
   { value: 'tcp', label: 'Generic: TCP' },
 ];
 
+const GENERIC_DRIVER_OPTIONS = [
+  { value: 'pjlink', label: 'Generic: PJLink' },
+  { value: 'tcp', label: 'Generic: TCP' },
+];
+
+/**
+ * The drivers that suit a category: the built-in ones that name it, by name, then the generic ones.
+ * A category no driver names (an asset-only kind) gets the whole list, so nothing is ever unreachable.
+ */
+export function driverOptionsFor(category: string) {
+  const matching = Object.entries(BUILT_IN_DRIVERS)
+    .filter(([, info]) => (info.categories as string[]).includes(category))
+    .map(([id, info]) => ({ value: id, label: info.name }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  return matching.length > 0 ? [...matching, ...GENERIC_DRIVER_OPTIONS] : DRIVER_OPTIONS;
+}
+
 export function controlFor(choice: string): DeviceControl {
   return choice === 'pjlink' || choice === 'tcp'
     ? { kind: 'generic', protocol: choice }
@@ -562,7 +579,18 @@ export function AddDeviceDialog({
             </Field>
           </div>
           <Field label="Category">
-            <SimpleSelect value={category} onValueChange={setCategory} options={CATEGORY_OPTIONS} />
+            <SimpleSelect
+              value={category}
+              onValueChange={(v) => {
+                setCategory(v);
+                // Keep the driver only if it still suits the new category.
+                if (!driverOptionsFor(v).some((o) => o.value === driver)) {
+                  setDriver(driverOptionsFor(v)[0]?.value ?? 'pjlink');
+                  setConn(emptyConnection());
+                }
+              }}
+              options={CATEGORY_OPTIONS}
+            />
           </Field>
           {kind === 'active' && (
             <div className="space-y-3">
@@ -573,7 +601,7 @@ export function AddDeviceDialog({
                     setDriver(v);
                     setConn(emptyConnection());
                   }}
-                  options={DRIVER_OPTIONS}
+                  options={driverOptionsFor(category)}
                 />
               </Field>
               <ConnectionFields slots={slots} draft={conn} onChange={setConn} />

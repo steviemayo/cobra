@@ -31,13 +31,21 @@ enum GatewayChannel {
 }
 
 model Org {
-  id                 String   @id @default(uuid()) @db.Uuid
+  id                 String    @id @default(uuid()) @db.Uuid
   name               String
-  createdAt          DateTime @default(now())
+  createdAt          DateTime  @default(now())
   /// When true, staff can only open a support session if they link one of this organisation's open tickets.
-  staffAccessBlocked Boolean  @default(false)
+  staffAccessBlocked Boolean   @default(false)
   /// customer: an organisation with rooms. msp: a managed service provider that looks after customers.
-  kind               String   @default("customer")
+  kind               String    @default("customer")
+  /// Set when Kestrel staff schedule the organisation for deletion. It is switched off at once (nobody
+  /// in it can sign in to it, its gateways are let go, its subscription is cancelled) and everything
+  /// is deleted for good on `deleteAfter`, unless staff restore it first.
+  deletedAt          DateTime?
+  deleteAfter        DateTime?
+  /// The staff member (StaffUser.userId) who scheduled it, and why.
+  deletedBy          String?   @db.Uuid
+  deleteReason       String?
 
   members             Member[]
   sites               Site[]
@@ -85,6 +93,8 @@ model Org {
   joinRequests        JoinRequest[]
   areas               Area[]
   devices             Device[]
+  deviceRooms         DeviceRoom[]
+  roomShapes          RoomShape[]
   deviceEvents        DeviceEvent[]
 }
 
@@ -241,6 +251,7 @@ model Room {
   incidents         Incident[]
   commands          RemoteCommand[]
   tickets           Ticket[]
+  sharedDevices     DeviceRoom[]
 
   @@index([orgId])
   @@index([siteId])
@@ -617,6 +628,8 @@ model Incident {
   alerted        Boolean   @default(false)
   acknowledgedBy String?   @db.Uuid
   acknowledgedAt DateTime?
+  /// Other rooms this incident also affects (a shared device that is offline serves several rooms). `roomId` stays the first.
+  roomIds        String[]  @default([]) @db.Uuid
 
   org  Org   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   room Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
@@ -768,6 +781,12 @@ model OrgBilling {
   quantity             Int       @default(0)
   currentPeriodEnd     DateTime?
   cancelAtPeriodEnd    Boolean   @default(false)
+  /// Rooms added mid-cycle are charged pro rata to the end of the period straight away, then billed in full from the next cycle.
+  trueUp               Boolean   @default(false)
+  /// How the plan is billed: "month" or "year".
+  billingInterval      String    @default("month")
+  /// Billed on the 1st of each month (first period pro rata). Chosen when first subscribing; never changed on a live subscription.
+  anchorFirstOfMonth   Boolean   @default(false)
   updatedAt            DateTime  @default(now()) @updatedAt
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -1241,11 +1260,51 @@ model Device {
   room    Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
   gateway Gateway?      @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
   events  DeviceEvent[]
+  /// The rooms a shared device serves, besides its home room (`roomId`).
+  rooms   DeviceRoom[]
 
   @@index([orgId])
   @@index([siteId])
   @@index([roomId])
   @@index([gatewayId])
+}
+
+/// A device shared by several rooms: one row per room it serves besides its home room. The device
+/// keeps one address, login, gateway and history; each room sees it and its own control points.
+/// The rooms may be at different sites of the same organisation. See docs/room-shapes-and-shared-devices.md.
+model DeviceRoom {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  deviceId  String   @db.Uuid
+  roomId    String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  org    Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  room   Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, roomId])
+  @@index([orgId])
+  @@index([roomId])
+}
+
+/// A saved room shape: the devices a room is made of, with their drivers, design settings and control
+/// points, and no address or login. New rooms are made from one (docs/room-shapes-and-shared-devices.md).
+model RoomShape {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  name        String
+  description String?
+  /// The device slots: see ShapeSlot in apps/web/src/server/room-shapes.ts.
+  slots       Json     @default("[]")
+  createdBy   String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, name])
+  @@index([orgId])
 }
 
 /// Append-only history of one device: field changes (old to new, who or what), moves, gateway
@@ -1670,24 +1729,36 @@ model OrgLatencySettings {
 // extra time is invoiced, unused time is credited and refunded. A linked ticket carries the
 // conversation. status: requested, quoted, booked (paid), completed, cancelled, declined.
 model Callout {
-  id             String   @id @default(uuid()) @db.Uuid
-  orgId          String   @db.Uuid
-  siteId         String?  @db.Uuid
-  roomId         String?  @db.Uuid
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @db.Uuid
+  siteId          String?  @db.Uuid
+  roomId          String?  @db.Uuid
   /// The ticket that carries the conversation with staff.
-  ticketId       String?  @db.Uuid
-  incidentId     String?  @db.Uuid
-  title          String
-  details        String
+  ticketId        String?  @db.Uuid
+  /// True when the callout opened its own ticket (and closes it when it ends). False when it was
+  /// requested from a ticket that already existed (an incident's), which carries on after the callout.
+  ownsTicket      Boolean  @default(true)
+  /// Who deals with it: "kestrel" (quote, prepay, invoice through Kestrel) or "msp:<org id>", a service
+  /// provider that covers the room, site or organisation. Kestrel can see every callout; only the
+  /// ones with Kestrel are quoted and billed here. An owner or dev can send one to Kestrel instead.
+  routedTo        String   @default("kestrel")
+  /// Everything that has happened to who has it: [{ at, kind, from, to, by, note }] (transfers, a
+  /// provider scheduling or completing it). Kept on the callout as well as on the ticket.
+  history         Json     @default("[]")
+  /// Who completed it (a Kestrel technician's label, or the service provider's name).
+  completedByName String?
+  incidentId      String?  @db.Uuid
+  title           String
+  details         String
   /// When the customer would like someone (free text: "Tuesday morning, before 10").
-  preferredDates String?
-  contactName    String?
-  contactPhone   String?
-  createdBy      String?  @db.Uuid
-  createdByEmail String?
-  status         String   @default("requested")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @default(now()) @updatedAt
+  preferredDates  String?
+  contactName     String?
+  contactPhone    String?
+  createdBy       String?  @db.Uuid
+  createdByEmail  String?
+  status          String   @default("requested")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
 
   // The quote. Money is in cents of `currency`; the rate and subtotal exclude GST.
   hours         Float?

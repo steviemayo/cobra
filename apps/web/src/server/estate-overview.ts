@@ -28,7 +28,8 @@ export type EstateDb = Pick<
   | 'ticket'
   | 'usageDefinition'
   | 'pmSchedule'
->;
+> &
+  Partial<Pick<PrismaClient, 'deviceRoom'>>;
 
 type GatewayStatus = 'pending' | 'online' | 'offline';
 
@@ -129,6 +130,11 @@ export async function estateOverview(
     db.usageDefinition.findMany({ where: { orgId, kind: 'av' } }),
     db.pmSchedule.findMany({ where: { orgId, enabled: true } }),
   ]);
+  // Shared devices: a device is also in every room it is linked to, whatever site it is at.
+  const links = db.deviceRoom ? await db.deviceRoom.findMany({ where: { orgId } }) : [];
+  const deviceById = new Map(allDevices.map((d) => [d.id, d]));
+  const homeRoomGateway = (roomId: string | null) =>
+    roomId ? (allRooms.find((x) => x.id === roomId)?.gatewayId ?? null) : null;
   const sites = allSites.filter((s) => inScope(scope, s.id));
   const areas = allAreas.filter((a) => inScope(scope, a.siteId));
   const rooms = allRooms.filter((r) => inScope(scope, r.siteId));
@@ -177,7 +183,14 @@ export async function estateOverview(
   };
 
   const rows: EstateRoom[] = rooms.map((r) => {
-    const own = devices.filter((d) => d.roomId === r.id);
+    const linkedHere = links
+      .filter((l) => l.roomId === r.id)
+      .flatMap((l) => {
+        const d = deviceById.get(l.deviceId);
+        return d && d.roomId !== r.id ? [d] : [];
+      });
+    const linkedIds = new Set(linkedHere.map((d) => d.id));
+    const own = [...devices.filter((d) => d.roomId === r.id), ...linkedHere];
     const ownLegacy = legacy.filter((d) => d.roomId === r.id);
     const gwSeen = new Map<string, { id: string; name: string; status: GatewayStatus }>();
     const note = (id: string | null | undefined) => {
@@ -200,7 +213,8 @@ export async function estateOverview(
       active++;
       const gwId = resolveGatewayId({
         deviceGatewayId: d.gatewayId,
-        roomGatewayId: r.gatewayId,
+        // A shared device is polled by its own home room's gateway, not the room that is looking at it.
+        roomGatewayId: linkedIds.has(d.id) ? homeRoomGateway(d.roomId) : r.gatewayId,
         siteGatewayId: defaultGatewayAt.get(d.siteId) ?? null,
       });
       const gw = note(gwId);
@@ -222,7 +236,9 @@ export async function estateOverview(
       else offline++;
     }
 
-    const open = incidents.filter((i) => i.roomId === r.id);
+    const open = incidents.filter(
+      (i) => i.roomId === r.id || (i.roomIds ?? []).includes(r.id),
+    );
     const worst = open.reduce<Severity | null>(
       (w, i) =>
         !w || SEVERITY_RANK[i.severity as Severity] > SEVERITY_RANK[w]

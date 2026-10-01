@@ -62,6 +62,16 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `created room “${s(meta.name)}” in ${s(meta.site)}`;
     case 'room.duplicate':
       return `copied room “${s(meta.from)}” to a new room “${s(meta.name)}”`;
+    case 'room.copy': {
+      const rooms = Array.isArray(meta.rooms) ? meta.rooms.map((r) => `“${s(r)}”`) : [];
+      return `made ${rooms.length} cop${rooms.length === 1 ? 'y' : 'ies'} of room “${s(meta.from)}”: ${rooms.join(', ')}`;
+    }
+    case 'room.shape_save':
+      return `saved a room shape “${s(meta.name)}”`;
+    case 'room.shape_delete':
+      return `deleted the room shape “${s(meta.name)}”`;
+    case 'device.shared':
+      return `set a device to serve ${typeof meta.rooms === 'number' ? meta.rooms : 0} other room${meta.rooms === 1 ? '' : 's'}`;
     case 'room.staging_copy':
       return `made a staging copy of room “${s(meta.from)}” called “${s(meta.name)}”`;
     case 'room.staging_promote':
@@ -126,10 +136,20 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `started a purchase of “${s(meta.name)}”`;
     case 'calendar.connect':
       return `connected the ${s(meta.provider) === 'graph' ? 'Microsoft 365' : 'Google'} calendar “${s(meta.name)}”`;
+    case 'org.delete.request':
+      return 'asked Kestrel to delete the organisation';
     case 'callout.request':
       return `asked for a support callout: ${s(meta.title)}`;
     case 'callout.pay':
       return 'opened payment for a support callout quote';
+    case 'callout.transfer':
+      return 'moved a callout between Kestrel and a service provider';
+    case 'callout.provider_schedule':
+      return 'scheduled a visit for a callout';
+    case 'callout.provider_complete':
+      return 'completed a callout for the service provider';
+    case 'callout.to_kestrel':
+      return 'sent a callout to Kestrel instead of the service provider';
     case 'callout.cancel':
       return 'cancelled a support callout';
     case 'latency.limits':

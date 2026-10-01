@@ -4,7 +4,7 @@ import { db } from '@kestrel/db';
 import { writeAudit } from '../audit';
 import { effectiveStatus, newEnrollToken } from '../gateway-service';
 import { cancelUpdate, requestUpdate, setAutoUpdate } from '../gateway-update-service';
-import { canSelfUpdate, latestVersions, updateStatus } from '../gateway-updates';
+import { canSelfUpdate, publishedVersions, updateStatus } from '../gateway-updates';
 import { SITE_SCOPED, siteFilter } from '../site-scope';
 import { orgProcedure, requireRole, router } from '../trpc';
 
@@ -50,7 +50,7 @@ export const gatewayRouter = router({
         orderBy: { createdAt: 'asc' },
         select: safe,
       });
-      const latest = latestVersions();
+      const latest = await publishedVersions();
       return gateways.map(({ features, ...g }) => ({
         ...g,
         status: effectiveStatus(g),

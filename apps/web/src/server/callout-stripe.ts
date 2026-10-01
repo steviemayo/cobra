@@ -107,6 +107,10 @@ export function realCalloutStripe(db: Pick<PrismaClient, 'orgBilling' | 'org'>):
       return { id: session.id, url: session.url };
     },
 
+    async expireCheckout(sessionId) {
+      await stripe.checkout.sessions.expire(sessionId);
+    },
+
     async prepaymentInvoice(sessionId) {
       const session = await stripe.checkout.sessions.retrieve(sessionId);
       return typeof session.invoice === 'string' ? session.invoice : (session.invoice?.id ?? null);

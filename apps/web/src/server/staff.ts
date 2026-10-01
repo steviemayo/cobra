@@ -68,6 +68,10 @@ export interface OrgSummary {
   members: number;
   /** The organisation requires a linked ticket before staff can open a session. */
   staffAccessBlocked: boolean;
+  /** Set when it is scheduled for deletion: when it was switched off, when it goes for good, and why. */
+  deletedAt: Date | null;
+  deleteAfter: Date | null;
+  deleteReason: string | null;
   /** trial, basic, pro, or "none" if the org has no billing record yet. */
   plan: string;
   billingStatus: string;
@@ -126,6 +130,9 @@ export async function orgDirectory(db: StaffDb, now = new Date()): Promise<OrgSu
         createdAt: o.createdAt,
         members: (m.get(o.id) ?? []).length,
         staffAccessBlocked: !!o.staffAccessBlocked,
+        deletedAt: o.deletedAt ?? null,
+        deleteAfter: o.deleteAfter ?? null,
+        deleteReason: o.deleteReason ?? null,
         plan: bill?.plan ?? 'none',
         billingStatus: bill?.status ?? 'none',
         trialEndsAt: bill?.trialEndsAt ?? null,

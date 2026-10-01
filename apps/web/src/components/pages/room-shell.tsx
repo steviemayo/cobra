@@ -21,7 +21,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ROOM_TYPE_LABEL } from '@/lib/format';
 import { useInvalidateEstate, useRoomsOverview } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
 
@@ -89,10 +88,6 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
           meta={
             <>
               {room.kind === 'staging' && <Badge variant="secondary">Staging</Badge>}
-              <span className="text-sm text-muted-foreground">{ROOM_TYPE_LABEL[room.type]}</span>
-              <span aria-hidden className="text-muted-foreground/50">
-                ·
-              </span>
               <Link
                 href={orgPath(orgId, `/sites/${room.siteId}`)}
                 className="text-sm text-muted-foreground hover:text-foreground hover:underline"

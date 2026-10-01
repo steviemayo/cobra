@@ -6,13 +6,14 @@ import { getEntitlements, type EntitlementDb } from './billing';
 import { SEVERITY_RANK, type AlertJob, type Severity } from './monitoring';
 import { pinnedFetch, postJson, postSigned, resolveAll, type Lookup } from './outbound';
 import { sendEmail } from './resend';
+import { sendSms } from './sms';
 import { affectedForRooms, type Impact } from './room-schedule';
 
 // `site` and `roomSchedule` are only needed to say which meetings a fault may affect.
 export type AlertDb = Pick<PrismaClient, 'alertChannel' | 'alertDelivery' | 'incident' | 'room'> &
   Partial<Pick<PrismaClient, 'site' | 'roomSchedule'>>;
 
-export const CHANNEL_TYPES = ['email', 'teams', 'webhook', 'itsm'] as const;
+export const CHANNEL_TYPES = ['email', 'sms', 'teams', 'webhook', 'itsm'] as const;
 export type ChannelType = (typeof CHANNEL_TYPES)[number];
 
 // Every channel may carry timing rules (see alert-rules.ts); without them it alerts at once, always.
@@ -20,6 +21,12 @@ const rules = { rules: ChannelRules.optional() };
 
 export const ChannelConfig = z.discriminatedUnion('type', [
   z.object({ type: z.literal('email'), to: z.array(z.string().email()).min(1).max(10), ...rules }),
+  // Mobile numbers in international format, e.g. +61412345678.
+  z.object({
+    type: z.literal('sms'),
+    to: z.array(z.string().regex(/^\+[1-9]\d{7,14}$/)).min(1).max(5),
+    ...rules,
+  }),
   z.object({ type: z.literal('teams'), url: z.string().url().max(2000), ...rules }),
   z.object({
     type: z.literal('webhook'),
@@ -173,6 +180,15 @@ export async function send(s: Senders, config: ChannelConfig, m: AlertMessage): 
       });
       return postJson(s, config.url, body);
     }
+    case 'sms': {
+      const text = [headline(m), m.incident.room ? `Room: ${m.incident.room}` : '', m.portalUrl ?? '']
+        .filter(Boolean)
+        .join('\n')
+        .slice(0, 480);
+      if (!(await sendSms(s, config.to, text)))
+        throw new NotConfigured('Text messages are not set up on this Kestrel server');
+      return;
+    }
     case 'email': {
       const text = [
         headline(m),
@@ -200,6 +216,8 @@ export const MAX_ALERTS_PER_CHANNEL_HOUR = 30;
  * channels does not multiply the hourly cap above.
  */
 export const MAX_EMAIL_ALERTS_PER_ORG_PER_DAY = 200;
+/** Text messages cost money per send, so an organisation's daily total is capped across its SMS channels. */
+export const MAX_SMS_ALERTS_PER_ORG_PER_DAY = 100;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
@@ -258,6 +276,23 @@ export async function deliverToChannel(
     });
     if (sentToday >= MAX_EMAIL_ALERTS_PER_ORG_PER_DAY) {
       await record('suppressed', 'Too many alert emails from this organisation today');
+      return { status: 'suppressed' };
+    }
+  }
+  if (channel.type === 'sms') {
+    const smsChannels = await db.alertChannel.findMany({
+      where: { orgId: channel.orgId, type: 'sms' },
+      select: { id: true },
+    });
+    const sentToday = await db.alertDelivery.count({
+      where: {
+        channelId: { in: smsChannels.map((c) => c.id) },
+        status: 'sent',
+        at: { gte: new Date(now.getTime() - DAY_MS) },
+      },
+    });
+    if (sentToday >= MAX_SMS_ALERTS_PER_ORG_PER_DAY) {
+      await record('suppressed', 'Too many text message alerts from this organisation today');
       return { status: 'suppressed' };
     }
   }

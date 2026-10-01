@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/common/empty-state';
 import { SeverityPill, dateTime } from '@/components/common/health';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { Section } from '@/components/common/section';
+import { useSiteZone } from '@/lib/use-estate';
 import { DevicePoints } from './device-points';
 import { DeviceSettings } from './device-settings';
 import { DeviceResponse } from './network-health';
@@ -41,6 +42,14 @@ import { PmSchedules } from './pm-schedule';
 import { DeviceDetailsView } from './device-details';
 
 type Device = RouterOutputs['device']['get'];
+
+/** The time zone of the site a device is at (its page already holds the device, so this costs nothing). */
+function useDeviceZone(deviceId: string): string | null {
+  const trpc = useTRPC();
+  const { orgId } = useOrg();
+  const device = useQuery(trpc.device.get.queryOptions({ orgId, deviceId }));
+  return useSiteZone(device.data?.siteId);
+}
 type DeviceEvent = RouterOutputs['device']['events'][number];
 
 const STATE_LABEL: Record<DeviceLiveState, string> = {
@@ -452,6 +461,7 @@ function describe(e: DeviceEvent): { title: string; detail?: string; tone?: 'war
 }
 
 function AssetHistory({ deviceId }: { deviceId: string }) {
+  const zone = useDeviceZone(deviceId);
   const trpc = useTRPC();
   const { orgId } = useOrg();
   const events = useQuery(trpc.device.events.queryOptions({ orgId, deviceId, limit: 200 }));
@@ -489,7 +499,7 @@ function AssetHistory({ deviceId }: { deviceId: string }) {
             />
             <div className="text-sm font-medium">{d.title}</div>
             {d.detail && <div className="text-xs text-muted-foreground">{d.detail}</div>}
-            <div className="text-xs text-muted-foreground" title={dateTime(e.at)}>
+            <div className="text-xs text-muted-foreground" title={dateTime(e.at, zone)}>
               {timeAgo(e.at)}
             </div>
           </li>
@@ -510,6 +520,8 @@ const FIELD_TITLE: Record<string, string> = {
   occupied: 'Occupied',
   streamConnected: 'Receiving a stream',
   activeApp: 'Active app',
+  playback: 'Playback',
+  playSource: 'Playing from',
 };
 
 /** Charts for only the readings this device has reported: nothing is drawn for what it does not have. */
@@ -591,6 +603,7 @@ function DeviceHistoryCharts({ deviceId }: { deviceId: string }) {
 }
 
 function DeviceTickets({ deviceId }: { deviceId: string }) {
+  const zone = useDeviceZone(deviceId);
   const trpc = useTRPC();
   const { orgId } = useOrg();
   const tickets = useQuery(trpc.device.tickets.queryOptions({ orgId, deviceId }));
@@ -612,7 +625,7 @@ function DeviceTickets({ deviceId }: { deviceId: string }) {
               <Badge variant={t.status === 'open' ? 'default' : 'secondary'}>
                 {t.status.replace('_', ' ')}
               </Badge>
-              {dateTime(t.createdAt)}
+              {dateTime(t.createdAt, zone)}
             </span>
           </li>
         ))}
@@ -622,6 +635,7 @@ function DeviceTickets({ deviceId }: { deviceId: string }) {
 }
 
 function DeviceIncidents({ deviceId }: { deviceId: string }) {
+  const zone = useDeviceZone(deviceId);
   const trpc = useTRPC();
   const { orgId } = useOrg();
   const incidents = useQuery(trpc.device.incidents.queryOptions({ orgId, deviceId }));
@@ -639,8 +653,8 @@ function DeviceIncidents({ deviceId }: { deviceId: string }) {
           <div className="min-w-0">
             <div className="truncate text-sm font-medium">{i.title}</div>
             <div className="text-xs text-muted-foreground">
-              Opened {dateTime(i.openedAt)}
-              {i.resolvedAt && <> · resolved {dateTime(i.resolvedAt)}</>}
+              Opened {dateTime(i.openedAt, zone)}
+              {i.resolvedAt && <> · resolved {dateTime(i.resolvedAt, zone)}</>}
             </div>
           </div>
           <div className="flex items-center gap-3">

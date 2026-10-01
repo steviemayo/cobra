@@ -283,6 +283,28 @@ describe('monitored rooms (what is charged)', () => {
     const deviceStatus = table([{ id: 's1', orgId: ORG2, roomId: 'r4' }]);
     return { room, device, deviceStatus } as never;
   };
+  /** The same estate with a shared monitored device (d1) linked to r2 and r3, and a recorded asset (d3) linked to r5. */
+  const sharedWorld = () => {
+    const w = world() as unknown as { room: ReturnType<typeof table>; device: ReturnType<typeof table>; deviceStatus: unknown };
+    w.room.rows.push({ id: 'r5', orgId: ORG2, kind: 'standard' });
+    const deviceRoom = table([
+      { id: 'l1', orgId: ORG2, deviceId: 'd1', roomId: 'r2' },
+      { id: 'l2', orgId: ORG2, deviceId: 'd1', roomId: 'r3' },
+      { id: 'l3', orgId: ORG2, deviceId: 'd3', roomId: 'r5' },
+    ]);
+    return { ...w, deviceRoom } as never;
+  };
+
+  it('counts a room that only shares a monitored device, once, and not for a recorded asset or a staging room', async () => {
+    const ids = await monitoredRoomIds(sharedWorld(), ORG2);
+    expect([...ids].sort()).toEqual(['r1', 'r2', 'r4']);
+  });
+
+  it('counts the shared rooms against the limit', async () => {
+    const e = { maxRooms: 3 } as never;
+    expect(await canMonitorRoom(sharedWorld(), ORG2, e, 'r5')).toBe(false);
+    expect(await canMonitorRoom(sharedWorld(), ORG2, e, 'r2')).toBe(true);
+  });
 
   it('counts a room once it has a monitored device, however many, and not recorded-only or staging rooms', async () => {
     const ids = await monitoredRoomIds(world(), ORG2);

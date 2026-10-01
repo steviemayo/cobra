@@ -74,6 +74,9 @@ export function RoomDeviceList({ roomId, compact }: { roomId: string; compact?: 
                     </Link>
                     <div className="text-xs font-normal text-muted-foreground">
                       {assetCategoryLabel(d.category)}
+                      {d.roomId !== roomId && ` · shared from ${d.roomName ?? 'another room'}`}
+                      {d.roomId === roomId && d.sharedRooms.length > 0 &&
+                        ` · shared with ${d.sharedRooms.length} other room${d.sharedRooms.length === 1 ? '' : 's'}`}
                     </div>
                   </TableCell>
                   <TableCell>

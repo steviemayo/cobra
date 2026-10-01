@@ -1,5 +1,6 @@
 'use client';
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { DoorOpen, Plus, Search } from 'lucide-react';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
@@ -8,22 +9,20 @@ import { SimpleSelect } from '@/components/common/simple-select';
 import { designHealth, type DesignHealth } from '@/components/common/status';
 import type { HealthLevel } from '@/components/common/health';
 import { useDialogs } from '@/components/shell/dialogs';
-import { useOrg } from '@/components/shell/org-context';
+import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ROOM_TYPE_LABEL } from '@/lib/format';
 import { useEstate } from '@/lib/use-estate';
 
 const ALL = 'all';
 
 export function RoomsView() {
-  const { canEdit } = useOrg();
+  const { orgId, canEdit } = useOrg();
   const { openNewRoom } = useDialogs();
   const { sites, rooms, live, isPending } = useEstate();
   const [query, setQuery] = useState('');
   const [site, setSite] = useState(ALL);
-  const [type, setType] = useState(ALL);
   const [design, setDesign] = useState<DesignHealth | typeof ALL>(ALL);
   const [status, setStatus] = useState<HealthLevel | typeof ALL>(ALL);
 
@@ -33,13 +32,12 @@ export function RoomsView() {
       (r) =>
         (!q || r.name.toLowerCase().includes(q) || r.site.name.toLowerCase().includes(q)) &&
         (site === ALL || r.siteId === site) &&
-        (type === ALL || r.type === type) &&
         (design === ALL || designHealth(r.draft, r.monitorOnly) === design) &&
         (status === ALL || live.get(r.id)?.health.level === status),
     );
-  }, [rooms, query, site, type, design, status, live]);
+  }, [rooms, query, site, design, status, live]);
 
-  const filtering = query || site !== ALL || type !== ALL || design !== ALL || status !== ALL;
+  const filtering = query || site !== ALL || design !== ALL || status !== ALL;
 
   return (
     <PageContainer>
@@ -49,6 +47,13 @@ export function RoomsView() {
         actions={
           canEdit && (
             <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                render={<Link href={orgPath(orgId, '/rooms/shapes')} />}
+              >
+                Room shapes
+              </Button>
               <Button size="sm" onClick={() => openNewRoom()}>
                 <Plus data-icon="inline-start" /> New room
               </Button>
@@ -91,15 +96,6 @@ export function RoomsView() {
               ]}
             />
             <SimpleSelect
-              value={type}
-              onValueChange={setType}
-              options={[
-                { value: ALL, label: 'All types' },
-                { value: 'meeting', label: ROOM_TYPE_LABEL.meeting },
-                { value: 'training', label: ROOM_TYPE_LABEL.training },
-              ]}
-            />
-            <SimpleSelect
               value={status}
               onValueChange={setStatus}
               options={[
@@ -129,7 +125,6 @@ export function RoomsView() {
                 onClick={() => {
                   setQuery('');
                   setSite(ALL);
-                  setType(ALL);
                   setDesign(ALL);
                   setStatus(ALL);
                 }}

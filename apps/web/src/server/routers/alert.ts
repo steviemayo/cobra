@@ -34,6 +34,8 @@ function describe(type: string, config: unknown): { summary: string; hasSecret: 
   switch (type) {
     case 'email':
       return { summary: ((c.to as string[]) ?? []).join(', '), hasSecret: false };
+    case 'sms':
+      return { summary: ((c.to as string[]) ?? []).join(', '), hasSecret: false };
     case 'teams':
       return { summary: host(c.url), hasSecret: false };
     case 'webhook':

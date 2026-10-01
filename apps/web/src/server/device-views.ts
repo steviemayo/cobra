@@ -1,5 +1,7 @@
 import type { PrismaClient } from '@kestrel/db';
 import { deviceLiveState, type DeviceLiveState, type Provenance } from '@kestrel/model';
+import { linkedDeviceIds, pointsForRoom } from './device-sharing';
+import { pointsOf } from './device-points';
 import { gatewayIdFor, type DevicesDb } from './devices';
 import { effectiveStatus } from './gateway-status';
 
@@ -14,6 +16,8 @@ export interface DeviceView {
   siteId: string;
   roomId: string | null;
   roomName: string | null;
+  /** The other rooms this device serves (a shared device), with their sites. Empty for a device in one room. */
+  sharedRooms: { id: string; name: string; siteId: string }[];
   areaId: string | null;
   /** The gateway that polls it (its own, else its room's, else the site's) and how that gateway is. */
   gatewayId: string | null;
@@ -63,16 +67,31 @@ export async function deviceViews(
       await db.room.findMany({ where: { orgId: filter.orgId, areaId: filter.areaId } })
     ).map((r) => r.id);
   }
+  // A shared device is also in every room it serves, whatever site it is at.
+  const viaLinks: string[] = [];
+  if (filter.roomId) viaLinks.push(...(await linkedDeviceIds(db, filter.orgId, filter.roomId)));
+  if (roomIds)
+    for (const r of roomIds) viaLinks.push(...(await linkedDeviceIds(db, filter.orgId, r)));
+  const homeWhere = {
+    ...(filter.roomId ? { roomId: filter.roomId } : {}),
+    ...(roomIds ? { roomId: { in: roomIds } } : {}),
+  };
   const rows = await db.device.findMany({
     where: {
       orgId: filter.orgId,
       ...(filter.deviceId ? { id: filter.deviceId } : {}),
-      ...(filter.siteId ? { siteId: filter.siteId } : {}),
-      ...(filter.roomId ? { roomId: filter.roomId } : {}),
-      ...(roomIds ? { roomId: { in: roomIds } } : {}),
+      ...(filter.siteId && !viaLinks.length ? { siteId: filter.siteId } : {}),
+      ...(viaLinks.length
+        ? { OR: [homeWhere, { id: { in: viaLinks } }] }
+        : homeWhere),
     },
     orderBy: { name: 'asc' },
   });
+  const links = db.deviceRoom && rows.length
+    ? await db.deviceRoom.findMany({
+        where: { orgId: filter.orgId, deviceId: { in: rows.map((r) => r.id) } },
+      })
+    : [];
   const rooms = new Map(
     (await db.room.findMany({ where: { orgId: filter.orgId } })).map((r) => [r.id, r]),
   );
@@ -94,6 +113,12 @@ export async function deviceViews(
       siteId: d.siteId,
       roomId: d.roomId,
       roomName: room?.name ?? null,
+      sharedRooms: links
+        .filter((l) => l.deviceId === d.id)
+        .flatMap((l) => {
+          const r = rooms.get(l.roomId);
+          return r ? [{ id: r.id, name: r.name, siteId: r.siteId }] : [];
+        }),
       areaId: room?.areaId ?? null,
       gatewayId: gwId,
       gatewayName: gw?.name ?? null,
@@ -129,7 +154,7 @@ export async function deviceViews(
       swapPending: d.swapPending,
       feedback: d.feedback,
       details: d.details,
-      points: d.points,
+      points: filter.roomId ? pointsForRoom(pointsOf(d.points), filter.roomId) : d.points,
       pointValues: d.pointValues,
       version: d.version,
     });

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
+import { DeletionPanel } from '@/components/staff/deletion-panel';
 import { LicencePanel } from '@/components/staff/licence-panel';
 import { NotesPanel } from '@/components/staff/notes-panel';
 import { RetentionPanel } from '@/components/staff/retention-panel';
@@ -79,6 +80,14 @@ export function StaffOrg({ orgId }: { orgId: string }) {
       <NotesPanel orgId={orgId} />
 
       <RetentionPanel orgId={orgId} />
+
+      <DeletionPanel
+        orgId={orgId}
+        name={o.name}
+        deletedAt={o.deletedAt}
+        deleteAfter={o.deleteAfter}
+        deleteReason={o.deleteReason}
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="space-y-2">

@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { formatInZone } from '@/lib/time';
 
 export type HealthLevel = 'healthy' | 'degraded' | 'down' | 'unknown';
 
@@ -90,13 +91,12 @@ export function OnlineDot({ online, className }: { online: boolean; className?: 
   );
 }
 
-export const dateTime = (d: Date | string) =>
-  new Date(d).toLocaleString('en-AU', {
-    day: 'numeric',
-    month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+/**
+ * A time as "1 Oct, 12:53 pm AEST". Pass the site's time zone to show it as the site keeps time; with
+ * none it is the viewer's own zone. The zone is always named, so a time is never ambiguous.
+ */
+export const dateTime = (d: Date | string, timeZone?: string | null) =>
+  formatInZone(d, timeZone, { shortYear: true });
 
 export const INCIDENT_KIND_LABEL: Record<string, string> = {
   device_offline: 'Device offline',

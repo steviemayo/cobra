@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -11,7 +12,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
-import { ROOM_TYPE_LABEL } from '@/lib/format';
 import { useInvalidateEstate, useSites } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
 import { RoomCalendarSetting } from './room-calendar';
@@ -28,6 +28,7 @@ export function RoomSettings({ roomId }: { roomId: string }) {
   const [name, setName] = useState<string | null>(null);
   const [siteId, setSiteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [shapeName, setShapeName] = useState('');
 
   const update = useMutation(
     trpc.room.update.mutationOptions({
@@ -37,6 +38,15 @@ export function RoomSettings({ roomId }: { roomId: string }) {
         setName(null);
         setSiteId(null);
       },
+    }),
+  );
+  const saveShape = useMutation(
+    trpc.room.saveShape.mutationOptions({
+      onSuccess: () => {
+        toast.success('Shape saved');
+        setShapeName('');
+      },
+      onError: (e) => toast.error(e.message),
     }),
   );
   const del = useMutation(
@@ -97,12 +107,6 @@ export function RoomSettings({ roomId }: { roomId: string }) {
             options={(sites.data ?? []).map((s) => ({ value: s.id, label: s.name }))}
           />
         </div>
-        <div className="space-y-2">
-          <Label>Room type</Label>
-          <p className="text-sm text-muted-foreground">
-            {ROOM_TYPE_LABEL[room.type]}. The type is fixed once a room is created.
-          </p>
-        </div>
         {update.error && <p className="text-sm text-destructive">{update.error.message}</p>}
         <Button type="submit" disabled={!dirty || update.isPending || !nameValue.trim()}>
           {update.isPending && <Spinner />}
@@ -113,6 +117,43 @@ export function RoomSettings({ roomId }: { roomId: string }) {
       <GatewaySetting roomId={roomId} />
 
       <RoomCalendarSetting roomId={roomId} />
+
+      <section className="space-y-3 rounded-lg border p-4">
+        <div>
+          <h2 className="text-sm font-medium">Make copies</h2>
+          <p className="text-sm text-muted-foreground">
+            Make several rooms like this one, each with its own name, addresses, logins and control points.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" render={<Link href={orgPath(orgId, `/rooms/${roomId}/copy`)} />}>
+          Copy this room
+        </Button>
+        <div className="space-y-2 border-t pt-3">
+          <Label htmlFor="shape-name">Save as a shape</Label>
+          <p className="text-xs text-muted-foreground">
+            Keeps this room’s devices, drivers and control points (no addresses or logins) so rooms can be made
+            from it later, from the Rooms page.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Input
+              id="shape-name"
+              className="w-64"
+              placeholder="Standard meeting room"
+              value={shapeName}
+              onChange={(e) => setShapeName(e.target.value)}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!shapeName.trim() || saveShape.isPending}
+              onClick={() => saveShape.mutate({ orgId, roomId, name: shapeName })}
+            >
+              {saveShape.isPending && <Spinner />}
+              Save shape
+            </Button>
+          </div>
+        </div>
+      </section>
 
       <section className="space-y-3 rounded-lg border border-destructive/30 p-4">
         <div>

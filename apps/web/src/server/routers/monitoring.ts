@@ -42,6 +42,8 @@ async function incidentScope(orgId: string, scope: SiteScope) {
   ]);
   return [
     { roomId: { in: rooms.map((r) => r.id) } },
+    // An incident about a shared device is also about the rooms it lists.
+    { roomIds: { hasSome: rooms.map((r) => r.id) } },
     { roomId: null, gatewayId: { in: gateways.map((g) => g.id) } },
   ];
 }
@@ -88,7 +90,10 @@ export const monitoringRouter = router({
           orderBy: { name: 'asc' },
         }),
         db.incident.findMany({
-          where: { roomId: room.id, orgId: ctx.orgId },
+          where: {
+            orgId: ctx.orgId,
+            OR: [{ roomId: room.id }, { roomIds: { has: room.id } }],
+          },
           orderBy: { openedAt: 'desc' },
           take: 20,
         }),
@@ -207,11 +212,43 @@ export const monitoringRouter = router({
       const rooms = await db.room.findMany({
         where: {
           orgId: ctx.orgId,
-          id: { in: [...new Set(rows.flatMap((r) => (r.roomId ? [r.roomId] : [])))] },
+          id: {
+            in: [
+              ...new Set(
+                rows.flatMap((r) => [...(r.roomId ? [r.roomId] : []), ...(r.roomIds ?? [])]),
+              ),
+            ],
+          },
         },
-        select: { id: true, name: true },
+        select: { id: true, name: true, siteId: true },
       });
       const roomName = new Map(rooms.map((r) => [r.id, r.name]));
+      // Each incident's time is shown in its site's zone: its room's site, or its gateway's.
+      const gatewaySite = new Map(
+        (
+          await db.gateway.findMany({
+            where: {
+              orgId: ctx.orgId,
+              id: { in: [...new Set(rows.flatMap((r) => (r.gatewayId ? [r.gatewayId] : [])))] },
+            },
+            select: { id: true, siteId: true },
+          })
+        ).map((g) => [g.id, g.siteId]),
+      );
+      const siteZones = new Map(
+        (
+          await db.site.findMany({
+            where: { orgId: ctx.orgId },
+            select: { id: true, timezone: true },
+          })
+        ).map((s) => [s.id, s.timezone]),
+      );
+      const zoneOf = (r: (typeof rows)[number]) => {
+        const siteId =
+          (r.roomId ? rooms.find((x) => x.id === r.roomId)?.siteId : undefined) ??
+          (r.gatewayId ? gatewaySite.get(r.gatewayId) : undefined);
+        return (siteId ? siteZones.get(siteId) : undefined) ?? null;
+      };
       // Meetings the open incidents may disturb, from the rooms' calendars.
       const impact = await affectedForRooms(
         db,
@@ -233,6 +270,12 @@ export const monitoringRouter = router({
         detail: r.detail,
         roomId: r.roomId,
         roomName: r.roomId ? (roomName.get(r.roomId) ?? null) : null,
+        /** Other rooms the same incident affects (a shared device). */
+        alsoRooms: (r.roomIds ?? []).flatMap((id) => {
+          const n = roomName.get(id);
+          return n ? [{ id, name: n }] : [];
+        }),
+        timezone: zoneOf(r),
         openedAt: r.openedAt,
         resolvedAt: r.resolvedAt,
         occurrences: r.occurrences,
@@ -247,7 +290,11 @@ export const monitoringRouter = router({
     .query(async ({ ctx, input }) => {
       const room = await assertScopedRoom(ctx.orgId, input.roomId, ctx.siteScope);
       const open = await db.incident.count({
-        where: { orgId: ctx.orgId, roomId: room.id, status: 'open' },
+        where: {
+          orgId: ctx.orgId,
+          status: 'open',
+          OR: [{ roomId: room.id }, { roomIds: { has: room.id } }],
+        },
       });
       if (open === 0) return null;
       return (await affectedForRooms(db, ctx.orgId, [room.id], new Date())).get(room.id) ?? null;

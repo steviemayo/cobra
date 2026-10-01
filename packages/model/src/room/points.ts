@@ -80,6 +80,11 @@ export const ControlPoint = z.object({
   role: PointRole.optional(),
   /** The microphone a microphone role acts on. */
   targetId: LocalId.optional(),
+  /**
+   * On a device shared by several rooms: the room this point belongs to. A point with no room belongs to
+   * the device as a whole and shows in every room it serves. Ignored on a device with one room.
+   */
+  roomId: z.string().uuid().optional(),
   /** Level points: the own range of the device, shown as 0 to 100 on the panel (usually dB). */
   min: z.number().optional(),
   max: z.number().optional(),

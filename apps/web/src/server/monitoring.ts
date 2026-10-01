@@ -1,7 +1,9 @@
 import { Prisma, type PrismaClient } from '@kestrel/db';
 import type { RoomReport } from '@kestrel/model';
+import { formatInZone } from '../lib/time';
 import { getEntitlements } from './billing';
 import { effectiveStatus } from './gateway-status';
+import { siteTimezone } from './site-zone';
 import { deviceOfSubject, inMaintenance, type MaintenanceDb } from './maintenance';
 import { mirrorTicket, type ItsmDb } from './itsm-service';
 import { pinnedFetch, resolveAll } from './outbound';
@@ -14,7 +16,7 @@ export type MonitoringDb = Pick<
   PrismaClient,
   'deviceStatus' | 'incident' | 'room' | 'gateway' | 'remoteCommand' | 'orgBilling' | 'org'
 > &
-  Partial<Pick<PrismaClient, 'maintenanceWindow'>>;
+  Partial<Pick<PrismaClient, 'maintenanceWindow' | 'site'>>;
 
 export type Severity = 'info' | 'warning' | 'critical';
 export type IncidentKind =
@@ -44,6 +46,8 @@ export const COMMAND_SENT_EXPIRY_MS = 10 * 60_000;
 interface NewIncident {
   orgId: string;
   roomId?: string | null;
+  /** Other rooms the same problem affects (a shared device serves several). */
+  roomIds?: string[];
   gatewayId?: string | null;
   /** The site, for a problem that is about the site rather than a room (so its maintenance windows apply). */
   siteId?: string | null;
@@ -64,7 +68,12 @@ export async function openIncident(
   if (open) {
     await db.incident.update({
       where: { id: open.id },
-      data: { lastSeenAt: now, title: input.title, detail: input.detail ?? null },
+      data: {
+        lastSeenAt: now,
+        title: input.title,
+        detail: input.detail ?? null,
+        ...(input.roomIds ? { roomIds: input.roomIds } : {}),
+      },
     });
     return null;
   }
@@ -86,6 +95,7 @@ export async function openIncident(
         occurrences: recent.occurrences + 1,
         title: input.title,
         detail: input.detail ?? null,
+        ...(input.roomIds ? { roomIds: input.roomIds } : {}),
       },
     });
     return null;
@@ -104,6 +114,7 @@ export async function openIncident(
     data: {
       orgId: input.orgId,
       roomId: input.roomId ?? null,
+      roomIds: input.roomIds ?? [],
       gatewayId: input.gatewayId ?? null,
       kind: input.kind,
       subject: input.subject,
@@ -222,7 +233,7 @@ export async function recordReports(
                 subject,
                 severity: 'warning',
                 title: `${d.name} is offline`,
-                detail: `${d.name} in ${room.name} has not answered since ${since.toISOString()}.`,
+                detail: `${d.name} in ${room.name} has not answered since ${formatInZone(since, await siteTimezone(db, room.siteId))}.`,
               },
               now,
             ),
@@ -340,8 +351,13 @@ export async function recordReports(
 export async function sweep(db: MonitoringDb, now = new Date()): Promise<AlertJob[]> {
   const jobs: AlertJob[] = [];
   const gateways = await db.gateway.findMany({ where: { enrolledAt: { not: null } } });
+  // An organisation scheduled for deletion has had its gateways let go: they are not "offline".
+  const suspended = new Set(
+    (await db.org.findMany({ where: { deletedAt: { gt: new Date(0) } } })).map((o) => o.id),
+  );
   const monitored = new Map<string, boolean>();
   for (const gw of gateways) {
+    if (suspended.has(gw.orgId)) continue;
     if (!monitored.has(gw.orgId))
       monitored.set(gw.orgId, (await getEntitlements(db, gw.orgId, now)).monitoring);
     if (!monitored.get(gw.orgId)) continue;
@@ -359,7 +375,7 @@ export async function sweep(db: MonitoringDb, now = new Date()): Promise<AlertJo
               severity: 'critical',
               title: `Gateway ${gw.name} is offline`,
               detail: gw.lastSeenAt
-                ? `Last heard from at ${gw.lastSeenAt.toISOString()}. Rooms keep running on site.`
+                ? `Last heard from at ${formatInZone(gw.lastSeenAt, await siteTimezone(db, gw.siteId))}. Rooms keep running on site.`
                 : null,
             },
             now,

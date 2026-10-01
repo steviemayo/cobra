@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import type { RoomLive } from '@/lib/use-estate';
-import { ROOM_TYPE_LABEL, timeAgo } from '@/lib/format';
+import { timeAgo } from '@/lib/format';
 import type { RouterOutputs } from '@/trpc/types';
 
 export type RoomRow = RouterOutputs['room']['overview'][number];
@@ -38,7 +38,6 @@ export function RoomsTable({
           <TableRow className="bg-muted/40 hover:bg-muted/40">
             <TableHead>Room</TableHead>
             {showSite && <TableHead>Site</TableHead>}
-            <TableHead>Type</TableHead>
             <TableHead>Live status</TableHead>
             <TableHead>Design</TableHead>
             <TableHead className="text-right">Devices</TableHead>
@@ -73,7 +72,6 @@ export function RoomsTable({
                     </Link>
                   </TableCell>
                 )}
-                <TableCell className="text-muted-foreground">{ROOM_TYPE_LABEL[r.type]}</TableCell>
                 <TableCell>
                   {liveRoom ? (
                     <HealthPill level={liveRoom.health.level} reasons={liveRoom.health.reasons} />

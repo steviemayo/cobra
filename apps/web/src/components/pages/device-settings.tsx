@@ -178,6 +178,20 @@ export function DeviceSettings({ device }: { device: Device }) {
           </div>
         </Row>
 
+        {device.kind === 'active' && (
+          <Row
+            label="Also serves"
+            hint="Other rooms this device is part of, at any site (one DSP or control system for several rooms). It keeps one address, login and history; each room can have its own control points on it."
+          >
+            <SharedRooms
+              key={`${device.id}:${device.sharedRooms.map((r) => r.id).join(',')}`}
+              device={device}
+              rooms={(rooms.data ?? []).map((r) => ({ id: r.id, name: r.name, siteName: r.site.name }))}
+              canEdit={canSupport}
+            />
+          </Row>
+        )}
+
         <Row
           label="Response time"
           hint="The gateway pings the device’s address to measure the network. Turn it off for a device that does not answer pings."
@@ -222,6 +236,77 @@ export function DeviceSettings({ device }: { device: Device }) {
         confirmLabel="Change driver"
         onConfirm={() => put({ control: controlFor(driver) })}
       />
+    </div>
+  );
+}
+
+/** The other rooms a shared device serves, at any site of the organisation. */
+function SharedRooms({
+  device,
+  rooms,
+  canEdit,
+}: {
+  device: Device;
+  rooms: { id: string; name: string; siteName: string }[];
+  canEdit: boolean;
+}) {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const { orgId } = useOrg();
+  const [picked, setPicked] = useState(() => new Set(device.sharedRooms.map((r) => r.id)));
+  const was = device.sharedRooms.map((r) => r.id).sort().join(',');
+  const dirty = [...picked].sort().join(',') !== was;
+  const save = useMutation(
+    trpc.device.setRooms.mutationOptions({
+      onSuccess: async () => {
+        toast.success('Saved');
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: trpc.device.get.queryKey() }),
+          qc.invalidateQueries({ queryKey: trpc.device.list.queryKey() }),
+          qc.invalidateQueries({ queryKey: trpc.monitoring.estate.queryKey() }),
+        ]);
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const options = rooms.filter((r) => r.id !== device.roomId);
+  if (options.length === 0)
+    return <p className="text-sm text-muted-foreground">There are no other rooms yet.</p>;
+  return (
+    <div className="space-y-2">
+      <ul className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2">
+        {options.map((r) => (
+          <li key={r.id}>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                disabled={!canEdit}
+                checked={picked.has(r.id)}
+                onChange={(e) =>
+                  setPicked((p) => {
+                    const next = new Set(p);
+                    if (e.target.checked) next.add(r.id);
+                    else next.delete(r.id);
+                    return next;
+                  })
+                }
+              />
+              {r.name}
+              <span className="text-xs text-muted-foreground">{r.siteName}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      {canEdit && (
+        <Button
+          size="sm"
+          disabled={!dirty || save.isPending}
+          onClick={() => save.mutate({ orgId, deviceId: device.id, roomIds: [...picked] })}
+        >
+          {save.isPending && <Spinner />}
+          Save
+        </Button>
+      )}
     </div>
   );
 }

@@ -17,8 +17,9 @@ import {
   type DeviceInput,
 } from '../devices';
 import { deviceViews } from '../device-views';
+import { setDeviceRooms } from '../device-sharing';
 import { MAX_POINTS, setDevicePoints } from '../device-points';
-import { canMonitorRoom, getEntitlements, monitorLimitMessage } from '../billing';
+import { canMonitorRoom, getEntitlements, monitoredRoomIds, monitorLimitMessage } from '../billing';
 import { syncQuantity } from '../stripe';
 import { after } from 'next/server';
 import { orgProcedure, requireRole, router } from '../trpc';
@@ -102,6 +103,51 @@ export const deviceRouter = router({
         meta: { count: input.points.length },
       });
       return { ok: true };
+    }),
+
+  /**
+   * Sets which other rooms a device serves (a shared device: one DSP or control system for several
+   * rooms, possibly at different sites of the organisation). Replaces the list.
+   */
+  setRooms: orgProcedure
+    .input(z.object({ orgId, deviceId: id, roomIds: z.array(id).max(50) }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev', 'support']);
+      // Linking a monitored device to a room makes that room monitored, which can take the
+      // organisation over its plan.
+      const shared = await db.device.findFirst({ where: { id: input.deviceId, orgId: ctx.orgId } });
+      if (shared?.kind === 'active') {
+        const have = new Set(
+          (await db.deviceRoom.findMany({ where: { orgId: ctx.orgId, deviceId: shared.id } })).map(
+            (l) => l.roomId,
+          ),
+        );
+        const e = await getEntitlements(db, ctx.orgId);
+        if (e.maxRooms !== null) {
+          const current = await monitoredRoomIds(db, ctx.orgId);
+          const fresh = new Set(
+            input.roomIds.filter((r) => r !== shared.roomId && !have.has(r) && !current.has(r)),
+          );
+          if (current.size + fresh.size > e.maxRooms)
+            throw new TRPCError({ code: 'FORBIDDEN', message: monitorLimitMessage(e) });
+        }
+      }
+      const res = await setDeviceRooms(db, {
+        orgId: ctx.orgId,
+        deviceId: input.deviceId,
+        roomIds: input.roomIds,
+        actorId: ctx.user.id,
+      });
+      if (!res.ok) return fail(res.message);
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'device.shared',
+        target: input.deviceId,
+        meta: { rooms: res.rooms },
+      });
+      after(() => syncQuantity(db, ctx.orgId).catch(() => undefined));
+      return res;
     }),
 
   /** The device's history, newest first. */

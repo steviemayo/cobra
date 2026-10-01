@@ -84,3 +84,9 @@ export function useInvalidateEstate() {
       qc.invalidateQueries({ queryKey: trpc.audit.list.queryKey() }),
     ]);
 }
+
+/** The time zone a site keeps time in, or null until sites have loaded (then times show in the viewer's zone). */
+export function useSiteZone(siteId: string | null | undefined): string | null {
+  const sites = useSites();
+  return sites.data?.find((s) => s.id === siteId)?.timezone ?? null;
+}

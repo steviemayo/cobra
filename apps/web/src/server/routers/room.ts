@@ -2,9 +2,18 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
-import { RoomModel, RoomType } from '@kestrel/model';
+import { ControlPoint, RoomModel, RoomType } from '@kestrel/model';
 import { writeAudit } from '../audit';
-import { getEntitlements, roomLimitMessage } from '../billing';
+import { getEntitlements, monitoredRoomIds, roomLimitMessage } from '../billing';
+import { saveShape, slotToSource, slotsOf } from '../room-shapes';
+import {
+  checkCopies,
+  describeSlots,
+  loadContext,
+  MAX_COPIES,
+  writeCopies,
+  type SourceDevice,
+} from '../room-copies';
 import { checkDeployable } from '../deploy-check';
 import { sharedGatewayProblem } from '../site-devices';
 import { createDeployment } from '../deployment-service';
@@ -147,7 +156,7 @@ export const roomRouter = router({
     }),
 
   create: orgProcedure
-    .input(z.object({ orgId, siteId: z.string().uuid(), name, type: RoomType }))
+    .input(z.object({ orgId, siteId: z.string().uuid(), name, type: RoomType.optional() }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
       const site = await assertSite(ctx.orgId, input.siteId);
@@ -160,7 +169,7 @@ export const roomRouter = router({
           message: roomLimitMessage(entitlements),
         });
       const room = await db.room.create({
-        data: { orgId: ctx.orgId, siteId: site.id, name: input.name, type: input.type },
+        data: { orgId: ctx.orgId, siteId: site.id, name: input.name, type: input.type ?? 'meeting' },
         omit,
       });
       await writeAudit({
@@ -168,7 +177,7 @@ export const roomRouter = router({
         actorId: ctx.user.id,
         action: 'room.create',
         target: room.id,
-        meta: { name: room.name, site: site.name, type: room.type },
+        meta: { name: room.name, site: site.name },
       });
       after(() =>
         syncQuantity(db, ctx.orgId).catch((e) =>
@@ -176,6 +185,221 @@ export const roomRouter = router({
         ),
       );
       return room;
+    }),
+
+  /**
+   * What a room is made of, as the shape a copy starts from: its devices with the fields each needs
+   * filled in per room, and their control points. No address or login is ever included.
+   */
+  copyShape: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, roomId: roomId.optional(), shapeId: z.string().uuid().optional() }))
+    .query(async ({ ctx, input }) => {
+      if (input.shapeId) {
+        const shape = await db.roomShape.findFirst({
+          where: { id: input.shapeId, orgId: ctx.orgId },
+        });
+        if (!shape) throw new TRPCError({ code: 'NOT_FOUND', message: 'Shape not found' });
+        return {
+          room: {
+            id: null as string | null,
+            name: shape.name,
+            siteId: null as string | null,
+            gatewayId: null as string | null,
+            areaId: null as string | null,
+            tags: [] as string[],
+          },
+          shape: { id: shape.id, name: shape.name },
+          devices: describeSlots(slotsOf(shape.slots).map(slotToSource)),
+        };
+      }
+      if (!input.roomId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose a room or a shape' });
+      const room = await db.room.findFirst({
+        where: { id: input.roomId, orgId: ctx.orgId, ...siteFilter(ctx.siteScope) },
+        select: { id: true, name: true, siteId: true, gatewayId: true, areaId: true, tags: true },
+      });
+      if (!room) throw new TRPCError({ code: 'NOT_FOUND', message: 'Room not found' });
+      const devices = await db.device.findMany({
+        where: { orgId: ctx.orgId, roomId: room.id },
+        orderBy: { createdAt: 'asc' },
+      });
+      return {
+        room: { ...room, id: room.id as string | null, siteId: room.siteId as string | null },
+        shape: null as { id: string; name: string } | null,
+        devices: describeSlots(devices as unknown as SourceDevice[]),
+      };
+    }),
+
+  /** The saved shapes of the organisation. */
+  shapes: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
+    const rows = await db.roomShape.findMany({
+      where: { orgId: ctx.orgId },
+      orderBy: { name: 'asc' },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      devices: slotsOf(r.slots).length,
+      createdAt: r.createdAt,
+    }));
+  }),
+
+  /** Keeps a room's devices, drivers, settings and control points (no addresses or logins) as a named shape. */
+  saveShape: orgProcedure
+    .input(
+      z.object({
+        orgId,
+        roomId,
+        name: z.string().trim().min(1).max(100),
+        description: z.string().trim().max(500).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const res = await saveShape(db, {
+        orgId: ctx.orgId,
+        roomId: input.roomId,
+        name: input.name,
+        description: input.description,
+        actorId: ctx.user.id,
+      });
+      if (!res.ok) throw new TRPCError({ code: 'BAD_REQUEST', message: res.message });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'room.shape_save',
+        target: res.value.id,
+        meta: { name: input.name },
+      });
+      return res.value;
+    }),
+
+  deleteShape: orgProcedure
+    .input(z.object({ orgId, shapeId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const shape = await db.roomShape.findFirst({ where: { id: input.shapeId, orgId: ctx.orgId } });
+      if (!shape) throw new TRPCError({ code: 'NOT_FOUND', message: 'Shape not found' });
+      await db.roomShape.delete({ where: { id: shape.id } });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'room.shape_delete',
+        target: shape.id,
+        meta: { name: shape.name },
+      });
+      return { ok: true };
+    }),
+
+  /**
+   * Makes copies of a room. With `dryRun` it only checks and says what is wrong. Everything is
+   * written in one transaction, or nothing is.
+   */
+  copy: orgProcedure
+    .input(
+      z.object({
+        orgId,
+        sourceRoomId: roomId.optional(),
+        shapeId: z.string().uuid().optional(),
+        /** Where the rooms go, when they are made from a shape. */
+        siteId: z.string().uuid().optional(),
+        dryRun: z.boolean().default(false),
+        copies: z
+          .array(
+            z.object({
+              name: z.string().trim().max(100),
+              areaId: z.string().uuid().nullable().optional(),
+              tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+              gatewayId: z.string().uuid().nullable().optional(),
+              devices: z
+                .array(
+                  z.object({
+                    sourceDeviceId: z.string().uuid(),
+                    skip: z.boolean().optional(),
+                    name: z.string().trim().min(1).max(80).optional(),
+                    values: z
+                      .record(z.string(), z.union([z.string().max(2000), z.number(), z.boolean()]))
+                      .optional(),
+                    settings: z
+                      .record(z.string(), z.union([z.string().max(2000), z.number(), z.boolean()]))
+                      .optional(),
+                    secrets: z
+                      .record(z.string(), z.union([z.string().max(2000), z.number(), z.boolean()]))
+                      .optional(),
+                    credentialSetId: z.string().uuid().nullable().optional(),
+                    points: z.array(ControlPoint).max(200).optional(),
+                    linkTo: z.string().uuid().optional(),
+                  }),
+                )
+                .max(100),
+            }),
+          )
+          .min(1)
+          .max(MAX_COPIES),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      let source: { id: string; name: string; siteId: string; gatewayId: string | null; monitorOnly: boolean };
+      let sourceDevices: SourceDevice[];
+      if (input.shapeId) {
+        const shape = await db.roomShape.findFirst({
+          where: { id: input.shapeId, orgId: ctx.orgId },
+        });
+        if (!shape) throw new TRPCError({ code: 'NOT_FOUND', message: 'Shape not found' });
+        if (!input.siteId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose a site' });
+        const site = await assertSite(ctx.orgId, input.siteId);
+        source = { id: shape.id, name: shape.name, siteId: site.id, gatewayId: null, monitorOnly: false };
+        sourceDevices = slotsOf(shape.slots).map(slotToSource);
+      } else {
+        if (!input.sourceRoomId)
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose a room or a shape' });
+        const room = await findRoom(ctx.orgId, input.sourceRoomId);
+        source = room;
+        sourceDevices = (await db.device.findMany({
+          where: { orgId: ctx.orgId, roomId: room.id },
+        })) as SourceDevice[];
+      }
+      const e = await getEntitlements(db, ctx.orgId);
+      const monitored = await monitoredRoomIds(db, ctx.orgId);
+      const context = await loadContext(db, ctx.orgId, source.siteId, {
+        maxRooms: e.maxRooms,
+        monitoredRooms: monitored.size,
+      });
+      const checked = checkCopies(sourceDevices, input.copies, context);
+      const ok = checked.batch.length === 0 && checked.rows.every((r) => r.problems.length === 0);
+      if (input.dryRun || !ok) return { ok, created: [] as { roomId: string; name: string; devices: number }[], ...checked };
+
+      const created = await db.$transaction(
+        (tx) =>
+          writeCopies(tx as unknown as Parameters<typeof writeCopies>[0], {
+            orgId: ctx.orgId,
+            actorId: ctx.user.id,
+            source: {
+              id: source.id,
+              siteId: source.siteId,
+              gatewayId: source.gatewayId,
+              monitorOnly: source.monitorOnly,
+            },
+            sourceDevices,
+            copies: input.copies,
+          }),
+        { timeout: 60_000, maxWait: 10_000 },
+      );
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'room.copy',
+        target: source.id,
+        meta: { from: source.name, rooms: created.map((r) => r.name) },
+      });
+      after(() =>
+        syncQuantity(db, ctx.orgId).catch((err) =>
+          console.error('[billing] quantity sync failed', err),
+        ),
+      );
+      return { ok: true, created, ...checked };
     }),
 
   update: orgProcedure
