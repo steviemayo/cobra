@@ -82,19 +82,25 @@ export function roomLimitMessage(e: Entitlements): string {
     : `Your plan includes ${e.maxRooms} rooms. Subscribe to add more.`;
 }
 
+export type BillingRoomsDb = Pick<PrismaClient, 'device' | 'deviceStatus' | 'room'> &
+  Partial<Pick<PrismaClient, 'deviceRoom'>>;
+
 /**
  * The rooms an organisation pays for: those with at least one monitored (active) device. A room of
  * only recorded assets, or with nothing in it, is free. Devices still inside older room designs
- * count until they are moved into the register. Staging and combined rooms are never counted.
+ * count until they are moved into the register. Staging and combined rooms are never counted. A room
+ * that a shared monitored device is linked to (`DeviceRoom`) is monitored too, even with no device of
+ * its own, so the rooms a shared DSP or control system serves are charged like any other.
  */
 export async function monitoredRoomIds(
-  db: Pick<PrismaClient, 'device' | 'deviceStatus' | 'room'>,
+  db: BillingRoomsDb,
   orgId: string,
 ): Promise<Set<string>> {
-  const [devices, legacy, rooms] = await Promise.all([
+  const [devices, legacy, rooms, links] = await Promise.all([
     db.device.findMany({ where: { orgId, kind: 'active' } }),
     db.deviceStatus.findMany({ where: { orgId } }),
     db.room.findMany({ where: { orgId } }),
+    db.deviceRoom ? db.deviceRoom.findMany({ where: { orgId } }) : Promise.resolve([]),
   ]);
   const billed = new Set(
     rooms.filter((r) => !['staging', 'combined'].includes(r.kind ?? 'standard')).map((r) => r.id),
@@ -102,6 +108,8 @@ export async function monitoredRoomIds(
   const ids = new Set<string>();
   for (const d of devices) if (d.roomId && billed.has(d.roomId)) ids.add(d.roomId);
   for (const d of legacy) if (billed.has(d.roomId)) ids.add(d.roomId);
+  const active = new Set(devices.map((d) => d.id));
+  for (const l of links) if (active.has(l.deviceId) && billed.has(l.roomId)) ids.add(l.roomId);
   return ids;
 }
 
@@ -114,7 +122,7 @@ export function monitorLimitMessage(e: Entitlements): string {
 
 /** Whether a device may start being monitored in a room: rooms already monitored are free to add to. */
 export async function canMonitorRoom(
-  db: Pick<PrismaClient, 'device' | 'deviceStatus' | 'room'>,
+  db: BillingRoomsDb,
   orgId: string,
   e: Entitlements,
   roomId: string | null,
