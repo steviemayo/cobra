@@ -165,6 +165,15 @@ if ($healthy) {
   } catch {
     Note "Could not tighten the permissions on the data folder: $($_.Exception.Message)"
   }
+  # This script came from a bundle checked against Kestrel's release key, and only the system can
+  # write here, so it is safe to refresh. The gateway's own account cannot write to this folder,
+  # so this is the only way the next update gets the newer script. Last, because it is running.
+  try {
+    $selfFresh = Join-Path $app 'windows\update.ps1'
+    if (Test-Path $selfFresh) { Copy-Item -Force $selfFresh (Join-Path $root 'update.ps1') }
+  } catch {
+    Note "Could not refresh update.ps1: $($_.Exception.Message)"
+  }
   Note "Updated to $latest"
   Forget-Request
   exit 0
