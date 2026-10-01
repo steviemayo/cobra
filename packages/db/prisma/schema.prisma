@@ -1678,24 +1678,36 @@ model OrgLatencySettings {
 // extra time is invoiced, unused time is credited and refunded. A linked ticket carries the
 // conversation. status: requested, quoted, booked (paid), completed, cancelled, declined.
 model Callout {
-  id             String   @id @default(uuid()) @db.Uuid
-  orgId          String   @db.Uuid
-  siteId         String?  @db.Uuid
-  roomId         String?  @db.Uuid
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @db.Uuid
+  siteId          String?  @db.Uuid
+  roomId          String?  @db.Uuid
   /// The ticket that carries the conversation with staff.
-  ticketId       String?  @db.Uuid
-  incidentId     String?  @db.Uuid
-  title          String
-  details        String
+  ticketId        String?  @db.Uuid
+  /// True when the callout opened its own ticket (and closes it when it ends). False when it was
+  /// requested from a ticket that already existed (an incident's), which carries on after the callout.
+  ownsTicket      Boolean  @default(true)
+  /// Who deals with it: "kestrel" (quote, prepay, invoice through Kestrel) or "msp:<org id>", a service
+  /// provider that covers the room, site or organisation. Kestrel can see every callout; only the
+  /// ones with Kestrel are quoted and billed here. An owner or dev can send one to Kestrel instead.
+  routedTo        String   @default("kestrel")
+  /// Everything that has happened to who has it: [{ at, kind, from, to, by, note }] (transfers, a
+  /// provider scheduling or completing it). Kept on the callout as well as on the ticket.
+  history         Json     @default("[]")
+  /// Who completed it (a Kestrel technician's label, or the service provider's name).
+  completedByName String?
+  incidentId      String?  @db.Uuid
+  title           String
+  details         String
   /// When the customer would like someone (free text: "Tuesday morning, before 10").
-  preferredDates String?
-  contactName    String?
-  contactPhone   String?
-  createdBy      String?  @db.Uuid
-  createdByEmail String?
-  status         String   @default("requested")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @default(now()) @updatedAt
+  preferredDates  String?
+  contactName     String?
+  contactPhone    String?
+  createdBy       String?  @db.Uuid
+  createdByEmail  String?
+  status          String   @default("requested")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
 
   // The quote. Money is in cents of `currency`; the rate and subtotal exclude GST.
   hours         Float?

@@ -21,6 +21,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
+import { SimpleSelect } from '@/components/common/simple-select';
 import { dollars } from '@/lib/money';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
@@ -47,6 +48,7 @@ const local = (d: Date) =>
   new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 
 type Action =
+  | { kind: 'transfer'; row: Row }
   | { kind: 'quote'; row: Row }
   | { kind: 'complete'; row: Row }
   | { kind: 'cancel'; row: Row }
@@ -178,6 +180,81 @@ function QuoteDialog({
             <Button type="submit" disabled={quote.isPending || !(sub > 0)}>
               {quote.isPending && <Spinner />}
               Send quote
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Moves a callout between Kestrel and a service provider that covers the organisation. */
+function TransferDialog({ row, onClose }: { row: Row; onClose: () => void }) {
+  const trpc = useTRPC();
+  const refresh = useRefresh();
+  const dest = useQuery(trpc.staff.callouts.destinations.queryOptions({ orgId: row.orgId }));
+  const options = [
+    { value: 'kestrel', label: 'Kestrel' },
+    ...(dest.data ?? []).map((p) => ({ value: p.route, label: p.name })),
+  ].filter((o) => o.value !== row.routedTo);
+  const [to, setTo] = useState('');
+  const [note, setNote] = useState('');
+  const chosen = to || options[0]?.value || '';
+  const m = useMutation(
+    trpc.staff.callouts.transfer.mutationOptions({
+      onSuccess: async () => {
+        await refresh();
+        toast.success('Moved. It is written on the ticket.');
+        onClose();
+      },
+    }),
+  );
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            m.mutate({ calloutId: row.id, to: chosen, note: note || undefined });
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Move: {row.title}</DialogTitle>
+            <DialogDescription>
+              {row.orgName}. Now with{' '}
+              {row.routedTo === 'kestrel' ? 'Kestrel' : (row.providerName ?? 'a service provider')}.
+              The ticket goes with it. A quote or visit arranged by the one that had it is cleared.
+              A paid booking can’t be moved: cancel it with the refund first.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Move it to</Label>
+            <SimpleSelect
+              className="w-full"
+              value={chosen}
+              onValueChange={setTo}
+              options={options}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="st-note">Note (the customer sees this)</Label>
+            <Textarea
+              id="st-note"
+              rows={2}
+              maxLength={500}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+          {m.error && <p className="text-sm text-destructive">{m.error.message}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={m.isPending || !chosen}>
+              {m.isPending && <Spinner />}
+              Move
             </Button>
           </div>
         </form>
@@ -400,7 +477,8 @@ export function StaffCallouts() {
                   <div className="font-medium">{c.title}</div>
                   <div className="text-xs text-muted-foreground">
                     {c.orgName}
-                    {c.roomName ? ` · ${c.roomName}` : ''} · requested {dateTime(c.createdAt)}
+                    {c.roomName ? ` · ${c.roomName}` : ''} · requested{' '}
+                    {dateTime(c.createdAt, c.timezone)}
                     {c.ticketId && (
                       <>
                         {' · '}
@@ -411,7 +489,11 @@ export function StaffCallouts() {
                     )}
                   </div>
                 </div>
-                <Badge variant="outline">{LABEL[c.status] ?? c.status}</Badge>
+                <Badge variant="outline">
+                  {c.routedTo !== 'kestrel' && c.status === 'requested'
+                    ? `With ${c.providerName ?? 'a service provider'}`
+                    : (LABEL[c.status] ?? c.status)}
+                </Badge>
               </div>
               <p className="whitespace-pre-line text-sm text-muted-foreground">{c.details}</p>
               {c.preferredDates && <p className="text-sm">Preferred times: {c.preferredDates}</p>}
@@ -424,7 +506,7 @@ export function StaffCallouts() {
                 <p className="text-sm tabular-nums">
                   {c.hours} h at {dollars(c.rateCents ?? 0)} = {dollars(c.subtotalCents ?? 0)} + GST{' '}
                   {dollars(c.gstCents ?? 0)} = <b>{dollars(c.totalCents)}</b>
-                  {c.scheduledFor ? ` · ${dateTime(c.scheduledFor)}` : ''}
+                  {c.scheduledFor ? ` · ${dateTime(c.scheduledFor, c.timezone)}` : ''}
                   {c.paidAt ? ' · paid' : ''}
                 </p>
               ) : null}
@@ -442,36 +524,55 @@ export function StaffCallouts() {
                   {c.refundedCents ? ` Refunded ${dollars(c.refundedCents)}.` : ''}
                 </p>
               )}
+              {c.routedTo !== 'kestrel' && (
+                <p className="text-sm text-muted-foreground">
+                  With {c.providerName ?? 'a service provider'}, who deal with the quote and
+                  invoice. Shown here for monitoring. The owner can send it to Kestrel instead.
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
-                {(c.status === 'requested' || c.status === 'quoted') && (
-                  <Button size="sm" onClick={() => setAction({ kind: 'quote', row: c })}>
-                    {c.status === 'quoted' ? 'Change quote' : 'Send quote'}
+                {['requested', 'quoted', 'scheduled'].includes(c.status) && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setAction({ kind: 'transfer', row: c })}
+                  >
+                    Move…
                   </Button>
                 )}
-                {c.status === 'booked' && (
+                {c.routedTo === 'kestrel' &&
+                  (c.status === 'requested' || c.status === 'quoted') && (
+                    <Button size="sm" onClick={() => setAction({ kind: 'quote', row: c })}>
+                      {c.status === 'quoted' ? 'Change quote' : 'Send quote'}
+                    </Button>
+                  )}
+                {c.routedTo === 'kestrel' && c.status === 'booked' && (
                   <Button size="sm" onClick={() => setAction({ kind: 'complete', row: c })}>
                     Complete
                   </Button>
                 )}
-                {(c.status === 'requested' || c.status === 'quoted') && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setAction({ kind: 'decline', row: c })}
-                  >
-                    Decline
-                  </Button>
-                )}
-                {['requested', 'quoted', 'booked'].includes(c.status) && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setAction({ kind: 'cancel', row: c })}
-                  >
-                    Cancel
-                  </Button>
-                )}
-                {c.status === 'cancelled' &&
+                {c.routedTo === 'kestrel' &&
+                  (c.status === 'requested' || c.status === 'quoted') && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setAction({ kind: 'decline', row: c })}
+                    >
+                      Decline
+                    </Button>
+                  )}
+                {c.routedTo === 'kestrel' &&
+                  ['requested', 'quoted', 'booked'].includes(c.status) && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setAction({ kind: 'cancel', row: c })}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                {c.routedTo === 'kestrel' &&
+                  c.status === 'cancelled' &&
                   c.cancelledBy === 'customer' &&
                   c.paidAt &&
                   !c.refundedCents && (
@@ -488,6 +589,9 @@ export function StaffCallouts() {
             </li>
           ))}
         </ul>
+      )}
+      {action?.kind === 'transfer' && (
+        <TransferDialog row={action.row} onClose={() => setAction(null)} />
       )}
       {action?.kind === 'quote' && (
         <QuoteDialog
