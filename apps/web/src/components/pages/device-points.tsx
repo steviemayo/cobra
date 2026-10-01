@@ -56,6 +56,7 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 const onOff = (v: boolean) => (v ? 'On' : 'Off');
 
 /** The range a level point maps onto 0 to 100 (its own, or the usual -40 to 0). */
+const WHOLE_DEVICE = '__whole';
 const rangeOf = (p: Pick<ControlPoint, 'min' | 'max'>) => ({ min: p.min ?? -40, max: p.max ?? 0 });
 const dbOf = (p: Pick<ControlPoint, 'min' | 'max'>, level: number) => {
   const r = rangeOf(p);
@@ -559,6 +560,12 @@ export function DevicePoints({ device }: { device: Device }) {
   const points = ControlPoint.array().safeParse(device.points);
   const list = points.success ? points.data : [];
   const values = (device.pointValues ?? {}) as Record<string, unknown>;
+  // A shared device holds a room's own points: say which room each one belongs to.
+  const serves = [
+    ...(device.roomId && device.roomName ? [{ id: device.roomId, name: device.roomName }] : []),
+    ...device.sharedRooms.map((r) => ({ id: r.id, name: r.name })),
+  ];
+  const sharedDevice = device.sharedRooms.length > 0;
 
   const save = useMutation(
     trpc.device.setPoints.mutationOptions({
@@ -606,6 +613,7 @@ export function DevicePoints({ device }: { device: Device }) {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Where</TableHead>
+              {sharedDevice && <TableHead>Room</TableHead>}
               <TableHead>Reading</TableHead>
               <TableHead>Watching</TableHead>
               <TableHead className="w-24" />
@@ -621,6 +629,30 @@ export function DevicePoints({ device }: { device: Device }) {
                   </div>
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">{addressText(p)}</TableCell>
+                {sharedDevice && (
+                  <TableCell>
+                    <SimpleSelect
+                      size="sm"
+                      className="w-44"
+                      value={p.roomId ?? WHOLE_DEVICE}
+                      disabled={!canSupport || save.isPending}
+                      onValueChange={(v) =>
+                        put(
+                          list.map((x) => {
+                            if (x.id !== p.id) return x;
+                            const rest = { ...x };
+                            delete rest.roomId;
+                            return v === WHOLE_DEVICE ? rest : { ...rest, roomId: v };
+                          }),
+                        )
+                      }
+                      options={[
+                        { value: WHOLE_DEVICE, label: 'Every room' },
+                        ...serves.map((r) => ({ value: r.id, label: r.name })),
+                      ]}
+                    />
+                  </TableCell>
+                )}
                 <TableCell className="tabular-nums">{reading(p, values[p.id])}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{watching(p)}</TableCell>
                 <TableCell>

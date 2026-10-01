@@ -42,6 +42,8 @@ async function incidentScope(orgId: string, scope: SiteScope) {
   ]);
   return [
     { roomId: { in: rooms.map((r) => r.id) } },
+    // An incident about a shared device is also about the rooms it lists.
+    { roomIds: { hasSome: rooms.map((r) => r.id) } },
     { roomId: null, gatewayId: { in: gateways.map((g) => g.id) } },
   ];
 }
@@ -88,7 +90,10 @@ export const monitoringRouter = router({
           orderBy: { name: 'asc' },
         }),
         db.incident.findMany({
-          where: { roomId: room.id, orgId: ctx.orgId },
+          where: {
+            orgId: ctx.orgId,
+            OR: [{ roomId: room.id }, { roomIds: { has: room.id } }],
+          },
           orderBy: { openedAt: 'desc' },
           take: 20,
         }),
@@ -207,7 +212,13 @@ export const monitoringRouter = router({
       const rooms = await db.room.findMany({
         where: {
           orgId: ctx.orgId,
-          id: { in: [...new Set(rows.flatMap((r) => (r.roomId ? [r.roomId] : [])))] },
+          id: {
+            in: [
+              ...new Set(
+                rows.flatMap((r) => [...(r.roomId ? [r.roomId] : []), ...(r.roomIds ?? [])]),
+              ),
+            ],
+          },
         },
         select: { id: true, name: true, siteId: true },
       });
@@ -259,6 +270,11 @@ export const monitoringRouter = router({
         detail: r.detail,
         roomId: r.roomId,
         roomName: r.roomId ? (roomName.get(r.roomId) ?? null) : null,
+        /** Other rooms the same incident affects (a shared device). */
+        alsoRooms: (r.roomIds ?? []).flatMap((id) => {
+          const n = roomName.get(id);
+          return n ? [{ id, name: n }] : [];
+        }),
         timezone: zoneOf(r),
         openedAt: r.openedAt,
         resolvedAt: r.resolvedAt,
@@ -274,7 +290,11 @@ export const monitoringRouter = router({
     .query(async ({ ctx, input }) => {
       const room = await assertScopedRoom(ctx.orgId, input.roomId, ctx.siteScope);
       const open = await db.incident.count({
-        where: { orgId: ctx.orgId, roomId: room.id, status: 'open' },
+        where: {
+          orgId: ctx.orgId,
+          status: 'open',
+          OR: [{ roomId: room.id }, { roomIds: { has: room.id } }],
+        },
       });
       if (open === 0) return null;
       return (await affectedForRooms(db, ctx.orgId, [room.id], new Date())).get(room.id) ?? null;

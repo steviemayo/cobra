@@ -6,6 +6,7 @@ import {
   POINT_TYPE_LABEL,
   type DeviceReport,
 } from '@kestrel/model';
+import { linkedRoomIds, roomsServedBy } from './device-sharing';
 import { openIncident, resolveIncident, type AlertJob, type MonitoringDb } from './monitoring';
 
 // Control points on a monitored device (docs/decisions.md QS-1..): the things inside a DSP or
@@ -13,7 +14,8 @@ import { openIncident, resolveIncident, type AlertJob, type MonitoringDb } from 
 // on its page, and optionally watched, so an incident is raised when one is out of bounds. The cloud
 // keeps the list and sends it to the gateway in the signed device set; the gateway reports back what
 // each point reads and whether each watch holds.
-export type PointsDb = Pick<PrismaClient, 'device' | 'deviceEvent' | 'incident'>;
+export type PointsDb = Pick<PrismaClient, 'device' | 'deviceEvent' | 'incident'> &
+  Partial<Pick<PrismaClient, 'deviceRoom'>>;
 
 export const MAX_POINTS = 200;
 
@@ -71,6 +73,13 @@ export async function setDevicePoints(
     return { ok: false, message: 'Only a monitored device can have control points' };
   const problem = validatePoints(row.control, input.points);
   if (problem) return { ok: false, message: problem };
+  // A point can only belong to a room this device serves.
+  const named = input.points.filter((p) => p.roomId);
+  if (named.length > 0) {
+    const served = new Set(await roomsServedBy(db, row));
+    const stray = named.find((p) => !served.has(p.roomId!));
+    if (stray) return { ok: false, message: `“${stray.name}” belongs to a room this device does not serve` };
+  }
   await db.device.update({
     where: { id: row.id },
     data: {
@@ -121,6 +130,8 @@ export async function applyWatchedPoints(
   const jobs: AlertJob[] = [];
   if (!rep.online) return jobs;
   const monitoring = db as unknown as MonitoringDb;
+  const pointsHere = pointsOf(row.points);
+  const linked = await linkedRoomIds(db, row.orgId, row.id);
   const watchedNow = new Set(
     pointsOf(row.points)
       .filter((p) => p.watch)
@@ -129,13 +140,19 @@ export async function applyWatchedPoints(
   for (const w of rep.watched ?? []) {
     if (!watchedNow.has(w.pointId)) continue;
     const subject = `device:${row.id}:${w.pointId}`;
+    // A point that belongs to a room affects that room only; one that belongs to the device affects every room it serves.
+    const point = pointsHere.find((p) => p.id === w.pointId);
+    const rooms = point?.roomId
+      ? [point.roomId]
+      : [...new Set([...(row.roomId ? [row.roomId] : []), ...linked])];
     const job = w.ok
       ? await resolveIncident(monitoring, { orgId: row.orgId, kind: 'point_alert', subject }, now)
       : await openIncident(
           monitoring,
           {
             orgId: row.orgId,
-            roomId: row.roomId,
+            roomId: rooms[0] ?? row.roomId,
+            roomIds: rooms.slice(1),
             gatewayId: gw.id,
             kind: 'point_alert',
             subject,

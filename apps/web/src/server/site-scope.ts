@@ -45,12 +45,14 @@ export function ticketVisible(
 
 /** An incident is about a room or (for a silent gateway) a gateway; either must be in scope. */
 export function incidentVisible(
-  incident: { roomId: string | null; gatewayId: string | null },
+  incident: { roomId: string | null; gatewayId: string | null; roomIds?: string[] | null },
   scope: SiteScope,
   roomIds: Set<string>,
   gatewayIds: Set<string>,
 ): boolean {
   if (scope === null) return true;
-  if (incident.roomId) return roomIds.has(incident.roomId);
+  // An incident that also affects other rooms (a shared device) is visible from any of them.
+  if (incident.roomId)
+    return roomIds.has(incident.roomId) || (incident.roomIds ?? []).some((r) => roomIds.has(r));
   return incident.gatewayId !== null && gatewayIds.has(incident.gatewayId);
 }

@@ -93,6 +93,7 @@ model Org {
   joinRequests        JoinRequest[]
   areas               Area[]
   devices             Device[]
+  deviceRooms         DeviceRoom[]
   deviceEvents        DeviceEvent[]
 }
 
@@ -249,6 +250,7 @@ model Room {
   incidents         Incident[]
   commands          RemoteCommand[]
   tickets           Ticket[]
+  sharedDevices     DeviceRoom[]
 
   @@index([orgId])
   @@index([siteId])
@@ -625,6 +627,8 @@ model Incident {
   alerted        Boolean   @default(false)
   acknowledgedBy String?   @db.Uuid
   acknowledgedAt DateTime?
+  /// Other rooms this incident also affects (a shared device that is offline serves several rooms). `roomId` stays the first.
+  roomIds        String[]  @default([]) @db.Uuid
 
   org  Org   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   room Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
@@ -1249,11 +1253,32 @@ model Device {
   room    Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
   gateway Gateway?      @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
   events  DeviceEvent[]
+  /// The rooms a shared device serves, besides its home room (`roomId`).
+  rooms   DeviceRoom[]
 
   @@index([orgId])
   @@index([siteId])
   @@index([roomId])
   @@index([gatewayId])
+}
+
+/// A device shared by several rooms: one row per room it serves besides its home room. The device
+/// keeps one address, login, gateway and history; each room sees it and its own control points.
+/// The rooms may be at different sites of the same organisation. See docs/room-shapes-and-shared-devices.md.
+model DeviceRoom {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  deviceId  String   @db.Uuid
+  roomId    String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  org    Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  room   Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, roomId])
+  @@index([orgId])
+  @@index([roomId])
 }
 
 /// Append-only history of one device: field changes (old to new, who or what), moves, gateway
