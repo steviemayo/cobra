@@ -1,4 +1,11 @@
-import type { DetailStatus, Device, DeviceCommand, DeviceDetailSection } from '@kestrel/model';
+import type {
+  ControlPoint,
+  DetailStatus,
+  Device,
+  DeviceCommand,
+  DeviceDetailSection,
+  PointReading,
+} from '@kestrel/model';
 import { askConsole, consoleAddressBlocked, tellConsole, type ConsoleTarget } from './ascii-console';
 import { BaseDriver } from './base';
 import type { DriverContext } from './types';
@@ -11,6 +18,10 @@ import type { DriverContext } from './types';
 //
 // "Power" switches every outlet; `command` names `outlet<n>_on` and `outlet<n>_off` switch one, the
 // same names the bundled `lib:blustream-pwr8iec` driver uses.
+//
+// Control points: one outlet's reading, as a generic point with the address { outlet: "3", field }.
+// `field` is state (on or off), load (something is connected), amps, watts, kwh or volts. That is how
+// one controller shared by several rooms gives each room its own outlets to watch.
 //
 // Settings: host, port (23), pollMs (15000), timeoutMs (3000).
 //
@@ -49,6 +60,21 @@ export function parsePwrStatus(text: string): PwrReading {
   for (const m of t.matchAll(ELECTRIC_RE))
     electric[m[1]!.toUpperCase()] = { volts: m[2]!, amps: m[3]!, watts: m[4]!, kwh: m[5]! };
   return { model, firmware, mac: MAC_RE.exec(t)?.[1]?.toUpperCase(), ip, system, outlets, electric };
+}
+
+/** What one outlet point reads from a status, or undefined when the outlet or field is not there. */
+export function pwrPointValue(
+  address: ControlPoint['address'],
+  r: PwrReading,
+): number | boolean | undefined {
+  const n = Number(address.outlet);
+  const field = String(address.field ?? 'state').toLowerCase();
+  const o = r.outlets.find((x) => x.n === n);
+  if (field === 'state') return o?.on;
+  if (field === 'load') return o ? o.mode.toLowerCase() === 'connected' : undefined;
+  const e = r.electric[String(n)];
+  const v = e && { amps: e.amps, watts: e.watts, kwh: e.kwh, volts: e.volts }[field as 'amps'];
+  return v === undefined ? undefined : Number(v);
 }
 
 export class BlustreamPwrDriver extends BaseDriver {
@@ -144,12 +170,28 @@ export class BlustreamPwrDriver extends BaseDriver {
         }),
       },
     });
+    const points: Record<string, number | boolean> = {};
+    for (const p of this.device.points ?? []) {
+      const v = pwrPointValue(p.address, r);
+      if (v !== undefined) points[p.id] = v;
+    }
     this.update((s) => {
       s.online = true;
+      s.points = points;
       s.power = r.outlets.some((o) => o.on) ? 'on' : 'off';
       if (r.firmware) s.firmware = r.firmware.slice(0, 100);
       s.details = sections;
     });
+  }
+
+  /** Reads one outlet point now, to check it before it is saved. */
+  async readPoint(point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>): Promise<PointReading> {
+    const r = parsePwrStatus(
+      await askConsole(this.target(), 'STATUS', this.setting<number>('timeoutMs', 3000), this.device.name),
+    );
+    const v = pwrPointValue(point.address, r);
+    if (v === undefined) this.fail('that outlet or reading was not found');
+    return { value: v };
   }
 
   async send(command: DeviceCommand): Promise<void> {
