@@ -28,6 +28,7 @@ export function RoomSettings({ roomId }: { roomId: string }) {
   const [name, setName] = useState<string | null>(null);
   const [siteId, setSiteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [shapeName, setShapeName] = useState('');
 
   const update = useMutation(
     trpc.room.update.mutationOptions({
@@ -37,6 +38,15 @@ export function RoomSettings({ roomId }: { roomId: string }) {
         setName(null);
         setSiteId(null);
       },
+    }),
+  );
+  const saveShape = useMutation(
+    trpc.room.saveShape.mutationOptions({
+      onSuccess: () => {
+        toast.success('Shape saved');
+        setShapeName('');
+      },
+      onError: (e) => toast.error(e.message),
     }),
   );
   const del = useMutation(
@@ -118,6 +128,31 @@ export function RoomSettings({ roomId }: { roomId: string }) {
         <Button variant="outline" size="sm" render={<Link href={orgPath(orgId, `/rooms/${roomId}/copy`)} />}>
           Copy this room
         </Button>
+        <div className="space-y-2 border-t pt-3">
+          <Label htmlFor="shape-name">Save as a shape</Label>
+          <p className="text-xs text-muted-foreground">
+            Keeps this room’s devices, drivers and control points (no addresses or logins) so rooms can be made
+            from it later, from the Rooms page.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Input
+              id="shape-name"
+              className="w-64"
+              placeholder="Standard meeting room"
+              value={shapeName}
+              onChange={(e) => setShapeName(e.target.value)}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!shapeName.trim() || saveShape.isPending}
+              onClick={() => saveShape.mutate({ orgId, roomId, name: shapeName })}
+            >
+              {saveShape.isPending && <Spinner />}
+              Save shape
+            </Button>
+          </div>
+        </div>
       </section>
 
       <section className="space-y-3 rounded-lg border border-destructive/30 p-4">
