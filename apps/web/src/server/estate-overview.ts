@@ -236,9 +236,7 @@ export async function estateOverview(
       else offline++;
     }
 
-    const open = incidents.filter(
-      (i) => i.roomId === r.id || (i.roomIds ?? []).includes(r.id),
-    );
+    const open = incidents.filter((i) => i.roomId === r.id || (i.roomIds ?? []).includes(r.id));
     const worst = open.reduce<Severity | null>(
       (w, i) =>
         !w || SEVERITY_RANK[i.severity as Severity] > SEVERITY_RANK[w]
@@ -345,8 +343,8 @@ export async function estateOverview(
 
   return {
     kpis: {
-      liveIncidents: incidents.length,
-      criticalIncidents: incidents.filter((i) => i.severity === 'critical').length,
+      liveIncidents: incidents.filter((i) => !i.parentId).length,
+      criticalIncidents: incidents.filter((i) => !i.parentId && i.severity === 'critical').length,
       roomsNeedingAttention: rows.filter((r) => r.openIncidents > 0).length,
       rooms: rows.length,
       roomsMonitored: monitored.length,

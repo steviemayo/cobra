@@ -30,6 +30,7 @@ import { siteTimezone } from './site-zone';
 import { applyWatchedPoints, pointValuesPatch, pointsOf, validatePoints } from './device-points';
 import { recordLatency, type LatencyDb } from './latency';
 import { linkedRoomIds } from './device-sharing';
+import { groupOutages, type GroupDb } from './incident-groups';
 import type { SigningKey } from './signing';
 
 // v2 devices (docs/pivot-monitoring.md): the cloud's half. Functions take the database as a
@@ -412,7 +413,8 @@ export async function ingestDeviceReports(
         ),
       );
   }
-  return { jobs, enforce };
+  // Devices that went quiet together on one network are one problem.
+  return { jobs: await groupOutages(db as unknown as GroupDb, gw, jobs, now), enforce };
 }
 
 /** As `ingestDeviceReports`, for callers that only want the alerts. */

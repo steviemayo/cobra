@@ -236,8 +236,8 @@ export async function orgOverview(
     rooms: roomRows,
     gateways: gatewayRows,
     incidents: {
-      open: incidents.length,
-      critical: incidents.filter((i) => i.severity === 'critical').length,
+      open: incidents.filter((i) => !i.parentId).length,
+      critical: incidents.filter((i) => !i.parentId && i.severity === 'critical').length,
     },
   };
 }

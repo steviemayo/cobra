@@ -109,4 +109,5 @@ export const INCIDENT_KIND_LABEL: Record<string, string> = {
   pm_overdue: 'Maintenance overdue',
   latency_high: 'Slow responses',
   network_degraded: 'Network slow',
+  group_outage: 'Several devices down',
 };

@@ -101,7 +101,7 @@ export async function fleetHealth(
     db.gateway.findMany({}),
     db.site.findMany({}),
     db.room.findMany({}),
-    db.incident.findMany({ where: { status: 'open' } }),
+    db.incident.findMany({ where: { status: 'open', parentId: null } }),
     db.deployment.findMany({ where: { status: { in: NOT_LIVE }, createdAt: { gte: since } } }),
     db.ticket.findMany({ where: { routedTo: 'kestrel', status: { in: ['open', 'in_progress'] } } }),
   ]);
