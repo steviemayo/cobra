@@ -340,8 +340,13 @@ export async function recordReports(
 export async function sweep(db: MonitoringDb, now = new Date()): Promise<AlertJob[]> {
   const jobs: AlertJob[] = [];
   const gateways = await db.gateway.findMany({ where: { enrolledAt: { not: null } } });
+  // An organisation scheduled for deletion has had its gateways let go: they are not "offline".
+  const suspended = new Set(
+    (await db.org.findMany({ where: { deletedAt: { gt: new Date(0) } } })).map((o) => o.id),
+  );
   const monitored = new Map<string, boolean>();
   for (const gw of gateways) {
+    if (suspended.has(gw.orgId)) continue;
     if (!monitored.has(gw.orgId))
       monitored.set(gw.orgId, (await getEntitlements(db, gw.orgId, now)).monitoring);
     if (!monitored.get(gw.orgId)) continue;

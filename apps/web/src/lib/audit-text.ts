@@ -126,6 +126,8 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `started a purchase of “${s(meta.name)}”`;
     case 'calendar.connect':
       return `connected the ${s(meta.provider) === 'graph' ? 'Microsoft 365' : 'Google'} calendar “${s(meta.name)}”`;
+    case 'org.delete.request':
+      return 'asked Kestrel to delete the organisation';
     case 'callout.request':
       return `asked for a support callout: ${s(meta.title)}`;
     case 'callout.pay':

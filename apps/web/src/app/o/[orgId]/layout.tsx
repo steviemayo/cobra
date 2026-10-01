@@ -75,7 +75,28 @@ export default async function OrgLayout({
   }
 
   // The organisation's accent colour also themes its portal.
-  const brand = await db.org.findFirst({ where: { id: orgId }, select: { branding: true } });
+  const brand = await db.org.findFirst({
+    where: { id: orgId },
+    select: { branding: true, name: true, deletedAt: true, deleteAfter: true },
+  });
+  // Scheduled for deletion: its own people (and providers) see why, not the portal. Staff in a
+  // support session still look in.
+  if (brand?.deletedAt && !viewAs)
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-3 px-4 text-center">
+        <h1 className="text-lg font-semibold">{brand.name} has been switched off</h1>
+        <p className="text-sm text-muted-foreground">
+          This organisation is scheduled for deletion
+          {brand.deleteAfter
+            ? ` on ${brand.deleteAfter.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}`
+            : ''}
+          . If that is a mistake, contact Kestrel support: until then everything can be restored.
+        </p>
+        <a href="/" className="text-sm underline">
+          Back
+        </a>
+      </main>
+    );
   // A service provider's name, logo and colour show instead when the owner chose them (white label).
   const provider = await portalBrandFor(db, orgId);
   const accent = readOrgBranding(brand?.branding).accent ?? provider?.accent ?? null;

@@ -38,6 +38,9 @@ export const authedProcedure = t.procedure.use(({ ctx, next }) => {
 
 const orgInput = z.object({ orgId: z.string().uuid() });
 
+/** What a member of an organisation scheduled for deletion is told. */
+export const SUSPENDED = 'This organisation has been switched off and is scheduled for deletion.';
+
 // Every org-scoped procedure goes through here: verifies membership, exposes orgId + role.
 // Prisma bypasses Supabase RLS, so all queries MUST filter by ctx.orgId.
 export const orgProcedure = authedProcedure.use(
@@ -46,7 +49,9 @@ export const orgProcedure = authedProcedure.use(
     if (!parsed.success) throw new TRPCError({ code: 'BAD_REQUEST', message: 'orgId required' });
     const member = await db.member.findUnique({
       where: { orgId_userId: { orgId: parsed.data.orgId, userId: ctx.user.id } },
+      include: { org: { select: { deletedAt: true } } },
     });
+    if (member?.org.deletedAt) throw new TRPCError({ code: 'FORBIDDEN', message: SUSPENDED });
     if (member) {
       return next({
         ctx: orgCtx({
@@ -64,6 +69,11 @@ export const orgProcedure = authedProcedure.use(
     // never owner.
     const msp = await mspAccess(db, ctx.user.id, parsed.data.orgId);
     if (msp) {
+      const target = await db.org.findFirst({
+        where: { id: parsed.data.orgId },
+        select: { deletedAt: true },
+      });
+      if (target?.deletedAt) throw new TRPCError({ code: 'FORBIDDEN', message: SUSPENDED });
       // Limited to some sites: only procedures that filter by the scope may run (default deny).
       if (msp.sites !== null && !meta?.siteScoped)
         throw new TRPCError({

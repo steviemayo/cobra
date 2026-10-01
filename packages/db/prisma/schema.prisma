@@ -31,13 +31,21 @@ enum GatewayChannel {
 }
 
 model Org {
-  id                 String   @id @default(uuid()) @db.Uuid
+  id                 String    @id @default(uuid()) @db.Uuid
   name               String
-  createdAt          DateTime @default(now())
+  createdAt          DateTime  @default(now())
   /// When true, staff can only open a support session if they link one of this organisation's open tickets.
-  staffAccessBlocked Boolean  @default(false)
+  staffAccessBlocked Boolean   @default(false)
   /// customer: an organisation with rooms. msp: a managed service provider that looks after customers.
-  kind               String   @default("customer")
+  kind               String    @default("customer")
+  /// Set when Kestrel staff schedule the organisation for deletion. It is switched off at once (nobody
+  /// in it can sign in to it, its gateways are let go, its subscription is cancelled) and everything
+  /// is deleted for good on `deleteAfter`, unless staff restore it first.
+  deletedAt          DateTime?
+  deleteAfter        DateTime?
+  /// The staff member (StaffUser.userId) who scheduled it, and why.
+  deletedBy          String?   @db.Uuid
+  deleteReason       String?
 
   members             Member[]
   sites               Site[]
