@@ -279,6 +279,9 @@ export const monitoringRouter = router({
         openedAt: r.openedAt,
         resolvedAt: r.resolvedAt,
         occurrences: r.occurrences,
+        meetingsAffected: r.meetingsAffected,
+        /** Set for a device that is part of a group outage; the group is another row of this list. */
+        parentId: r.parentId,
         acknowledged: r.acknowledgedAt !== null,
       }));
     }),

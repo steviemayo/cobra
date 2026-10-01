@@ -148,6 +148,11 @@ export async function autoTicket(
     const linked = new Set(tickets.map((t) => t.incidentId).filter((x): x is string => !!x));
     for (const inc of open) {
       if (linked.has(inc.id)) continue;
+      // A device that is part of a group is ticketed through the group.
+      if (inc.parentId) {
+        out.grouped++;
+        continue;
+      }
       const room = inc.roomId
         ? await db.room.findFirst({ where: { id: inc.roomId, orgId } })
         : null;

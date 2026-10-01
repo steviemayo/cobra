@@ -98,7 +98,7 @@ export async function orgDirectory(db: StaffDb, now = new Date()): Promise<OrgSu
     db.member.findMany({}),
     db.room.findMany({}),
     db.gateway.findMany({}),
-    db.incident.findMany({ where: { status: 'open' } }),
+    db.incident.findMany({ where: { status: 'open', parentId: null } }),
     db.ticket.findMany({ where: { status: 'open' } }),
   ]);
   const by = <T extends { orgId: string }>(rows: T[]) => {

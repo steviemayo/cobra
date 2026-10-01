@@ -176,6 +176,29 @@ export async function schedulesForGateway(
   });
 }
 
+/** A fault counts as meeting-impacting when a meeting is on now or starts within this long. */
+export const PRESSURE_LEAD_MS = 30 * 60_000;
+
+/**
+ * How many meetings a fault that opens now puts at risk: on now, or starting within the lead time,
+ * across the rooms it touches. Zero when the rooms have no calendar or the copy is stale, so an
+ * unknown calendar never raises anything.
+ */
+export async function meetingPressure(
+  db: Partial<Pick<PrismaClient, 'roomSchedule'>>,
+  orgId: string,
+  roomIds: string[],
+  now: Date,
+): Promise<number> {
+  let n = 0;
+  for (const roomId of new Set(roomIds)) {
+    // The list is sorted by start, so any meeting inside the lead time is within its first five.
+    const { meetings } = await affectedMeetings(db, orgId, roomId, now);
+    n += meetings.filter((m) => Date.parse(m.start) <= now.getTime() + PRESSURE_LEAD_MS).length;
+  }
+  return n;
+}
+
 /** What a fault may disturb in a room, for alerts, the incident page and the room's card. */
 export interface Impact {
   meetings: { title: string; organiser?: string; start: string; end: string; busy: boolean }[];

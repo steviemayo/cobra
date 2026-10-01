@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { RoomReport } from '@kestrel/model';
 import {
   DEVICE_GRACE_MS,
+  openIncident,
   FLAP_WINDOW_MS,
   recordReports,
   roomHealth,
@@ -523,5 +524,102 @@ describe('room health', () => {
       openIncidents: Array.from({ length: 10 }, () => ({ severity: 'critical' })),
     });
     expect(h.score).toBe(0);
+  });
+});
+
+describe('a problem that opens around a meeting', () => {
+  const meeting = (id: string, from: number, to: number, priv = false) => ({
+    id,
+    title: id,
+    start: at(from).toISOString(),
+    end: at(to).toISOString(),
+    private: priv,
+  });
+  const open = (
+    w: ReturnType<typeof world>,
+    kind: 'device_offline' | 'pm_overdue' = 'device_offline',
+  ) =>
+    openIncident(
+      w.db,
+      { orgId: ORG, roomId: ROOM, kind, subject: `${ROOM}:d1`, severity: 'warning', title: 'x' },
+      T0,
+    );
+  const withSchedule = (meetings: unknown, fetchedAt = T0) => {
+    const w = world();
+    const roomSchedule = table([{ roomId: ROOM, orgId: ORG, fetchedAt, meetings }]);
+    (w.db as unknown as { roomSchedule: unknown }).roomSchedule = roomSchedule;
+    return w;
+  };
+
+  it('is raised a step and marked when a meeting is on now', async () => {
+    const w = withSchedule([meeting('a', -600_000, 600_000)]);
+    await open(w);
+    expect(w.incident.rows[0]).toMatchObject({
+      severity: 'critical',
+      meetingsAffected: 1,
+      severityRaised: true,
+    });
+  });
+
+  it('is raised when a meeting starts within half an hour, but not when it is later', async () => {
+    const soon = withSchedule([meeting('a', 20 * 60_000, 80 * 60_000)]);
+    await open(soon);
+    expect(soon.incident.rows[0]).toMatchObject({ severity: 'critical', meetingsAffected: 1 });
+    const later = withSchedule([meeting('a', 3 * 3_600_000, 4 * 3_600_000)]);
+    await open(later);
+    expect(later.incident.rows[0]).toMatchObject({
+      severity: 'warning',
+      meetingsAffected: 0,
+      severityRaised: false,
+    });
+  });
+
+  it('counts a private meeting too', async () => {
+    const w = withSchedule([meeting('a', -600_000, 600_000, true)]);
+    await open(w);
+    expect(w.incident.rows[0]).toMatchObject({ severity: 'critical', meetingsAffected: 1 });
+  });
+
+  it('never raises on a stale calendar, or a room with none', async () => {
+    const stale = withSchedule([meeting('a', -600_000, 600_000)], at(-3_600_000));
+    await open(stale);
+    expect(stale.incident.rows[0]).toMatchObject({ severity: 'warning', meetingsAffected: 0 });
+    const none = world();
+    await open(none);
+    expect(none.incident.rows[0]).toMatchObject({ severity: 'warning', meetingsAffected: 0 });
+  });
+
+  it('leaves housekeeping problems alone', async () => {
+    const w = withSchedule([meeting('a', -600_000, 600_000)]);
+    await open(w, 'pm_overdue');
+    expect(w.incident.rows[0]).toMatchObject({ severity: 'warning', meetingsAffected: 0 });
+  });
+
+  it('does not go past critical', async () => {
+    const w = withSchedule([meeting('a', -600_000, 600_000)]);
+    await openIncident(
+      w.db,
+      {
+        orgId: ORG,
+        roomId: ROOM,
+        kind: 'room_fault',
+        subject: 's',
+        severity: 'critical',
+        title: 'x',
+      },
+      T0,
+    );
+    expect(w.incident.rows[0]).toMatchObject({ severity: 'critical', severityRaised: false });
+  });
+
+  it('still opens the incident if the calendar cannot be read', async () => {
+    const w = withSchedule([meeting('a', -600_000, 600_000)]);
+    (w.db as unknown as { roomSchedule: unknown }).roomSchedule = {
+      findFirst: () => Promise.reject(new Error('down')),
+    };
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await open(w);
+    expect(w.incident.rows[0]).toMatchObject({ severity: 'warning', meetingsAffected: 0 });
+    err.mockRestore();
   });
 });

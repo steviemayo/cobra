@@ -8,6 +8,7 @@ import { deviceOfSubject, inMaintenance, type MaintenanceDb } from './maintenanc
 import { mirrorTicket, type ItsmDb } from './itsm-service';
 import { pinnedFetch, resolveAll } from './outbound';
 import { autoTicket, type AutomationDb } from './ticket-automation';
+import { meetingPressure } from './room-schedule';
 
 // Turns what gateways report into device status and incidents. Functions take the database as a
 // parameter so they can be tested without one. They return alert jobs instead of sending anything,
@@ -16,7 +17,7 @@ export type MonitoringDb = Pick<
   PrismaClient,
   'deviceStatus' | 'incident' | 'room' | 'gateway' | 'remoteCommand' | 'orgBilling' | 'org'
 > &
-  Partial<Pick<PrismaClient, 'maintenanceWindow' | 'site'>>;
+  Partial<Pick<PrismaClient, 'maintenanceWindow' | 'site' | 'roomSchedule'>>;
 
 export type Severity = 'info' | 'warning' | 'critical';
 export type IncidentKind =
@@ -29,7 +30,8 @@ export type IncidentKind =
   | 'config_enforce_failed'
   | 'pm_overdue'
   | 'latency_high'
-  | 'network_degraded';
+  | 'network_degraded'
+  | 'group_outage';
 
 export interface AlertJob {
   incidentId: string;
@@ -42,6 +44,20 @@ export const DEVICE_GRACE_MS = 45_000;
 export const FLAP_WINDOW_MS = 5 * 60_000;
 export const COMMAND_PENDING_EXPIRY_MS = 5 * 60_000;
 export const COMMAND_SENT_EXPIRY_MS = 10 * 60_000;
+
+/** Problems that can spoil a meeting. Housekeeping kinds (overdue checks, drift, failed deploys) never count. */
+const MEETING_KINDS: IncidentKind[] = [
+  'device_offline',
+  'room_fault',
+  'point_alert',
+  'latency_high',
+  'network_degraded',
+];
+const RAISED: Record<Severity, Severity> = {
+  info: 'warning',
+  warning: 'critical',
+  critical: 'critical',
+};
 
 interface NewIncident {
   orgId: string;
@@ -110,6 +126,19 @@ export async function openIncident(
     )
   )
     return null;
+  // A problem that opens while a meeting is on, or about to start, is worse than the same problem at
+  // night: mark it and raise its severity one step. The calendar is only extra context, so any trouble
+  // reading it leaves the incident as it was.
+  let meetingsAffected = 0;
+  if (MEETING_KINDS.includes(input.kind)) {
+    const rooms = [...(input.roomId ? [input.roomId] : []), ...(input.roomIds ?? [])];
+    try {
+      meetingsAffected = await meetingPressure(db, input.orgId, rooms, now);
+    } catch (e) {
+      console.error('[monitoring] could not check meetings for a new incident', e);
+    }
+  }
+  const severity = meetingsAffected > 0 ? RAISED[input.severity] : input.severity;
   const created = await db.incident.create({
     data: {
       orgId: input.orgId,
@@ -118,7 +147,9 @@ export async function openIncident(
       gatewayId: input.gatewayId ?? null,
       kind: input.kind,
       subject: input.subject,
-      severity: input.severity,
+      severity,
+      meetingsAffected,
+      severityRaised: severity !== input.severity,
       status: 'open',
       title: input.title,
       detail: input.detail ?? null,
