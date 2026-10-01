@@ -5,6 +5,7 @@ const ctx = (over: Partial<CopyContext> = {}): CopyContext => ({
   roomNames: new Set(['boardroom 1']),
   addresses: new Map(),
   credentialSets: new Set(['set-1']),
+  shareable: new Map(),
   areas: new Set(['area-1']),
   gateways: new Set(['gw-1']),
   maxRooms: null,
@@ -37,6 +38,27 @@ const copy = (name: string, host = '10.0.0.5', extra: object = {}) => ({
     { sourceDeviceId: 'd-dsp', values: (host ? { host } : {}) as Record<string, string>, ...extra },
     { sourceDeviceId: 'd-lap' },
   ],
+});
+
+describe('sharing a slot', () => {
+  const shared = (driverId = 'qsys-core') =>
+    new Map([['dsp-shared', { driverId, name: '“Shared DSP”' }]]);
+  const link = (extra: object = {}) => ({
+    name: 'Room 2',
+    devices: [{ sourceDeviceId: 'd-dsp', linkTo: 'dsp-shared', ...extra }, { sourceDeviceId: 'd-lap' }],
+  });
+
+  it('needs no address for a device that is shared, only valid points', () => {
+    const r = checkCopies(source, [link()], ctx({ shareable: shared() }));
+    expect(r.rows[0]!.problems).toEqual([]);
+  });
+
+  it('refuses a device that is not there or uses another driver', () => {
+    expect(checkCopies(source, [link()], ctx()).rows[0]!.problems[0]).toContain('not there');
+    expect(checkCopies(source, [link()], ctx({ shareable: shared('biamp-tesira') })).rows[0]!.problems[0]).toContain(
+      'different driver',
+    );
+  });
 });
 
 describe('requiredFields', () => {
@@ -117,16 +139,18 @@ beforeAll(() => {
 function world() {
   const room = table([{ id: SRC, orgId: ORG, siteId: SITE, name: 'Room 1' }]);
   const device = table([]);
+  const deviceRoom = table([]);
   const db = {
     room,
     device,
+    deviceRoom,
     deviceEvent: table([]),
     site: table([{ id: SITE, orgId: ORG }]),
     gateway: table([]),
     credentialSet: table([]),
     area: table([]),
   } as unknown as CopyDb;
-  return { db, room, device };
+  return { db, room, device, deviceRoom };
 }
 
 describe('writeCopies', () => {
@@ -163,6 +187,40 @@ describe('writeCopies', () => {
     expect((dsps[1]!.points as { address: { component: string } }[])[0]!.address.component).toBe('Room3');
     expect(dsps.every((d) => d.sealed === null)).toBe(true);
     expect(w.device.rows.find((d) => d.name === 'Laptop')).toMatchObject({ kind: 'passive', control: undefined });
+  });
+
+  it('links a room to a shared device and gives it that room’s own points, with ids that do not clash', async () => {
+    const w = world();
+    await w.device.create({
+      data: {
+        id: 'dsp-shared',
+        orgId: ORG,
+        siteId: SITE,
+        roomId: null,
+        name: 'Shared DSP',
+        kind: 'active',
+        control: qsys.control,
+        points: [{ id: 'vol', name: 'Hall volume', type: 'level', address: { component: 'Hall', control: 'gain' } }],
+        version: 3,
+      },
+    });
+    const made = await writeCopies(w.db, {
+      orgId: ORG,
+      actorId: 'u1',
+      source: { id: SRC, siteId: SITE, gatewayId: null, monitorOnly: false },
+      sourceDevices: [qsys, laptop],
+      copies: [
+        { name: 'Room 2', devices: [{ sourceDeviceId: 'd-dsp', linkTo: 'dsp-shared' }, { sourceDeviceId: 'd-lap' }] },
+      ],
+    });
+    const roomId = made[0]!.roomId;
+    expect(w.deviceRoom.rows).toMatchObject([{ deviceId: 'dsp-shared', roomId }]);
+    const dsp = w.device.rows.find((d) => d.id === 'dsp-shared')!;
+    const pts = dsp.points as { id: string; roomId?: string }[];
+    expect(pts.map((p) => [p.id, p.roomId])).toEqual([['vol', undefined], ['vol-2', roomId]]);
+    expect(dsp.version).toBe(4);
+    // No second DSP was made for the new room.
+    expect(w.device.rows.filter((d) => d.name === 'DSP')).toHaveLength(0);
   });
 
   it('leaves out devices that are skipped', async () => {

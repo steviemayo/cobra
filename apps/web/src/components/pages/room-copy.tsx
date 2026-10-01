@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
-import { useInvalidateEstate } from '@/lib/use-estate';
+import { useInvalidateEstate, useSites } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
 import { useRoom } from './room-shell';
@@ -27,6 +27,8 @@ interface DeviceDraft {
   credentialSetId: string | null;
   secrets: Record<string, string>;
   points: ControlPoint[];
+  /** An existing device this room shares instead of getting its own. */
+  linkTo: string | null;
 }
 interface CopyDraft {
   name: string;
@@ -72,6 +74,7 @@ function generate(
               credentialSetId: d.credentialSetId,
               secrets: {},
               points: rewritePoints(d.points, rewrite, n),
+              linkTo: null,
             } satisfies DeviceDraft,
           ];
         }),
@@ -84,16 +87,30 @@ function clean(values: Record<string, string>) {
   return Object.fromEntries(Object.entries(values).filter(([, v]) => v.trim() !== ''));
 }
 
-/** Makes several copies of a room: each with its own name, addresses, logins and control points. */
-export function RoomCopy({ roomId }: { roomId: string }) {
+/**
+ * Makes several rooms from one room or from a saved shape: each with its own name, addresses, logins
+ * and control points, or sharing a device that already exists.
+ */
+export function RoomCopy({ roomId, shapeId }: { roomId?: string; shapeId?: string }) {
   const trpc = useTRPC();
   const router = useRouter();
   const { orgId, canEdit } = useOrg();
-  const { room } = useRoom(roomId);
+  const { room } = useRoom(roomId ?? '');
   const invalidate = useInvalidateEstate();
-  const shape = useQuery({ ...trpc.room.copyShape.queryOptions({ orgId, roomId }), retry: false });
+  const sites = useSites();
+  const [pickedSite, setPickedSite] = useState('');
+  const siteId = shapeId ? pickedSite || sites.data?.[0]?.id || '' : (room?.siteId ?? '');
+  const shape = useQuery({
+    ...trpc.room.copyShape.queryOptions({ orgId, roomId, shapeId }),
+    retry: false,
+  });
   const sets = useQuery(trpc.binding.credentialSets.list.queryOptions({ orgId }));
-  const areas = useQuery(trpc.area.list.queryOptions({ orgId, siteId: room?.siteId }));
+  const areas = useQuery({
+    ...trpc.area.list.queryOptions({ orgId, siteId: siteId || undefined }),
+    enabled: !!siteId,
+  });
+  // Every monitored device of the organisation, to share one instead of making a new one.
+  const everyDevice = useQuery(trpc.device.list.queryOptions({ orgId }));
 
   const [count, setCount] = useState(2);
   const [start, setStart] = useState(2);
@@ -105,7 +122,8 @@ export function RoomCopy({ roomId }: { roomId: string }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [result, setResult] = useState<RouterOutputs['room']['copy'] | null>(null);
 
-  const patternValue = pattern || `${room?.name ?? 'Room'} copy {n}`;
+  const sourceName = shape.data?.room.name ?? room?.name ?? 'Room';
+  const patternValue = pattern || (shapeId ? `${sourceName} {n}` : `${sourceName} copy {n}`);
   const active = useMemo(() => (shape.data?.devices ?? []).filter((d) => d.kind === 'active'), [shape.data]);
 
   const send = useMutation(
@@ -126,11 +144,11 @@ export function RoomCopy({ roomId }: { roomId: string }) {
     }),
   );
 
-  if (!room) return null;
+  if (!shapeId && !room) return null;
   if (!canEdit)
     return (
       <PageContainer className="pt-5">
-        <p className="text-sm text-muted-foreground">You don’t have permission to copy this room.</p>
+        <p className="text-sm text-muted-foreground">You don’t have permission to make rooms.</p>
       </PageContainer>
     );
   if (shape.isPending) return null;
@@ -150,7 +168,7 @@ export function RoomCopy({ roomId }: { roomId: string }) {
   const submit = (dryRun: boolean) =>
     send.mutate({
       orgId,
-      sourceRoomId: roomId,
+      ...(shapeId ? { shapeId, siteId } : { sourceRoomId: roomId }),
       dryRun,
       copies: drafts.map((c) => ({
         name: c.name,
@@ -158,6 +176,7 @@ export function RoomCopy({ roomId }: { roomId: string }) {
         devices: s.devices.map((d) => {
           const x = c.devices[d.id]!;
           if (x.skip) return { sourceDeviceId: d.id, skip: true };
+          if (x.linkTo) return { sourceDeviceId: d.id, name: x.name, linkTo: x.linkTo, points: x.points };
           return {
             sourceDeviceId: d.id,
             name: x.name,
@@ -180,12 +199,31 @@ export function RoomCopy({ roomId }: { roomId: string }) {
     <PageContainer className="max-w-5xl space-y-6 pt-5">
       <section className="space-y-4 rounded-lg border p-4">
         <div>
-          <h2 className="text-sm font-medium">Make copies of {s.room.name}</h2>
+          <h2 className="text-sm font-medium">
+            {shapeId ? `Make rooms from the shape “${s.room.name}”` : `Make copies of ${s.room.name}`}
+          </h2>
           <p className="text-sm text-muted-foreground">
-            Each copy gets this room’s devices and control points. Addresses and logins are not copied: fill in
-            what is different for each room, or leave the saved login in place.
+            Each room gets these devices and control points. Addresses and logins are not kept: fill in what is
+            different for each room, leave the saved login in place, or share a device that already exists
+            (a DSP or control system that serves several rooms).
           </p>
         </div>
+        {shapeId && (
+          <div className="max-w-sm space-y-1.5">
+            <Label>Site</Label>
+            <SimpleSelect
+              className="w-full"
+              value={siteId}
+              onValueChange={(v) => {
+                setPickedSite(v);
+                setDrafts([]);
+                setResult(null);
+              }}
+              options={(sites.data ?? []).map((x) => ({ value: x.id, label: x.name }))}
+              placeholder="Choose a site"
+            />
+          </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-4">
           <div className="space-y-1.5">
             <Label htmlFor="copy-count">How many</Label>
@@ -272,6 +310,7 @@ export function RoomCopy({ roomId }: { roomId: string }) {
           </div>
         )}
         <Button
+          disabled={!siteId}
           onClick={() => {
             setDrafts(
               generate(s, { count, start, pattern: patternValue, find, replace, addresses }),
@@ -325,6 +364,9 @@ export function RoomCopy({ roomId }: { roomId: string }) {
                   d={d}
                   x={c.devices[d.id]!}
                   sets={sets.data ?? []}
+                  shareable={(everyDevice.data ?? [])
+                    .filter((x) => x.kind === 'active' && x.driver && x.driver === d.driverId)
+                    .map((x) => ({ id: x.id, name: x.name, where: x.roomName }))}
                   expanded={!!open[`${i}:${d.id}`]}
                   onToggle={() => setOpen((o) => ({ ...o, [`${i}:${d.id}`]: !o[`${i}:${d.id}`] }))}
                   onChange={(fn) => changeDevice(i, d.id, fn)}
@@ -373,6 +415,7 @@ function DeviceRow({
   d,
   x,
   sets,
+  shareable,
   expanded,
   onToggle,
   onChange,
@@ -380,6 +423,7 @@ function DeviceRow({
   d: ShapeDevice;
   x: DeviceDraft;
   sets: { id: string; name: string }[];
+  shareable: { id: string; name: string; where: string | null }[];
   expanded: boolean;
   onToggle: () => void;
   onChange: (fn: (d: DeviceDraft) => DeviceDraft) => void;
@@ -405,7 +449,21 @@ function DeviceRow({
           Leave out
         </label>
       </div>
-      {!x.skip && d.kind === 'active' && (
+      {!x.skip && d.kind === 'active' && shareable.length > 0 && (
+        <SimpleSelect
+          className="w-full sm:w-96"
+          value={x.linkTo ?? NONE}
+          onValueChange={(v) => onChange((c) => ({ ...c, linkTo: v === NONE ? null : v }))}
+          options={[
+            { value: NONE, label: 'Its own device' },
+            ...shareable.map((o) => ({
+              value: o.id,
+              label: `Share ${o.name}${o.where ? ` (${o.where})` : ''}`,
+            })),
+          ]}
+        />
+      )}
+      {!x.skip && d.kind === 'active' && !x.linkTo && (
         <div className="grid gap-2 sm:grid-cols-3">
           {d.binding.map((f) => (
             <Input

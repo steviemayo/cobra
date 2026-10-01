@@ -66,6 +66,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       const rooms = Array.isArray(meta.rooms) ? meta.rooms.map((r) => `“${s(r)}”`) : [];
       return `made ${rooms.length} cop${rooms.length === 1 ? 'y' : 'ies'} of room “${s(meta.from)}”: ${rooms.join(', ')}`;
     }
+    case 'room.shape_save':
+      return `saved a room shape “${s(meta.name)}”`;
+    case 'room.shape_delete':
+      return `deleted the room shape “${s(meta.name)}”`;
     case 'device.shared':
       return `set a device to serve ${typeof meta.rooms === 'number' ? meta.rooms : 0} other room${meta.rooms === 1 ? '' : 's'}`;
     case 'room.staging_copy':
