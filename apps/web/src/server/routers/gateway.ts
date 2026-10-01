@@ -57,6 +57,8 @@ export const gatewayRouter = router({
         update: updateStatus(g, latest),
         // Whether the portal can update it. An older gateway needs one manual update first.
         canSelfUpdate: canSelfUpdate(features),
+        // Whether it can look for devices on its network. An older gateway needs updating first.
+        canDiscover: !!features?.includes('discovery'),
       }));
     }),
 

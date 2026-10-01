@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Download, Package, Plus, Search } from 'lucide-react';
+import { AlertTriangle, Download, Package, Plus, Radar, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   ASSET_ONLY_CATEGORIES,
@@ -52,6 +52,7 @@ import {
   type ConnectionDraft,
 } from './device-connection';
 import { DeviceStateBadge } from './device-detail';
+import { FindDevicesDialog } from './find-devices';
 import { ImportRegisterDialog } from './import-register-dialog';
 
 export type DeviceRow = RouterOutputs['device']['list'][number];
@@ -125,6 +126,7 @@ export function AssetsView() {
   const areas = useQuery(trpc.area.list.queryOptions({ orgId }));
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [finding, setFinding] = useState(false);
   const [search, setSearch] = useState('');
   const [siteId, setSiteId] = useState('');
   const [category, setCategory] = useState('');
@@ -242,6 +244,16 @@ export function AssetsView() {
                 disabled={sites.length === 0}
               >
                 Import CSV
+              </Button>
+            )}
+            {canEdit && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setFinding(true)}
+                disabled={sites.length === 0}
+              >
+                <Radar data-icon="inline-start" /> Find devices
               </Button>
             )}
             {canEdit && (
@@ -470,6 +482,7 @@ export function AssetsView() {
       )}
 
       {importing && <ImportRegisterDialog sites={sites} onClose={() => setImporting(false)} />}
+      {finding && <FindDevicesDialog onClose={() => setFinding(false)} />}
       {adding && <AddDeviceDialog sites={sites} rooms={rooms} onClose={() => setAdding(false)} />}
     </PageContainer>
   );
@@ -484,31 +497,59 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/** Starting values for the Add device dialog, such as what a network scan found. */
+export interface AddDeviceDefaults {
+  kind?: 'active' | 'passive';
+  name?: string;
+  category?: string;
+  /** A built-in driver id, or 'pjlink' / 'tcp'. */
+  driver?: string;
+  host?: string;
+  make?: string;
+  model?: string;
+  ip?: string;
+  /** The site to start on (it can still be changed). */
+  siteId?: string;
+  /** A monitored device is given this gateway only while it is added to the gateway's own site. */
+  gateway?: { id: string; siteId: string };
+}
+
 export function AddDeviceDialog({
   sites,
   rooms,
   siteId: fixedSite,
   roomId: fixedRoom,
+  defaults,
   onClose,
 }: {
   sites: { id: string; name: string }[];
   rooms: { id: string; name: string; siteId: string }[];
   siteId?: string;
   roomId?: string;
+  defaults?: AddDeviceDefaults;
   onClose: () => void;
 }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const { orgId } = useOrg();
-  const [kind, setKind] = useState<'active' | 'passive'>('passive');
-  const [name, setName] = useState('');
-  const [siteId, setSiteId] = useState(fixedSite ?? sites[0]?.id ?? '');
+  const [kind, setKind] = useState<'active' | 'passive'>(defaults?.kind ?? 'passive');
+  const [name, setName] = useState(defaults?.name ?? '');
+  const [siteId, setSiteId] = useState(
+    fixedSite ??
+      (defaults?.siteId && sites.some((s) => s.id === defaults.siteId)
+        ? defaults.siteId
+        : sites[0]?.id) ??
+      '',
+  );
   const [roomId, setRoomId] = useState(fixedRoom ?? '');
-  const [category, setCategory] = useState('display');
-  const [driver, setDriver] = useState('pjlink');
-  const [conn, setConn] = useState<ConnectionDraft>(emptyConnection());
-  const [make, setMake] = useState('');
-  const [model, setModel] = useState('');
+  const [category, setCategory] = useState(defaults?.category ?? 'display');
+  const [driver, setDriver] = useState(defaults?.driver ?? 'pjlink');
+  const [conn, setConn] = useState<ConnectionDraft>(
+    emptyConnection(defaults?.host ? { host: defaults.host } : {}),
+  );
+  const [ip, setIp] = useState(defaults?.ip ?? '');
+  const [make, setMake] = useState(defaults?.make ?? '');
+  const [model, setModel] = useState(defaults?.model ?? '');
   const [serial, setSerial] = useState('');
   const [assetTag, setAssetTag] = useState('');
   const siteRooms = rooms.filter((r) => r.siteId === siteId);
@@ -614,6 +655,11 @@ export function AddDeviceDialog({
             <Field label="Model">
               <Input value={model} onChange={(e) => setModel(e.target.value)} maxLength={100} />
             </Field>
+            {kind === 'passive' && (
+              <Field label="IP address">
+                <Input value={ip} onChange={(e) => setIp(e.target.value)} maxLength={80} />
+              </Field>
+            )}
             <Field label="Serial number">
               <Input value={serial} onChange={(e) => setSerial(e.target.value)} maxLength={100} />
             </Field>
@@ -653,8 +699,11 @@ export function AddDeviceDialog({
                       values: connectionPatch(slots, conn).values,
                       secrets: connectionPatch(slots, conn).secrets,
                       credentialSetId: connectionPatch(slots, conn).credentialSetId,
+                      ...(defaults?.gateway && defaults.gateway.siteId === siteId
+                        ? { gatewayId: defaults.gateway.id }
+                        : {}),
                     }
-                  : {}),
+                  : { ip: ip.trim() || null }),
                 make: make || null,
                 model: model || null,
                 serial: serial || null,
