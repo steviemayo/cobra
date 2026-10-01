@@ -1,7 +1,9 @@
 import { Prisma, type PrismaClient } from '@kestrel/db';
 import type { RoomReport } from '@kestrel/model';
+import { formatInZone } from '../lib/time';
 import { getEntitlements } from './billing';
 import { effectiveStatus } from './gateway-status';
+import { siteTimezone } from './site-zone';
 import { deviceOfSubject, inMaintenance, type MaintenanceDb } from './maintenance';
 import { mirrorTicket, type ItsmDb } from './itsm-service';
 import { pinnedFetch, resolveAll } from './outbound';
@@ -14,7 +16,7 @@ export type MonitoringDb = Pick<
   PrismaClient,
   'deviceStatus' | 'incident' | 'room' | 'gateway' | 'remoteCommand' | 'orgBilling' | 'org'
 > &
-  Partial<Pick<PrismaClient, 'maintenanceWindow'>>;
+  Partial<Pick<PrismaClient, 'maintenanceWindow' | 'site'>>;
 
 export type Severity = 'info' | 'warning' | 'critical';
 export type IncidentKind =
@@ -222,7 +224,7 @@ export async function recordReports(
                 subject,
                 severity: 'warning',
                 title: `${d.name} is offline`,
-                detail: `${d.name} in ${room.name} has not answered since ${since.toISOString()}.`,
+                detail: `${d.name} in ${room.name} has not answered since ${formatInZone(since, await siteTimezone(db, room.siteId))}.`,
               },
               now,
             ),
@@ -364,7 +366,7 @@ export async function sweep(db: MonitoringDb, now = new Date()): Promise<AlertJo
               severity: 'critical',
               title: `Gateway ${gw.name} is offline`,
               detail: gw.lastSeenAt
-                ? `Last heard from at ${gw.lastSeenAt.toISOString()}. Rooms keep running on site.`
+                ? `Last heard from at ${formatInZone(gw.lastSeenAt, await siteTimezone(db, gw.siteId))}. Rooms keep running on site.`
                 : null,
             },
             now,

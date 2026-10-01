@@ -92,7 +92,7 @@ export function IncidentsView() {
                   {' · '}
                   {i.status === 'open'
                     ? `opened ${timeAgo(i.openedAt)}`
-                    : `resolved ${i.resolvedAt ? dateTime(i.resolvedAt) : ''}`}
+                    : `resolved ${i.resolvedAt ? dateTime(i.resolvedAt, i.timezone) : ''}`}
                   {i.occurrences > 1 && ` · came back ${i.occurrences - 1}×`}
                 </div>
                 {i.detail && <p className="text-sm text-muted-foreground">{i.detail}</p>}

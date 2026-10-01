@@ -59,7 +59,7 @@ export function RoomMonitoring({ roomId }: { roomId: string }) {
                     ) : (
                       <Badge variant="secondary">Closed</Badge>
                     )}
-                    {dateTime(i.openedAt)}
+                    {dateTime(i.openedAt, i.timezone)}
                   </span>
                 </li>
               ))}

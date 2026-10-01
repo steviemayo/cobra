@@ -25,6 +25,8 @@ import {
   type MonitoringDb,
 } from './monitoring';
 import { evaluateConfig, type ConfigDb, type EnforceItem } from './config-service';
+import { formatInZone } from '../lib/time';
+import { siteTimezone } from './site-zone';
 import { applyWatchedPoints, pointValuesPatch, pointsOf, validatePoints } from './device-points';
 import { recordLatency, type LatencyDb } from './latency';
 import type { SigningKey } from './signing';
@@ -397,7 +399,7 @@ export async function ingestDeviceReports(
             subject,
             severity: 'warning',
             title: `${row.name} is offline`,
-            detail: `${row.name}${roomName ? ` in ${roomName}` : ''} has not answered since ${since.toISOString()}.`,
+            detail: `${row.name}${roomName ? ` in ${roomName}` : ''} has not answered since ${formatInZone(since, await siteTimezone(db, row.siteId))}.`,
           },
           now,
         ),

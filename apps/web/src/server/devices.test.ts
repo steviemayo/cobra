@@ -318,6 +318,10 @@ describe('heartbeat reports', () => {
       status: 'open',
     });
     expect(jobs).toHaveLength(1);
+    // The time in the incident reads as the site keeps it (Sydney here: 10:00 UTC is 8:00 pm AEST),
+    // with the zone named, not as a UTC string.
+    expect(String(w.incident.rows[0]!.detail)).toContain('since 30 Sept 2026, 8:00 pm AEST');
+    expect(String(w.incident.rows[0]!.detail)).not.toContain('T10:00');
     await recordDeviceReports(
       w.db,
       gw,

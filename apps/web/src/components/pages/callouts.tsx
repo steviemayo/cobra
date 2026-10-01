@@ -226,7 +226,7 @@ function CalloutCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="font-medium">{c.title}</div>
-          <div className="text-xs text-muted-foreground">Requested {dateTime(c.createdAt)}</div>
+          <div className="text-xs text-muted-foreground">Requested {dateTime(c.createdAt, c.timezone)}</div>
         </div>
         <Badge variant="outline" className={TONE[c.status] ?? ''}>
           {c.statusLabel}
@@ -251,7 +251,7 @@ function CalloutCard({
       {c.status === 'quoted' && (
         <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
           <p className="text-sm">
-            Proposed time: <b>{c.scheduledFor ? dateTime(c.scheduledFor) : 'to be agreed'}</b>
+            Proposed time: <b>{c.scheduledFor ? dateTime(c.scheduledFor, c.timezone) : 'to be agreed'}</b>
           </p>
           <Quote c={c} />
           {c.quoteNote && <p className="text-sm text-muted-foreground">{c.quoteNote}</p>}
@@ -280,7 +280,7 @@ function CalloutCard({
       {c.status === 'booked' && (
         <div className="space-y-1 rounded-lg border bg-primary/5 p-3 text-sm">
           <p>
-            Booked for <b>{c.scheduledFor ? dateTime(c.scheduledFor) : 'a time to be confirmed'}</b>
+            Booked for <b>{c.scheduledFor ? dateTime(c.scheduledFor, c.timezone) : 'a time to be confirmed'}</b>
             . Paid {dollars(c.paidCents ?? 0)} including GST. A tax invoice was emailed to you.
           </p>
           <p className="text-xs text-muted-foreground">
@@ -314,7 +314,7 @@ function CalloutCard({
 
       {c.status === 'cancelled' && (
         <p className="text-sm text-muted-foreground">
-          Cancelled {c.cancelledAt ? dateTime(c.cancelledAt) : ''}
+          Cancelled {c.cancelledAt ? dateTime(c.cancelledAt, c.timezone) : ''}
           {c.cancelledBy === 'staff' ? ' by Kestrel' : ''}.
           {c.refundedCents ? ` ${dollars(c.refundedCents)} refunded.` : ''}
           {c.paidAt && !c.refundedCents ? ' The prepayment was not refunded.' : ''}

@@ -400,7 +400,7 @@ export function StaffCallouts() {
                   <div className="font-medium">{c.title}</div>
                   <div className="text-xs text-muted-foreground">
                     {c.orgName}
-                    {c.roomName ? ` · ${c.roomName}` : ''} · requested {dateTime(c.createdAt)}
+                    {c.roomName ? ` · ${c.roomName}` : ''} · requested {dateTime(c.createdAt, c.timezone)}
                     {c.ticketId && (
                       <>
                         {' · '}
@@ -424,7 +424,7 @@ export function StaffCallouts() {
                 <p className="text-sm tabular-nums">
                   {c.hours} h at {dollars(c.rateCents ?? 0)} = {dollars(c.subtotalCents ?? 0)} + GST{' '}
                   {dollars(c.gstCents ?? 0)} = <b>{dollars(c.totalCents)}</b>
-                  {c.scheduledFor ? ` · ${dateTime(c.scheduledFor)}` : ''}
+                  {c.scheduledFor ? ` · ${dateTime(c.scheduledFor, c.timezone)}` : ''}
                   {c.paidAt ? ' · paid' : ''}
                 </p>
               ) : null}

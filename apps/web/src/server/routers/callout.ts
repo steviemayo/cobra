@@ -13,6 +13,7 @@ import {
   requestCallout,
   startPayment,
 } from '../callouts';
+import { orgTimezone, siteTimezone } from '../site-zone';
 import { BillingNotConfigured, baseUrl, stripeConfigured } from '../stripe';
 import { orgProcedure, requireRole, router } from '../trpc';
 
@@ -30,7 +31,8 @@ export function asTrpc(e: unknown): never {
 type Row = Awaited<ReturnType<typeof listCallouts>>[number];
 
 /** What a customer sees of a callout: no Stripe identifiers, only the invoice link. */
-export const calloutView = (c: Row, now = new Date()) => ({
+export const calloutView = (c: Row, timezone: string, now = new Date()) => ({
+  timezone,
   id: c.id,
   title: c.title,
   details: c.details,
@@ -68,7 +70,14 @@ export const calloutView = (c: Row, now = new Date()) => ({
 // A customer's support callouts (docs/decisions.md CO-1..): ask, see the quote, pay to book, cancel.
 export const calloutRouter = router({
   list: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => ({
-    callouts: (await listCallouts(db, { orgId: ctx.orgId })).map((c) => calloutView(c)),
+    callouts: await (async () => {
+      const rows = await listCallouts(db, { orgId: ctx.orgId });
+      const org = await orgTimezone(db, ctx.orgId);
+      const zones = new Map<string, string>();
+      for (const c of rows)
+        if (c.siteId && !zones.has(c.siteId)) zones.set(c.siteId, await siteTimezone(db, c.siteId));
+      return rows.map((c) => calloutView(c, (c.siteId && zones.get(c.siteId)) || org));
+    })(),
     noticeHours: CANCEL_NOTICE_MS / 3_600_000,
     paymentsAvailable: stripeConfigured(),
   })),

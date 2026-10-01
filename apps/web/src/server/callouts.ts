@@ -1,4 +1,6 @@
 import type { PrismaClient } from '@kestrel/db';
+import { formatInZone } from '../lib/time';
+import { orgTimezone, siteTimezone } from './site-zone';
 
 // Support callouts (docs/decisions.md CO-1..). A customer asks for a Kestrel technician to attend;
 // staff reply with availability and a quote (hours x hourly rate, plus GST); the customer prepays
@@ -221,7 +223,8 @@ export async function sendQuote(db: CalloutDb, id: string, q: QuoteInput, now = 
       stripeSessionId: null,
     },
   });
-  const message = `Quote for “${c.title}”: ${q.hours} hours at ${dollars(q.rateCents)}/hour = ${dollars(t.subtotalCents)} + GST ${dollars(t.gstCents)} = ${dollars(t.totalCents)} (AUD). Proposed time: ${q.scheduledFor.toISOString()}. Pay under Support > Callouts to secure the booking. It can be cancelled for a full refund up to 48 hours before.${q.note ? `\n\n${q.note.trim()}` : ''}`;
+  const zone = c.siteId ? await siteTimezone(db, c.siteId) : await orgTimezone(db, c.orgId);
+  const message = `Quote for “${c.title}”: ${q.hours} hours at ${dollars(q.rateCents)}/hour = ${dollars(t.subtotalCents)} + GST ${dollars(t.gstCents)} = ${dollars(t.totalCents)} (AUD). Proposed time: ${formatInZone(q.scheduledFor, zone)}. Pay under Support > Callouts to secure the booking. It can be cancelled for a full refund up to 48 hours before.${q.note ? `\n\n${q.note.trim()}` : ''}`;
   await say(db, c, message);
   return { ...t, orgId: c.orgId, ticketId: c.ticketId, message };
 }
@@ -317,10 +320,11 @@ export async function fulfilCallout(
     },
   });
   if (claimed.count === 0) return 'duplicate';
+  const zone = c.siteId ? await siteTimezone(db, c.siteId) : await orgTimezone(db, c.orgId);
   await say(
     db,
     c,
-    `Payment received. Your callout is booked${c.scheduledFor ? ` for ${c.scheduledFor.toISOString()}` : ''}. A tax invoice for the prepayment has been emailed. You can cancel for a full refund up to 48 hours before.`,
+    `Payment received. Your callout is booked${c.scheduledFor ? ` for ${formatInZone(c.scheduledFor, zone)}` : ''}. A tax invoice for the prepayment has been emailed. You can cancel for a full refund up to 48 hours before.`,
   );
   return 'booked';
 }

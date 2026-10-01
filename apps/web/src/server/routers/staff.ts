@@ -16,6 +16,7 @@ import {
 } from '../staff-team';
 import { StaffRole } from '@kestrel/model';
 import { realCalloutStripe } from '../callout-stripe';
+import { orgTimezone, siteTimezone } from '../site-zone';
 import { OrgDeletionError, restoreOrg, scheduleDeletion } from '../org-deletion';
 import {
   CalloutError,
@@ -575,11 +576,16 @@ export const staffRouter = router({
         });
         return {
           defaultRateCents: Number(process.env.KESTREL_CALLOUT_RATE_CENTS) || null,
-          callouts: rows.map((r) => ({
-            ...r,
-            orgName: orgs.find((o) => o.id === r.orgId)?.name ?? 'Unknown',
-            roomName: rooms.find((x) => x.id === r.roomId)?.name ?? null,
-          })),
+          callouts: await Promise.all(
+            rows.map(async (r) => ({
+              ...r,
+              timezone: r.siteId
+                ? await siteTimezone(db, r.siteId)
+                : await orgTimezone(db, r.orgId),
+              orgName: orgs.find((o) => o.id === r.orgId)?.name ?? 'Unknown',
+              roomName: rooms.find((x) => x.id === r.roomId)?.name ?? null,
+            })),
+          ),
         };
       }),
 
