@@ -30,6 +30,7 @@ export const PURGED_BY_ORG_ID = [
   'supportSession',
   'calendarFire',
   'roomSchedule',
+  'roomBooking',
   'deviceHistory',
   'usageDefinition',
   'usageSettings',

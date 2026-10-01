@@ -141,7 +141,8 @@ export async function roomWeek(
 
 /** Reads a room's calendar now and saves the copy, so a newly chosen calendar works straight away. */
 export async function refreshRoomNow(
-  db: Pick<PrismaClient, 'calendarConnection' | 'roomSchedule'>,
+  db: Pick<PrismaClient, 'calendarConnection' | 'roomSchedule'> &
+    Partial<Pick<PrismaClient, 'roomBooking'>>,
   room: { id: string; orgId: string },
   connectionId: string,
   resource: string,

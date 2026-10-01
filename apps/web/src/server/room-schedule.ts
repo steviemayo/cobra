@@ -24,7 +24,8 @@ import {
 export type ScheduleDb = Pick<
   PrismaClient,
   'calendarConnection' | 'room' | 'release' | 'roomSchedule'
->;
+> &
+  Partial<Pick<PrismaClient, 'roomBooking'>>;
 
 /** How far ahead an older gateway's panel is told about. A day's meetings, without the week. */
 export const WINDOW_MS = 12 * 3_600_000;
@@ -49,9 +50,60 @@ export function roomCalendar(room: {
     : null;
 }
 
+/** Bookings are kept this long after they end, like telemetry. */
+export const BOOKING_KEEP_MS = 90 * 86_400_000;
+
+/**
+ * Keeps what the calendar read says about a room's bookings, so they can be compared with faults
+ * after the meeting is over. Bookings still to come follow the calendar (moved, changed or
+ * cancelled ones are replaced or removed); a booking that has started is never removed, whatever
+ * the calendar says later. Never throws: the history is extra, and the refresh matters more.
+ */
+export async function keepBookings(
+  db: Partial<Pick<PrismaClient, 'roomBooking'>>,
+  room: { id: string; orgId: string },
+  meetings: Meeting[],
+  now: Date,
+): Promise<void> {
+  if (!db.roomBooking) return;
+  try {
+    const seen = new Set<string>();
+    for (const m of meetings) {
+      const startsAt = new Date(m.start);
+      seen.add(`${m.id}@${startsAt.getTime()}`);
+      const data = {
+        title: m.private ? '' : m.title,
+        organiser: m.private ? null : (m.organiser ?? null),
+        private: m.private,
+        endsAt: new Date(m.end),
+        seenAt: now,
+      };
+      await db.roomBooking.upsert({
+        where: { roomId_eventId_startsAt: { roomId: room.id, eventId: m.id, startsAt } },
+        create: { roomId: room.id, orgId: room.orgId, eventId: m.id, startsAt, ...data },
+        update: data,
+      });
+    }
+    // Still to come but no longer on the calendar: cancelled or moved.
+    const upcoming = await db.roomBooking.findMany({
+      where: { roomId: room.id, startsAt: { gt: now } },
+      select: { id: true, eventId: true, startsAt: true },
+    });
+    const gone = upcoming
+      .filter((b) => !seen.has(`${b.eventId}@${b.startsAt.getTime()}`))
+      .map((b) => b.id);
+    if (gone.length) await db.roomBooking.deleteMany({ where: { id: { in: gone } } });
+    await db.roomBooking.deleteMany({
+      where: { roomId: room.id, endsAt: { lt: new Date(now.getTime() - BOOKING_KEEP_MS) } },
+    });
+  } catch (e) {
+    console.error('[calendar] could not keep booking history', e);
+  }
+}
+
 /** Reads one room's calendar and saves the copy. Throws when the calendar can't be read. */
 export async function storeSchedule(
-  db: Pick<PrismaClient, 'roomSchedule'>,
+  db: Pick<PrismaClient, 'roomSchedule'> & Partial<Pick<PrismaClient, 'roomBooking'>>,
   room: { id: string; orgId: string },
   creds: CalendarCredentials,
   resource: string,
@@ -74,6 +126,7 @@ export async function storeSchedule(
     await db.roomSchedule.create({
       data: { roomId: room.id, orgId: room.orgId, meetings, fetchedAt: now },
     });
+  await keepBookings(db, room, meetings, now);
   return meetings;
 }
 

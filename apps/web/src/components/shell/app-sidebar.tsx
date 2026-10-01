@@ -547,11 +547,11 @@ export function AppSidebar() {
               </div>
             </NavGroup>
             <NavGroup id="monitor" label="Monitor" defaultOpen items={monitor} />
+            <NavGroup id="support" label="Support" defaultOpen items={support} />
             <NavGroup id="assets" label="Assets" items={assets} />
             <NavGroup id="maintenance" label="Maintenance" items={maintenance} />
             <NavGroup id="configuration" label="Configuration" items={configuration} />
             <NavGroup id="analytics" label="Analytics" items={analytics} />
-            <NavGroup id="support" label="Support" defaultOpen items={support} />
           </>
         }
 
