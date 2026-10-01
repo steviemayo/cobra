@@ -21,8 +21,24 @@ export interface HttpGetOptions {
 
 const MAX_BODY = 256 * 1024;
 
-/** GET one path and resolve with the body. Rejects on a non-2xx answer, a timeout or an oversized reply. */
-export function httpGet(host: string, path: string, o: HttpGetOptions): Promise<string> {
+/** A connection the player dropped before answering: it closes idle sockets and has few to spare. */
+const DROPPED = /socket hang up|ECONNRESET|EPIPE/;
+
+/**
+ * GET one path and resolve with the body. Rejects on a non-2xx answer, a timeout or an oversized
+ * reply. A dropped connection is tried once more on a fresh one.
+ */
+export async function httpGet(host: string, path: string, o: HttpGetOptions): Promise<string> {
+  try {
+    return await httpGetOnce(host, path, o);
+  } catch (e) {
+    if (e instanceof Error && DROPPED.test(`${e.message} ${(e as NodeJS.ErrnoException).code ?? ''}`))
+      return httpGetOnce(host, path, o);
+    throw e;
+  }
+}
+
+function httpGetOnce(host: string, path: string, o: HttpGetOptions): Promise<string> {
   return new Promise((resolve, reject) => {
     const lib = o.protocol === 'https' ? https : http;
     const req = lib.request(
@@ -31,6 +47,10 @@ export function httpGet(host: string, path: string, o: HttpGetOptions): Promise<
         port: o.port,
         path,
         method: 'GET',
+        // A new connection each time, closed after the answer: these players drop idle sockets,
+        // and a reused one fails with "socket hang up".
+        agent: false,
+        headers: { connection: 'close' },
         timeout: o.timeoutMs,
         ...(o.protocol === 'https' ? { rejectUnauthorized: !o.allowSelfSigned } : {}),
       },
