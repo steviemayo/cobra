@@ -25,6 +25,7 @@ import {
   type MonitoringDb,
 } from './monitoring';
 import { evaluateConfig, type ConfigDb, type EnforceItem } from './config-service';
+import { applyWatchedPoints, pointValuesPatch, pointsOf } from './device-points';
 import { recordLatency, type LatencyDb } from './latency';
 import type { SigningKey } from './signing';
 
@@ -232,6 +233,7 @@ export async function signedDeviceSetFor(
         ...(isObject(d.values) ? d.values : {}),
         ...own,
       },
+      points: pointsOf(d.points),
     });
     stamp.push(`${d.id}:${d.version}:${set.updatedAt}`);
   }
@@ -293,6 +295,9 @@ export async function ingestDeviceReports(
     if (details?.success && JSON.stringify(details.data) !== JSON.stringify(row.details ?? null))
       patch.details = details.data as Prisma.InputJsonValue;
     if (rep.firmware && rep.firmware !== row.firmware) patch.firmwareSince = now;
+    // What each control point reads, for the device's page.
+    const values = pointValuesPatch(row, rep);
+    if (values) patch.pointValues = values as Prisma.InputJsonValue;
 
     // What the device says about itself fills and refreshes the asset record.
     const prov = asProvenance(row.provenance);
@@ -364,6 +369,9 @@ export async function ingestDeviceReports(
           at: now,
         })),
       });
+
+    // Watched control points: an incident for each that is out of bounds, resolved when it is fine.
+    for (const j of await applyWatchedPoints(db, row, gw, rep, now)) jobs.push(j);
 
     const subject = `device:${row.id}`;
     const roomName = row.roomId

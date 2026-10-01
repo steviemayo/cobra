@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { defaultDeviceState, type DeviceState, type SignedDeviceSet } from '@kestrel/model';
+import {
+  defaultDeviceState,
+  type ControlPoint,
+  type DeviceState,
+  type SignedDeviceSet,
+} from '@kestrel/model';
 import { silentLogger } from './log';
 
 const built: FakeDriver[] = [];
@@ -60,7 +65,7 @@ const B = '00000000-0000-4000-8000-000000000002';
 
 function set(
   version: string,
-  devices: { id: string; host?: string; name?: string }[],
+  devices: { id: string; host?: string; name?: string; points?: ControlPoint[] }[],
 ): SignedDeviceSet {
   return {
     payload: {
@@ -73,6 +78,7 @@ function set(
         category: 'display',
         control: { kind: 'generic' as const, protocol: 'pjlink' as const },
         settings: { host: d.host ?? '10.0.0.1' },
+        ...(d.points && { points: d.points }),
       })),
     },
     hash: 'a'.repeat(64),
@@ -83,6 +89,76 @@ function set(
 
 beforeEach(() => {
   built.length = 0;
+});
+
+describe('DeviceHost control points', () => {
+  const points: ControlPoint[] = [
+    {
+      id: 'g',
+      name: 'Boardroom gain',
+      type: 'level',
+      address: { component: 'Boardroom', control: 'gain' },
+      watch: { min: 20, severity: 'critical' },
+    },
+    {
+      id: 'm',
+      name: 'Boardroom mute',
+      type: 'mute',
+      address: { component: 'Boardroom', control: 'mute' },
+      watch: { expect: false, severity: 'warning' },
+    },
+    {
+      id: 's',
+      name: 'Scene',
+      type: 'generic',
+      valueType: 'integer',
+      address: { control: 'Scene' },
+    },
+    {
+      id: 'late',
+      name: 'Not read yet',
+      type: 'generic',
+      address: { control: 'Late' },
+      watch: { expect: 1, severity: 'warning' },
+    },
+  ];
+
+  it('hands the points to the driver and reports their readings and whether each is in bounds', () => {
+    const host = new DeviceHost(silentLogger);
+    host.apply(set('v1', [{ id: A, points }]));
+    built[0]!.state.points = { g: 10, m: false, s: 2 };
+    const report = host.reports(LATER())[0]!;
+    // Only what has been read: the point with no reading yet is left out of both.
+    expect(report.points).toEqual({ g: 10, m: false, s: 2 });
+    expect(report.watched).toEqual([
+      {
+        pointId: 'g',
+        name: 'Boardroom gain',
+        ok: false,
+        message: 'Boardroom gain is 10, below 20',
+        severity: 'critical',
+      },
+      { pointId: 'm', name: 'Boardroom mute', ok: true, severity: 'warning' },
+    ]);
+  });
+
+  it('reports nothing about points for a device that has none', () => {
+    const host = new DeviceHost(silentLogger);
+    host.apply(set('v1', [{ id: A }]));
+    const report = host.reports(LATER())[0]!;
+    expect(report.points).toBeUndefined();
+    expect(report.watched).toBeUndefined();
+  });
+
+  it('rebuilds the driver when its points change, and not otherwise', () => {
+    const host = new DeviceHost(silentLogger);
+    host.apply(set('v1', [{ id: A, points }]));
+    host.apply(set('v2', [{ id: A, points }]));
+    expect(built).toHaveLength(1);
+    host.apply(set('v3', [{ id: A, points: points.slice(0, 2) }]));
+    expect(built).toHaveLength(2);
+    expect(built[0]!.closes).toBe(1);
+  });
 });
 
 describe('DeviceHost response times', () => {

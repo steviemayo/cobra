@@ -1228,6 +1228,10 @@ model Device {
   feedback      Json?
   details       Json?
   firmwareSince DateTime?
+  /// Active only: the control points read on it (a DSP's gain blocks, routers, named controls) and what each is watched for. See ControlPoint.
+  points        Json      @default("[]")
+  /// What each point read at the last heartbeat, by point id.
+  pointValues   Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt

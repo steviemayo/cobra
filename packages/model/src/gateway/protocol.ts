@@ -269,6 +269,8 @@ export const DeviceReport = z.object({
   latency: DeviceLatency.optional(),
   /** The points this device is watched on. Absent when none are. */
   watched: z.array(WatchedPoint).max(100).optional(),
+  /** What each control point reads now (by point id), as Kestrel shows it: 0 to 100 for a level. Absent when it has none. */
+  points: z.record(z.string().max(100), z.union([z.number(), z.boolean(), z.string().max(500)])).optional(),
   /** Whatever the driver reports back, control or not. Absent when it has nothing to say. */
   feedback: DeviceFeedback.optional(),
   /**

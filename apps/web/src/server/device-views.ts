@@ -46,6 +46,9 @@ export interface DeviceView {
   swapPending: boolean;
   feedback: unknown;
   details: unknown;
+  /** The control points read on the device, and what each read at the last heartbeat (by point id). */
+  points: unknown;
+  pointValues: unknown;
   version: number;
 }
 
@@ -126,6 +129,8 @@ export async function deviceViews(
       swapPending: d.swapPending,
       feedback: d.feedback,
       details: d.details,
+      points: d.points,
+      pointValues: d.pointValues,
       version: d.version,
     });
   }

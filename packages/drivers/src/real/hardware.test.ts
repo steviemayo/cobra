@@ -75,7 +75,9 @@ async function fakeQsys(
     let authed = !opts.user;
     socket.on('error', () => undefined);
     if (opts.pushEngineStatus)
-      socket.write(JSON.stringify({ jsonrpc: '2.0', method: 'EngineStatus', params: ENGINE_STATUS }) + '\0');
+      socket.write(
+        JSON.stringify({ jsonrpc: '2.0', method: 'EngineStatus', params: ENGINE_STATUS }) + '\0',
+      );
     socket.on('data', (chunk: string) => {
       buf += chunk;
       let i: number;
@@ -153,7 +155,15 @@ async function fakeQsys(
 }
 
 const qsysDevice = (port: number, extra: Record<string, unknown> = {}) =>
-  device('dsp', 'qsys-core', { host: '127.0.0.1', port, timeoutMs: 400, pollMs: 100, ...extra });
+  device('dsp', 'qsys-core', {
+    host: '127.0.0.1',
+    port,
+    timeoutMs: 400,
+    pollMs: 100,
+    // The older way: a gain component the panel volume acts on. A bare Core reads none.
+    gainComponent: 'gain',
+    ...extra,
+  });
 
 describe('Q-SYS Core driver', () => {
   it('is what a device asks for by driver id', () => {
@@ -168,7 +178,8 @@ describe('Q-SYS Core driver', () => {
     drivers.push(d);
     expect(d.getState().online).toBe(false);
     d.start();
-    await until(() => d.getState().online);
+    // The engine status can say "online" before the gain read has landed, so wait for the volume.
+    await until(() => d.getState().online && d.getState().volume === 50);
     // -20 dB on a -40..0 scale is half way.
     expect(d.getState()).toMatchObject({ online: true, volume: 50, muted: false });
     expect(core.requests.find((r) => r.method === 'Component.Get')).toMatchObject({
@@ -615,7 +626,7 @@ describe('Blustream DA11ABL-WP-V2 driver', () => {
     expect(createDriver(wallPlateDevice(1), ctx)).toBeInstanceOf(BlustreamDa11ablDriver);
   });
 
-  it('routes by the port id\'s digit, mutes and sets volume without waiting for a reply', async () => {
+  it("routes by the port id's digit, mutes and sets volume without waiting for a reply", async () => {
     const wp = await fakeWallPlate('Connected\r\n');
     const d = new BlustreamDa11ablDriver(wallPlateDevice(wp.port), ctx);
     drivers.push(d);
@@ -713,7 +724,9 @@ describe('Blustream ACM1000 driver', () => {
   });
 
   it('counts the inputs and outputs it sees in the status reply, and keeps the raw text', async () => {
-    const acm = await fakeAcm('IN 001 Online\r\nIN 002 Online\r\nOUT 001 FR 001\r\nOUT 002 FR 001\r\n');
+    const acm = await fakeAcm(
+      'IN 001 Online\r\nIN 002 Online\r\nOUT 001 FR 001\r\nOUT 002 FR 001\r\n',
+    );
     const d = new BlustreamAcm1000Driver(acmDevice(acm.port), ctx);
     drivers.push(d);
     d.start();
@@ -738,5 +751,25 @@ describe('Blustream ACM1000 driver', () => {
     d.start();
     await wait(200);
     expect(d.getState().online).toBe(false);
+  });
+});
+
+describe('Q-SYS Core driver as a monitored device', () => {
+  it('only keeps the connection: logon, engine status and NoOp, and reads no gain', async () => {
+    const core = await fakeQsys();
+    const d = new QsysDriver(
+      device('dsp', 'qsys-core', {
+        host: '127.0.0.1',
+        port: core.port,
+        timeoutMs: 400,
+        pollMs: 100,
+      }),
+      ctx,
+    );
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    await until(() => core.requests.some((r) => r.method === 'NoOp'));
+    expect(core.requests.map((r) => r.method)).not.toContain('Component.Get');
   });
 });

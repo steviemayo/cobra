@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DEVICE_CATALOG, DeviceCategory } from './room/catalog';
 import { DeviceControl } from './room/device';
+import { ControlPoint } from './room/points';
 import type { DeviceDetails } from './runtime/device';
 
 // v2 devices (docs/pivot-monitoring.md): a device is a first-class record in the estate, active
@@ -232,6 +233,8 @@ export const MonitoredDevice = z.object({
   category: DeviceCategory.or(z.string().min(1).max(40)),
   control: DeviceControl,
   settings: z.record(z.string(), z.unknown()).default({}),
+  /** The control points to read on it (a DSP's gain blocks, mutes, routers, named controls), and what to watch them for. */
+  points: z.array(ControlPoint).max(200).optional(),
 });
 export type MonitoredDevice = z.infer<typeof MonitoredDevice>;
 

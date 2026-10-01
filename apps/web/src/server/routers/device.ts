@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
-import { AssetCategory, AssetStatus, DeviceControl, DeviceKind } from '@kestrel/model';
+import {
+  AssetCategory,
+  AssetStatus,
+  ControlPoint,
+  DeviceControl,
+  DeviceKind,
+} from '@kestrel/model';
 import { writeAudit } from '../audit';
 import {
   createDevice,
@@ -11,6 +17,7 @@ import {
   type DeviceInput,
 } from '../devices';
 import { deviceViews } from '../device-views';
+import { MAX_POINTS, setDevicePoints } from '../device-points';
 import { canMonitorRoom, getEntitlements, monitorLimitMessage } from '../billing';
 import { syncQuantity } from '../stripe';
 import { after } from 'next/server';
@@ -71,6 +78,31 @@ export const deviceRouter = router({
     if (!view) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such device' });
     return view;
   }),
+
+  /**
+   * Replaces the control points read on a monitored device: named components and named controls on
+   * a DSP, and what each is watched for. The gateway picks the change up in its next device set.
+   */
+  setPoints: orgProcedure
+    .input(z.object({ orgId, deviceId: id, points: z.array(ControlPoint).max(MAX_POINTS) }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev', 'support']);
+      const res = await setDevicePoints(db, {
+        orgId: ctx.orgId,
+        deviceId: input.deviceId,
+        actorId: ctx.user.id,
+        points: input.points,
+      });
+      if (!res.ok) return fail(res.message);
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'device.points',
+        target: input.deviceId,
+        meta: { count: input.points.length },
+      });
+      return { ok: true };
+    }),
 
   /** The device's history, newest first. */
   events: orgProcedure

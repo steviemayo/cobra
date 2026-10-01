@@ -7,6 +7,8 @@ import {
   type DeviceReport,
   type MonitoredDevice,
   type SignedDeviceSet,
+  type WatchedPoint,
+  checkWatch,
 } from '@kestrel/model';
 import type { Logger } from './log';
 import { deviceFeedback } from './device-feedback';
@@ -37,7 +39,7 @@ interface Running {
 
 const fingerprintOf = (d: MonitoredDevice) =>
   createHash('sha256')
-    .update(JSON.stringify([d.name, d.category, d.control, d.settings]))
+    .update(JSON.stringify([d.name, d.category, d.control, d.settings, d.points]))
     .digest('hex');
 
 export class DeviceHost {
@@ -93,6 +95,7 @@ export class DeviceHost {
         ports: [],
         control: d.control,
         settings: d.settings,
+        points: d.points,
       });
       if (!parsed.success) {
         this.log('warn', 'A device could not be read and was skipped', { deviceId: id });
@@ -150,6 +153,7 @@ export class DeviceHost {
               : undefined;
         const details = this.detailsFor(device.id, state.details, now);
         const latency = this.prober.take(device.id, state.online ?? true);
+        const { readings, watched } = this.pointsOf(device, state.points);
         return {
           deviceId: device.id,
           name: device.name,
@@ -157,10 +161,42 @@ export class DeviceHost {
           ...(driverName && { driver: driverName }),
           ...(state.firmware && { firmware: state.firmware }),
           ...(latency && { latency }),
+          ...(readings && { points: readings }),
+          ...(watched && { watched }),
           ...(Object.keys(feedback).length > 0 && { feedback }),
           ...(details && { details }),
         };
       });
+  }
+
+  /**
+   * What each of a device's control points reads now, and for the ones that are watched whether the
+   * reading is in bounds. A point with no reading yet is left out of both: Kestrel says nothing
+   * rather than guess.
+   */
+  private pointsOf(device: Device, state: Record<string, number | boolean | string>) {
+    const points = device.points ?? [];
+    if (points.length === 0) return {};
+    const readings: Record<string, number | boolean | string> = {};
+    const watched: WatchedPoint[] = [];
+    for (const p of points) {
+      const value = state[p.id];
+      if (value === undefined) continue;
+      readings[p.id] = value;
+      if (!p.watch) continue;
+      const result = checkWatch(p.name, p.watch, value);
+      watched.push({
+        pointId: p.id,
+        name: p.name,
+        ok: result.ok,
+        ...(result.ok ? {} : { message: result.message.slice(0, 300) }),
+        severity: p.watch.severity,
+      });
+    }
+    return {
+      ...(Object.keys(readings).length > 0 && { readings }),
+      ...(watched.length > 0 && { watched }),
+    };
   }
 
   /** Details go up when they change and now and then as a refresh, so absent means "same as last time". */

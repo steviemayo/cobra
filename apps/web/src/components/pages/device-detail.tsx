@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/common/empty-state';
 import { SeverityPill, dateTime } from '@/components/common/health';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { Section } from '@/components/common/section';
+import { DevicePoints } from './device-points';
 import { DeviceResponse } from './network-health';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { orgPath, useOrg } from '@/components/shell/org-context';
@@ -795,6 +796,7 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
+          {d.kind === 'active' && <TabsTrigger value="points">Control points</TabsTrigger>}
           {d.kind === 'active' && <TabsTrigger value="charts">History</TabsTrigger>}
           {d.kind === 'active' && <TabsTrigger value="config">Configuration</TabsTrigger>}
           <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
@@ -828,6 +830,11 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
             <RequireFeature feature="configuration">
               <DeviceConfig deviceId={d.id} />
             </RequireFeature>
+          </TabsContent>
+        )}
+        {d.kind === 'active' && (
+          <TabsContent value="points" className="pt-4">
+            <DevicePoints device={d} />
           </TabsContent>
         )}
         {d.kind === 'active' && (

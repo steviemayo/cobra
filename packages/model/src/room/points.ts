@@ -85,6 +85,11 @@ export const ControlPoint = z.object({
   max: z.number().optional(),
   /** Watch this point and raise an incident when it is out of bounds. Works with or without control. */
   watch: PointWatch.optional(),
+  /**
+   * What kind of value a generic point holds, so the portal can offer the right watch fields (on or
+   * off, a number, text). The driver reads the value as it is whatever this says.
+   */
+  valueType: z.enum(['boolean', 'integer', 'float', 'text']).optional(),
 });
 export type ControlPoint = z.infer<typeof ControlPoint>;
 
@@ -92,6 +97,8 @@ export type ControlPoint = z.infer<typeof ControlPoint>;
 export interface PointAddressField {
   key: string;
   label: string;
+  /** Left blank for a point that has no such part (a Q-SYS named control has no component). */
+  optional?: boolean;
 }
 /** The address form for each point type a driver supports. A type left out is not supported. */
 export type PointForms = Partial<Record<PointType, PointAddressField[]>>;
