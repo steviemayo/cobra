@@ -30,6 +30,7 @@ export const DeviceCategory = z.enum([
   'occupancy_sensor',
   'control_processor',
   'touch_panel',
+  'music_player',
 ]);
 export type DeviceCategory = z.infer<typeof DeviceCategory>;
 
@@ -293,6 +294,14 @@ export const DEVICE_CATALOG: Record<DeviceCategory, CategoryInfo> = {
   touch_panel: {
     label: 'Touch panel',
     section: 'infrastructure',
+    capabilities: [],
+    controllable: false,
+    defaultPorts: [],
+  },
+  // Watched, not driven: the room's own audio path stays in its DSP and amplifiers.
+  music_player: {
+    label: 'Music player',
+    section: 'source',
     capabilities: [],
     controllable: false,
     defaultPorts: [],

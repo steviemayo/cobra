@@ -214,6 +214,10 @@ export const DeviceFeedback = z.object({
   /** AVoIP decoders: is it receiving the stream it was pointed at. */
   streamConnected: z.boolean().optional(),
   activeApp: z.string().max(200).optional(),
+  /** Music players: playing, paused, stopped or buffering. */
+  playback: z.string().max(40).optional(),
+  /** Music players: where the audio comes from (Spotify, Line in). */
+  playSource: z.string().max(100).optional(),
 });
 export type DeviceFeedback = z.infer<typeof DeviceFeedback>;
 /** The fields of `DeviceFeedback`, for code that walks them generically (change detection, history). */
@@ -227,6 +231,8 @@ export const DEVICE_FEEDBACK_FIELDS = [
   'occupied',
   'streamConnected',
   'activeApp',
+  'playback',
+  'playSource',
 ] as const satisfies readonly (keyof DeviceFeedback)[];
 export type DeviceFeedbackField = (typeof DEVICE_FEEDBACK_FIELDS)[number];
 

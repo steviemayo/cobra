@@ -23,6 +23,7 @@ export const DriverClass = z.enum([
   'relay',
   'sensor',
   'infrastructure',
+  'music_player',
 ]);
 export type DriverClass = z.infer<typeof DriverClass>;
 
@@ -195,6 +196,16 @@ export const DRIVER_CLASSES: Record<DriverClass, DriverClassInfo> = {
     label: 'Infrastructure',
     categories: [],
     features: { ping: 'Reports online', snmp: 'SNMP health', http_health: 'HTTP health' },
+  },
+  music_player: {
+    label: 'Music player',
+    categories: ['music_player'],
+    features: {
+      now_playing: 'Reports the track playing (title, artist, album)',
+      playback_state: 'Reports playing, paused or stopped',
+      source: 'Reports where the audio comes from',
+      volume: 'Reports volume and mute',
+    },
   },
 };
 

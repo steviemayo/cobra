@@ -24,6 +24,7 @@ export const FIELD_OPTIONS = [
   { value: 'volume', label: 'Volume' },
   { value: 'blanked', label: 'Picture blanked' },
   { value: 'activeApp', label: 'Active app' },
+  { value: 'playback', label: 'Playback' },
   { value: 'online', label: 'Answering (online)' },
 ];
 const COMPARE_OPTIONS = [
