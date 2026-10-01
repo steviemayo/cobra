@@ -6,6 +6,9 @@ import { genericRestDriver } from './generic-rest';
 import { AVOIP_SWITCHER_IDS } from './avoip';
 import { BlustreamAcm1000Driver } from './blustream-acm1000';
 import { BlustreamDa11ablDriver } from './blustream-da11abl';
+import { BluesoundDriver } from './bluesound';
+import { BlustreamPwrDriver } from './blustream-pwr';
+import { WiimDriver } from './wiim';
 import { Crestron4SeriesDriver } from './crestron-4series';
 import { CrestronFlexDriver } from './crestron-flex';
 import { CrestronOccupancyDriver } from './crestron-occupancy';
@@ -63,6 +66,9 @@ const BUILT_IN: Record<string, (device: Device, ctx: DriverContext) => DeviceDri
   'crestron-occupancy': (d, c) => new CrestronOccupancyDriver(d, c),
   'blustream-da11abl': (d, c) => new BlustreamDa11ablDriver(d, c),
   'blustream-acm1000': (d, c) => new BlustreamAcm1000Driver(d, c),
+  'blustream-pwr': (d, c) => new BlustreamPwrDriver(d, c),
+  wiim: (d, c) => new WiimDriver(d, c),
+  bluesound: (d, c) => new BluesoundDriver(d, c),
 };
 export const BUILT_IN_DRIVER_IDS = [
   ...Object.keys(BUILT_IN),

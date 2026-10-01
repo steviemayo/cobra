@@ -39,5 +39,7 @@ export function deviceFeedback(state: DeviceState | undefined, ports: Port[]): D
   if (state?.occupied !== undefined) feedback.occupied = state.occupied;
   if (state?.streamConnected !== undefined) feedback.streamConnected = state.streamConnected;
   if (state?.activeApp !== undefined) feedback.activeApp = state.activeApp;
+  if (state?.playback !== undefined) feedback.playback = state.playback;
+  if (state?.playSource !== undefined) feedback.playSource = state.playSource;
   return feedback;
 }

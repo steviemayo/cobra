@@ -520,6 +520,8 @@ const FIELD_TITLE: Record<string, string> = {
   occupied: 'Occupied',
   streamConnected: 'Receiving a stream',
   activeApp: 'Active app',
+  playback: 'Playback',
+  playSource: 'Playing from',
 };
 
 /** Charts for only the readings this device has reported: nothing is drawn for what it does not have. */

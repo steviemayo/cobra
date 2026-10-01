@@ -124,6 +124,10 @@ export const DeviceState = z.object({
   activeApp: z.string().optional(),
   /** Occupancy sensors: is anyone in the room. */
   occupied: z.boolean().optional(),
+  /** Music players: playing, paused, stopped or buffering. What is playing goes in `details`, so track changes do not fill the history. */
+  playback: z.string().max(40).optional(),
+  /** Music players: where the audio comes from, in the player's words (Spotify, Line in, Bluetooth). */
+  playSource: z.string().max(100).optional(),
   /** Input port -> is a signal present. Only devices with signal_detect report this. */
   signal: z.record(z.string(), z.boolean()).default({}),
   /** The firmware or software version the device reported about itself, as it wrote it. Read only: nothing here changes it. */

@@ -13,8 +13,9 @@ import {
 describe('catalog', () => {
   it('covers every category with a label and capabilities, except pure monitoring infrastructure', () => {
     // A control processor or touch panel gives the room nothing to route or trigger on: it is
-    // watched, not a source, sink or control surface, so it has no capability to declare.
-    const noCapability: DeviceCategory[] = ['control_processor', 'touch_panel'];
+    // watched, not a source, sink or control surface, so it has no capability to declare. The same
+    // goes for a music player, which the room's own DSP and amplifiers sit behind.
+    const noCapability: DeviceCategory[] = ['control_processor', 'touch_panel', 'music_player'];
     for (const category of DeviceCategory.options) {
       const info = DEVICE_CATALOG[category];
       expect(info.label).not.toBe('');

@@ -392,4 +392,48 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     categories: ['occupancy_sensor'],
     example: { host: '<sensor IP>', username: 'admin', password: '<password>' },
   },
+  'blustream-pwr': {
+    name: 'Blustream IEC power controller (PWR2/4/8IEC)',
+    description:
+      'Blustream PWR2IEC, PWR4IEC and PWR8IEC power controllers over the Telnet console. Switches every outlet or one outlet, and reads back each outlet’s state, whether something is connected to it, and its current, power and energy use, plus the unit’s firmware, address and system status. Checked against a real PWR4IEC; the other two sizes are expected to answer the same way.',
+    class: 'relay',
+    features: ['on_off'],
+    settings: [
+      { key: 'host', label: 'Controller address', scope: 'binding', required: true },
+      { key: 'port', label: 'Port (23)', scope: 'binding' },
+      { key: 'pollMs', label: 'How often to read the controller (ms)', scope: 'design' },
+    ],
+    categories: ['power_outlet'],
+    example: { host: '<controller IP>' },
+  },
+  wiim: {
+    name: 'WiiM music player',
+    description:
+      'Monitoring only, over the player’s own HTTP API: reports whether it is playing, paused or stopped, where the audio comes from, volume and mute, the track playing (title, artist, album, quality), and the player’s name, model and firmware. WiiM Mini, Pro, Pro Plus, Amp and Ultra, and other Linkplay-based players. Not yet verified against a real player.',
+    class: 'music_player',
+    features: ['now_playing', 'playback_state', 'source', 'volume'],
+    settings: [
+      { key: 'host', label: 'Player address', scope: 'binding', required: true },
+      { key: 'port', label: 'Port (443; 80 for plain HTTP)', scope: 'binding' },
+      { key: 'protocol', label: 'https or http', scope: 'design' },
+      { key: 'allowSelfSigned', label: 'Accept the player’s own certificate (true)', scope: 'design' },
+      { key: 'pollMs', label: 'How often to check the player (ms)', scope: 'design' },
+    ],
+    categories: ['music_player'],
+    example: { host: '<player IP>' },
+  },
+  bluesound: {
+    name: 'Bluesound music player (BluOS)',
+    description:
+      'Monitoring only, over the BluOS HTTP API (port 11000): reports whether the player is playing, paused or stopped, the service or input it is playing from, volume and mute, the track playing (title, artist, album, quality), and the player’s name, model and group. Node, Powernode, Vault, Pulse and the Professional B100S and B400S. Not yet verified against a real player.',
+    class: 'music_player',
+    features: ['now_playing', 'playback_state', 'source', 'volume'],
+    settings: [
+      { key: 'host', label: 'Player address', scope: 'binding', required: true },
+      { key: 'port', label: 'Port (11000)', scope: 'binding' },
+      { key: 'pollMs', label: 'How often to check the player (ms)', scope: 'design' },
+    ],
+    categories: ['music_player'],
+    example: { host: '<player IP>' },
+  },
 };

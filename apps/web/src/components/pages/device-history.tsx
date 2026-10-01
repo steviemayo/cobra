@@ -39,6 +39,8 @@ const FIELD_LABEL: Record<string, string> = {
   occupied: 'Occupied',
   streamConnected: 'Stream connected',
   activeApp: 'App',
+  playback: 'Playback',
+  playSource: 'Playing from',
 };
 
 const dateLabel = (iso: string) =>
