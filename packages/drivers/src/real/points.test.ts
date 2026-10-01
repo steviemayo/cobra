@@ -51,6 +51,15 @@ interface Core {
   forgetGroups: () => void;
 }
 
+/** The parts of a QRC request this fake reads. */
+interface Params {
+  Id: string;
+  Name: string;
+  Value?: unknown;
+  Component: { Name: string; Controls: { Name: string }[] };
+  Controls: { Name: string; Value?: unknown }[];
+}
+
 interface Group {
   components: Map<string, Set<string>>;
   named: Set<string>;
@@ -95,7 +104,7 @@ async function fakeCore(): Promise<Core> {
         const msg = JSON.parse(buf.slice(0, i)) as {
           id: number;
           method: string;
-          params: any;
+          params: Params;
         };
         buf = buf.slice(i + 1);
         requests.push({ method: msg.method, params: msg.params });
@@ -129,13 +138,13 @@ async function fakeCore(): Promise<Core> {
           reply({ Name: msg.params.Name, Controls: [] });
         } else if (msg.method === 'Control.Get') {
           reply(
-            (msg.params as string[]).flatMap((n) =>
+            (msg.params as unknown as string[]).flatMap((n) =>
               named.has(n) ? [{ Name: n, Value: named.get(n) }] : [],
             ),
           );
         } else if (msg.method === 'Control.Set') {
           sets.push({ component: '', control: msg.params.Name, value: msg.params.Value });
-          named.set(msg.params.Name, msg.params.Value);
+          named.set(msg.params.Name, msg.params.Value as Value);
           reply(true);
         } else if (msg.method === 'ChangeGroup.Destroy') {
           groups.delete(msg.params.Id);
@@ -162,7 +171,7 @@ async function fakeCore(): Promise<Core> {
             named: new Set(),
             told: new Map(),
           };
-          for (const n of msg.params.Controls as string[]) g.named.add(n);
+          for (const n of msg.params.Controls as unknown as string[]) g.named.add(n);
           groups.set(msg.params.Id, g);
           reply({ Id: msg.params.Id, Result: 0 });
         } else if (msg.method === 'ChangeGroup.Poll') {
