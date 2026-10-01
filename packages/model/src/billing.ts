@@ -150,6 +150,7 @@ export const PLAN_FEATURES: Record<
     summary: 'Know what you have and how it is doing.',
     features: [
       'Live monitoring of every monitored device and room',
+      'Find devices on your local network from the gateway',
       'The asset register, with CSV import and export',
       'Incidents, tickets and email alerts',
       'Maintenance windows',

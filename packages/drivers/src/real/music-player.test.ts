@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { DRIVER_CLASSES, STARTER_TEMPLATES, type Device } from '@kestrel/model';
 import { BluesoundDriver, attrs, tag, xmlText } from './bluesound';
 import { BUILT_IN_DRIVER_IDS, createDriver } from './registry';
+import { httpGet } from './music-player';
 import { WiimDriver, decodeHex } from './wiim';
 import type { DeviceDriver, DriverContext } from './types';
 
@@ -56,6 +57,32 @@ describe('music player class', () => {
     expect(DRIVER_CLASSES.music_player.categories).toEqual(['music_player']);
     expect(createDriver(device('wiim', {}), ctx)).toBeInstanceOf(WiimDriver);
     expect(createDriver(device('bluesound', {}), ctx)).toBeInstanceOf(BluesoundDriver);
+  });
+});
+
+describe('httpGet', () => {
+  it('tries once more on a fresh connection when the player drops the first one', async () => {
+    let hits = 0;
+    const server = http.createServer((req, res) => {
+      hits++;
+      if (hits === 1) req.socket.destroy();
+      else res.end('ok');
+    });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as { port: number }).port;
+    const o = { protocol: 'http' as const, port, timeoutMs: 1000, allowSelfSigned: false };
+    await expect(httpGet('127.0.0.1', '/x', o)).resolves.toBe('ok');
+    expect(hits).toBe(2);
+  });
+
+  it('gives up after the second dropped connection', async () => {
+    const server = http.createServer((req) => req.socket.destroy());
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as { port: number }).port;
+    const o = { protocol: 'http' as const, port, timeoutMs: 1000, allowSelfSigned: false };
+    await expect(httpGet('127.0.0.1', '/x', o)).rejects.toThrow(/hang up|ECONNRESET/);
   });
 });
 
