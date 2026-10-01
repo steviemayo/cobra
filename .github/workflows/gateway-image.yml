@@ -48,6 +48,11 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           git fetch --depth=1 origin "$BASE_SHA"
+          # A change to CI files alone (an action bump, say) changes nothing an installed gateway runs.
+          if [ -z "$(git diff --name-only "$BASE_SHA" | grep -v '^\.github/')" ]; then
+            echo "Only CI files changed: no gateway release is needed."
+            exit 0
+          fi
           if git diff "$BASE_SHA" -- apps/gateway/src/config.ts | grep -q '^[+-].*GATEWAY_VERSION'; then
             echo "GATEWAY_VERSION was bumped."
           else

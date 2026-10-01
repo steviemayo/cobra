@@ -160,7 +160,8 @@ describe('Q-SYS Core driver', () => {
     drivers.push(d);
     expect(d.getState().online).toBe(false);
     d.start();
-    await until(() => d.getState().online);
+    // The engine status can say "online" before the gain read has landed, so wait for the volume.
+    await until(() => d.getState().online && d.getState().volume === 50);
     // -20 dB on a -40..0 scale is half way.
     expect(d.getState()).toMatchObject({ online: true, volume: 50, muted: false });
     expect(core.requests.find((r) => r.method === 'Component.Get')).toMatchObject({
