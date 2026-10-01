@@ -150,19 +150,21 @@ function world() {
     { id: 't1', orgId: ORG, roomId: R1, status: 'open' },
     { id: 't2', orgId: ORG, roomId: R2, status: 'in_progress' },
   ]);
+  const deviceRoom = table([]);
   const db = {
     room,
     gateway,
     site,
     area,
     device,
+    deviceRoom,
     deviceStatus,
     incident,
     ticket,
     usageDefinition,
     pmSchedule,
   } as unknown as EstateDb;
-  return { db, deviceStatus, device, usageDefinition, site };
+  return { db, deviceStatus, device, deviceRoom, incident, usageDefinition, site };
 }
 
 describe('estateOverview', () => {
@@ -268,5 +270,31 @@ describe('estateOverview', () => {
     expect(o.sites.map((s) => s.id)).toEqual([SITE2]);
     expect(o.areas).toEqual([]);
     expect(o.kpis).toMatchObject({ rooms: 1, gateways: 0, liveIncidents: 0, openTickets: 0 });
+  });
+
+  it('counts a shared device in every room it serves, and shows its incident in each', async () => {
+    const { db, deviceRoom, incident } = world();
+    // d1 is Boardroom's online device on GW1; the Foyer (another site) shares it.
+    await deviceRoom.create({ data: { orgId: ORG, deviceId: 'd1', roomId: R3 } });
+    await incident.create({
+      data: { id: 'i3', orgId: ORG, roomId: R1, roomIds: [R3], gatewayId: G1, status: 'open', severity: 'warning' },
+    });
+    const o = await estateOverview(db, ORG, NOW);
+    const foyer = o.rooms.find((r) => r.id === R3)!;
+    expect(foyer.devices).toMatchObject({ active: 1, online: 1, passive: 1 });
+    expect(foyer.openIncidents).toBe(1);
+    expect(foyer.health.level).toBe('degraded');
+    // The Boardroom still counts it once: one device, not two.
+    expect(o.rooms.find((r) => r.id === R1)!.devices.active).toBe(2);
+  });
+
+  it('shows a room the incidents of a shared device to a provider limited to that room’s site', async () => {
+    const { db, deviceRoom, incident } = world();
+    await deviceRoom.create({ data: { orgId: ORG, deviceId: 'd1', roomId: R3 } });
+    await incident.create({
+      data: { id: 'i3', orgId: ORG, roomId: R1, roomIds: [R3], gatewayId: G1, status: 'open', severity: 'warning' },
+    });
+    const o = await estateOverview(db, ORG, NOW, [SITE2]);
+    expect(o.rooms.find((r) => r.id === R3)!.openIncidents).toBe(1);
   });
 });

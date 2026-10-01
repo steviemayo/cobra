@@ -89,6 +89,22 @@ export function IncidentsView() {
                       </Link>
                     </>
                   )}
+                  {i.alsoRooms.length > 0 && (
+                    <>
+                      {' and '}
+                      {i.alsoRooms.map((r, k) => (
+                        <span key={r.id}>
+                          {k > 0 && ', '}
+                          <Link
+                            href={orgPath(orgId, `/rooms/${r.id}/monitoring`)}
+                            className="hover:text-foreground hover:underline"
+                          >
+                            {r.name}
+                          </Link>
+                        </span>
+                      ))}
+                    </>
+                  )}
                   {' · '}
                   {i.status === 'open'
                     ? `opened ${timeAgo(i.openedAt)}`

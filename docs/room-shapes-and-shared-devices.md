@@ -1,6 +1,6 @@
 # Room shapes, copies and shared devices (plan, for review before building)
 
-Status: **plan only**, written 2026-10-01. Nothing here is built. Extends `docs/pivot-monitoring.md` (rooms are a light grouping of devices) and replaces the v1 plan in `docs/driver-classes.md` ("Shared devices", slices 3 and 6), whose web pages were removed in M7-5.
+Status: written 2026-10-01. Slices 1 to 3 built (PR #131). Slice 4 built in the next PR (needs migration `20261001070000_shared_devices`). The rest is plan. Extends `docs/pivot-monitoring.md` (rooms are a light grouping of devices) and replaces the v1 plan in `docs/driver-classes.md` ("Shared devices", slices 3 and 6), whose web pages were removed in M7-5.
 
 ## What the user asked for
 
@@ -32,7 +32,7 @@ Status: **plan only**, written 2026-10-01. Nothing here is built. Extends `docs/
 | RS-9  | **Control points belong to a room.** Each control point gets an optional `roomId` (inside the `points` JSON, additive). A shared DSP, control processor or lighting unit then holds Room A's points and Room B's points on the one device. Room pages show only their points, the device page shows all, grouped by room. A point with no `roomId` belongs to the device as a whole and shows in every linked room |
 | RS-10 | **What can be shared is any device**, in three shapes, so a control system works the same as a DSP: **(a) points per room**: DSP, Crestron or other control processor (program slot or IP table entry per room), lighting processor. **(b) outlets per room**: a power controller such as the Blustream PWR, an outlet per room (a point type for an outlet is added with the PWR driver work). **(c) whole device**: a switch, a codec, a control system whose health matters to every room it serves, with no per-room slice |
 | RS-11 | **Impact**: one device, one incident. If a shared device goes offline or a point goes out of bounds, the incident is listed against **each linked room** (and on the device), and each room's status shows it. A point with a `roomId` affects only that room; a whole-device fault affects all. Room usage rules and analytics can use a linked shared device's readings in each room |
-| RS-12 | **Same site, same gateway.** A shared device and the rooms it serves must be in one site (and so reached by one gateway). Cross-site sharing is not offered. A device cannot be linked to a room in another site |
+| RS-12 | **Same organisation, any site** (decided 2026-10-01). A shared device is polled by one gateway, the one its home room or its own site resolves to, whatever site the rooms it serves are at. A room never gets a connection of its own to it. A device cannot serve a room of another organisation |
 | RS-13 | **Shapes with shared slots.** A slot can be marked **shared**. Creating copies then asks, per slot: link to an existing shared device (pick it), or create it once and link all the new rooms to it. For a shared slot the grid has no address columns, only the points (RS-6) |
 | RS-14 | **Billing and limits**: per room, as now. A shared device is counted **once** for any device-based monitor limit, not once per room, and is not an extra charge. To be confirmed against `canMonitorRoom` when building |
 | RS-15 | **Delete and unlink**: removing a room unlinks its shared devices and deletes its own points on them (after listing what goes). Deleting a shared device lists every room that uses it first. Moving a device between "own" and "shared" is an edit, not a rebuild |
@@ -59,7 +59,7 @@ Slices 2 and 3 answer the "copies" ask on their own. Slice 4 is the larger one (
 
 ## Questions for the user
 
-1. **Saved shapes (RS-3b):** are copy-from-a-room and a bulk grid enough at first, with named shapes later in slice 5? Or are named shapes needed from the start
-2. **Shared across sites (RS-12):** is a control system ever shared by rooms in different sites (one central processor running several buildings)? If yes, the same-gateway rule needs rethinking
+1. **(open)** **Saved shapes (RS-3b):** are copy-from-a-room and a bulk grid enough at first, with named shapes later in slice 5? Or are named shapes needed from the start
+2. **Shared across sites (RS-12):** decided: same organisation, any site
 3. **Outlets as rooms (RS-10b):** is a power controller (PWR4 outlets per room) a case you want in this, or is it a later add-on?
-4. **Whole-device sharing (RS-10c):** should a shared device that goes offline mark **every** linked room as having a problem, or only raise one incident that lists the rooms?
+4. **Whole-device sharing (RS-10c):** decided: one incident that lists every room, shown in each of them

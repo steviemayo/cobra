@@ -29,6 +29,7 @@ import { formatInZone } from '../lib/time';
 import { siteTimezone } from './site-zone';
 import { applyWatchedPoints, pointValuesPatch, pointsOf, validatePoints } from './device-points';
 import { recordLatency, type LatencyDb } from './latency';
+import { linkedRoomIds } from './device-sharing';
 import type { SigningKey } from './signing';
 
 // v2 devices (docs/pivot-monitoring.md): the cloud's half. Functions take the database as a
@@ -48,7 +49,7 @@ export type DevicesDb = Pick<
   | 'area'
   | 'site'
 > &
-  Partial<Pick<PrismaClient, 'latencyBucket'>>;
+  Partial<Pick<PrismaClient, 'latencyBucket' | 'deviceRoom'>>;
 
 const secretsKey = () => process.env.KESTREL_SECRETS_KEY || undefined;
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -376,9 +377,14 @@ export async function ingestDeviceReports(
     for (const j of await applyWatchedPoints(db, row, gw, rep, now)) jobs.push(j);
 
     const subject = `device:${row.id}`;
-    const roomName = row.roomId
-      ? (await db.room.findFirst({ where: { id: row.roomId } }))?.name
-      : null;
+    // A shared device serves several rooms: one incident, listing every room it affects.
+    const alsoRooms = await linkedRoomIds(db, row.orgId, row.id);
+    const affected = [...new Set([...(row.roomId ? [row.roomId] : []), ...alsoRooms])];
+    const homeRoom = affected[0] ?? null;
+    const names = affected.length
+      ? (await db.room.findMany({ where: { id: { in: affected } } })).map((r) => r.name)
+      : [];
+    const roomName = names.length ? names.join(', ') : null;
     if (rep.online)
       add(
         await resolveIncident(
@@ -393,13 +399,14 @@ export async function ingestDeviceReports(
           monitoring,
           {
             orgId: gw.orgId,
-            roomId: row.roomId,
+            roomId: homeRoom,
+            roomIds: affected.slice(1),
             gatewayId: gw.id,
             kind: 'device_offline',
             subject,
             severity: 'warning',
             title: `${row.name} is offline`,
-            detail: `${row.name}${roomName ? ` in ${roomName}` : ''} has not answered since ${formatInZone(since, await siteTimezone(db, row.siteId))}.`,
+            detail: `${row.name}${roomName ? ` (${names.length > 1 ? 'affects' : 'in'} ${roomName})` : ''} has not answered since ${formatInZone(since, await siteTimezone(db, row.siteId))}.`,
           },
           now,
         ),

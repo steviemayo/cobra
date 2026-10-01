@@ -17,6 +17,7 @@ import {
   type DeviceInput,
 } from '../devices';
 import { deviceViews } from '../device-views';
+import { setDeviceRooms } from '../device-sharing';
 import { MAX_POINTS, setDevicePoints } from '../device-points';
 import { canMonitorRoom, getEntitlements, monitorLimitMessage } from '../billing';
 import { syncQuantity } from '../stripe';
@@ -102,6 +103,31 @@ export const deviceRouter = router({
         meta: { count: input.points.length },
       });
       return { ok: true };
+    }),
+
+  /**
+   * Sets which other rooms a device serves (a shared device: one DSP or control system for several
+   * rooms, possibly at different sites of the organisation). Replaces the list.
+   */
+  setRooms: orgProcedure
+    .input(z.object({ orgId, deviceId: id, roomIds: z.array(id).max(50) }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev', 'support']);
+      const res = await setDeviceRooms(db, {
+        orgId: ctx.orgId,
+        deviceId: input.deviceId,
+        roomIds: input.roomIds,
+        actorId: ctx.user.id,
+      });
+      if (!res.ok) return fail(res.message);
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'device.shared',
+        target: input.deviceId,
+        meta: { rooms: res.rooms },
+      });
+      return res;
     }),
 
   /** The device's history, newest first. */

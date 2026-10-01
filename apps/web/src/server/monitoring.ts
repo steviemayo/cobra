@@ -46,6 +46,8 @@ export const COMMAND_SENT_EXPIRY_MS = 10 * 60_000;
 interface NewIncident {
   orgId: string;
   roomId?: string | null;
+  /** Other rooms the same problem affects (a shared device serves several). */
+  roomIds?: string[];
   gatewayId?: string | null;
   /** The site, for a problem that is about the site rather than a room (so its maintenance windows apply). */
   siteId?: string | null;
@@ -66,7 +68,12 @@ export async function openIncident(
   if (open) {
     await db.incident.update({
       where: { id: open.id },
-      data: { lastSeenAt: now, title: input.title, detail: input.detail ?? null },
+      data: {
+        lastSeenAt: now,
+        title: input.title,
+        detail: input.detail ?? null,
+        ...(input.roomIds ? { roomIds: input.roomIds } : {}),
+      },
     });
     return null;
   }
@@ -88,6 +95,7 @@ export async function openIncident(
         occurrences: recent.occurrences + 1,
         title: input.title,
         detail: input.detail ?? null,
+        ...(input.roomIds ? { roomIds: input.roomIds } : {}),
       },
     });
     return null;
@@ -106,6 +114,7 @@ export async function openIncident(
     data: {
       orgId: input.orgId,
       roomId: input.roomId ?? null,
+      roomIds: input.roomIds ?? [],
       gatewayId: input.gatewayId ?? null,
       kind: input.kind,
       subject: input.subject,
