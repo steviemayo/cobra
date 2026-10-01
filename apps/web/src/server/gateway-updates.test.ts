@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareVersions, latestVersions, updateStatus } from './gateway-updates';
+import { compareVersions, latestVersions, publishedVersions, updateStatus } from './gateway-updates';
 
 describe('gateway versions', () => {
   it('compare by number, not text, and ignore a leading v or a pre-release tag', () => {
@@ -28,5 +28,21 @@ describe('gateway versions', () => {
   it('say unknown when either side does not know its version', () => {
     expect(updateStatus({ version: null, channel: 'stable' }, { stable: '1.0.0', beta: null }).status).toBe('unknown');
     expect(updateStatus({ version: '1.0.0', channel: 'beta' }, { stable: '1.0.0', beta: null }).status).toBe('unknown');
+  });
+});
+
+describe('publishedVersions', () => {
+  const read = (v: Record<string, string | null>) => async (c: 'stable' | 'beta') => v[c] ?? null;
+  it('uses what is published, so a release nobody wrote into the setting still counts', async () => {
+    const v = await publishedVersions({ GATEWAY_LATEST_STABLE: '0.4.0' }, read({ stable: '0.4.3', beta: null }));
+    expect(v).toEqual({ stable: '0.4.3', beta: null });
+    expect(updateStatus({ version: '0.4.0', channel: 'stable' }, v).status).toBe('behind');
+  });
+  it('keeps the setting when it is newer, or when the release cannot be read', async () => {
+    expect(await publishedVersions({ GATEWAY_LATEST_STABLE: '0.5.0' }, read({ stable: '0.4.3' }))).toMatchObject({ stable: '0.5.0' });
+    const failing = async () => {
+      throw new Error('GitHub is down');
+    };
+    expect(await publishedVersions({ GATEWAY_LATEST_BETA: '0.4.1' }, failing)).toEqual({ stable: null, beta: '0.4.1' });
   });
 });
