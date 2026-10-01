@@ -204,6 +204,10 @@ model Room {
   areaId                  String?   @db.Uuid
   /// Free labels for cross-cutting groups ("boardroom", "VIP").
   tags                    String[]  @default([])
+  /// The calendar profile this room reads its bookings with, and the room's own calendar in it (the
+  /// room mailbox address for Microsoft 365, the calendar id for Google).
+  calendarConnectionId    String?   @db.Uuid
+  calendarResource        String?
   /// Hash of the secret webhook callers present. Null until someone generates one.
   hookSecretHash          String?
   desiredReleaseId        String?   @db.Uuid
@@ -217,11 +221,12 @@ model Room {
   reportedAt              DateTime?
   updatedAt               DateTime  @default(now()) @updatedAt
 
-  org               Org                @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site              Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  gateway           Gateway?           @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
-  group             RoomGroup?         @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  area              Area?              @relation(fields: [areaId], references: [id], onDelete: SetNull)
+  org               Org                 @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site              Site                @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  gateway           Gateway?            @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  group             RoomGroup?          @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  area              Area?               @relation(fields: [areaId], references: [id], onDelete: SetNull)
+  calendar          CalendarConnection? @relation(fields: [calendarConnectionId], references: [id], onDelete: SetNull)
   assets            Device[]
   draft             RoomDraft?
   binding           RoomBinding?
@@ -971,7 +976,9 @@ model RoomDivider {
 
 // ---- Calendars ---------------------------------------------------------------------------------
 
-// How Kestrel reads an organisation's room calendars. `sealed` is the credentials, encrypted with
+// A calendar profile: how Kestrel reads an organisation's room calendars. An organisation can have
+// several (more than one Microsoft 365 tenant, Google as well); each room picks one and names its
+// own calendar. `sealed` is the credentials, encrypted with
 // KESTREL_SECRETS_KEY; they are never sent to a browser. provider: graph or google.
 model CalendarConnection {
   id        String   @id @default(uuid()) @db.Uuid
@@ -981,9 +988,10 @@ model CalendarConnection {
   sealed    String
   createdAt DateTime @default(now())
 
-  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  org   Org    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  rooms Room[]
 
-  @@unique([orgId, provider])
+  @@unique([orgId, name])
 }
 
 // A meeting that has already started a room's calendar trigger, so it never runs twice.

@@ -17,6 +17,7 @@ import {
   deleteWindow,
   upcomingWindows,
 } from '../maintenance';
+import { maintenanceClashes } from '../room-calendar';
 import { PRIORITY_ORDER, createRule, deleteRule, updateRule } from '../ticket-automation';
 import { featureProcedure, orgProcedure, requireRole, router } from '../trpc';
 
@@ -68,6 +69,27 @@ export const supportRouter = router({
       active: w.startsAt.getTime() <= now && w.endsAt.getTime() > now,
     }));
   }),
+
+  // Meetings that would be disturbed by planned maintenance, and times that suit, from the rooms'
+  // calendars. Checked before a window is saved; it never blocks saving.
+  windowClashes: orgProcedure
+    .input(
+      z.object({
+        orgId,
+        scope: z.enum(WINDOW_SCOPES),
+        scopeId: id.nullable().optional(),
+        startsAt: z.coerce.date(),
+        endsAt: z.coerce.date(),
+        repeat: z.enum(WINDOW_REPEATS).default('none'),
+        repeatUntil: z.coerce.date().nullable().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      requireRole(ctx.role, [...TEAM]);
+      if (input.endsAt.getTime() <= input.startsAt.getTime())
+        return { clashes: [], rooms: 0, checked: 0, horizonDays: 14, suggestions: [] };
+      return maintenanceClashes(db, ctx.orgId, { ...input, scopeId: input.scopeId ?? null });
+    }),
 
   createWindow: orgProcedure
     .input(

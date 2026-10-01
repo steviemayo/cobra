@@ -126,8 +126,12 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `started a purchase of “${s(meta.name)}”`;
     case 'calendar.connect':
       return `connected the ${s(meta.provider) === 'graph' ? 'Microsoft 365' : 'Google'} calendar “${s(meta.name)}”`;
+    case 'calendar.update':
+      return `updated the calendar profile “${s(meta.name)}”`;
     case 'calendar.remove':
-      return `disconnected the ${s(meta.provider) === 'graph' ? 'Microsoft 365' : 'Google'} calendar`;
+      return `removed the ${s(meta.provider) === 'graph' ? 'Microsoft 365' : 'Google'} calendar profile “${s(meta.name)}”`;
+    case 'calendar.room':
+      return meta.connectionId ? 'chose a calendar for a room' : 'removed the calendar from a room';
     case 'trigger.fire':
       return `a trigger started “${s(meta.room)}”`;
     case 'combination.create':

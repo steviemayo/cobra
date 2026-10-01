@@ -144,3 +144,28 @@ export async function upcomingWindows(db: MaintenanceDb, orgId: string, now: Dat
     return !w.repeatUntil || w.repeatUntil.getTime() >= now.getTime();
   });
 }
+
+/** The times a window covers between `from` and `to`, one entry per repeat, clipped to the range. */
+export function windowOccurrences(
+  w: WindowRow,
+  from: Date,
+  to: Date,
+): { start: Date; end: Date }[] {
+  const start = w.startsAt.getTime();
+  const length = w.endsAt.getTime() - start;
+  if (length <= 0) return [];
+  const step = w.repeat === 'weekly' ? 7 * DAY_MS : w.repeat === 'daily' ? DAY_MS : 0;
+  const out: { start: Date; end: Date }[] = [];
+  const last = step === 0 ? 0 : Math.max(0, Math.ceil((to.getTime() - start) / step));
+  const first = step === 0 ? 0 : Math.max(0, Math.floor((from.getTime() - start - length) / step));
+  for (let k = first; k <= last; k++) {
+    const s = start + k * step;
+    if (w.repeatUntil && s > w.repeatUntil.getTime() + step) break;
+    if (s < to.getTime() && s + length > from.getTime())
+      out.push({
+        start: new Date(Math.max(s, from.getTime())),
+        end: new Date(Math.min(s + length, to.getTime())),
+      });
+  }
+  return out;
+}
