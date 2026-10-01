@@ -2,17 +2,20 @@
 #   docker build -f apps/gateway/Dockerfile -t kestrel-gateway .
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-slim AS build
+FROM node:26-slim AS build
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable
+# Node no longer bundles Corepack by default (removed from the default install starting with
+# Node 25); installing it from npm first still gets pnpm pinned to the repo's own
+# "packageManager" field, exactly as corepack enable always did.
+RUN npm install -g corepack@latest && corepack enable
 WORKDIR /repo
 COPY . .
 # Install only what the gateway and the panel app need (not Next.js, Prisma, ...).
 RUN pnpm install --frozen-lockfile --filter "@kestrel/gateway..." --filter "@kestrel/panel-app..."
 RUN pnpm --filter @kestrel/panel-app build
 
-FROM node:24-slim AS runtime
+FROM node:26-slim AS runtime
 ENV NODE_ENV=production \
     KESTREL_DATA_DIR=/data \
     KESTREL_PANEL_DIR=/app/panel \
