@@ -438,3 +438,58 @@ describe('areas', () => {
     expect(dup.ok).toBe(false);
   });
 });
+
+describe('changing how a device is reached', () => {
+  it('moves it to another gateway, back to automatic, and refuses a gateway at another site', async () => {
+    const w = world();
+    const id = await activeDevice(w);
+    const set = (gatewayId: string | null) =>
+      updateDevice(w.db, { orgId: ORG, deviceId: id, actorId: 'u1', patch: { gatewayId } });
+    expect((await set(GW_OTHER)).ok).toBe(true);
+    expect(w.device.rows[0]).toMatchObject({ gatewayId: GW_OTHER, version: 2 });
+    expect((await set(null)).ok).toBe(true);
+    expect(w.device.rows[0]).toMatchObject({ gatewayId: null, version: 3 });
+    w.gateway.rows.push({
+      id: '99999999-9999-4999-8999-999999999993',
+      orgId: ORG,
+      siteId: '22222222-2222-4222-8222-222222222299',
+      createdAt: at(0),
+    });
+    const bad = await set('99999999-9999-4999-8999-999999999993');
+    expect(bad).toMatchObject({ ok: false, message: 'That gateway is not in this site' });
+    expect(w.device.rows[0]!.version).toBe(3);
+    expect(w.deviceEvent.rows.filter((e) => e.type === 'gateway_changed')).toHaveLength(2);
+  });
+
+  it('changing the driver drops the control points the new driver cannot read', async () => {
+    const w = world();
+    const id = await activeDevice(w);
+    const gain = {
+      id: 'g',
+      name: 'Gain',
+      type: 'level',
+      address: { component: 'Room', control: 'gain' },
+    };
+    const named = {
+      id: 'n',
+      name: 'Scene',
+      type: 'generic',
+      address: { control: 'Scene' },
+    };
+    Object.assign(w.device.rows[0]!, {
+      control: { kind: 'driver', driverId: 'qsys-core' },
+      points: [gain, named],
+      pointValues: { g: 50 },
+    });
+    // A PJLink projector reads no points.
+    await updateDevice(w.db, {
+      orgId: ORG,
+      deviceId: id,
+      actorId: 'u1',
+      patch: { control: { kind: 'driver', driverId: 'pjlink' } },
+    });
+    expect(w.device.rows[0]).toMatchObject({ points: [] });
+    expect(w.device.rows[0]!.pointValues).not.toEqual({ g: 50 });
+    expect(w.deviceEvent.rows.some((e) => e.field === 'control points')).toBe(true);
+  });
+});

@@ -63,7 +63,7 @@ const CATEGORY_OPTIONS = [
   ...DeviceCategory.options.map((c) => ({ value: c as string, label: DEVICE_CATALOG[c].label })),
   ...ASSET_ONLY_CATEGORIES.map((c) => ({ value: c as string, label: assetCategoryLabel(c) })),
 ];
-const DRIVER_OPTIONS = [
+export const DRIVER_OPTIONS = [
   ...Object.entries(BUILT_IN_DRIVERS).map(([id, info]) => ({ value: id, label: info.name })),
   { value: 'pjlink', label: 'Generic: PJLink' },
   { value: 'tcp', label: 'Generic: TCP' },

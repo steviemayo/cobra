@@ -18,6 +18,7 @@ import { SeverityPill, dateTime } from '@/components/common/health';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { Section } from '@/components/common/section';
 import { DevicePoints } from './device-points';
+import { DeviceSettings } from './device-settings';
 import { DeviceResponse } from './network-health';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { orgPath, useOrg } from '@/components/shell/org-context';
@@ -37,7 +38,6 @@ import { RequireFeature } from '@/components/common/plan-gate';
 import { DeviceConfig } from './device-config';
 import { PmRuns } from './pm-records';
 import { PmSchedules } from './pm-schedule';
-import { DeviceConnection } from './device-connection';
 import { DeviceDetailsView } from './device-details';
 
 type Device = RouterOutputs['device']['get'];
@@ -799,6 +799,7 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
           {d.kind === 'active' && <TabsTrigger value="points">Control points</TabsTrigger>}
           {d.kind === 'active' && <TabsTrigger value="charts">History</TabsTrigger>}
           {d.kind === 'active' && <TabsTrigger value="config">Configuration</TabsTrigger>}
+          {d.kind === 'active' && <TabsTrigger value="settings">Settings</TabsTrigger>}
           <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
           <TabsTrigger value="history">Asset history</TabsTrigger>
           <TabsTrigger value="incidents">Incidents and tickets</TabsTrigger>
@@ -806,19 +807,13 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
         <TabsContent value="overview" className="pt-4">
           <Overview device={d} />
         </TabsContent>
+        {d.kind === 'active' && (
+          <TabsContent value="settings" className="pt-4">
+            <DeviceSettings device={d} />
+          </TabsContent>
+        )}
         <TabsContent value="details" className="space-y-6 pt-4">
           <AssetDetails key={`${d.id}:${d.version}:${JSON.stringify(d.provenance)}`} device={d} />
-          {d.kind === 'active' && (
-            <DeviceConnection
-              key={`${d.id}:${d.version}`}
-              deviceId={d.id}
-              control={d.control as never}
-              values={d.values}
-              hasLogin={d.hasLogin}
-              credentialSetId={d.credentialSetId}
-              canEdit={canSupport}
-            />
-          )}
           {!canSupport && (
             <Label className="text-xs text-muted-foreground">
               You can view but not change this device.
