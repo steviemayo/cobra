@@ -3,7 +3,10 @@ import { inScope, type SiteScope } from './site-scope';
 
 // Which firmware each device in the estate reports. Read only: Kestrel shows what a device says
 // about itself and never changes it. A device shows a version only if its driver can ask for one.
-export type FirmwareDb = Pick<PrismaClient, 'room' | 'site' | 'deviceStatus'>;
+// The devices a gateway watches (the device register) come first; the older per-room status rows
+// are added for devices only an older gateway knows about.
+export type FirmwareDb = Pick<PrismaClient, 'room' | 'site' | 'deviceStatus'> &
+  Partial<Pick<PrismaClient, 'device'>>;
 
 export interface FirmwareRow {
   roomId: string;
@@ -40,16 +43,42 @@ export async function firmwareReport(
   /** null: the whole organisation. A list: only rooms at these sites. */
   scope: SiteScope = null,
 ): Promise<{ rows: FirmwareRow[]; drivers: FirmwareDriverGroup[] }> {
-  const [allRooms, sites, statuses] = await Promise.all([
+  const [allRooms, sites, statuses, devices] = await Promise.all([
     db.room.findMany({ where: { orgId } }),
     db.site.findMany({ where: { orgId } }),
     db.deviceStatus.findMany({ where: { orgId } }),
+    db.device?.findMany({ where: { orgId, status: { not: 'retired' } } }) ?? [],
   ]);
   const rooms = new Map(allRooms.filter((r) => inScope(scope, r.siteId)).map((r) => [r.id, r]));
   const siteName = new Map(sites.map((s) => [s.id, s.name]));
 
-  const rows: FirmwareRow[] = statuses
-    .filter((d) => rooms.has(d.roomId))
+  const registered: FirmwareRow[] = devices
+    .filter((d) => d.roomId && rooms.has(d.roomId))
+    .map((d) => {
+      const room = rooms.get(d.roomId!)!;
+      const control = d.control as { kind?: string; driverId?: string; protocol?: string } | null;
+      return {
+        roomId: room.id,
+        roomName: room.name,
+        siteName: siteName.get(room.siteId) ?? '',
+        deviceId: d.id,
+        name: d.name,
+        driver:
+          control?.kind === 'driver'
+            ? (control.driverId ?? null)
+            : control?.kind === 'generic'
+              ? `generic ${control.protocol ?? ''}`.trim()
+              : null,
+        firmware: d.firmware ?? null,
+        firmwareSince: d.firmwareSince ?? null,
+        // Passive devices are not watched, so they have no state to report.
+        online: d.online === true,
+      };
+    });
+  const seen = new Set(registered.map((r) => r.deviceId));
+
+  const legacy: FirmwareRow[] = statuses
+    .filter((d) => rooms.has(d.roomId) && !seen.has(d.deviceId))
     .map((d) => {
       const room = rooms.get(d.roomId)!;
       return {
@@ -63,16 +92,17 @@ export async function firmwareReport(
         firmwareSince: d.firmwareSince ?? null,
         online: d.online,
       };
-    })
-    .sort(
-      (a, b) =>
-        // Devices with no known driver go last.
-        Number(a.driver === null) - Number(b.driver === null) ||
-        (a.driver ?? '').localeCompare(b.driver ?? '') ||
-        a.siteName.localeCompare(b.siteName) ||
-        a.roomName.localeCompare(b.roomName) ||
-        a.name.localeCompare(b.name),
-    );
+    });
+
+  const rows: FirmwareRow[] = [...registered, ...legacy].sort(
+    (a, b) =>
+      // Devices with no known driver go last.
+      Number(a.driver === null) - Number(b.driver === null) ||
+      (a.driver ?? '').localeCompare(b.driver ?? '') ||
+      a.siteName.localeCompare(b.siteName) ||
+      a.roomName.localeCompare(b.roomName) ||
+      a.name.localeCompare(b.name),
+  );
 
   const byDriver = new Map<string, FirmwareRow[]>();
   for (const r of rows) {

@@ -11,6 +11,7 @@ import { maybeSweep } from '../monitoring';
 import { estateOverview } from '../estate-overview';
 import { orgDevices, orgOverview, sharedInRoom } from '../monitoring-queries';
 import { affectedForRooms } from '../room-schedule';
+import { roomTimeline } from '../room-timeline';
 import { SITE_SCOPED, siteFilter, type SiteScope } from '../site-scope';
 import { featureProcedure, requireRole, router } from '../trpc';
 import { validTimeZone } from '../usage-analytics';
@@ -301,6 +302,16 @@ export const monitoringRouter = router({
       });
       if (open === 0) return null;
       return (await affectedForRooms(db, ctx.orgId, [room.id], new Date())).get(room.id) ?? null;
+    }),
+
+  // One day of a room: its bookings (live and kept) with a lane per device showing when each had a
+  // fault, for finding out what went wrong in a meeting that has already happened.
+  timeline: monitoringProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, roomId: z.string().uuid(), at: z.coerce.date().optional() }))
+    .query(async ({ ctx, input }) => {
+      const room = await assertScopedRoom(ctx.orgId, input.roomId, ctx.siteScope);
+      return roomTimeline(db, room, input.at ?? new Date());
     }),
 
   acknowledge: monitoringProcedure

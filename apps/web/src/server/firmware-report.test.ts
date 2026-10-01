@@ -98,4 +98,41 @@ describe('the firmware report', () => {
       },
     ]);
   });
+
+  it('includes the devices a gateway watches, once, alongside the older status rows', async () => {
+    const { db } = world();
+    const D1 = '77777777-7777-4777-8777-777777777771';
+    const reg = (id: string, over: Record<string, unknown> = {}) => ({
+      id,
+      orgId: ORG,
+      roomId: R1,
+      name: 'UC-Engine',
+      status: 'in_service',
+      control: { kind: 'driver', driverId: 'crestron-flex' },
+      firmware: '1.22.00.405',
+      firmwareSince: T,
+      online: true,
+      ...over,
+    });
+    const withDevices = {
+      ...db,
+      device: table([
+        reg(D1),
+        reg('retired', { status: 'retired' }),
+        reg('spare', { roomId: null }),
+        reg('foreign', { orgId: OTHER_ORG }),
+        // Also reported by the older status table: shown once, from the register.
+        reg('projector', { name: 'Projector', control: { kind: 'driver', driverId: 'pjlink' } }),
+      ]),
+    } as unknown as FirmwareDb;
+    const { rows, drivers } = await firmwareReport(withDevices, ORG);
+    const flex = rows.filter((r) => r.driver === 'crestron-flex');
+    expect(flex).toHaveLength(1);
+    expect(flex[0]).toMatchObject({ deviceId: D1, firmware: '1.22.00.405', online: true });
+    expect(rows.some((r) => ['retired', 'spare', 'foreign'].includes(r.deviceId))).toBe(false);
+    expect(drivers.find((d) => d.driver === 'crestron-flex')).toMatchObject({
+      devices: 1,
+      reporting: 1,
+    });
+  });
 });

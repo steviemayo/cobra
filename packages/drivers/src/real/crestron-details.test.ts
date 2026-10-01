@@ -2,10 +2,18 @@ import http from 'node:http';
 import net from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ControlPoint, Device, DeviceDetailSection } from '@kestrel/model';
-import { DeviceDetails } from '@kestrel/model';
+import { DeviceDetails, identityFromDetails } from '@kestrel/model';
 import { Crestron4SeriesDriver } from './crestron-4series';
 import { parseJoinAddress, parseJoinValue } from './crestron-console';
-import { CrestronFlexDriver, flexOccupied } from './crestron-flex';
+import {
+  CrestronFlexDriver,
+  flexOccupied,
+  parseEthernet,
+  parseHostname,
+  parseIp,
+  parseMac,
+  parseSerial,
+} from './crestron-flex';
 import { CrestronOccupancyDriver, meansChange } from './crestron-occupancy';
 import { CrestronTswDriver } from './crestron-tsw';
 import { digPath } from './cresnext';
@@ -495,6 +503,11 @@ async function fakeConsole(joins: Record<string, string>, over: { password?: str
           if (line === 'version')
             out =
               'UC-ENGINE Unified Collaboration System [v1.22.00.405,%2506NAATEST] @E-908D6E959126';
+          else if (line === 'maca') out = 'MAC Address: 90-8D-6E-95-91-26';
+          else if (line === 'serial') out = 'Serial Number: 2506NAA00184';
+          else if (line === 'ipa') out = 'IP Address: 192.168.1.6';
+          else if (line === 'hostname') out = 'Hostname : MTR-MTGRM01';
+          else if (line === 'est') out = EST;
           else if (line === 'uptime')
             out =
               'The system has been running for 0 days 11:41:25.0\r\nThe system last started on: Monday, September 28, 2026 at 02:50:15 ';
@@ -514,6 +527,65 @@ async function fakeConsole(joins: Record<string, string>, over: { password?: str
   closers.push({ close: () => server.close() });
   return { port: (server.address() as { port: number }).port, commands };
 }
+
+// What `est` prints on a real unit: an ipconfig listing with the wired adapter, Wi-Fi and others.
+const EST = [
+  'IP Table:',
+  'CIP_ID  Type   Status     DevID  Port   IP Address/SiteName     RoomID',
+  '',
+  'Windows IP Configuration',
+  '',
+  '   Host Name . . . . . . . . . . . . : MTR-MTGRM01',
+  '',
+  'Ethernet adapter Ethernet:',
+  '',
+  '   Connection-specific DNS Suffix  . : localdomain',
+  '   Description . . . . . . . . . . . : Intel(R) Ethernet Connection (11) I219-LM',
+  '   Physical Address. . . . . . . . . : 90-8D-6E-95-91-26',
+  '   DHCP Enabled. . . . . . . . . . . : Yes',
+  '   Link-local IPv6 Address . . . . . : fe80::613a:89b0:c889:1020%10(Preferred) ',
+  '   IPv4 Address. . . . . . . . . . . : 192.168.1.6(Preferred) ',
+  '   Subnet Mask . . . . . . . . . . . : 255.255.255.0',
+  '   Lease Obtained. . . . . . . . . . : Friday, 2 October 2026 9:18:07 AM',
+  '   Default Gateway . . . . . . . . . : 192.168.1.1',
+  '   DHCP Server . . . . . . . . . . . : 192.168.1.1',
+  '   DNS Servers . . . . . . . . . . . : 192.168.1.1',
+  '',
+  'Wireless LAN adapter WiFi:',
+  '',
+  '   Media State . . . . . . . . . . . : Media disconnected',
+  '   Physical Address. . . . . . . . . : A0-59-50-FE-8A-DF',
+  '',
+  'Ethernet adapter Ethernet 2:',
+  '',
+  '   Description . . . . . . . . . . . : Realtek USB FE Family Controller',
+  '   IPv4 Address. . . . . . . . . . . : 169.254.0.1(Preferred) ',
+  '',
+].join('\r\n');
+
+describe('what a Flex console says about itself', () => {
+  it('reads the wired adapter only', () => {
+    const eth = parseEthernet(EST)!;
+    expect(eth['IPv4 Address']).toBe('192.168.1.6');
+    expect(eth['Subnet Mask']).toBe('255.255.255.0');
+    expect(eth['Default Gateway']).toBe('192.168.1.1');
+    expect(eth['Description']).toBe('Intel(R) Ethernet Connection (11) I219-LM');
+    expect(eth['Lease Obtained']).toBe('Friday, 2 October 2026 9:18:07 AM');
+    // Wi-Fi and the second (USB) adapter are not mixed in.
+    expect(eth['Media State']).toBeUndefined();
+    expect(Object.values(eth)).not.toContain('169.254.0.1');
+    expect(parseEthernet('no adapters here')).toBeUndefined();
+  });
+
+  it('reads the one-line answers and ignores a command the unit does not know', () => {
+    expect(parseMac('MAC Address: 90-8D-6E-95-91-26')).toBe('90:8D:6E:95:91:26');
+    expect(parseSerial('Serial Number: 2506NAA00184')).toBe('2506NAA00184');
+    expect(parseIp('IP Address: 192.168.1.6')).toBe('192.168.1.6');
+    expect(parseHostname('Hostname : MTR-MTGRM01')).toBe('MTR-MTGRM01');
+    for (const f of [parseMac, parseSerial, parseIp, parseHostname])
+      expect(f('Bad or Incomplete Command')).toBeUndefined();
+  });
+});
 
 describe('a Crestron Flex (Teams Room)', () => {
   const flexSettings = (port: number, over: Record<string, unknown> = {}) => ({
@@ -559,6 +631,18 @@ describe('a Crestron Flex (Teams Room)', () => {
     expect(s.occupied).toBe(true);
     expect(DeviceDetails.safeParse(s.details).success).toBe(true);
     expect(row(section(s.details, 'Device'), 'MAC address')).toBe('90:8D:6E:95:91:26');
+    // These feed the asset register, whose serial and MAC come from rows with these labels.
+    expect(row(section(s.details, 'Device'), 'Serial number')).toBe('2506NAA00184');
+    expect(row(section(s.details, 'Device'), 'Hostname')).toBe('MTR-MTGRM01');
+    expect(row(section(s.details, 'Device'), 'IP address')).toBe('192.168.1.6');
+    const eth = section(s.details, 'Ethernet');
+    expect(row(eth, 'IPv4 address')).toBe('192.168.1.6');
+    expect(row(eth, 'Default gateway')).toBe('192.168.1.1');
+    expect(eth?.rows.find((r) => r.label === 'Link')?.status).toBe('ok');
+    expect(identityFromDetails(DeviceDetails.parse(s.details))).toMatchObject({
+      serial: '2506NAA00184',
+      mac: '90:8D:6E:95:91:26',
+    });
     expect(row(section(s.details, 'Device'), 'Running for')).toBe('0 days 11:41:25.0');
     const app = section(s.details, 'Teams Rooms app');
     expect(row(app, 'State')).toBe('Idle');
