@@ -36,6 +36,7 @@ import {
   Handshake,
   BarChart3,
   FileText,
+  Wrench,
 } from 'lucide-react';
 import { AnimatedCollapse } from '@/components/common/animated-collapse';
 import { useBilling } from '@/components/common/plan-gate';
@@ -474,6 +475,7 @@ export function AppSidebar() {
   ]);
   const support = entries([
     { href: `${base}/tickets`, icon: LifeBuoy, label: 'Tickets' },
+    { href: `${base}/callouts`, icon: Wrench, label: 'Callouts' },
     canEdit &&
       full && {
         href: `${base}/integrations`,

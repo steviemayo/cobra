@@ -15,6 +15,17 @@ import {
   setStaff,
 } from '../staff-team';
 import { StaffRole } from '@kestrel/model';
+import { realCalloutStripe } from '../callout-stripe';
+import {
+  CalloutError,
+  cancelByStaff,
+  completeCallout,
+  declineCallout,
+  listCallouts,
+  refundLateCancellation,
+  sendQuote,
+} from '../callouts';
+import { BillingNotConfigured } from '../stripe';
 import { orgDetail, orgDirectory, recordStaffAudit, mfaRequired } from '../staff';
 import {
   AnnounceError,
@@ -68,7 +79,9 @@ function asTrpc(e: unknown): never {
     e instanceof SessionError ||
     e instanceof TicketError ||
     e instanceof RetentionError ||
-    e instanceof TeamError
+    e instanceof TeamError ||
+    e instanceof CalloutError ||
+    e instanceof BillingNotConfigured
   )
     throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
   throw e;
@@ -535,6 +548,165 @@ export const staffRouter = router({
           target: input.id,
         });
         return { ok: true };
+      }),
+  }),
+
+  // Support callouts across every organisation: reply with a quote, complete the work (extra time
+  // is invoiced, unused time refunded), cancel and refund. Money moves only for support or billing
+  // staff, and every step is written to the staff audit trail.
+  callouts: router({
+    list: staffProcedure
+      .input(
+        z
+          .object({ status: z.array(z.string()).optional(), orgId: z.string().uuid().optional() })
+          .default({}),
+      )
+      .query(async ({ input }) => {
+        const rows = await listCallouts(db, input);
+        const orgs = await db.org.findMany({
+          where: { id: { in: [...new Set(rows.map((r) => r.orgId))] } },
+          select: { id: true, name: true },
+        });
+        const rooms = await db.room.findMany({
+          where: { id: { in: rows.flatMap((r) => (r.roomId ? [r.roomId] : [])) } },
+          select: { id: true, name: true },
+        });
+        return {
+          defaultRateCents: Number(process.env.KESTREL_CALLOUT_RATE_CENTS) || null,
+          callouts: rows.map((r) => ({
+            ...r,
+            orgName: orgs.find((o) => o.id === r.orgId)?.name ?? 'Unknown',
+            roomName: rooms.find((x) => x.id === r.roomId)?.name ?? null,
+          })),
+        };
+      }),
+
+    quote: staffProcedure
+      .input(
+        z.object({
+          calloutId: z.string().uuid(),
+          hours: z.number().min(0.5).max(40),
+          rateCents: z.number().int().min(100).max(1_000_000),
+          scheduledFor: z.coerce.date(),
+          scheduledEnd: z.coerce.date().nullable().optional(),
+          note: z.string().trim().max(1000).nullable().optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireAnyStaffRole(ctx.staff, ['support', 'billing']);
+        try {
+          const res = await sendQuote(db, input.calloutId, {
+            ...input,
+            staffUserId: ctx.staff.userId,
+          });
+          await recordStaffAudit(db, {
+            staffUserId: ctx.staff.userId,
+            action: 'callout.quote',
+            orgId: res.orgId,
+            target: input.calloutId,
+            meta: { hours: input.hours, rateCents: input.rateCents, totalCents: res.totalCents },
+          });
+          if (res.ticketId)
+            after(() => tellOrg(res.orgId, res.ticketId!, 'staff_reply', res.message));
+          return { totalCents: res.totalCents };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    decline: staffProcedure
+      .input(
+        z.object({ calloutId: z.string().uuid(), reason: z.string().trim().max(300).default('') }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireAnyStaffRole(ctx.staff, ['support', 'billing']);
+        try {
+          const res = await declineCallout(db, input.calloutId, input.reason);
+          await recordStaffAudit(db, {
+            staffUserId: ctx.staff.userId,
+            action: 'callout.decline',
+            orgId: res.orgId,
+            target: input.calloutId,
+          });
+          return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    complete: staffProcedure
+      .input(
+        z.object({
+          calloutId: z.string().uuid(),
+          actualHours: z.number().min(0.5).max(40),
+          note: z.string().trim().max(1000).nullable().optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireAnyStaffRole(ctx.staff, ['support', 'billing']);
+        try {
+          const res = await completeCallout(db, realCalloutStripe(db), {
+            id: input.calloutId,
+            actualHours: input.actualHours,
+            note: input.note,
+            staffUserId: ctx.staff.userId,
+          });
+          await recordStaffAudit(db, {
+            staffUserId: ctx.staff.userId,
+            action: 'callout.complete',
+            orgId: res.orgId,
+            target: input.calloutId,
+            meta: { actualHours: input.actualHours, diffCents: res.diffCents },
+          });
+          if (res.ticketId) after(() => tellOrg(res.orgId, res.ticketId!, 'status_changed'));
+          return { diffCents: res.diffCents };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    cancel: staffProcedure
+      .input(
+        z.object({ calloutId: z.string().uuid(), reason: z.string().trim().max(300).default('') }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireAnyStaffRole(ctx.staff, ['support', 'billing']);
+        try {
+          const res = await cancelByStaff(db, realCalloutStripe(db), {
+            id: input.calloutId,
+            reason: input.reason,
+          });
+          await recordStaffAudit(db, {
+            staffUserId: ctx.staff.userId,
+            action: 'callout.cancel',
+            orgId: res.orgId,
+            target: input.calloutId,
+            meta: { refundedCents: res.refundedCents },
+          });
+          if (res.ticketId) after(() => tellOrg(res.orgId, res.ticketId!, 'status_changed'));
+          return { refundedCents: res.refundedCents };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    refundLate: staffProcedure
+      .input(z.object({ calloutId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        requireAnyStaffRole(ctx.staff, ['admin', 'billing']);
+        try {
+          const res = await refundLateCancellation(db, realCalloutStripe(db), input.calloutId);
+          await recordStaffAudit(db, {
+            staffUserId: ctx.staff.userId,
+            action: 'callout.refund',
+            orgId: res.orgId,
+            target: input.calloutId,
+            meta: { refundedCents: res.refundedCents },
+          });
+          return { refundedCents: res.refundedCents };
+        } catch (e) {
+          return asTrpc(e);
+        }
       }),
   }),
 });

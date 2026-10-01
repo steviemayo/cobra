@@ -72,6 +72,7 @@ model Org {
   grantsToProviders   MspGrant[]            @relation("CustomerSide")
   grantsFromCustomers MspGrant[]            @relation("MspSide")
   calendars           CalendarConnection[]
+  callouts            Callout[]
   latencyBuckets      LatencyBucket[]
   latencyHours        LatencyHour[]
   latencySettings     OrgLatencySettings?
@@ -1655,4 +1656,76 @@ model OrgLatencySettings {
   updatedAt     DateTime @default(now()) @updatedAt
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// ---- Support callouts --------------------------------------------------------------------------
+
+// A request for a Kestrel technician to attend a site. The customer asks, staff reply with
+// availability and a quote (hours at an hourly rate, plus GST), the customer prepays through Stripe
+// Checkout to secure the booking, and when the work is done staff enter the hours actually worked:
+// extra time is invoiced, unused time is credited and refunded. A linked ticket carries the
+// conversation. status: requested, quoted, booked (paid), completed, cancelled, declined.
+model Callout {
+  id             String   @id @default(uuid()) @db.Uuid
+  orgId          String   @db.Uuid
+  siteId         String?  @db.Uuid
+  roomId         String?  @db.Uuid
+  /// The ticket that carries the conversation with staff.
+  ticketId       String?  @db.Uuid
+  incidentId     String?  @db.Uuid
+  title          String
+  details        String
+  /// When the customer would like someone (free text: "Tuesday morning, before 10").
+  preferredDates String?
+  contactName    String?
+  contactPhone   String?
+  createdBy      String?  @db.Uuid
+  createdByEmail String?
+  status         String   @default("requested")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
+
+  // The quote. Money is in cents of `currency`; the rate and subtotal exclude GST.
+  hours         Float?
+  rateCents     Int?
+  subtotalCents Int?
+  gstCents      Int?
+  totalCents    Int?
+  currency      String    @default("aud")
+  quoteNote     String?
+  quotedAt      DateTime?
+  quotedBy      String?   @db.Uuid
+  /// The time staff offer. It becomes the booking when the quote is paid.
+  scheduledFor  DateTime?
+  scheduledEnd  DateTime?
+
+  // The prepayment (Stripe Checkout, which also issues the tax invoice for it).
+  stripeSessionId  String?   @unique
+  paymentIntentId  String?
+  prepaidInvoiceId String?
+  paidCents        Int?
+  paidAt           DateTime?
+
+  // The work done, and what followed from it.
+  actualHours     Float?
+  completionNote  String?
+  completedAt     DateTime?
+  completedBy     String?   @db.Uuid
+  /// Extra time beyond the quote: an invoice for the difference.
+  stripeInvoiceId String?
+  invoiceUrl      String?
+  invoicedCents   Int?
+  /// Unused time, or a cancellation: a credit note against the prepayment, refunded to the card.
+  creditNoteId    String?
+  refundedCents   Int?
+
+  cancelledAt  DateTime?
+  /// customer or staff
+  cancelledBy  String?
+  cancelReason String?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status, createdAt])
+  @@index([status, createdAt])
 }

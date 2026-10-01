@@ -20,7 +20,7 @@ export function getStripe(): Stripe {
 }
 
 /** The portal's public address, from config or from the request that is being served. */
-async function baseUrl(): Promise<string> {
+export async function baseUrl(): Promise<string> {
   const configured = process.env.NEXT_PUBLIC_APP_URL;
   if (configured) return configured.replace(/\/$/, '');
   const h = await headers();
