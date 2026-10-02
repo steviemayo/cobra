@@ -12,6 +12,7 @@ import {
 } from '@kestrel/model';
 import type { Logger } from './log';
 import { deviceFeedback } from './device-feedback';
+import { FastFail } from './fastfail';
 import { Prober } from './probe';
 
 // v2 (docs/pivot-monitoring.md): the devices a gateway polls on their own, whatever room they are in.
@@ -50,11 +51,19 @@ export class DeviceHost {
   constructor(
     private readonly log: Logger,
     private readonly prober: Prober = new Prober(),
+    private readonly fastFail: FastFail = new FastFail({
+      driverOnline: (id) => this.running.get(id)?.driver.getState().online,
+      onChange: () => this.onUrgent?.(),
+    }),
   ) {}
+
+  /** Called when a device is confirmed down or comes back, so the gateway can tell the cloud at once. */
+  onUrgent: (() => void) | null = null;
 
   /** Starts the steady pinging of the devices (kept apart so tests don't ping anything). */
   start() {
     this.prober.start();
+    this.fastFail.start();
   }
 
   /** The version of the device set now running, or null when none has been applied. */
@@ -79,6 +88,7 @@ export class DeviceHost {
         this.running.delete(id);
         this.sentDetails.delete(id);
         this.prober.untrack(id);
+        this.fastFail.untrack(id);
         this.log('info', 'Stopped polling a device', { device: run.device.name, deviceId: id });
       }
     for (const [id, d] of wanted) {
@@ -132,6 +142,17 @@ export class DeviceHost {
         device.settings.probe === false ? undefined : host,
         device.settings.allowLocalAddress === true,
       );
+      // Confirm a failure here, in seconds, unless its settings say not to.
+      const port = Number(device.settings.port);
+      this.fastFail.track(
+        id,
+        device.settings.fastFail === false ? undefined : host,
+        Number.isFinite(port) ? port : undefined,
+        {
+          everyMs: Number(device.settings.checkEveryMs) || undefined,
+          failsToConfirm: Number(device.settings.failsToConfirm) || undefined,
+        },
+      );
       this.log('info', 'Polling a device', { device: device.name, deviceId: id });
     }
     this.version = signed?.payload.version ?? null;
@@ -152,12 +173,14 @@ export class DeviceHost {
               ? control.protocol
               : undefined;
         const details = this.detailsFor(device.id, state.details, now);
-        const latency = this.prober.take(device.id, state.online ?? true);
+        const verdict = this.fastFail.verdict(device.id);
+        const latency = this.prober.take(device.id, verdict?.online ?? state.online ?? true);
         const { readings, watched } = this.pointsOf(device, state.points);
         return {
           deviceId: device.id,
           name: device.name,
-          online: state.online ?? true,
+          online: verdict?.online ?? state.online ?? true,
+          ...(verdict?.confirmed && { confirmed: true, offlineForMs: verdict.offlineForMs }),
           ...(driverName && { driver: driverName }),
           ...(state.firmware && { firmware: state.firmware }),
           ...(latency && { latency }),

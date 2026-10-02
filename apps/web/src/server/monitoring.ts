@@ -42,6 +42,13 @@ export interface AlertJob {
 export const DEVICE_GRACE_MS = 45_000;
 /** A problem that comes back within this long of being resolved reopens the same incident, quietly. */
 export const FLAP_WINDOW_MS = 5 * 60_000;
+/**
+ * A problem that returns after being resolved for at least this long is a new problem worth another
+ * alert; sooner than that it is the same flap and stays quiet.
+ */
+export const RECUR_ALERT_AFTER_MS = 60_000;
+/** Alerts for one incident that keeps coming back: this many, then one "keeps dropping out", then quiet. */
+export const RECUR_ALERT_MAX = 3;
 export const COMMAND_PENDING_EXPIRY_MS = 5 * 60_000;
 export const COMMAND_SENT_EXPIRY_MS = 10 * 60_000;
 
@@ -102,19 +109,26 @@ export async function openIncident(
     orderBy: { resolvedAt: 'desc' },
   });
   if (recent) {
+    const occurrences = recent.occurrences + 1;
+    const gap = now.getTime() - (recent.resolvedAt?.getTime() ?? now.getTime());
+    // Back after a real gap: say so (a few times, then once that it keeps dropping out). Straight
+    // back after a blip: the same flap, quiet.
+    const speak =
+      recent.alerted && gap >= RECUR_ALERT_AFTER_MS && occurrences <= RECUR_ALERT_MAX + 1;
+    const flapping = occurrences === RECUR_ALERT_MAX + 1;
     await db.incident.update({
       where: { id: recent.id },
       data: {
         status: 'open',
         resolvedAt: null,
         lastSeenAt: now,
-        occurrences: recent.occurrences + 1,
-        title: input.title,
+        occurrences,
+        title: speak && flapping ? `${input.title} (keeps dropping out)` : input.title,
         detail: input.detail ?? null,
         ...(input.roomIds ? { roomIds: input.roomIds } : {}),
       },
     });
-    return null;
+    return speak ? { incidentId: recent.id, event: 'opened' } : null;
   }
   // Inside a maintenance window nothing new is raised: no incident, no alert, no ticket.
   if (
@@ -173,7 +187,10 @@ export async function resolveIncident(
     where: { id: open.id },
     data: { status: 'resolved', resolvedAt: now },
   });
-  return open.alerted ? { incidentId: open.id, event: 'resolved' } : null;
+  // One that keeps dropping out has said so already: its recoveries are not each announced.
+  return open.alerted && open.occurrences <= RECUR_ALERT_MAX
+    ? { incidentId: open.id, event: 'resolved' }
+    : null;
 }
 
 /** Applies one heartbeat's room reports for a gateway: device status first, then incidents. */

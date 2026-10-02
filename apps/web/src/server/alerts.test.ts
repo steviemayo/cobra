@@ -207,8 +207,11 @@ describe('delivery', () => {
       });
     const { s, calls } = senders();
     await deliverAlerts(w.db, [{ incidentId: INC, event: 'opened' }], s, T0);
-    expect(calls).toHaveLength(0);
+    // One notice that the limit is reached, so a storm is never silent; nothing after it.
+    expect(calls).toHaveLength(1);
     expect(w.alertDelivery.rows.at(-1)).toMatchObject({ status: 'suppressed' });
+    await deliverAlerts(w.db, [{ incidentId: INC, event: 'opened' }], s, T0);
+    expect(calls).toHaveLength(1);
   });
 
   it('caps how many alert emails one organisation sends a day, across every email channel it has', async () => {

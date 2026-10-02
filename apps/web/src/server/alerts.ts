@@ -45,7 +45,7 @@ export const ChannelConfig = z.discriminatedUnion('type', [
 export type ChannelConfig = z.infer<typeof ChannelConfig>;
 
 export interface AlertMessage {
-  event: 'opened' | 'reminder' | 'resolved' | 'test';
+  event: 'opened' | 'reminder' | 'resolved' | 'test' | 'summary';
   incident: {
     id: string;
     kind: string;
@@ -62,6 +62,14 @@ export interface AlertMessage {
     impact?: Impact;
   };
   portalUrl: string | null;
+  /**
+   * Present when this one message stands for several incidents that belong together (a room's
+   * problems, a site's). `incident` is then the headline of the group, and these are its members.
+   */
+  batch?: {
+    count: number;
+    incidents: { id: string; kind: string; severity: Severity; title: string; room: string | null }[];
+  };
 }
 
 const impactText = (m: AlertMessage): string =>
@@ -86,7 +94,7 @@ export interface Senders {
   /** Whether the organisation's plan lets this kind of channel send. Absent means anything goes. */
   allowed?: (db: AlertDb, orgId: string, type: string) => Promise<boolean>;
 }
-const realSenders = (): Senders => ({
+export const realSenders = (): Senders => ({
   fetch: pinnedFetch,
   resolve: resolveAll,
   env: process.env,
@@ -106,8 +114,13 @@ const headline = (m: AlertMessage) =>
         ? `Test alert: ${m.incident.title}`
         : m.incident.title;
 
-function payload(m: AlertMessage) {
-  return { event: m.event, incident: m.incident, portalUrl: m.portalUrl };
+export function payload(m: AlertMessage) {
+  return {
+    event: m.event,
+    incident: m.incident,
+    portalUrl: m.portalUrl,
+    ...(m.batch ? { batch: m.batch } : {}),
+  };
 }
 
 export async function send(s: Senders, config: ChannelConfig, m: AlertMessage): Promise<void> {
@@ -219,6 +232,23 @@ export const MAX_EMAIL_ALERTS_PER_ORG_PER_DAY = 200;
 /** Text messages cost money per send, so an organisation's daily total is capped across its SMS channels. */
 export const MAX_SMS_ALERTS_PER_ORG_PER_DAY = 100;
 const HOUR_MS = 3_600_000;
+const CAP_NOTICE_NOTE = 'Too many alerts in the last hour (a notice was sent)';
+
+/** The one message that tells a channel it has hit its hourly limit. */
+const capNotice = (m: AlertMessage): AlertMessage => ({
+  event: 'summary',
+  incident: {
+    id: m.incident.id,
+    kind: 'rollup',
+    severity: m.incident.severity,
+    title: 'Alert limit reached: further alerts for the next hour are only in the portal',
+    detail: `This channel has had ${MAX_ALERTS_PER_CHANNEL_HOUR} alerts in the last hour. Kestrel keeps recording every incident; open the portal to see them all.`,
+    room: null,
+    openedAt: m.incident.openedAt,
+    resolvedAt: null,
+  },
+  portalUrl: m.portalUrl,
+});
 const DAY_MS = 24 * HOUR_MS;
 
 function parseChannel(row: { type: string; config: unknown }): ChannelConfig | null {
@@ -256,6 +286,27 @@ export async function deliverToChannel(
       },
     });
     if (recent >= MAX_ALERTS_PER_CHANNEL_HOUR) {
+      // Say once, per hour, that the rest are only in the portal, so a storm is never silent.
+      const told = await db.alertDelivery.count({
+        where: {
+          channelId: channel.id,
+          status: 'suppressed',
+          error: CAP_NOTICE_NOTE,
+          at: { gte: new Date(now.getTime() - HOUR_MS) },
+        },
+      });
+      if (told === 0) {
+        const config = parseChannel(channel);
+        if (config) {
+          try {
+            await send(s, config, capNotice(msg));
+            await record('suppressed', CAP_NOTICE_NOTE);
+            return { status: 'suppressed' };
+          } catch {
+            // Fall through: recorded below like any other suppressed alert.
+          }
+        }
+      }
       await record('suppressed', 'Too many alerts in the last hour');
       return { status: 'suppressed' };
     }
@@ -336,9 +387,9 @@ export function channelRules(ch: { config: unknown }): ChannelRules | null {
   return parsed.success && hasRules(parsed.data) ? parsed.data : null;
 }
 
-type IncidentRow = NonNullable<Awaited<ReturnType<AlertDb['incident']['findFirst']>>>;
+export type IncidentRow = NonNullable<Awaited<ReturnType<AlertDb['incident']['findFirst']>>>;
 
-async function buildMessage(
+export async function buildMessage(
   db: AlertDb,
   incident: IncidentRow,
   event: AlertMessage['event'],
@@ -383,7 +434,7 @@ async function buildMessage(
   };
 }
 
-const reaches = (incident: { severity: string }, ch: { minSeverity: string }) =>
+export const reaches = (incident: { severity: string }, ch: { minSeverity: string }) =>
   SEVERITY_RANK[incident.severity as Severity] >= SEVERITY_RANK[ch.minSeverity as Severity];
 
 /** Sends the alerts a monitoring pass produced. Run it after the response, never inside it. */
@@ -421,7 +472,7 @@ export async function deliverAlerts(
             where: {
               channelId: ch.id,
               incidentId: incident.id,
-              status: 'sent',
+              status: { in: ['sent', 'batched'] },
               event: { in: ['opened', 'reminder'] },
             },
           });
@@ -469,7 +520,7 @@ export async function deliverDue(
             event: { in: ['opened', 'reminder'] },
           },
         });
-        const failed = history.filter((d) => d.status !== 'sent');
+        const failed = history.filter((d) => d.status !== 'sent' && d.status !== 'batched');
         const lastTry = failed.length ? Math.max(...failed.map((d) => d.at.getTime())) : 0;
         if (failed.length >= MAX_ATTEMPTS || now.getTime() < lastTry + RETRY_AFTER_MS) continue;
         const due = dueNow({
@@ -477,7 +528,7 @@ export async function deliverDue(
           openedAt: incident.openedAt,
           acknowledged: incident.acknowledgedAt !== null,
           sent: history
-            .filter((d) => d.status === 'sent')
+            .filter((d) => d.status === 'sent' || d.status === 'batched')
             .map((d) => ({ event: d.event, at: d.at })),
           now,
         });

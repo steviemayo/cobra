@@ -973,3 +973,13 @@ Not done: photo upload for checklist items, the visit being done offline on a ph
 - **FD-6** A host whose address matches a register device's connection settings (`host`, `address` or `ip`) or its recorded IP is marked "Already in register" and links to it. Add is disabled for it, with "Add anyway". The dialog reads the register with the caller's site scope, so a limited provider never learns of a device at another site
 - **FD-7** Adding from a scan opens the ordinary Add device dialog, filled in but editable. A monitored device is given the scanning gateway only if it is added to that gateway's own site; a recorded one gets the address as its IP. Nothing is ever added without the person pressing Add device
 - **FD-8** Entry points: a "Find devices" button on the asset register (owner and dev) and "Find devices on this network" in a gateway's menu. The dialog polls every 2 seconds and gives up after about 2 minutes, with the gateway's own error shown as written and a Retry
+
+## Fast failure alerts and batching (2026-10-02)
+
+- FF-1: the gateway checks each polled device every 5s (TCP connect to its port, else one ping). The first miss starts a burst of checks 1s apart; 3 misses in a row (`failsToConfirm`, 2-10) confirm it down in about 8s. Device settings `fastFail: false`, `checkEveryMs`, `failsToConfirm` override. A device that has never answered a check is not judged (its checks may be blocked), and a driver that stays offline 15s is believed even if checks pass
+- FF-2: coming back needs 2 answers in a row. Nothing leaves the gateway while a device is only suspect
+- FF-3: a confirmed down device is pushed at once: changes within 1.5s share one check-in, and these check-ins are at least 3s apart. The report carries `confirmed` and `offlineForMs`; the cloud then skips its 45s grace and dates the outage from the first miss. Old gateways keep the grace
+- FF-4: a problem that returns after being resolved for 60s or more (inside the 5 minute flap window) is alerted again; the 4th time says "keeps dropping out" once, then it is quiet and its recoveries are not announced. Quicker returns stay quiet as before
+- FF-5: alerts wait 2s (something critical) or 5s, then problems that belong together go out as one message: same room, then 3+ rooms at one site, then same gateway. Members are recorded as `batched` deliveries. The wait is in server memory, so it only joins alerts on the same instance. Webhook/ITSM payloads gain an optional `batch` object
+- FF-6: a channel at its hourly limit gets one notice that the rest are only in the portal, instead of silence
+- Not done: grouping by model/vendor, and a sub-30s gateway-offline path (needs a short keepalive and a faster sweep)

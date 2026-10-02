@@ -1,6 +1,7 @@
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
-import { deliverAlerts, deliverDue } from '@/server/alerts';
+import { queueAlerts } from '@/server/alert-batch';
+import { deliverDue } from '@/server/alerts';
 import { cronAuthorised } from '@/server/cron-auth';
 import { latencyJob } from '@/server/latency';
 import { sweep } from '@/server/monitoring';
@@ -23,7 +24,7 @@ export async function GET(req: Request) {
       (e: unknown) => console.error('[calendar] refresh failed', e),
     ),
   );
-  if (jobs.length) after(() => deliverAlerts(db, jobs));
+  if (jobs.length) after(() => queueAlerts(db, jobs));
   // Alerts held back by a channel's hours or delay, and reminders for problems nobody has picked up.
   const due = await deliverDue(db).catch((e: unknown) => {
     console.error('[alerts] due delivery failed', e);

@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
 import { DEVICE_FEEDBACK_FIELDS, DeviceDetails, DeviceFeedback } from '@kestrel/model';
-import { deliverAlerts } from '../alerts';
+import { queueAlerts } from '../alert-batch';
 import { writeAudit } from '../audit';
 import { deviceFeedbackDailyHistory, deviceFeedbackHistory } from '../device-feedback-history';
 import { firmwareReport } from '../firmware-report';
@@ -56,7 +56,7 @@ export const monitoringRouter = router({
     .input(z.object({ orgId }))
     .query(async ({ ctx }) => {
       const jobs = await maybeSweep(db);
-      if (jobs.length) after(() => deliverAlerts(db, jobs));
+      if (jobs.length) after(() => queueAlerts(db, jobs));
       return orgOverview(db, ctx.orgId, new Date(), ctx.siteScope);
     }),
 
@@ -66,7 +66,7 @@ export const monitoringRouter = router({
     .input(z.object({ orgId }))
     .query(async ({ ctx }) => {
       const jobs = await maybeSweep(db);
-      if (jobs.length) after(() => deliverAlerts(db, jobs));
+      if (jobs.length) after(() => queueAlerts(db, jobs));
       return estateOverview(db, ctx.orgId, new Date(), ctx.siteScope);
     }),
 
