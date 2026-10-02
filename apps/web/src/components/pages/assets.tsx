@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Download, Package, Plus, Radar, Search } from 'lucide-react';
+import { AlertTriangle, CalendarCheck, Download, Package, Plus, Radar, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   ASSET_ONLY_CATEGORIES,
@@ -51,6 +51,7 @@ import {
   emptyConnection,
   type ConnectionDraft,
 } from './device-connection';
+import { AlignDatesDialog, FixGapsDialog, GAPS, gapKeysOf, type GapKey } from './asset-gaps';
 import { DeviceStateBadge } from './device-detail';
 import { FindDevicesDialog } from './find-devices';
 import { ImportRegisterDialog } from './import-register-dialog';
@@ -93,17 +94,7 @@ export function controlFor(choice: string): DeviceControl {
     : { kind: 'driver', driverId: choice };
 }
 
-/** What a register still needs: the fields people are asked to keep complete. */
-export function gapsOf(
-  d: Pick<DeviceRow, 'serial' | 'assetTag' | 'warrantyEndsOn' | 'make' | 'model'>,
-) {
-  const gaps: string[] = [];
-  if (!d.serial) gaps.push('serial');
-  if (!d.assetTag) gaps.push('asset tag');
-  if (!d.make || !d.model) gaps.push('make/model');
-  if (!d.warrantyEndsOn) gaps.push('warranty');
-  return gaps;
-}
+const dayText = (d: Date | string | null) => (d ? new Date(d).toISOString().slice(0, 10) : '–');
 
 const csvCell = (v: unknown) => {
   const s =
@@ -131,7 +122,10 @@ export function AssetsView() {
   const [siteId, setSiteId] = useState('');
   const [category, setCategory] = useState('');
   const [kind, setKind] = useState('');
-  const [gapsOnly, setGapsOnly] = useState(false);
+  /** '' shows everything, 'any' every device with a gap, or one kind of gap. */
+  const [gapFilter, setGapFilter] = useState<'' | 'any' | GapKey>('');
+  const [aligning, setAligning] = useState(false);
+  const [fixingId, setFixingId] = useState<string | null>(null);
   const [groupBy, setGroupBy] = useState<GroupBy>('site');
 
   const siteName = (id: string) => sites.find((s) => s.id === id)?.name ?? 'Site';
@@ -143,13 +137,16 @@ export function AssetsView() {
       if (siteId && d.siteId !== siteId) return false;
       if (category && d.category !== category) return false;
       if (kind && d.kind !== kind) return false;
-      if (gapsOnly && gapsOf(d).length === 0) return false;
+      if (gapFilter) {
+        const keys = gapKeysOf(d);
+        if (gapFilter === 'any' ? keys.length === 0 : !keys.includes(gapFilter)) return false;
+      }
       if (!q) return true;
       return [d.name, d.roomName, d.make, d.model, d.serial, d.mac, d.ip, d.assetTag, d.firmware]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(q));
     });
-  }, [devices.data, search, siteId, category, kind, gapsOnly]);
+  }, [devices.data, search, siteId, category, kind, gapFilter]);
 
   const groups = useMemo(() => {
     const key = (d: DeviceRow) =>
@@ -168,8 +165,15 @@ export function AssetsView() {
   }, [filtered, groupBy, sites, areas.data]);
 
   const all = devices.data ?? [];
-  const complete = all.length ? all.filter((d) => gapsOf(d).length === 0).length : 0;
+  const complete = all.length ? all.filter((d) => gapKeysOf(d).length === 0).length : 0;
+  const gapCounts = GAPS.map((g) => ({ ...g, count: all.filter((d) => g.missing(d)).length }));
   const swaps = all.filter((d) => d.swapPending).length;
+
+  // "Save and next" walks the devices with gaps in the order they are listed on screen.
+  const fixQueue = groups.flatMap(([, rows]) => rows).filter((d) => gapKeysOf(d).length > 0);
+  const fixing = fixingId ? all.find((d) => d.id === fixingId) : undefined;
+  const fixIndex = fixing ? fixQueue.findIndex((d) => d.id === fixing.id) : -1;
+  const fixNext = fixIndex >= 0 ? (fixQueue[fixIndex + 1] ?? null) : (fixQueue[0] ?? null);
 
   function exportCsv() {
     const head = [
@@ -240,6 +244,16 @@ export function AssetsView() {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => setAligning(true)}
+                disabled={all.length === 0}
+              >
+                <CalendarCheck data-icon="inline-start" /> Align dates
+              </Button>
+            )}
+            {canEdit && (
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => setImporting(true)}
                 disabled={sites.length === 0}
               >
@@ -296,14 +310,14 @@ export function AssetsView() {
             <button
               type="button"
               className="px-4 py-3 text-left transition-colors hover:bg-muted/50"
-              onClick={() => setGapsOnly(!gapsOnly)}
+              onClick={() => setGapFilter(gapFilter === 'any' ? '' : 'any')}
             >
               <div className="text-xs text-muted-foreground">Register complete</div>
               <div className="tabular mt-1 text-2xl font-semibold">
                 {Math.round((complete / all.length) * 100)}%
               </div>
               <div className="text-xs text-muted-foreground">
-                {gapsOnly ? 'Showing gaps only' : `${all.length - complete} with gaps`}
+                {gapFilter === 'any' ? 'Showing gaps only' : `${all.length - complete} with gaps`}
               </div>
             </button>
             <div className="px-4 py-3">
@@ -315,6 +329,38 @@ export function AssetsView() {
               </div>
             </div>
           </div>
+
+          {all.length > complete && (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-muted-foreground">Missing:</span>
+              {gapCounts
+                .filter((g) => g.count > 0)
+                .map((g) => (
+                  <button
+                    key={g.key}
+                    type="button"
+                    aria-pressed={gapFilter === g.key}
+                    onClick={() => setGapFilter(gapFilter === g.key ? '' : g.key)}
+                    className={cn(
+                      'rounded-full border px-2.5 py-1 transition-colors hover:bg-muted/50',
+                      gapFilter === g.key && 'border-foreground bg-muted',
+                    )}
+                  >
+                    {g.label} <span className="tabular text-muted-foreground">{g.count}</span>
+                  </button>
+                ))}
+              {canEdit && fixQueue.length > 0 && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="ml-auto"
+                  onClick={() => setFixingId(fixQueue[0]!.id)}
+                >
+                  Fill in gaps one by one
+                </Button>
+              )}
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-48 flex-1 sm:max-w-64">
@@ -403,13 +449,14 @@ export function AssetsView() {
                         <TableHead>Serial</TableHead>
                         <TableHead>IP / MAC</TableHead>
                         <TableHead>Firmware</TableHead>
+                        <TableHead>Lifecycle</TableHead>
                         <TableHead>State</TableHead>
                         <TableHead className="text-right">Gaps</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {rows.map((d) => {
-                        const gaps = gapsOf(d);
+                        const gaps = gapKeysOf(d);
                         const href = orgPath(orgId, `/devices/${d.id}`);
                         return (
                           <TableRow key={d.id}>
@@ -457,14 +504,38 @@ export function AssetsView() {
                             <TableCell className="text-sm">
                               {d.firmware ?? <span className="text-muted-foreground">–</span>}
                             </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              <div>Installed {dayText(d.installedOn)}</div>
+                              <div>Warranty {dayText(d.warrantyEndsOn)}</div>
+                              <div>End of life {dayText(d.endOfLifeOn)}</div>
+                            </TableCell>
                             <TableCell>
                               <DeviceStateBadge state={d.state} />
                             </TableCell>
                             <TableCell className="text-right">
                               {gaps.length === 0 ? (
                                 <span className="text-xs text-muted-foreground">Complete</span>
+                              ) : canEdit ? (
+                                <button
+                                  type="button"
+                                  className="inline-flex flex-col items-end gap-1 hover:underline"
+                                  title="Fill in what is missing"
+                                  onClick={() => setFixingId(d.id)}
+                                >
+                                  <Badge variant="outline">{gaps.length} missing</Badge>
+                                  <span className="max-w-40 text-xs text-muted-foreground">
+                                    {GAPS.filter((g) => gaps.includes(g.key))
+                                      .map((g) => g.label.toLowerCase())
+                                      .join(', ')}
+                                  </span>
+                                </button>
                               ) : (
-                                <Badge variant="outline" title={`Missing: ${gaps.join(', ')}`}>
+                                <Badge
+                                  variant="outline"
+                                  title={`Missing: ${GAPS.filter((g) => gaps.includes(g.key))
+                                    .map((g) => g.label.toLowerCase())
+                                    .join(', ')}`}
+                                >
                                   {gaps.length} missing
                                 </Badge>
                               )}
@@ -483,6 +554,18 @@ export function AssetsView() {
 
       {importing && <ImportRegisterDialog sites={sites} onClose={() => setImporting(false)} />}
       {finding && <FindDevicesDialog onClose={() => setFinding(false)} />}
+      {aligning && (
+        <AlignDatesDialog sites={sites} rooms={rooms} onClose={() => setAligning(false)} />
+      )}
+      {fixing && (
+        <FixGapsDialog
+          key={fixing.id}
+          device={fixing}
+          nextName={fixNext && fixNext.id !== fixing.id ? fixNext.name : null}
+          onSaved={(next) => setFixingId(next && fixNext ? fixNext.id : null)}
+          onClose={() => setFixingId(null)}
+        />
+      )}
       {adding && <AddDeviceDialog sites={sites} rooms={rooms} onClose={() => setAdding(false)} />}
     </PageContainer>
   );

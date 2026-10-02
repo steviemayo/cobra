@@ -60,6 +60,8 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `deleted site “${s(meta.name)}”`;
     case 'room.create':
       return `created room “${s(meta.name)}” in ${s(meta.site)}`;
+    case 'room.create_many':
+      return `created ${s(meta.count)} rooms in ${s(meta.site)}`;
     case 'room.duplicate':
       return `copied room “${s(meta.from)}” to a new room “${s(meta.name)}”`;
     case 'room.copy': {
