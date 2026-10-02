@@ -1,4 +1,5 @@
 import { db } from '@kestrel/db';
+import { createSupabaseAdmin } from '@/lib/supabase/admin';
 import { cronAuthorised } from '@/server/cron-auth';
 import { pruneAudit } from '@/server/audit-retention';
 import { pruneUnclaimed } from '@/server/gateway-announce';
@@ -66,7 +67,11 @@ export async function GET(req: Request) {
     error: e instanceof Error ? e.message : String(e),
   }));
   // Organisations whose 30 days are up are deleted for good (each one tried again next time if it fails).
-  const orgsPurged = await purgeDueOrgs(db).catch((e: unknown) => ({
+  // People who belonged to nothing but that organisation have their sign-in account deleted too.
+  const orgsPurged = await purgeDueOrgs(db, new Date(), async (userId) => {
+    const { error } = await createSupabaseAdmin().auth.admin.deleteUser(userId);
+    if (error) throw new Error(error.message);
+  }).catch((e: unknown) => ({
     error: e instanceof Error ? e.message : String(e),
   }));
   return Response.json({

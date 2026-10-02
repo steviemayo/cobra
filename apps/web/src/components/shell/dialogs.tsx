@@ -16,6 +16,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { Textarea } from '@/components/ui/textarea';
 import { useInvalidateEstate, useSites } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
 import { orgPath, useOrg } from './org-context';
@@ -165,9 +166,32 @@ function NewRoomDialog({
   const sites = useSites();
   const invalidate = useInvalidateEstate();
   const [name, setName] = useState('');
+  const [many, setMany] = useState(false);
+  const [names, setNames] = useState('');
   const [pickedSite, setPickedSite] = useState('');
   const siteList = sites.data ?? [];
   const siteId = pickedSite || presetSiteId || siteList[0]?.id || '';
+  const nameList = names
+    .split('\n')
+    .map((n) => n.trim())
+    .filter(Boolean);
+
+  const createMany = useMutation(
+    trpc.room.createMany.mutationOptions({
+      onSuccess: async (r) => {
+        await invalidate();
+        toast.success(
+          `${r.created} ${r.created === 1 ? 'room' : 'rooms'} created` +
+            (r.skipped.length ? `, ${r.skipped.length} skipped (name already used)` : ''),
+        );
+        onOpenChange(false);
+        setNames('');
+        setMany(false);
+        setPickedSite('');
+        router.push(orgPath(orgId, `/sites/${siteId}`));
+      },
+    }),
+  );
 
   const create = useMutation(
     trpc.room.create.mutationOptions({
@@ -201,27 +225,47 @@ function NewRoomDialog({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              create.mutate({ orgId, siteId, name });
+              if (many) createMany.mutate({ orgId, siteId, names: nameList });
+              else create.mutate({ orgId, siteId, name });
             }}
             className="space-y-5"
           >
             <DialogHeader>
-              <DialogTitle>New room</DialogTitle>
+              <DialogTitle>{many ? 'New rooms' : 'New room'}</DialogTitle>
               <DialogDescription>
-                Add the room, then add its devices.
+                {many
+                  ? 'Add several rooms to one site at once, then add their devices.'
+                  : 'Add the room, then add its devices.'}
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-2">
-              <Label htmlFor="room-name">Name</Label>
-              <Input
-                id="room-name"
-                autoFocus
-                required
-                placeholder="Boardroom 1"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
+            {many ? (
+              <div className="space-y-2">
+                <Label htmlFor="room-names">Names, one per line</Label>
+                <Textarea
+                  id="room-names"
+                  autoFocus
+                  rows={8}
+                  placeholder={'Boardroom 1\nBoardroom 2\nTraining Room'}
+                  value={names}
+                  onChange={(e) => setNames(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {nameList.length} {nameList.length === 1 ? 'room' : 'rooms'}. Up to 100 at a time.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="room-name">Name</Label>
+                <Input
+                  id="room-name"
+                  autoFocus
+                  required
+                  placeholder="Boardroom 1"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="room-site">Site</Label>
               <SimpleSelect
@@ -233,14 +277,34 @@ function NewRoomDialog({
                 placeholder="Choose a site"
               />
             </div>
-            {create.error && <p className="text-sm text-destructive">{create.error.message}</p>}
+            {(many ? createMany.error : create.error) && (
+              <p className="text-sm text-destructive">
+                {(many ? createMany.error : create.error)!.message}
+              </p>
+            )}
             <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                className="sm:mr-auto"
+                onClick={() => setMany(!many)}
+              >
+                {many ? 'Add one room' : 'Add several rooms'}
+              </Button>
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={create.isPending || !name.trim() || !siteId}>
-                {create.isPending && <Spinner />}
-                Create room
+              <Button
+                type="submit"
+                disabled={
+                  create.isPending ||
+                  createMany.isPending ||
+                  !siteId ||
+                  (many ? nameList.length === 0 || nameList.length > 100 : !name.trim())
+                }
+              >
+                {(create.isPending || createMany.isPending) && <Spinner />}
+                {many ? 'Create rooms' : 'Create room'}
               </Button>
             </DialogFooter>
           </form>

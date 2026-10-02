@@ -273,6 +273,26 @@ describe('device status and incidents', () => {
     expect(w.incident.rows[0]).toMatchObject({ status: 'open', occurrences: 2 });
   });
 
+  it('alerts again when a problem returns after a real gap inside the flap window', async () => {
+    const w = world();
+    const gw = { id: GW, orgId: ORG };
+    await recordReports(w.db, gw, [report({ devices: offline() })], T0);
+    await recordReports(w.db, gw, [report({ devices: offline() })], at(DEVICE_GRACE_MS));
+    await recordReports(w.db, gw, [report()], at(60_000));
+    // Gone again 2 minutes after it was resolved: not a blip, so it is told.
+    const back = 60_000 + 2 * 60_000;
+    await recordReports(w.db, gw, [report({ devices: offline() })], at(back));
+    const jobs = await recordReports(
+      w.db,
+      gw,
+      [report({ devices: offline() })],
+      at(back + DEVICE_GRACE_MS),
+    );
+    expect(jobs).toEqual([{ incidentId: w.incident.rows[0]!.id, event: 'opened' }]);
+    expect(w.incident.rows).toHaveLength(1);
+    expect(w.incident.rows[0]).toMatchObject({ status: 'open', occurrences: 2 });
+  });
+
   it('opens a fresh incident once the flap window has passed', async () => {
     const w = world();
     const gw = { id: GW, orgId: ORG };

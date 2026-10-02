@@ -96,6 +96,8 @@ export async function getDefinition(
     ['room', roomId],
     ['org', null],
   ] as const) {
+    // An empty room id means "the organisation's default"; it is not a valid uuid to query.
+    if (scope === 'room' && !rid) continue;
     const row = await db.usageDefinition.findFirst({ where: { orgId, roomId: rid, kind } });
     const rule = row ? parseRule(row.rule) : null;
     if (row && rule)

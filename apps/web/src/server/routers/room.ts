@@ -169,7 +169,12 @@ export const roomRouter = router({
           message: roomLimitMessage(entitlements),
         });
       const room = await db.room.create({
-        data: { orgId: ctx.orgId, siteId: site.id, name: input.name, type: input.type ?? 'meeting' },
+        data: {
+          orgId: ctx.orgId,
+          siteId: site.id,
+          name: input.name,
+          type: input.type ?? 'meeting',
+        },
         omit,
       });
       await writeAudit({
@@ -185,6 +190,62 @@ export const roomRouter = router({
         ),
       );
       return room;
+    }),
+
+  /** Adds several rooms to a site at once. Names already used in the site are skipped. */
+  createMany: orgProcedure
+    .input(
+      z.object({
+        orgId,
+        siteId: z.string().uuid(),
+        names: z.array(name).min(1).max(100),
+        type: RoomType.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev']);
+      const site = await assertSite(ctx.orgId, input.siteId);
+      const entitlements = await getEntitlements(db, ctx.orgId);
+      if (entitlements.maxRooms === 0)
+        throw new TRPCError({ code: 'FORBIDDEN', message: roomLimitMessage(entitlements) });
+      const taken = new Set(
+        (await db.room.findMany({ where: { orgId: ctx.orgId, siteId: site.id } })).map((r) =>
+          r.name.toLowerCase(),
+        ),
+      );
+      const fresh: string[] = [];
+      const skipped: string[] = [];
+      for (const n of input.names) {
+        const key = n.toLowerCase();
+        if (taken.has(key)) skipped.push(n);
+        else {
+          taken.add(key);
+          fresh.push(n);
+        }
+      }
+      if (fresh.length > 0) {
+        await db.room.createMany({
+          data: fresh.map((n) => ({
+            orgId: ctx.orgId,
+            siteId: site.id,
+            name: n,
+            type: input.type ?? 'meeting',
+          })),
+        });
+        await writeAudit({
+          orgId: ctx.orgId,
+          actorId: ctx.user.id,
+          action: 'room.create_many',
+          target: site.id,
+          meta: { site: site.name, count: fresh.length },
+        });
+        after(() =>
+          syncQuantity(db, ctx.orgId).catch((e) =>
+            console.error('[billing] quantity sync failed', e),
+          ),
+        );
+      }
+      return { created: fresh.length, skipped };
     }),
 
   /**
@@ -213,7 +274,8 @@ export const roomRouter = router({
           devices: describeSlots(slotsOf(shape.slots).map(slotToSource)),
         };
       }
-      if (!input.roomId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose a room or a shape' });
+      if (!input.roomId)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose a room or a shape' });
       const room = await db.room.findFirst({
         where: { id: input.roomId, orgId: ctx.orgId, ...siteFilter(ctx.siteScope) },
         select: { id: true, name: true, siteId: true, gatewayId: true, areaId: true, tags: true },
@@ -279,7 +341,9 @@ export const roomRouter = router({
     .input(z.object({ orgId, shapeId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
-      const shape = await db.roomShape.findFirst({ where: { id: input.shapeId, orgId: ctx.orgId } });
+      const shape = await db.roomShape.findFirst({
+        where: { id: input.shapeId, orgId: ctx.orgId },
+      });
       if (!shape) throw new TRPCError({ code: 'NOT_FOUND', message: 'Shape not found' });
       await db.roomShape.delete({ where: { id: shape.id } });
       await writeAudit({
@@ -341,7 +405,13 @@ export const roomRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner', 'dev']);
-      let source: { id: string; name: string; siteId: string; gatewayId: string | null; monitorOnly: boolean };
+      let source: {
+        id: string;
+        name: string;
+        siteId: string;
+        gatewayId: string | null;
+        monitorOnly: boolean;
+      };
       let sourceDevices: SourceDevice[];
       if (input.shapeId) {
         const shape = await db.roomShape.findFirst({
@@ -350,7 +420,13 @@ export const roomRouter = router({
         if (!shape) throw new TRPCError({ code: 'NOT_FOUND', message: 'Shape not found' });
         if (!input.siteId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose a site' });
         const site = await assertSite(ctx.orgId, input.siteId);
-        source = { id: shape.id, name: shape.name, siteId: site.id, gatewayId: null, monitorOnly: false };
+        source = {
+          id: shape.id,
+          name: shape.name,
+          siteId: site.id,
+          gatewayId: null,
+          monitorOnly: false,
+        };
         sourceDevices = slotsOf(shape.slots).map(slotToSource);
       } else {
         if (!input.sourceRoomId)
@@ -369,7 +445,12 @@ export const roomRouter = router({
       });
       const checked = checkCopies(sourceDevices, input.copies, context);
       const ok = checked.batch.length === 0 && checked.rows.every((r) => r.problems.length === 0);
-      if (input.dryRun || !ok) return { ok, created: [] as { roomId: string; name: string; devices: number }[], ...checked };
+      if (input.dryRun || !ok)
+        return {
+          ok,
+          created: [] as { roomId: string; name: string; devices: number }[],
+          ...checked,
+        };
 
       const created = await db.$transaction(
         (tx) =>

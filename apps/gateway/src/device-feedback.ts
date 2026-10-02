@@ -41,5 +41,7 @@ export function deviceFeedback(state: DeviceState | undefined, ports: Port[]): D
   if (state?.activeApp !== undefined) feedback.activeApp = state.activeApp;
   if (state?.playback !== undefined) feedback.playback = state.playback;
   if (state?.playSource !== undefined) feedback.playSource = state.playSource;
+  if (state?.inMeeting !== undefined) feedback.inMeeting = state.inMeeting;
+  if (state?.roomState !== undefined) feedback.roomState = state.roomState;
   return feedback;
 }

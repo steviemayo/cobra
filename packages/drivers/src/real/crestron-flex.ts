@@ -104,6 +104,25 @@ export function flexOccupied(
   return occupied;
 }
 
+/**
+ * What the Teams Rooms app says it is doing, in four words: idle, present, in_meeting or other.
+ * The app's own text is matched loosely (case, spacing and punctuation ignored). An empty or error
+ * reply is left unreported rather than called "other". An in-meeting join that says yes wins over
+ * the text, since the text varies between app versions.
+ */
+export function flexRoomState(
+  appState: string | undefined,
+  inMeeting: boolean | undefined,
+): string | undefined {
+  if (inMeeting === true) return 'in_meeting';
+  const t = (appState ?? '').toLowerCase().replace(/[^a-z]/g, '');
+  if (!t || /error|fail|unknown|unavailable|^(na|none|null|undefined)$/.test(t)) return undefined;
+  if (t.includes('meeting') || t.includes('call')) return 'in_meeting';
+  if (t.includes('idle')) return 'idle';
+  if (t.includes('present') || t.includes('sharing')) return 'present';
+  return 'other';
+}
+
 /** The value after the first colon of "MAC Address: 90-8D-..." or "Hostname : MTR-1", or undefined. */
 const afterColon = (reply: string): string | undefined => {
   const m = /^[^:\r\n]+:[ \t]*(\S.*?)[ \t]*$/m.exec(reply);
@@ -357,6 +376,9 @@ export class CrestronFlexDriver extends BaseDriver {
         s.points = points;
         if (firmware) s.firmware = firmware;
         if (occupied !== undefined) s.occupied = occupied;
+        if (reading.d.inMeeting !== undefined) s.inMeeting = reading.d.inMeeting;
+        const roomState = flexRoomState(reading.s.appState, reading.d.inMeeting);
+        if (roomState !== undefined) s.roomState = roomState;
         s.details = flexDetails(reading);
       });
     } catch (e) {

@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { generateSealKey, generateKeyPair, verifyDeviceSet } from '@kestrel/crypto';
 import type { DeviceReport } from '@kestrel/model';
 import {
+  alignDates,
   createArea,
   createDevice,
   deviceSetVersion,
@@ -495,5 +496,74 @@ describe('changing how a device is reached', () => {
     expect(w.device.rows[0]).toMatchObject({ points: [] });
     expect(w.device.rows[0]!.pointValues).not.toEqual({ g: 50 });
     expect(w.deviceEvent.rows.some((e) => e.field === 'control points')).toBe(true);
+  });
+});
+
+describe('aligning dates', () => {
+  async function three() {
+    const w = world();
+    const add = (name: string, roomId: string | null, extra = {}) =>
+      createDevice(w.db, {
+        orgId: ORG,
+        siteId: SITE,
+        kind: 'passive',
+        actorId: null,
+        name,
+        category: 'display',
+        roomId,
+        ...extra,
+      });
+    await add('A', ROOM);
+    await add('B', ROOM, { warrantyEndsOn: new Date('2027-01-01') });
+    await add('C', null);
+    return w;
+  }
+  const base = { orgId: ORG, actorId: null, scopeId: null };
+
+  it('fills blanks only by default, within a room', async () => {
+    const w = await three();
+    const res = await alignDates(w.db, {
+      ...base,
+      scope: 'room',
+      scopeId: ROOM,
+      warrantyEndsOn: new Date('2030-06-30'),
+      overwrite: false,
+    });
+    expect(res).toEqual({ ok: true, value: { matched: 2, updated: 1 } });
+    const by = (n: string) => w.device.rows.find((r) => r.name === n)!;
+    expect(by('A').warrantyEndsOn).toEqual(new Date('2030-06-30'));
+    expect(by('B').warrantyEndsOn).toEqual(new Date('2027-01-01'));
+    expect(by('C').warrantyEndsOn).toBeNull();
+  });
+
+  it('replaces recorded dates when told to, across the organisation', async () => {
+    const w = await three();
+    const res = await alignDates(w.db, {
+      ...base,
+      scope: 'org',
+      installedOn: new Date('2025-01-01'),
+      warrantyEndsOn: new Date('2030-06-30'),
+      overwrite: true,
+    });
+    expect(res).toEqual({ ok: true, value: { matched: 3, updated: 3 } });
+    expect(
+      w.device.rows.every((r) => +(r.warrantyEndsOn as Date) === +new Date('2030-06-30')),
+    ).toBe(true);
+  });
+
+  it('refuses no dates and an unknown room', async () => {
+    const w = await three();
+    expect(await alignDates(w.db, { ...base, scope: 'org', overwrite: false })).toMatchObject({
+      ok: false,
+    });
+    expect(
+      await alignDates(w.db, {
+        ...base,
+        scope: 'room',
+        scopeId: '44444444-4444-4444-8444-444444444444',
+        endOfLifeOn: new Date('2031-01-01'),
+        overwrite: false,
+      }),
+    ).toMatchObject({ ok: false, message: 'No such room' });
   });
 });

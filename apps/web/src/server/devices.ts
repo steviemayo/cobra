@@ -287,10 +287,15 @@ export async function ingestDeviceReports(
     if (!row) continue;
     const patch: Record<string, unknown> = { lastSeenAt: now };
     let since = row.since ?? now;
+    // A confirmed report says how long the device has really been quiet.
+    const quietSince =
+      !rep.online && rep.confirmed && rep.offlineForMs !== undefined
+        ? new Date(now.getTime() - rep.offlineForMs)
+        : now;
     if (row.online !== rep.online || !row.since) {
       patch.online = rep.online;
-      patch.since = now;
-      since = now;
+      patch.since = quietSince;
+      since = quietSince;
     }
     if (rep.name && rep.name !== row.name && !row.name) patch.name = rep.name;
     if (rep.feedback && JSON.stringify(rep.feedback) !== JSON.stringify(row.feedback ?? null))
@@ -394,7 +399,8 @@ export async function ingestDeviceReports(
           now,
         ),
       );
-    else if (now.getTime() - since.getTime() >= DEVICE_GRACE_MS)
+    // The gateway has already waited out a run of quick failed checks when it says `confirmed`.
+    else if (rep.confirmed || now.getTime() - since.getTime() >= DEVICE_GRACE_MS)
       add(
         await openIncident(
           monitoring,
@@ -797,6 +803,60 @@ export async function resolveSwap(
     now,
   );
   return { ok: true, value: { id: row.id } };
+}
+
+export type AlignScope = 'org' | 'site' | 'room';
+
+/**
+ * Sets the install, warranty-end and end-of-life dates on every device in a room, a site or the
+ * whole organisation, for quick alignment. By default only blanks are filled; `overwrite` replaces
+ * dates already recorded. Each change goes through updateDevice, so it is logged like a manual edit.
+ */
+export async function alignDates(
+  db: DevicesDb,
+  input: {
+    orgId: string;
+    scope: AlignScope;
+    scopeId: string | null;
+    installedOn?: Date | null;
+    warrantyEndsOn?: Date | null;
+    endOfLifeOn?: Date | null;
+    overwrite: boolean;
+    actorId: string | null;
+  },
+  now = new Date(),
+): Promise<DeviceResult<{ matched: number; updated: number }>> {
+  const where: Record<string, unknown> = { orgId: input.orgId };
+  if (input.scope !== 'org') {
+    if (!input.scopeId) return bad('Choose where to apply the dates');
+    if (input.scope === 'site') {
+      if (!(await db.site.findFirst({ where: { id: input.scopeId, orgId: input.orgId } })))
+        return bad('No such site');
+      where.siteId = input.scopeId;
+    } else {
+      if (!(await checkRoom(db, input.orgId, input.scopeId))) return bad('No such room');
+      where.roomId = input.scopeId;
+    }
+  }
+  const dates = (['installedOn', 'warrantyEndsOn', 'endOfLifeOn'] as const).filter(
+    (f) => input[f] instanceof Date,
+  );
+  if (dates.length === 0) return bad('Enter at least one date');
+  const rows = await db.device.findMany({ where });
+  let updated = 0;
+  for (const row of rows) {
+    const patch: DeviceInput = {};
+    for (const f of dates)
+      if ((input.overwrite || !row[f]) && show(input[f]) !== show(row[f])) patch[f] = input[f];
+    if (Object.keys(patch).length === 0) continue;
+    const res = await updateDevice(
+      db,
+      { orgId: input.orgId, deviceId: row.id, actorId: input.actorId, patch },
+      now,
+    );
+    if (res.ok) updated++;
+  }
+  return { ok: true, value: { matched: rows.length, updated } };
 }
 
 export async function deleteDevice(

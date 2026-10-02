@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { DisplayKey, LocalId } from '../room/common';
-import type { ControlPoint, DiscoveredComponent, DiscoveredControl, PointReading } from '../room/points';
+import type {
+  ControlPoint,
+  DiscoveredComponent,
+  DiscoveredControl,
+  PointReading,
+} from '../room/points';
 import type { QuickActionId } from './quick-actions';
 
 // The vocabulary the engine speaks to drivers (real or simulated). Drivers translate to protocol.
@@ -128,6 +133,10 @@ export const DeviceState = z.object({
   playback: z.string().max(40).optional(),
   /** Music players: where the audio comes from, in the player's words (Spotify, Line in, Bluetooth). */
   playSource: z.string().max(100).optional(),
+  /** Conference systems: is a meeting or call running right now. */
+  inMeeting: z.boolean().optional(),
+  /** Conference systems: what the room is doing: idle, present, in_meeting or other. */
+  roomState: z.string().max(40).optional(),
   /** Input port -> is a signal present. Only devices with signal_detect report this. */
   signal: z.record(z.string(), z.boolean()).default({}),
   /** The firmware or software version the device reported about itself, as it wrote it. Read only: nothing here changes it. */

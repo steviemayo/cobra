@@ -10,6 +10,7 @@ import {
 } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import {
+  alignDates,
   createDevice,
   deleteDevice,
   resolveSwap,
@@ -260,6 +261,40 @@ export const deviceRouter = router({
         target: deviceId,
       });
       after(() => syncQuantity(db, ctx.orgId).catch(() => undefined));
+      return res.value;
+    }),
+
+  /**
+   * Sets install, warranty-end and end-of-life dates on every device in a room, a site or the whole
+   * organisation. Blanks only unless `overwrite` is set.
+   */
+  alignDates: orgProcedure
+    .input(
+      z.object({
+        orgId,
+        scope: z.enum(['org', 'site', 'room']),
+        scopeId: id.nullable(),
+        installedOn: z.coerce.date().optional(),
+        warrantyEndsOn: z.coerce.date().optional(),
+        endOfLifeOn: z.coerce.date().optional(),
+        overwrite: z.boolean().default(false),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev', 'support']);
+      const res = await alignDates(db, {
+        ...input,
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+      });
+      if (!res.ok) return fail(res.message);
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'device.align_dates',
+        target: input.scopeId ?? ctx.orgId,
+        meta: { scope: input.scope, overwrite: input.overwrite, ...res.value },
+      });
       return res.value;
     }),
 

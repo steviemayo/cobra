@@ -193,6 +193,18 @@ function purgeWorld(deleteAfter: Date | null) {
     { id: OTHER, name: 'Other Co', deletedAt: null, deleteAfter: null },
   ]);
   const staffAudit = table([]);
+  // ONLY: in this organisation alone. BOTH: also in Other Co. STAFFER: in this organisation and is staff.
+  const member = table([
+    { id: 'm1', orgId: ORG, userId: 'u-only' },
+    { id: 'm2', orgId: ORG, userId: 'u-both' },
+    { id: 'm3', orgId: OTHER, userId: 'u-both' },
+    { id: 'm4', orgId: ORG, userId: 'u-staff' },
+  ]);
+  const staffUser = table([{ id: 's1', userId: 'u-staff' }]);
+  const joinRequest = table([
+    { id: 'j1', orgId: OTHER, userId: 'u-only' },
+    { id: 'j2', orgId: OTHER, userId: 'u-both' },
+  ]);
   const tables = Object.fromEntries(
     PURGED_BY_ORG_ID.map((t) => [
       t,
@@ -202,14 +214,21 @@ function purgeWorld(deleteAfter: Date | null) {
       ]),
     ]),
   );
-  return { db: { org, staffAudit, ...tables } as never, org, staffAudit, tables };
+  return {
+    db: { org, staffAudit, member, staffUser, joinRequest, ...tables } as never,
+    org,
+    staffAudit,
+    member,
+    joinRequest,
+    tables,
+  };
 }
 
 describe('the clean-up', () => {
   it('deletes an organisation whose day has come, and everything keyed to it that would not cascade', async () => {
     const w = purgeWorld(new Date(NOW.getTime() + 30 * DAY));
     const out = await purgeDueOrgs(w.db, new Date(NOW.getTime() + 31 * DAY));
-    expect(out).toEqual({ purged: [ORG], failed: [] });
+    expect(out).toEqual({ purged: [ORG], failed: [], accountsDeleted: [], accountsFailed: [] });
     expect(w.org.rows.map((o) => o.id)).toEqual([OTHER]);
     for (const t of PURGED_BY_ORG_ID)
       expect(w.tables[t]!.rows.map((r) => r.id)).toEqual([`${t}-theirs`]);
@@ -219,6 +238,32 @@ describe('the clean-up', () => {
       staffUserId: STAFF,
       meta: { name: 'Acme AV', reason: 'Left' },
     });
+  });
+
+  it('deletes the sign-in account of someone who was only in it, and nobody else', async () => {
+    const w = purgeWorld(new Date(NOW.getTime() + 30 * DAY));
+    const deleted: string[] = [];
+    const out = await purgeDueOrgs(w.db, new Date(NOW.getTime() + 31 * DAY), async (id) => {
+      deleted.push(id);
+    });
+    // u-both is also in Other Co, u-staff is Kestrel staff: both keep their accounts.
+    expect(deleted).toEqual(['u-only']);
+    expect(out.accountsDeleted).toEqual(['u-only']);
+    expect(w.joinRequest.rows.map((r) => r.id)).toEqual(['j2']);
+    expect(w.member.rows.map((m) => m.id)).toEqual(['m3']);
+    expect(w.staffAudit.rows.map((a) => a.action)).toEqual([
+      'org.delete.purge',
+      'org.delete.accounts',
+    ]);
+  });
+
+  it('reports an account it could not delete, since the organisation is already gone', async () => {
+    const w = purgeWorld(new Date(NOW.getTime() + 30 * DAY));
+    const out = await purgeDueOrgs(w.db, new Date(NOW.getTime() + 31 * DAY), async () => {
+      throw new Error('auth down');
+    });
+    expect(out.purged).toEqual([ORG]);
+    expect(out.accountsFailed).toEqual([{ userId: 'u-only', error: 'auth down' }]);
   });
 
   it('leaves alone one that is not due yet, and one not scheduled at all', async () => {
