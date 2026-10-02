@@ -68,7 +68,6 @@ export interface Result {
 
 export { HEARTBEAT_SECONDS, OFFLINE_AFTER_MS, effectiveStatus } from './gateway-status';
 import { HEARTBEAT_SECONDS } from './gateway-status';
-import { latestVersions } from './gateway-updates';
 
 const fail = (status: number, error: string): Result => ({ status, body: { error } });
 
@@ -286,7 +285,8 @@ export async function heartbeat(
       watch: await watchedRooms(db, gw.id, now),
       pollNow: await hasWaitingIntents(db, gw.id, now),
       control: entitlements.control,
-      update: { channel: gw.channel, latest: latestVersions()[gw.channel] },
+      // The portal decides when a gateway updates and orders it (below), so it does not announce a version: that was read from a setting nobody kept current.
+      update: { channel: gw.channel, latest: null },
       ...(updateOrder ? { updateOrder } : {}),
       // Only a gateway that says it shows bookings is sent them; an older one has no use for them.
       schedules: parsed.data.features.includes('schedule')

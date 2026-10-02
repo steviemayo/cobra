@@ -360,21 +360,11 @@ describe('heartbeat', () => {
     expect(schedules[0]!.meetings[0]!.title).toBe('Budget review');
   });
 
-  it('tells the gateway which channel it follows and the newest version on it', async () => {
+  it('tells the gateway which channel it follows, and does not announce a version', async () => {
     const w = world();
     const gw = { ...w.gateway.rows[0]!, channel: 'beta' } as never;
-    const prev = process.env.GATEWAY_LATEST_BETA;
-    process.env.GATEWAY_LATEST_BETA = '0.3.0-beta.1';
-    try {
-      const res = await heartbeat(w.db, gw, hb([]), keys);
-      expect(HeartbeatResponse.parse(res.body).update).toEqual({
-        channel: 'beta',
-        latest: '0.3.0-beta.1',
-      });
-    } finally {
-      if (prev === undefined) delete process.env.GATEWAY_LATEST_BETA;
-      else process.env.GATEWAY_LATEST_BETA = prev;
-    }
+    const res = await heartbeat(w.db, gw, hb([]), keys);
+    expect(HeartbeatResponse.parse(res.body).update).toEqual({ channel: 'beta', latest: null });
   });
 
   it('stores a room error, and ignores rooms that belong to another gateway', async () => {
