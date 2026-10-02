@@ -287,10 +287,15 @@ export async function ingestDeviceReports(
     if (!row) continue;
     const patch: Record<string, unknown> = { lastSeenAt: now };
     let since = row.since ?? now;
+    // A confirmed report says how long the device has really been quiet.
+    const quietSince =
+      !rep.online && rep.confirmed && rep.offlineForMs !== undefined
+        ? new Date(now.getTime() - rep.offlineForMs)
+        : now;
     if (row.online !== rep.online || !row.since) {
       patch.online = rep.online;
-      patch.since = now;
-      since = now;
+      patch.since = quietSince;
+      since = quietSince;
     }
     if (rep.name && rep.name !== row.name && !row.name) patch.name = rep.name;
     if (rep.feedback && JSON.stringify(rep.feedback) !== JSON.stringify(row.feedback ?? null))
@@ -394,7 +399,8 @@ export async function ingestDeviceReports(
           now,
         ),
       );
-    else if (now.getTime() - since.getTime() >= DEVICE_GRACE_MS)
+    // The gateway has already waited out a run of quick failed checks when it says `confirmed`.
+    else if (rep.confirmed || now.getTime() - since.getTime() >= DEVICE_GRACE_MS)
       add(
         await openIncident(
           monitoring,

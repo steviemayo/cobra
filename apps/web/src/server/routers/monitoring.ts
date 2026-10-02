@@ -3,7 +3,8 @@ import { TRPCError } from '@trpc/server';
 import { after } from 'next/server';
 import { db } from '@kestrel/db';
 import { DEVICE_FEEDBACK_FIELDS, DeviceDetails, DeviceFeedback } from '@kestrel/model';
-import { deliverAlerts } from '../alerts';
+import { summariseBadges } from '../incident-badges';
+import { queueAlerts } from '../alert-batch';
 import { writeAudit } from '../audit';
 import { deviceFeedbackDailyHistory, deviceFeedbackHistory } from '../device-feedback-history';
 import { firmwareReport } from '../firmware-report';
@@ -56,7 +57,7 @@ export const monitoringRouter = router({
     .input(z.object({ orgId }))
     .query(async ({ ctx }) => {
       const jobs = await maybeSweep(db);
-      if (jobs.length) after(() => deliverAlerts(db, jobs));
+      if (jobs.length) after(() => queueAlerts(db, jobs));
       return orgOverview(db, ctx.orgId, new Date(), ctx.siteScope);
     }),
 
@@ -66,7 +67,7 @@ export const monitoringRouter = router({
     .input(z.object({ orgId }))
     .query(async ({ ctx }) => {
       const jobs = await maybeSweep(db);
-      if (jobs.length) after(() => deliverAlerts(db, jobs));
+      if (jobs.length) after(() => queueAlerts(db, jobs));
       return estateOverview(db, ctx.orgId, new Date(), ctx.siteScope);
     }),
 
@@ -189,6 +190,40 @@ export const monitoringRouter = router({
     .meta(SITE_SCOPED)
     .input(z.object({ orgId }))
     .query(({ ctx }) => firmwareReport(db, ctx.orgId, ctx.siteScope)),
+
+  // For the menu badges and toasts: a small, cheap answer polled from every page.
+  incidentBadges: monitoringProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId }))
+    .query(async ({ ctx }) => {
+      const scoped = await incidentScope(ctx.orgId, ctx.siteScope);
+      const rows = await db.incident.findMany({
+        where: { orgId: ctx.orgId, status: 'open', ...(scoped ? { OR: scoped } : {}) },
+        select: {
+          id: true,
+          kind: true,
+          severity: true,
+          title: true,
+          roomId: true,
+          roomIds: true,
+          parentId: true,
+          openedAt: true,
+          acknowledgedAt: true,
+        },
+        orderBy: { openedAt: 'desc' },
+        take: 500,
+      });
+      const roomIds = [
+        ...new Set(rows.flatMap((r) => (r.roomId ? [r.roomId] : []))),
+      ];
+      const rooms = roomIds.length
+        ? await db.room.findMany({
+            where: { orgId: ctx.orgId, id: { in: roomIds } },
+            select: { id: true, name: true },
+          })
+        : [];
+      return summariseBadges(rows, new Map(rooms.map((r) => [r.id, r.name])));
+    }),
 
   incidents: monitoringProcedure
     .meta(SITE_SCOPED)

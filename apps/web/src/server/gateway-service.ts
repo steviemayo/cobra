@@ -14,7 +14,7 @@ import { signedBindingsFor } from './bindings';
 import { applyCommandResults, takePendingCommands } from './commands';
 import { updateStep } from './gateway-update-service';
 import { applyReport, promoteDue } from './deployment-service';
-import { deliverAlerts } from './alerts';
+import { queueAlerts } from './alert-batch';
 import { deviceSetVersion, ingestDeviceReports, signedDeviceSetFor } from './devices';
 import { getEntitlements } from './billing';
 import { groupsForGateway, recordDividers } from './gateway-groups';
@@ -293,7 +293,7 @@ export async function heartbeat(
         ? await schedulesForGateway(db, gw, now)
         : [],
     },
-    after: jobs.length ? () => deliverAlerts(db, jobs) : undefined,
+    after: jobs.length ? () => queueAlerts(db, jobs) : undefined,
   };
 }
 

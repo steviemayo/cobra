@@ -273,6 +273,13 @@ export const DeviceReport = z.object({
   deviceId: z.string().min(1).max(100),
   name: z.string().max(200),
   online: z.boolean(),
+  /**
+   * The gateway has already waited out a run of quick failed checks before saying this device is
+   * offline, so the cloud raises the problem now instead of applying its own grace period.
+   */
+  confirmed: z.boolean().optional(),
+  /** How long the device has been unreachable, in milliseconds, when `confirmed`. */
+  offlineForMs: z.number().int().min(0).max(86_400_000).optional(),
   /** The driver this device uses (for example "pjlink" or "custom:my-driver"), so versions can be compared by driver. */
   driver: z.string().max(100).optional(),
   /** The firmware version the device reported, if its driver can ask. */

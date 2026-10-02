@@ -26,6 +26,10 @@ const KEY_CONFIG_VERSION = 'configVersion';
 const KEY_DEVICE_SET = 'deviceSet';
 const KEY_INSTALL = 'install';
 const MAX_BACKOFF_MS = 60_000;
+/** A confirmed device change waits this long for others to join it, then checks in. */
+const URGENT_COALESCE_MS = 1_500;
+/** Check-ins started by device changes are at least this far apart. */
+const URGENT_MIN_GAP_MS = 3_000;
 
 /** What this gateway can do, sent in every heartbeat so the portal only hands it work it can run. */
 const FEATURES = ['discovery', 'firmware', 'self-update', 'device-set', 'config-enforce'];
@@ -132,6 +136,7 @@ export class Gateway {
   start() {
     this.bootDevices(this.trustedKeys());
     this.devices.start();
+    this.devices.onUrgent = () => this.pushSoon();
     // If the installer had to put the old version back, say so once the cloud is reachable.
     this.updateReport = takeUpdateResult(this.cfg.dataDir);
     this.record({ type: 'gateway.started', data: { version: this.cfg.version } });
@@ -141,6 +146,27 @@ export class Gateway {
   stop() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.urgentTimer) clearTimeout(this.urgentTimer);
+    this.urgentTimer = null;
+  }
+
+  private urgentTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastUrgentAt = 0;
+
+  /**
+   * A device was confirmed down (or came back): check in now rather than at the next beat. Changes
+   * a moment apart share one check-in, and check-ins this way are spaced out so a storm of them
+   * can never hammer the cloud.
+   */
+  private pushSoon() {
+    if (this.stopped || this.hold || this.urgentTimer || !this.store.get(KEY_CREDENTIAL)) return;
+    const wait = Math.max(URGENT_COALESCE_MS, this.lastUrgentAt + URGENT_MIN_GAP_MS - Date.now());
+    this.urgentTimer = setTimeout(() => {
+      this.urgentTimer = null;
+      this.lastUrgentAt = Date.now();
+      this.wake();
+    }, wait);
+    this.urgentTimer.unref?.();
   }
 
   get identity(): Identity | null {
