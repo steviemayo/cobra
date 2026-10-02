@@ -39,7 +39,7 @@ Everything below the phase table, up to and including build steps N to U (Window
 - Gateway-offline detection and calendar polling need an external scheduler (see Ops). Vercel Hobby cron is daily only, so `vercel.json` only has retention
 - Calendar triggers use meeting starts only; combined "follow" mirrors activity ids (no cross-room routing model)
 - Phone sessions are stateless two-hour tokens: they cannot be revoked, only expire
-- Windows update script does not replace itself (the gateway copies its bundled one over the installed one before each update, S-3); `GATEWAY_VERSION` must be bumped per release (CI enforces it) along with `GATEWAY_LATEST_STABLE/BETA` on the server
+- Windows update script does not replace itself (the gateway copies its bundled one over the installed one before each update, S-3); `GATEWAY_VERSION` must be bumped per release (CI enforces it) and nothing on the server: the portal reads the newest version from the `gateway-stable` / `gateway-beta` release's `VERSION` file (decision S-9)
 
 ## Repo map (added since Phase 0)
 

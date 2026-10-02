@@ -191,7 +191,7 @@ Full list (from `.env.example`). "Now" means set it before anything else works; 
 | `STAFF_REQUIRE_MFA`, `STAFF_HOST` | optional | leave both unset in production. See `docs/staff-portal-and-msp.md` |
 | `RESEND_API_KEY`, `ALERT_FROM_EMAIL` | step 6 | Resend |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_BASIC`, `STRIPE_PRICE_PRO` | step 7 | Stripe |
-| `GATEWAY_LATEST_STABLE`, `GATEWAY_LATEST_BETA` | step 9 | newest gateway version per channel, e.g. `0.1.0` |
+| ~~`GATEWAY_LATEST_STABLE`, `GATEWAY_LATEST_BETA`~~ | step 9 | No longer used (decision S-9): the portal reads each channel's published `VERSION`. Delete them from Vercel |
 | `NEXT_PUBLIC_GATEWAY_IMAGE` | optional | e.g. `ghcr.io/steviemayo/kestrel-gateway:stable`, shown in the "add gateway" instructions |
 | `GITHUB_RELEASE_TOKEN` | step N | fine-grained PAT, Contents: Read on this repo. Lets `/api/gateway/download` fetch the Windows installer from the private repo's release on people's behalf |
 
