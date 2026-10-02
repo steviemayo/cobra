@@ -11,6 +11,7 @@ import { AppSidebar } from './app-sidebar';
 import { Breadcrumbs } from './breadcrumbs';
 import { CommandMenu, usePalette } from './command-menu';
 import { DialogsProvider } from './dialogs';
+import { IncidentToaster } from './incident-toaster';
 import { PortalAccent } from './portal-accent';
 import { OrgProvider, type OrgSummary, type PortalBrandMark } from './org-context';
 import { ThemeToggle } from './theme-toggle';
@@ -78,6 +79,7 @@ export function OrgShell({
         <DialogsProvider>
           <CommandMenu>
             <AppSidebar />
+            <IncidentToaster />
             <SidebarInset className="min-w-0">
               {viewAs && <ViewAsBanner session={viewAs} email={user.email} />}
               <ViaProviderBanner />
