@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { CodeInput } from '@/components/ui/code-input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
@@ -115,16 +115,8 @@ export function StaffMfa() {
       {ready && factorId && (
         <form onSubmit={verify} className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="mfa-code">Code</Label>
-            <Input
-              id="mfa-code"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              autoFocus
-              maxLength={6}
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-            />
+            <Label>Code</Label>
+            <CodeInput value={code} onChange={setCode} disabled={busy} autoFocus />
           </div>
           <Button type="submit" disabled={busy || code.length !== 6}>
             {busy && <Spinner />} Continue
