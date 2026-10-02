@@ -25,9 +25,7 @@
         "STRIPE_PRICE_BASIC_YEARLY",
         "STRIPE_PRICE_PRO_YEARLY",
         "KESTREL_SECRETS_KEY",
-        "KESTREL_ADMIN_EMAILS",
-        "GATEWAY_LATEST_STABLE",
-        "GATEWAY_LATEST_BETA"
+        "KESTREL_ADMIN_EMAILS"
       ],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },

@@ -6,34 +6,20 @@ import { channelRelease } from './gateway-release';
 
 export type Channel = 'stable' | 'beta';
 
-/** The newest version published on each channel, set by whoever releases the gateway. */
-export function latestVersions(
-  env: Record<string, string | undefined> = process.env,
-): Record<Channel, string | null> {
-  const clean = (v: string | undefined) =>
-    v && /^\d+(\.\d+){0,2}/.test(v.trim()) ? v.trim() : null;
-  return { stable: clean(env.GATEWAY_LATEST_STABLE), beta: clean(env.GATEWAY_LATEST_BETA) };
-}
-
 /**
- * The newest version on each channel: what is actually published (the release's VERSION file, read
- * from GitHub and cached briefly), or the `GATEWAY_LATEST_*` setting when that is newer or the
- * release cannot be read. The setting used to be the only source, so a release nobody remembered to
- * write into it left every gateway looking up to date and hid the Update button.
+ * The newest version on each channel: what is actually published, read from the release's VERSION
+ * file on GitHub and cached briefly. That file is the only source: CI writes it when a gateway change
+ * reaches `main` (stable) or `dev` (beta), so nothing is set by hand on the server. A channel whose
+ * release cannot be read is null (the gateway's update status is then "unknown").
  */
 export async function publishedVersions(
-  env: Record<string, string | undefined> = process.env,
   read: (channel: Channel) => Promise<string | null> = async (c) =>
     (await channelRelease(c))?.version ?? null,
 ): Promise<Record<Channel, string | null>> {
-  const fromEnv = latestVersions(env);
-  const newest = async (channel: Channel) => {
-    const published = await read(channel).catch(() => null);
-    const set = fromEnv[channel];
-    if (published && set) return compareVersions(published, set) >= 0 ? published : set;
-    return published ?? set;
-  };
-  const [stable, beta] = await Promise.all([newest('stable'), newest('beta')]);
+  const [stable, beta] = await Promise.all([
+    read('stable').catch(() => null),
+    read('beta').catch(() => null),
+  ]);
   return { stable, beta };
 }
 
@@ -58,7 +44,7 @@ export type UpdateStatus = 'current' | 'behind' | 'unknown';
 /** Whether a gateway is running the newest version on its channel; unknown if either is not known. */
 export function updateStatus(
   gateway: { version: string | null; channel: Channel },
-  latest: Record<Channel, string | null> = latestVersions(),
+  latest: Record<Channel, string | null>,
 ): { status: UpdateStatus; latest: string | null } {
   const newest = latest[gateway.channel];
   if (!gateway.version || !newest) return { status: 'unknown', latest: newest };
