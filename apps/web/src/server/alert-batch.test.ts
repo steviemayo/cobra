@@ -36,10 +36,15 @@ function world(incidents: ReturnType<typeof inc>[], rooms = 4) {
     },
   ]);
   const alertDelivery = table([]);
-  const calls: { url: string; body: any }[] = [];
+  interface Body {
+    event: string;
+    incident: { title: string; severity: string; room: string | null };
+    batch?: { count: number };
+  }
+  const calls: { url: string; body: Body }[] = [];
   const s: Senders = {
     fetch: (async (url: string | URL, init: RequestInit) => {
-      calls.push({ url: String(url), body: JSON.parse(String(init.body)) });
+      calls.push({ url: String(url), body: JSON.parse(String(init.body)) as Body });
       return new Response('{}', { status: 200 });
     }) as typeof fetch,
     resolve: async () => ['93.184.216.34'],
@@ -84,7 +89,7 @@ describe('batched alerts', () => {
       severity: 'critical',
       room: 'Room 1',
     });
-    expect(body.batch.count).toBe(3);
+    expect(body.batch?.count).toBe(3);
     expect(w.alertDelivery.rows.map((r) => r.status).sort()).toEqual([
       'batched',
       'batched',
@@ -130,7 +135,7 @@ describe('batched alerts', () => {
       queueAlerts(w.db, opened(2), w.s, windows),
     ]);
     expect(w.calls).toHaveLength(1);
-    expect(w.calls[0]!.body.batch.count).toBe(2);
+    expect(w.calls[0]!.body.batch?.count).toBe(2);
   });
 
   it('plans one group of one for anything left alone', async () => {
