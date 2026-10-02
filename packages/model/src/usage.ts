@@ -135,6 +135,7 @@ export const DEFAULT_USAGE_RULES: Record<UsageKind, UsageRule> = {
       cond('projector', 'power', 'on'),
       cond('video_destination', 'power', 'on'),
       cond('recorder', 'recording', true),
+      cond('conference_system', 'inMeeting', true),
     ],
   },
   occupied: { op: 'or', rules: [cond('occupancy_sensor', 'occupied', true)] },
