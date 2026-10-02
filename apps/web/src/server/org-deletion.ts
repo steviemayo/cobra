@@ -166,21 +166,61 @@ export async function restoreOrg(
   });
 }
 
-type PurgeDb = Pick<PrismaClient, 'org'> &
+type PurgeDb = Pick<PrismaClient, 'org' | 'member' | 'staffUser' | 'joinRequest'> &
   Record<
     (typeof PURGED_BY_ORG_ID)[number],
     { deleteMany: (a: { where: { orgId: string } }) => Promise<unknown> }
   >;
 
-/** Deletes everything an organisation has, then the organisation (which takes the rest with it). */
-export async function purgeOrg(db: PurgeDb, orgId: string): Promise<void> {
+/** Removes a sign-in account (Supabase auth user). Throws if it cannot. */
+export type DeleteUser = (userId: string) => Promise<void>;
+
+export interface PurgeOrgResult {
+  /** Sign-in accounts that belonged to nothing but this organisation, and were deleted. */
+  accountsDeleted: string[];
+  /** Accounts that should have been deleted but could not be. The organisation is gone, so a person must remove them. */
+  accountsFailed: { userId: string; error: string }[];
+}
+
+/**
+ * Deletes everything an organisation has, then the organisation (which takes the rest with it).
+ * When `deleteUser` is given, each person who was a member of this organisation and of no other, and
+ * is not Kestrel staff, has their sign-in account deleted too. Anyone who also belongs to another
+ * organisation (or is staff) keeps their account.
+ */
+export async function purgeOrg(
+  db: PurgeDb,
+  orgId: string,
+  deleteUser?: DeleteUser,
+): Promise<PurgeOrgResult> {
+  const result: PurgeOrgResult = { accountsDeleted: [], accountsFailed: [] };
+  const members = await db.member.findMany({ where: { orgId } });
   for (const table of PURGED_BY_ORG_ID) await db[table].deleteMany({ where: { orgId } });
+  await db.member.deleteMany({ where: { orgId } });
   await db.org.delete({ where: { id: orgId } });
+  if (!deleteUser) return result;
+
+  for (const userId of new Set(members.map((m) => m.userId))) {
+    if ((await db.member.count({ where: { userId } })) > 0) continue;
+    if ((await db.staffUser.count({ where: { userId } })) > 0) continue;
+    try {
+      await deleteUser(userId);
+      // Their requests to join other organisations go with them (the rest of their rows have no account to point at).
+      await db.joinRequest.deleteMany({ where: { userId } });
+      result.accountsDeleted.push(userId);
+    } catch (e) {
+      result.accountsFailed.push({ userId, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return result;
 }
 
 export interface PurgeSummary {
   purged: string[];
   failed: { orgId: string; error: string }[];
+  /** Sign-in accounts deleted along with their only organisation. */
+  accountsDeleted: string[];
+  accountsFailed: { userId: string; error: string }[];
 }
 
 /**
@@ -191,11 +231,17 @@ export interface PurgeSummary {
 export async function purgeDueOrgs(
   db: PurgeDb & Pick<OrgDeletionDb, 'staffAudit'>,
   now = new Date(),
+  deleteUser?: DeleteUser,
 ): Promise<PurgeSummary> {
   const due = await db.org.findMany({
     where: { deletedAt: { not: null }, deleteAfter: { lte: now } },
   });
-  const summary: PurgeSummary = { purged: [], failed: [] };
+  const summary: PurgeSummary = {
+    purged: [],
+    failed: [],
+    accountsDeleted: [],
+    accountsFailed: [],
+  };
   for (const org of due) {
     if (!org.deletedAt || !org.deleteAfter) continue;
     try {
@@ -212,8 +258,24 @@ export async function purgeDueOrgs(
           },
         },
       });
-      await purgeOrg(db, org.id);
+      const res = await purgeOrg(db, org.id, deleteUser);
       summary.purged.push(org.id);
+      summary.accountsDeleted.push(...res.accountsDeleted);
+      summary.accountsFailed.push(...res.accountsFailed);
+      if (res.accountsDeleted.length || res.accountsFailed.length)
+        await db.staffAudit.create({
+          data: {
+            staffUserId: org.deletedBy ?? '00000000-0000-0000-0000-000000000000',
+            action: 'org.delete.accounts',
+            orgId: org.id,
+            target: org.id,
+            meta: {
+              name: org.name,
+              deleted: res.accountsDeleted,
+              failed: res.accountsFailed.map((f) => f.userId),
+            },
+          },
+        });
     } catch (e) {
       summary.failed.push({ orgId: org.id, error: e instanceof Error ? e.message : String(e) });
     }

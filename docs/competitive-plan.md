@@ -60,10 +60,15 @@
 - Per incident `kind` (and optionally per driver): short steps text and up to N allowlisted actions (reuse `RemoteCommand`), visible on the incident and on the ticket
 - Scrutiny: every action must stay allowlisted and audited (CLAUDE.md rule). Org-editable runbooks are user content, so render as plain text or sanitised markdown only
 
-### P7. Teams Rooms health (medium, cloud-side)
-- Read Teams Rooms device health through Microsoft Graph with the existing Microsoft 365 connection pattern; map to a Device (new driver class "cloud") and feed ordinary status, incidents
-- **Verify before committing**: exact Graph endpoints, permission scopes, per-customer admin consent, licensing, and rate limits. I have not verified them here
-- Teams only first; Zoom and Webex after real demand
+### P7. Conferencing platform health (re-scoped 2026-10-01 after checking the vendor APIs)
+- **Teams Rooms: do not build on Microsoft Graph.** `/beta/teamworkDevice` began retiring 8 Dec 2025 with no replacement ("no plans to support Graph APIs for Teams Devices"). Teams admin center device health rules and alerts retire by late Sept 2026, and monitoring moves to the Teams Rooms Pro Management portal, which has no supported API. Whether the old endpoint still answers today is **unverified** and can stop without notice, so it is not a foundation for a paid feature
+- **Teams Rooms, what we can use:**
+  - Crestron Flex UC-Engine: already covered. `crestron-flex.ts` reads the Teams Rooms app state and peripherals over the secure console (41797, reserved joins). Verified against a real unit
+  - Other Teams hardware: a per-vendor driver (Logitech, Poly, Yealink cloud or local APIs; not investigated), or Intune Graph (inventory and compliance only, Intune-enrolled devices only). Treat as demand-led
+  - Scan of the Flex UC-Engine (2026-10-01, TCP connect, all ports): open 80/443 (default IIS page), 7680 (Windows Delivery Optimization), 41794 and 41797 (Crestron CIP and secure console), 49400, 49500, 49501 (Crestron-specific, undocumented; 49501 is HTTPS and answers OPTIONS with a custom `x-sessioncookie` header, GET and POST return 405). RDP, WinRM and SMB are closed. **No generic Teams Rooms health API was found on the box.** UDP and authenticated paths were not tested
+- **Webex first (best documented):** Devices and Workspaces APIs plus Workspace Integrations (fine-grained xAPI, webhooks or a message queue for selected statuses, one admin authorisation per workspace in Control Hub). Two routes: cloud-side polling like the calendar connection, or a gateway driver over the device's local xAPI. The LAN route needs no per-customer cloud consent and fits the gateway model. Verify rate limits and the auth flow before building (the docs page could not be read in full)
+- **Zoom Rooms second:** REST API gives room list, status (Offline, Available, InMeeting, UnderConstruction), device lists and configuration, but no device health endpoint. Mic, camera and battery faults arrive only as Zoom Rooms Alert webhooks, so Kestrel would hold state and could miss events during downtime. Also a Zoom Rooms Control System API that has not been assessed
+- Sources: MC1183294 (https://mc.merill.net/message/MC1183294), Microsoft Q&A on the teamworkDevice replacement, m365admin.handsontek.net on the Teams admin center retirement, developer.webex.com (Workspace Integrations, xAPI Query Status), developers.zoom.us (Rooms APIs) and the Zoom developer forum thread on device health
 
 ### P8. Quick wins to schedule alongside
 - **QR report-a-problem**: per-room signed token URL, no login, creates a ticket with room and device state. **Security gate**: unauthenticated write, so rate limit per token and IP, length caps, no PII, honeypot or captcha, revocable token, and an entry in the security audit. Do not build before that is designed
