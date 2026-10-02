@@ -113,7 +113,9 @@ export function UsageDefinitionDialog({
             detected.
           </DialogDescription>
         </DialogHeader>
-        {def.isPending || rule === null ? (
+        {def.isError ? (
+          <p className="text-destructive text-sm">Could not load the rule: {def.error.message}</p>
+        ) : def.isPending || rule === null ? (
           <Skeleton className="h-40 w-full" />
         ) : (
           <div className="space-y-4">
