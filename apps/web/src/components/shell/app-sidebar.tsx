@@ -62,6 +62,7 @@ import {
 } from '@/components/ui/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useEstate, useEstateOverview } from '@/lib/use-estate';
+import { roomTrouble, useIncidentBadges } from '@/lib/use-incident-badges';
 import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
 import { useDialogs } from './dialogs';
@@ -82,6 +83,7 @@ function NavItem({
   exact,
   soon,
   count,
+  tone,
   locked,
 }: {
   href?: string;
@@ -91,6 +93,8 @@ function NavItem({
   soon?: boolean;
   /** A number to show beside the label (something waiting), when above zero. */
   count?: number;
+  /** A count that needs attention now (a critical incident) is red. */
+  tone?: 'critical';
   /** Not in the plan: still listed, with a lock. The page it opens says what to do. */
   locked?: boolean;
 }) {
@@ -121,16 +125,41 @@ function NavItem({
         </SidebarMenuBadge>
       )}
       {!locked && !!count && (
-        <SidebarMenuBadge aria-label={`${count} waiting`}>{count}</SidebarMenuBadge>
+        <SidebarMenuBadge
+          aria-label={`${count} waiting`}
+          className={cn(
+            tone === 'critical' && 'bg-destructive text-white peer-data-active/menu-button:text-white',
+          )}
+        >
+          {count}
+        </SidebarMenuBadge>
       )}
     </SidebarMenuItem>
   );
 }
 
+/** A small count on a room (or a dot when the menu is narrow) when it has open incidents. */
+function TroubleBadge({ trouble }: { trouble?: { count: number; severity: string } }) {
+  if (!trouble) return null;
+  return (
+    <span
+      role="status"
+      aria-label={`${trouble.count} open incident${trouble.count === 1 ? '' : 's'}`}
+      className={cn(
+        'ml-auto grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px] font-medium leading-none text-white',
+        trouble.severity === 'critical' ? 'bg-destructive' : 'bg-warning',
+      )}
+    >
+      {trouble.count}
+    </span>
+  );
+}
+
 function EstateTree() {
-  const { orgId } = useOrg();
+  const { orgId, canSupport } = useOrg();
   const pathname = usePathname();
   const { sites, rooms, roomsBySite, isPending } = useEstate();
+  const trouble = roomTrouble(useIncidentBadges(canSupport).data);
   const estate = useEstateOverview();
   const health = new Map((estate.data?.rooms ?? []).map((r) => [r.id, r.health]));
   const areas = estate.data?.areas ?? [];
@@ -167,6 +196,7 @@ function EstateTree() {
           >
             <HealthDot level={h?.level ?? 'unknown'} />
             <span title={h?.reasons[0]}>{r.name}</span>
+            <TroubleBadge trouble={trouble.get(r.id)} />
           </SidebarMenuSubButton>
         </SidebarMenuSubItem>
       );
@@ -202,6 +232,10 @@ function EstateTree() {
         const siteRooms = roomsBySite.get(site.id) ?? [];
         const open = manual[site.id] ?? (site.id === activeSiteId || sites.length <= 2);
         const sitePath = orgPath(orgId, `/sites/${site.id}`);
+        const siteTrouble = siteRooms.reduce((n, r) => n + (trouble.get(r.id)?.count ?? 0), 0);
+        const siteWorst = siteRooms.some((r) => trouble.get(r.id)?.severity === 'critical')
+          ? 'critical'
+          : 'warning';
         return (
           <SidebarMenuItem key={site.id}>
             <div className="flex items-center gap-0.5">
@@ -226,6 +260,14 @@ function EstateTree() {
                 <span>{site.name}</span>
               </SidebarMenuButton>
             </div>
+            {siteTrouble > 0 && !open && (
+              <SidebarMenuBadge
+                aria-label={`${siteTrouble} incidents`}
+                className={cn(siteWorst === 'critical' && 'bg-destructive text-white')}
+              >
+                {siteTrouble}
+              </SidebarMenuBadge>
+            )}
             <AnimatedCollapse open={open}>
               <SidebarMenuSub>
                 {siteRooms.length === 0 && (
@@ -271,6 +313,7 @@ interface NavEntry {
   label: string;
   exact?: boolean;
   count?: number;
+  tone?: 'critical';
   locked?: boolean;
   /** A v2 page not built yet: listed disabled with a Soon badge. */
   soon?: boolean;
@@ -334,7 +377,18 @@ function NavGroup({
         render={<button type="button" onClick={toggle} aria-expanded={open} />}
         className="cursor-pointer justify-between hover:text-sidebar-foreground"
       >
-        {label}
+        <span className="flex items-center gap-1.5">
+          {label}
+          {!open && items.some((i) => i.count) && (
+            <span
+              aria-label="Something needs attention"
+              className={cn(
+                'size-1.5 rounded-full',
+                items.some((i) => i.tone === 'critical') ? 'bg-destructive' : 'bg-warning',
+              )}
+            />
+          )}
+        </span>
         <ChevronRight
           className={cn('size-3.5 transition-transform duration-200', open && 'rotate-90')}
         />
@@ -381,6 +435,8 @@ export function AppSidebar() {
     enabled: isOwner && !scoped,
     refetchInterval: 60_000,
   });
+  // Open incidents that need someone: a count on Incidents, and a dot on its group while closed.
+  const badges = useIncidentBadges(canSupport).data;
   const base = orgPath(orgId);
   const isActive = useActive();
   const settingsOpen = isActive(`${base}/settings`);
@@ -397,7 +453,13 @@ export function AppSidebar() {
   // Items with `soon` are the new v2 pages, built in later steps (docs/pivot-monitoring.md).
   const monitor = entries([
     { href: `${base}/monitoring`, icon: Activity, label: 'Monitoring' },
-    canSupport && { href: `${base}/incidents`, icon: AlertTriangle, label: 'Incidents' },
+    canSupport && {
+      href: `${base}/incidents`,
+      icon: AlertTriangle,
+      label: 'Incidents',
+      count: badges?.open,
+      tone: badges?.critical ? ('critical' as const) : undefined,
+    },
     canSeeTeam && full && { href: `${base}/alerts`, icon: BellRing, label: 'Alerts' },
     canSupport && { href: `${base}/gateways`, icon: Router, label: 'Gateways' },
     canEdit &&
