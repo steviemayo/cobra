@@ -84,6 +84,7 @@
 - A gateway installed with no working token **announces itself** (no credential); staff see it under Staff > Unclaimed gateways and assign it to an organisation, site and name, and it then enrols itself (decisions T-1..T-5)
 - **The portal decides when a gateway updates** (now, at a set time, or automatic per gateway; manual by default). The heartbeat reply carries the order; Windows downloads through a signed link and checks SHA-256, Docker asks Watchtower (decisions S-1..S-8)
 - **Local pages:** `/` on the gateway's panel port is a status page with panel links, open on the LAN; `/admin` is behind an admin code (`admin-code.txt` in the data folder) and can enter a new token or reset the gateway (decisions U-1..U-6)
+- **Always bump `GATEWAY_VERSION`** (`apps/gateway/src/config.ts`, and `version` in `apps/gateway/package.json` to match) in any PR that changes `apps/gateway`, `apps/panel` or anything under `packages/` (except `packages/db`), including driver changes. The `version-bump` CI check fails the PR otherwise, and installed gateways only offer an update when the number changes. A web-only change needs no bump. The portal reads the newest version from the `gateway-stable` / `gateway-beta` release's `VERSION` file, so nothing is set on Vercel (S-9)
 - Heartbeat 30s; telemetry retention 90 days
 - Remote commands: allowlisted only, full audit log
 
