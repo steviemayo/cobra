@@ -218,6 +218,10 @@ export const DeviceFeedback = z.object({
   playback: z.string().max(40).optional(),
   /** Music players: where the audio comes from (Spotify, Line in). */
   playSource: z.string().max(100).optional(),
+  /** Conference systems: is a meeting or call running. */
+  inMeeting: z.boolean().optional(),
+  /** Conference systems: idle, present, in_meeting or other. */
+  roomState: z.string().max(40).optional(),
 });
 export type DeviceFeedback = z.infer<typeof DeviceFeedback>;
 /** The fields of `DeviceFeedback`, for code that walks them generically (change detection, history). */
@@ -233,6 +237,8 @@ export const DEVICE_FEEDBACK_FIELDS = [
   'activeApp',
   'playback',
   'playSource',
+  'inMeeting',
+  'roomState',
 ] as const satisfies readonly (keyof DeviceFeedback)[];
 export type DeviceFeedbackField = (typeof DEVICE_FEEDBACK_FIELDS)[number];
 

@@ -8,6 +8,7 @@ import { parseJoinAddress, parseJoinValue } from './crestron-console';
 import {
   CrestronFlexDriver,
   flexOccupied,
+  flexRoomState,
   parseEthernet,
   parseHostname,
   parseIp,
@@ -629,6 +630,9 @@ describe('a Crestron Flex (Teams Room)', () => {
     expect(s.firmware).toBe('1.22.00.405');
     // The join says empty but the camera counts three people: occupied.
     expect(s.occupied).toBe(true);
+    // Not in a meeting and the app is idle.
+    expect(s.inMeeting).toBe(false);
+    expect(s.roomState).toBe('idle');
     expect(DeviceDetails.safeParse(s.details).success).toBe(true);
     expect(row(section(s.details, 'Device'), 'MAC address')).toBe('90:8D:6E:95:91:26');
     // These feed the asset register, whose serial and MAC come from rows with these labels.
@@ -713,5 +717,19 @@ describe('a Crestron Flex (Teams Room)', () => {
     expect(flexOccupied(false, 2)).toBe(true);
     expect(flexOccupied(true, undefined)).toBe(true);
     expect(flexOccupied(undefined, undefined)).toBeUndefined();
+  });
+
+  it('works out the room state from the app text and the in-meeting join', () => {
+    expect(flexRoomState('Idle', false)).toBe('idle');
+    expect(flexRoomState('  IDLE ', undefined)).toBe('idle');
+    expect(flexRoomState('In Meeting', undefined)).toBe('in_meeting');
+    expect(flexRoomState('TeamsMeeting', false)).toBe('in_meeting');
+    expect(flexRoomState('Idle', true)).toBe('in_meeting');
+    expect(flexRoomState('Presenting', false)).toBe('present');
+    expect(flexRoomState('Updating', false)).toBe('other');
+    // Empty and error replies are unknown, not "other".
+    expect(flexRoomState('', undefined)).toBeUndefined();
+    expect(flexRoomState('ERROR', false)).toBeUndefined();
+    expect(flexRoomState('N/A', undefined)).toBeUndefined();
   });
 });

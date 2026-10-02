@@ -70,6 +70,24 @@ describe('evaluateUsageRule', () => {
   });
 });
 
+describe('a conference system in a meeting', () => {
+  const rooms = [{ id: 'c1', category: 'conference_system' }];
+  const get = (v: Record<string, string>) => (id: string, f: string) => v[`${id}|${f}`];
+
+  it('counts as AV in use, and idle does not', () => {
+    expect(evaluateUsageRule(DEFAULT_USAGE_RULES.av, rooms, get({ 'c1|inMeeting': 'true' }))).toBe(
+      true,
+    );
+    expect(
+      evaluateUsageRule(
+        DEFAULT_USAGE_RULES.av,
+        rooms,
+        get({ 'c1|inMeeting': 'false', 'c1|roomState': 'idle' }),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe('checkUsageRule and describeUsageRule', () => {
   it('refuses conditions that name nothing and rules that are too deep', () => {
     expect(checkUsageRule({ op: 'cond', field: 'power', cmp: 'eq', value: 'on' })).toMatch(

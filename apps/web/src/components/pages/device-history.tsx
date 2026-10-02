@@ -41,6 +41,8 @@ const FIELD_LABEL: Record<string, string> = {
   activeApp: 'App',
   playback: 'Playback',
   playSource: 'Playing from',
+  inMeeting: 'In a meeting',
+  roomState: 'Room state',
 };
 
 const dateLabel = (iso: string) =>

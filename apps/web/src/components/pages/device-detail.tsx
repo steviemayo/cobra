@@ -522,6 +522,8 @@ const FIELD_TITLE: Record<string, string> = {
   activeApp: 'Active app',
   playback: 'Playback',
   playSource: 'Playing from',
+  inMeeting: 'In a meeting',
+  roomState: 'Room state',
 };
 
 /** Charts for only the readings this device has reported: nothing is drawn for what it does not have. */
