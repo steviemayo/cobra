@@ -2,7 +2,16 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, Building2, LifeBuoy, Router, ScrollText, Users, Wrench } from 'lucide-react';
+import {
+  Activity,
+  Building2,
+  FileText,
+  LifeBuoy,
+  Router,
+  ScrollText,
+  Users,
+  Wrench,
+} from 'lucide-react';
 import { hasStaffRole, type StaffRole } from '@kestrel/model';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
@@ -11,6 +20,7 @@ const NAV: { href: string; label: string; icon: typeof Building2; needs?: StaffR
   { href: '/staff/orgs', label: 'Organisations', icon: Building2 },
   { href: '/staff/health', label: 'Fleet health', icon: Activity },
   { href: '/staff/gateways', label: 'Unclaimed gateways', icon: Router },
+  { href: '/staff/invoices', label: 'Invoice requests', icon: FileText, needs: ['billing'] },
   { href: '/staff/tickets', label: 'Tickets', icon: LifeBuoy },
   { href: '/staff/callouts', label: 'Callouts', icon: Wrench },
   { href: '/staff/audit', label: 'Audit trail', icon: ScrollText, needs: ['admin', 'support'] },
@@ -37,6 +47,14 @@ export function StaffShell({
     retry: false,
   });
   const waiting = (unclaimed.data ?? []).filter((g) => g.status === 'open').length;
+  const canBill = hasStaffRole(roles, 'billing');
+  const invoices = useQuery({
+    ...trpc.staff.invoiceRequests.list.queryOptions(),
+    refetchInterval: 60_000,
+    retry: false,
+    enabled: canBill,
+  });
+  const invoiceWaiting = invoices.data?.length ?? 0;
   return (
     <div className="flex min-h-screen flex-col">
       <header className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b bg-muted/40 px-4 py-2 sm:px-6">
@@ -62,6 +80,11 @@ export function StaffShell({
                 {href === '/staff/gateways' && waiting > 0 && (
                   <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
                     {waiting}
+                  </span>
+                )}
+                {href === '/staff/invoices' && invoiceWaiting > 0 && (
+                  <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
+                    {invoiceWaiting}
                   </span>
                 )}
               </Link>

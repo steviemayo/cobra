@@ -823,9 +823,28 @@ model OrgBilling {
   billingInterval      String    @default("month")
   /// Billed on the 1st of each month (first period pro rata). Chosen when first subscribing; never changed on a live subscription.
   anchorFirstOfMonth   Boolean   @default(false)
+  /// Pay by invoice instead of card (yearly only). The owner asks, staff decide: "none", "requested", "approved" or "declined".
+  invoiceStatus        String    @default("none")
+  invoiceRequestedAt   DateTime?
+  invoiceRequestNote   String?
+  invoiceDecidedAt     DateTime?
+  invoiceDecidedBy     String?   @db.Uuid
+  /// Shown to the owner when a request is declined.
+  invoiceDeclineReason String?
+  /// Days to pay an invoice. Staff set it per organisation; 14 unless changed.
+  invoiceDays          Int       @default(14)
+  /// Stripe's collection method on the subscription: "charge_automatically" (card) or "send_invoice".
+  collectionMethod     String    @default("charge_automatically")
+  /// The latest invoice sent for this subscription, kept from Stripe's invoice events. Cleared once paid.
+  openInvoiceId        String?
+  openInvoiceUrl       String?
+  openInvoiceDueAt     DateTime?
   updatedAt            DateTime  @default(now()) @updatedAt
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceStatus])
+  @@index([openInvoiceDueAt])
 }
 
 // Stripe events already handled, so a redelivered webhook changes nothing.

@@ -15,6 +15,7 @@ import { useBilling } from '@/components/common/plan-gate';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { orgPath, useOrg } from '@/components/shell/org-context';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { Switch } from '@/components/ui/switch';
@@ -56,6 +57,25 @@ export function BillingView() {
   const trueUp = useMutation(
     trpc.billing.setTrueUp.mutationOptions({
       onSuccess: refresh,
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const [invoiceNote, setInvoiceNote] = useState('');
+  const requestInvoice = useMutation(
+    trpc.billing.requestInvoice.mutationOptions({
+      onSuccess: async () => {
+        await refresh();
+        toast.success('Request sent. Kestrel staff will be in touch.');
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const subscribeByInvoice = useMutation(
+    trpc.billing.subscribeByInvoice.mutationOptions({
+      onSuccess: async () => {
+        await refresh();
+        toast.success('Done. Your invoice will be emailed to you shortly.');
+      },
       onError: (e) => toast.error(e.message),
     }),
   );
@@ -153,6 +173,96 @@ export function BillingView() {
             disabled={trueUp.isPending}
             onCheckedChange={(enabled) => trueUp.mutate({ orgId, enabled })}
           />
+        </section>
+      )}
+
+      {b.available && b.yearlyAvailable && (
+        <section className="space-y-3 rounded-lg border p-4">
+          <div className="text-sm font-medium">Pay by invoice</div>
+          {b.subscription.collectionMethod === 'send_invoice' ? (
+            <div className="space-y-1 text-sm text-muted-foreground">
+              <p>
+                You are billed yearly by invoice, emailed to you with {b.invoiceBilling.days} days
+                to pay. Add a card as a backup and it is charged if an invoice is still unpaid after
+                its due date.
+              </p>
+              {b.subscription.openInvoice && (
+                <p className="text-foreground">
+                  An invoice is waiting
+                  {b.subscription.openInvoice.dueAt
+                    ? `, due ${formatDate(b.subscription.openInvoice.dueAt)}`
+                    : ''}
+                  .{' '}
+                  {b.subscription.openInvoice.url && (
+                    <a
+                      href={b.subscription.openInvoice.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline underline-offset-2"
+                    >
+                      View and pay
+                    </a>
+                  )}
+                </p>
+              )}
+            </div>
+          ) : b.invoiceBilling.status === 'approved' ? (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Approved. Choose a plan to be invoiced yearly. Access starts straight away and you
+                have {b.invoiceBilling.days} days to pay the invoice. Adding a card as a backup is
+                optional.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {PAID_PLANS.map((plan: PaidPlan) => (
+                  <Button
+                    key={plan}
+                    variant="outline"
+                    size="sm"
+                    disabled={subscribeByInvoice.isPending}
+                    onClick={() => subscribeByInvoice.mutate({ orgId, plan })}
+                  >
+                    {subscribeByInvoice.isPending &&
+                      subscribeByInvoice.variables?.plan === plan && <Spinner />}
+                    Invoice me for {PLAN_FEATURES[plan].label} (yearly)
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ) : b.invoiceBilling.status === 'requested' ? (
+            <p className="text-sm text-muted-foreground">
+              Your request to pay by invoice is with Kestrel staff.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Prefer an invoice to a card? Yearly plans can be invoiced once Kestrel staff approve
+                it.
+              </p>
+              {b.invoiceBilling.status === 'declined' && b.invoiceBilling.declineReason && (
+                <p className="text-sm">Last request declined: {b.invoiceBilling.declineReason}</p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  className="max-w-sm"
+                  aria-label="Note for Kestrel staff (optional)"
+                  placeholder="Note for Kestrel staff (optional)"
+                  maxLength={500}
+                  value={invoiceNote}
+                  onChange={(ev) => setInvoiceNote(ev.target.value)}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={requestInvoice.isPending}
+                  onClick={() => requestInvoice.mutate({ orgId, note: invoiceNote })}
+                >
+                  {requestInvoice.isPending && <Spinner />}
+                  Request invoice billing
+                </Button>
+              </div>
+            </div>
+          )}
         </section>
       )}
 

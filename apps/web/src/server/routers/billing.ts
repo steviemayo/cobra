@@ -12,9 +12,12 @@ import {
   priceMapFromEnv,
   yearlyAvailable,
 } from '../billing';
+import { InvoiceError, requestInvoice } from '../invoice-billing';
+import { notifyInvoiceRequest } from '../ticket-notify';
 import {
   BillingNotConfigured,
   billingPortalUrl,
+  startInvoiceSubscription,
   startSubscription,
   stripeConfigured,
 } from '../stripe';
@@ -25,6 +28,7 @@ const orgId = z.string().uuid();
 function asTrpc(e: unknown): never {
   if (e instanceof BillingNotConfigured)
     throw new TRPCError({ code: 'PRECONDITION_FAILED', message: e.message });
+  if (e instanceof InvoiceError) throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
   if (e instanceof TRPCError) throw e;
   console.error('[billing]', e);
   // Stripe's own error messages are written to be shown to a user (e.g. "No such price: ..."),
@@ -61,6 +65,19 @@ export const billingRouter = router({
         trueUp: billing.trueUp,
         interval: billing.billingInterval === 'year' ? ('year' as const) : ('month' as const),
         anchorFirstOfMonth: billing.anchorFirstOfMonth,
+        collectionMethod:
+          billing.collectionMethod === 'send_invoice'
+            ? ('send_invoice' as const)
+            : ('charge_automatically' as const),
+        openInvoice: billing.openInvoiceId
+          ? { url: billing.openInvoiceUrl, dueAt: billing.openInvoiceDueAt }
+          : null,
+      },
+      invoiceBilling: {
+        status: billing.invoiceStatus,
+        days: billing.invoiceDays,
+        requestedAt: billing.invoiceRequestedAt,
+        declineReason: billing.invoiceDeclineReason,
       },
       /** Whether yearly prices are set up, so the portal can offer them. */
       yearlyAvailable: yearlyAvailable(prices),
@@ -109,6 +126,54 @@ export const billingRouter = router({
             anchorFirstOfMonth: !!input.anchorFirstOfMonth,
             changed: 'changed' in res,
           },
+        });
+        return res;
+      } catch (e) {
+        return asTrpc(e);
+      }
+    }),
+
+  // Owners only. Ask Kestrel staff to let the organisation pay yearly by invoice instead of card.
+  requestInvoice: orgProcedure
+    .input(z.object({ orgId, note: z.string().max(500).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      try {
+        await requestInvoice(db, { orgId: ctx.orgId, userId: ctx.user.id, note: input.note });
+        // Best effort: staff also see it in the queue, so a failed message never fails the request.
+        const org = await db.org.findFirst({ where: { id: ctx.orgId } });
+        await notifyInvoiceRequest({
+          orgId: ctx.orgId,
+          orgName: org?.name ?? 'A customer',
+          note: input.note,
+        }).catch(() => false);
+        return { ok: true };
+      } catch (e) {
+        return asTrpc(e);
+      }
+    }),
+
+  // Owners only, and only once staff have approved it. Starts a yearly subscription billed by invoice.
+  subscribeByInvoice: orgProcedure
+    .input(z.object({ orgId, plan: z.enum(PAID_PLANS) }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      try {
+        const org = await db.org.findFirst({ where: { id: ctx.orgId } });
+        const rooms = (await monitoredRoomIds(db, ctx.orgId)).size;
+        const res = await startInvoiceSubscription(db, {
+          orgId: ctx.orgId,
+          orgName: org?.name ?? 'Kestrel customer',
+          plan: input.plan,
+          rooms,
+          email: ctx.user.email ?? null,
+        });
+        await writeAudit({
+          orgId: ctx.orgId,
+          actorId: ctx.user.id,
+          action: 'billing.subscribe_invoice',
+          target: ctx.orgId,
+          meta: { plan: input.plan },
         });
         return res;
       } catch (e) {
