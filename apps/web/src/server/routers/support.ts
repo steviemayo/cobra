@@ -21,7 +21,7 @@ import { maintenanceClashes } from '../room-calendar';
 import { PRIORITY_ORDER, createRule, deleteRule, updateRule } from '../ticket-automation';
 import { featureProcedure, orgProcedure, requireRole, router } from '../trpc';
 
-// Ticket rules and service desk connections are a Pro feature (and part of a running trial).
+// Ticket rules and service desk connections are a Premium feature (and part of a running trial).
 const desk = featureProcedure('serviceDesk');
 
 const orgId = z.string().uuid();

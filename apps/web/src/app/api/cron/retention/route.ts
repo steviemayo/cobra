@@ -9,7 +9,9 @@ import { pruneOldData } from '@/server/retention';
 import { pruneUsage, rollupUsage } from '@/server/usage-service';
 import { getEntitlements } from '@/server/billing';
 import { snapshotAll } from '@/server/config-service';
+import { endOrphanedDelegations, type DelegationDb } from '@/server/delegated-billing';
 import { expireGrants } from '@/server/msp-portfolio';
+import { delegationEffectsOrUnavailable } from '@/server/stripe';
 import { pmSweep } from '@/server/pm-service';
 import { runScheduledIssues } from '@/server/register-issues';
 import { loadSigningKey } from '@/server/signing';
@@ -66,6 +68,11 @@ export async function GET(req: Request) {
   const grants = await expireGrants(db as never).catch((e: unknown) => ({
     error: e instanceof Error ? e.message : String(e),
   }));
+  // A billing arrangement whose connection has ended or expired ends with it (BD-7).
+  const delegations = await endOrphanedDelegations(
+    db as unknown as DelegationDb,
+    delegationEffectsOrUnavailable(),
+  ).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
   // Organisations whose 30 days are up are deleted for good (each one tried again next time if it fails).
   // People who belonged to nothing but that organisation have their sign-in account deleted too.
   const orgsPurged = await purgeDueOrgs(db, new Date(), async (userId) => {
@@ -78,6 +85,7 @@ export async function GET(req: Request) {
     ...res,
     orgsPurged,
     grants,
+    delegations,
     snapshots,
     pm,
     register,

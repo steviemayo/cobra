@@ -2,7 +2,7 @@ import type { PrismaClient } from '@kestrel/db';
 import { validateRoomModel } from '@kestrel/engine';
 import { RoomModel, type RoomModel as RoomModelType } from '@kestrel/model';
 
-// The marketplace: organisations on Pro publish room designs; organisations on Basic and above
+// The marketplace: organisations on Premium publish room designs; organisations on Essentials and above
 // get them. Every listing is reviewed by Kestrel staff before anyone else sees it. Functions take
 // the database as a parameter so they can be tested without one.
 export type MarketDb = Pick<
