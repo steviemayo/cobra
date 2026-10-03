@@ -269,6 +269,32 @@ export const DeviceLatency = z.object({
 });
 export type DeviceLatency = z.infer<typeof DeviceLatency>;
 
+/**
+ * What a gateway reports about a tracked device's network address (docs/decisions.md, DA-*). The
+ * cloud keeps the address it was told, so a gateway that finds a device at a new address says so and
+ * keeps saying so until the cloud's device set carries that address.
+ */
+export const DeviceAddressReport = z.object({
+  /** The device's MAC as the gateway read it from its own network (the ARP table). Same network only. */
+  mac: z.string().max(40).optional(),
+  /** The device has moved: where it was, where it is now, and how the gateway knows it is the same device. */
+  change: z
+    .object({
+      from: z.string().max(100),
+      to: z.string().max(100),
+      how: z.enum(['hostname', 'mac', 'identity']),
+    })
+    .optional(),
+  /** Addresses that might be the device but could not be told apart, for a person to pick. */
+  candidates: z
+    .array(z.object({ address: z.string().max(100), note: z.string().max(200) }))
+    .max(10)
+    .optional(),
+  /** Why the gateway could not follow it: it answers at its address but is a different device, or nothing was found. */
+  issue: z.enum(['identity_changed', 'not_found']).optional(),
+});
+export type DeviceAddressReport = z.infer<typeof DeviceAddressReport>;
+
 export const DeviceReport = z.object({
   deviceId: z.string().min(1).max(100),
   name: z.string().max(200),
@@ -297,6 +323,8 @@ export const DeviceReport = z.object({
    * now and then as a refresh, so absent means "same as last time", not "none".
    */
   details: DeviceDetails.optional(),
+  /** Tracked devices only: the address the gateway sees, and what it did about it. */
+  address: DeviceAddressReport.optional(),
 });
 export type DeviceReport = z.infer<typeof DeviceReport>;
 

@@ -55,6 +55,7 @@ function defaultsFor(
   if (base.kind === 'active') {
     base.driver = s?.driver;
     base.host = f.host;
+    if (f.mac) base.mac = f.mac;
     if (gateway?.siteId) base.gateway = { id: gateway.id, siteId: gateway.siteId };
   } else {
     base.ip = f.host;

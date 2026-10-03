@@ -19,6 +19,7 @@ import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { Section } from '@/components/common/section';
 import { useSiteZone } from '@/lib/use-estate';
 import { DevicePoints } from './device-points';
+import { AddressNotice, DeviceAddress } from './device-address';
 import { DeviceSettings } from './device-settings';
 import { DeviceResponse } from './network-health';
 import { SimpleSelect } from '@/components/common/simple-select';
@@ -440,6 +441,11 @@ function describe(e: DeviceEvent): { title: string; detail?: string; tone?: 'war
       return { title: 'Moved to another room' };
     case 'gateway_changed':
       return { title: 'Gateway changed' };
+    case 'address_changed':
+      return {
+        title: 'Address changed',
+        detail: `${show(e.oldValue)} to ${show(e.newValue)}`,
+      };
     case 'upgraded':
       return { title: 'Now monitored', detail: 'A driver was added to a recorded asset' };
     case 'swap_flagged':
@@ -808,6 +814,7 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
         }
       />
       <SwapNotice device={d} />
+      <AddressNotice device={d} />
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -824,7 +831,8 @@ export function DeviceDetailView({ deviceId }: { deviceId: string }) {
           <Overview device={d} />
         </TabsContent>
         {d.kind === 'active' && (
-          <TabsContent value="settings" className="pt-4">
+          <TabsContent value="settings" className="space-y-6 pt-4">
+            <DeviceAddress key={`${d.id}:${d.version}`} device={d} />
             <DeviceSettings device={d} />
           </TabsContent>
         )}

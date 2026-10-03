@@ -48,6 +48,12 @@ export interface DeviceView {
   notes: string | null;
   provenance: Provenance;
   swapPending: boolean;
+  /** fixed or tracked, and for a tracked one: its hostname, where it has been, and what the gateway could not settle. */
+  addressMode: string;
+  hostname: string | null;
+  addressHistory: unknown;
+  addressSuggestion: unknown;
+  refindAt: Date | null;
   feedback: unknown;
   details: unknown;
   /** The control points read on the device, and what each read at the last heartbeat (by point id). */
@@ -81,17 +87,16 @@ export async function deviceViews(
       orgId: filter.orgId,
       ...(filter.deviceId ? { id: filter.deviceId } : {}),
       ...(filter.siteId && !viaLinks.length ? { siteId: filter.siteId } : {}),
-      ...(viaLinks.length
-        ? { OR: [homeWhere, { id: { in: viaLinks } }] }
-        : homeWhere),
+      ...(viaLinks.length ? { OR: [homeWhere, { id: { in: viaLinks } }] } : homeWhere),
     },
     orderBy: { name: 'asc' },
   });
-  const links = db.deviceRoom && rows.length
-    ? await db.deviceRoom.findMany({
-        where: { orgId: filter.orgId, deviceId: { in: rows.map((r) => r.id) } },
-      })
-    : [];
+  const links =
+    db.deviceRoom && rows.length
+      ? await db.deviceRoom.findMany({
+          where: { orgId: filter.orgId, deviceId: { in: rows.map((r) => r.id) } },
+        })
+      : [];
   const rooms = new Map(
     (await db.room.findMany({ where: { orgId: filter.orgId } })).map((r) => [r.id, r]),
   );
@@ -152,6 +157,11 @@ export async function deviceViews(
       notes: d.notes,
       provenance: (d.provenance ?? {}) as Provenance,
       swapPending: d.swapPending,
+      addressMode: d.addressMode,
+      hostname: d.hostname,
+      addressHistory: d.addressHistory,
+      addressSuggestion: d.addressSuggestion,
+      refindAt: d.refindAt,
       feedback: d.feedback,
       details: d.details,
       points: filter.roomId ? pointsForRoom(pointsOf(d.points), filter.roomId) : d.points,
