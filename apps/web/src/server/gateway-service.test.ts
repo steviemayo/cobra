@@ -698,7 +698,7 @@ describe('plan gating over the heartbeat', () => {
     expect((res.body as { control: boolean }).control).toBe(false);
   });
 
-  it('tells the gateway control is on for Pro, and off again once a trial runs out', async () => {
+  it('tells the gateway control is on for Premium, and off again once a trial runs out', async () => {
     const w = world();
     const gw = w.gateway.rows[0]! as never;
     expect(((await heartbeat(w.db, gw, hb([]), keys)).body as { control: boolean }).control).toBe(

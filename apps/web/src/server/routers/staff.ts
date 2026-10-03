@@ -29,7 +29,19 @@ import {
   sendQuote,
   transferCallout,
 } from '../callouts';
-import { BillingNotConfigured, getStripe, stripeConfigured } from '../stripe';
+import {
+  DelegationError,
+  delegatedCustomers,
+  endDelegation,
+  setProviderDiscount,
+  type DelegationDb,
+} from '../delegated-billing';
+import {
+  BillingNotConfigured,
+  delegationEffectsOrUnavailable,
+  getStripe,
+  stripeConfigured,
+} from '../stripe';
 import { orgDetail, orgDirectory, recordStaffAudit, mfaRequired } from '../staff';
 import {
   AnnounceError,
@@ -90,6 +102,7 @@ function asTrpc(e: unknown): never {
     e instanceof AnnounceError ||
     e instanceof LicenceError ||
     e instanceof InvoiceError ||
+    e instanceof DelegationError ||
     e instanceof SessionError ||
     e instanceof TicketError ||
     e instanceof RetentionError ||
@@ -354,6 +367,56 @@ export const staffRouter = router({
         requireStaffRole(ctx.staff, 'billing');
         try {
           await revokeInvoice(db, { ...input, staffUserId: ctx.staff.userId });
+          return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+  }),
+
+  // Who pays for an organisation (BD-5 to BD-14): a provider paying on its behalf, a provider's
+  // standing discount, and the way to unwind an arrangement that has gone wrong.
+  delegation: router({
+    get: staffProcedure.input(z.object({ orgId })).query(async ({ input }) => {
+      const b = await db.orgBilling.findFirst({ where: { orgId: input.orgId } });
+      const payer = b?.payerOrgId ? await db.org.findFirst({ where: { id: b.payerOrgId } }) : null;
+      return {
+        status: (b?.delegationStatus ?? 'none') as 'none' | 'requested' | 'active' | 'ending',
+        billedBy: b?.billedBy === 'provider' ? ('provider' as const) : ('self' as const),
+        payerName: payer?.name ?? null,
+        handoverAt: b?.delegationHandoverAt ?? null,
+        endsAt: b?.delegationEndsAt ?? null,
+        discountPercent: b?.providerDiscountPercent ?? null,
+        customers: await delegatedCustomers(db as unknown as DelegationDb, input.orgId),
+      };
+    }),
+
+    // Stops the arrangement for a customer, from either side's point of view.
+    end: staffProcedure.input(z.object({ orgId })).mutation(async ({ ctx, input }) => {
+      requireStaffRole(ctx.staff, 'billing');
+      try {
+        const outcome = await endDelegation(
+          db as unknown as DelegationDb,
+          delegationEffectsOrUnavailable(),
+          { customerOrgId: input.orgId, by: 'staff', userId: null, staffUserId: ctx.staff.userId },
+        );
+        return { outcome };
+      } catch (e) {
+        return asTrpc(e);
+      }
+    }),
+
+    // A standing percentage off every subscription this provider pays for, from now on. Null clears it.
+    setDiscount: staffProcedure
+      .input(z.object({ orgId, percent: z.number().int().nullable() }))
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'billing');
+        try {
+          await setProviderDiscount(db as unknown as DelegationDb, {
+            orgId: input.orgId,
+            staffUserId: ctx.staff.userId,
+            percent: input.percent,
+          });
           return { ok: true };
         } catch (e) {
           return asTrpc(e);

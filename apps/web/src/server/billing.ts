@@ -105,6 +105,16 @@ export function assertAnchorChangeAllowed(billing: { status: string }): void {
     throw new Error('The billing date can only be chosen when you first subscribe.');
 }
 
+/** The delegation columns of a row that is back to paying for itself (BD-5). */
+export const NO_DELEGATION = {
+  billedBy: 'self',
+  delegationStatus: 'none',
+  payerOrgId: null,
+  delegationHandoverAt: null,
+  delegationFromSubscriptionId: null,
+  delegationEndsAt: null,
+} as const;
+
 /** The organisation's billing row, created on first use with a fresh trial. */
 export async function ensureBilling(db: EntitlementDb, orgId: string, now = new Date()) {
   const existing = await db.orgBilling.findFirst({ where: { orgId } });
@@ -233,6 +243,53 @@ export interface StripeSubscriptionLike {
 
 const idOf = (c: string | { id: string }) => (typeof c === 'string' ? c : c.id);
 
+/**
+ * A subscription a provider pays for. Stripe knows it under the provider's customer, so it is matched
+ * by the organisation named in its metadata, and only when that organisation really has asked this
+ * provider to pay (BD-6). It never changes the customer's own Stripe customer.
+ */
+async function applyDelegatedSubscription(
+  db: BillingDb,
+  sub: StripeSubscriptionLike,
+  prices: PriceMap,
+  customer: string,
+  payerOrgId: string,
+  now: Date,
+): Promise<boolean> {
+  const orgId = sub.metadata?.orgId;
+  if (!orgId) return false;
+  const billing = await ensureBilling(db, orgId, now);
+  if (billing.payerOrgId !== payerOrgId) return false;
+  const payer = await db.orgBilling.findFirst({ where: { orgId: payerOrgId } });
+  if (!payer || payer.stripeCustomerId !== customer) return false;
+
+  if (billing.stripeSubscriptionId !== sub.id) {
+    // Not the subscription this organisation is on now (the accept has not saved yet, or it moved to
+    // its own direct billing). Only finish an ending delegation once the provider's one is gone.
+    if (sub.status === 'canceled' && billing.delegationStatus === 'ending')
+      await db.orgBilling.update({ where: { id: billing.id }, data: { ...NO_DELEGATION } });
+    return true;
+  }
+  const item = sub.items.data[0];
+  const known = planAndIntervalForPrice(prices, item?.price.id);
+  const periodEnd = item?.current_period_end ?? sub.current_period_end;
+  await db.orgBilling.update({
+    where: { id: billing.id },
+    data: {
+      stripeItemId: item?.id ?? null,
+      status: sub.status,
+      ...(known ? { plan: known.plan, billingInterval: known.interval } : {}),
+      ...(sub.collection_method ? { collectionMethod: sub.collection_method } : {}),
+      quantity: item?.quantity ?? billing.quantity,
+      currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
+      cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
+      // The provider's subscription is over: back to paying for itself (and to Essentials until it does).
+      ...(sub.status === 'canceled' ? { ...NO_DELEGATION } : {}),
+    },
+  });
+  return true;
+}
+
 /** Records a subscription's state against the organisation it belongs to. Returns false if it can't be matched. */
 export async function applyStripeSubscription(
   db: BillingDb,
@@ -241,12 +298,22 @@ export async function applyStripeSubscription(
   now = new Date(),
 ): Promise<boolean> {
   const customer = idOf(sub.customer);
+  if (sub.metadata?.payerOrgId)
+    return applyDelegatedSubscription(db, sub, prices, customer, sub.metadata.payerOrgId, now);
   const byCustomer = await db.orgBilling.findFirst({ where: { stripeCustomerId: customer } });
   const orgId = byCustomer?.orgId ?? sub.metadata?.orgId;
   if (!orgId) return false;
   const billing = await ensureBilling(db, orgId, now);
   // A customer created for one organisation must never be applied to another.
   if (billing.stripeCustomerId && billing.stripeCustomerId !== customer) return false;
+
+  // While a provider pays, the organisation's own subscriptions (the one stopping at the handover)
+  // must not take its place. Once the provider's is ending, a new paying one set up by the
+  // organisation is adopted (BD-10).
+  const current = billing.stripeSubscriptionId;
+  const otherSub = billing.billedBy === 'provider' && !!current && current !== sub.id;
+  if (otherSub && billing.delegationStatus !== 'ending') return true;
+  if (otherSub && !PAYING_STATUSES.has(sub.status)) return true;
 
   const item = sub.items.data[0];
   const known = planAndIntervalForPrice(prices, item?.price.id);
@@ -266,6 +333,9 @@ export async function applyStripeSubscription(
       quantity: item?.quantity ?? billing.quantity,
       currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
       cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
+      // Adopting its own subscription: it pays for itself again, and the provider's one is still
+      // running out, which `delegationStatus` 'ending' keeps visible until its own event arrives.
+      ...(otherSub ? { billedBy: 'self' } : {}),
     },
   });
   return true;

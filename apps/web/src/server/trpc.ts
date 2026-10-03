@@ -163,7 +163,7 @@ export const featureProcedure = (feature: Feature) =>
     return next();
   });
 
-/** An org procedure for anything that deploys or controls a room: Pro, and a running trial. */
+/** An org procedure for anything that deploys or controls a room: Premium, and a running trial. */
 export const controlProcedure = featureProcedure('control');
 
 /**
