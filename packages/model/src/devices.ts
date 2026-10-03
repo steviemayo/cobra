@@ -227,6 +227,35 @@ export function deviceLiveState(input: {
 // ---- What travels to a gateway --------------------------------------------------------------------
 
 /** One device a gateway polls. `settings` already has addresses and logins merged in. */
+/** How a device's address is kept. Fixed: it never changes. Tracked: the gateway finds it again if it moves. */
+export const ADDRESS_MODES = ['fixed', 'tracked'] as const;
+export const AddressMode = z.enum(ADDRESS_MODES);
+export type AddressMode = z.infer<typeof AddressMode>;
+
+/**
+ * What a gateway needs to recognise a tracked device after it changes address. Sent inside the
+ * device's settings (key `addressTracking`) so it is signed with the rest and an older gateway just
+ * ignores it. `refindAt` changes when someone presses "Find again".
+ */
+export const AddressTracking = z.object({
+  mac: z.string().max(40).optional(),
+  hostname: z.string().max(253).optional(),
+  serial: z.string().max(100).optional(),
+  name: z.string().max(100).optional(),
+  refindAt: z.string().max(40).optional(),
+});
+export type AddressTracking = z.infer<typeof AddressTracking>;
+export const ADDRESS_TRACKING_KEY = 'addressTracking';
+
+/** A MAC as lower-case colon pairs (aa:bb:cc:dd:ee:ff), or null if it is not one. Accepts - . and bare forms. */
+export function normaliseMac(raw: string | null | undefined): string | null {
+  const hex = (raw ?? '').trim().toLowerCase().replace(/[:.\-\s]/g, '');
+  return /^[0-9a-f]{12}$/.test(hex) ? hex.match(/../g)!.join(':') : null;
+}
+
+/** A hostname a DNS or mDNS lookup could resolve: letters, digits, dots and hyphens, 253 characters at most. */
+export const HOSTNAME_RE = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
+
 export const MonitoredDevice = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).max(80),

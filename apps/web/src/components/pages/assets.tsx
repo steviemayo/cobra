@@ -53,6 +53,7 @@ import {
 } from './device-connection';
 import { AlignDatesDialog, FixGapsDialog, GAPS, gapKeysOf, type GapKey } from './asset-gaps';
 import { DeviceStateBadge } from './device-detail';
+import { AddressTrackingFields } from './device-address';
 import { FindDevicesDialog } from './find-devices';
 import { ImportRegisterDialog } from './import-register-dialog';
 
@@ -588,6 +589,8 @@ export interface AddDeviceDefaults {
   /** A built-in driver id, or 'pjlink' / 'tcp'. */
   driver?: string;
   host?: string;
+  /** Its MAC, when a scan could read it from the gateway's network. */
+  mac?: string;
   make?: string;
   model?: string;
   ip?: string;
@@ -631,6 +634,15 @@ export function AddDeviceDialog({
     emptyConnection(defaults?.host ? { host: defaults.host } : {}),
   );
   const [ip, setIp] = useState(defaults?.ip ?? '');
+  const [address, setAddress] = useState<{
+    mode: 'fixed' | 'tracked';
+    hostname: string;
+    mac: string;
+  }>({
+    mode: 'fixed',
+    hostname: '',
+    mac: defaults?.mac ?? '',
+  });
   const [make, setMake] = useState(defaults?.make ?? '');
   const [model, setModel] = useState(defaults?.model ?? '');
   const [serial, setSerial] = useState('');
@@ -729,6 +741,7 @@ export function AddDeviceDialog({
                 />
               </Field>
               <ConnectionFields slots={slots} draft={conn} onChange={setConn} />
+              <AddressTrackingFields {...address} onChange={setAddress} />
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
@@ -782,6 +795,9 @@ export function AddDeviceDialog({
                       values: connectionPatch(slots, conn).values,
                       secrets: connectionPatch(slots, conn).secrets,
                       credentialSetId: connectionPatch(slots, conn).credentialSetId,
+                      addressMode: address.mode,
+                      hostname: address.mode === 'tracked' ? address.hostname.trim() || null : null,
+                      mac: address.mac.trim() || null,
                       ...(defaults?.gateway && defaults.gateway.siteId === siteId
                         ? { gatewayId: defaults.gateway.id }
                         : {}),

@@ -61,6 +61,15 @@ import {
   startSession,
 } from '../support-sessions';
 import {
+  InvoiceError,
+  approvedInvoiceOrgs,
+  decideInvoice,
+  pendingInvoiceRequests,
+  revokeInvoice,
+  setInvoiceDays,
+} from '../invoice-billing';
+import { updateInvoiceDays } from '../stripe';
+import {
   LicenceError,
   addNote,
   licenceState,
@@ -80,6 +89,7 @@ function asTrpc(e: unknown): never {
   if (
     e instanceof AnnounceError ||
     e instanceof LicenceError ||
+    e instanceof InvoiceError ||
     e instanceof SessionError ||
     e instanceof TicketError ||
     e instanceof RetentionError ||
@@ -284,6 +294,66 @@ export const staffRouter = router({
         requireStaffRole(ctx.staff, 'billing');
         try {
           await revokeOverride(db, { ...input, staffUserId: ctx.staff.userId });
+          return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+  }),
+
+  // Requests to pay by invoice instead of card: the queue, and staff decisions on it.
+  invoiceRequests: router({
+    list: staffProcedure.query(async ({ ctx }) => {
+      requireStaffRole(ctx.staff, 'billing');
+      return pendingInvoiceRequests(db);
+    }),
+
+    decide: staffProcedure
+      .input(
+        z.object({
+          orgId,
+          approve: z.boolean(),
+          reason: z.string().max(600).optional(),
+          days: z.number().int().optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'billing');
+        try {
+          await decideInvoice(db, { ...input, staffUserId: ctx.staff.userId });
+          return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    approved: staffProcedure.query(async ({ ctx }) => {
+      requireStaffRole(ctx.staff, 'billing');
+      return approvedInvoiceOrgs(db);
+    }),
+
+    // Days to pay for this customer. A running invoiced subscription is updated too, for invoices from now on.
+    setDays: staffProcedure
+      .input(z.object({ orgId, days: z.number().int() }))
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'billing');
+        try {
+          await setInvoiceDays(db, { ...input, staffUserId: ctx.staff.userId });
+          const billing = await db.orgBilling.findFirst({ where: { orgId: input.orgId } });
+          if (billing?.stripeSubscriptionId && billing.collectionMethod === 'send_invoice')
+            await updateInvoiceDays(billing.stripeSubscriptionId, input.days);
+          return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+
+    revoke: staffProcedure
+      .input(z.object({ orgId, reason: z.string().max(600) }))
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'billing');
+        try {
+          await revokeInvoice(db, { ...input, staffUserId: ctx.staff.userId });
           return { ok: true };
         } catch (e) {
           return asTrpc(e);

@@ -78,8 +78,8 @@ model Org {
   roomGroups          RoomGroup[]
   licenseOverrides    OrgLicenseOverride[]
   notes               OrgNote[]
-  grantsToProviders   MspGrant[]            @relation("CustomerSide")
-  grantsFromCustomers MspGrant[]            @relation("MspSide")
+  grantsToProviders   MspGrant[]             @relation("CustomerSide")
+  grantsFromCustomers MspGrant[]             @relation("MspSide")
   calendars           CalendarConnection[]
   callouts            Callout[]
   latencyBuckets      LatencyBucket[]
@@ -100,16 +100,16 @@ model Org {
 }
 
 model Member {
-  id        String   @id @default(uuid()) @db.Uuid
-  orgId     String   @db.Uuid
-  userId    String   @db.Uuid // Supabase auth.users.id
-  email     String? // denormalised from auth.users for the team list
-  role      OrgRole
-  createdAt DateTime @default(now())
+  id            String    @id @default(uuid()) @db.Uuid
+  orgId         String    @db.Uuid
+  userId        String    @db.Uuid // Supabase auth.users.id
+  email         String? // denormalised from auth.users for the team list
+  role          OrgRole
+  createdAt     DateTime  @default(now())
   /// When this person was last in the portal; the login recap covers what happened since. Null until their first visit.
-  lastSeenAt   DateTime?
+  lastSeenAt    DateTime?
   /// They asked not to be shown the login recap.
-  recapSilenced Boolean @default(false)
+  recapSilenced Boolean   @default(false)
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
@@ -613,34 +613,34 @@ model DeviceStatus {
 // Something wrong that a person may need to act on. One open incident per (kind, subject).
 // kind: device_offline, gateway_offline, room_fault, deploy_failed. severity: info, warning, critical.
 model Incident {
-  id             String    @id @default(uuid()) @db.Uuid
-  orgId          String    @db.Uuid
-  roomId         String?   @db.Uuid
-  gatewayId      String?   @db.Uuid
-  kind           String
+  id               String    @id @default(uuid()) @db.Uuid
+  orgId            String    @db.Uuid
+  roomId           String?   @db.Uuid
+  gatewayId        String?   @db.Uuid
+  kind             String
   /// What the incident is about, so the same problem is never opened twice (e.g. "<roomId>:<deviceId>").
-  subject        String
-  severity       String
-  status         String    @default("open")
-  title          String
-  detail         String?
-  openedAt       DateTime
-  lastSeenAt     DateTime
-  resolvedAt     DateTime?
+  subject          String
+  severity         String
+  status           String    @default("open")
+  title            String
+  detail           String?
+  openedAt         DateTime
+  lastSeenAt       DateTime
+  resolvedAt       DateTime?
   /// How many times it has come back inside the flap window.
-  occurrences    Int       @default(1)
+  occurrences      Int       @default(1)
   /// Whether an "opened" alert went out, so resolution is only announced when the opening was.
-  alerted        Boolean   @default(false)
-  acknowledgedBy String?   @db.Uuid
-  acknowledgedAt DateTime?
+  alerted          Boolean   @default(false)
+  acknowledgedBy   String?   @db.Uuid
+  acknowledgedAt   DateTime?
   /// Other rooms this incident also affects (a shared device that is offline serves several rooms). `roomId` stays the first.
-  roomIds        String[]  @default([]) @db.Uuid
+  roomIds          String[]  @default([]) @db.Uuid
   /// Meetings on now or about to start in the room when this opened (0 when the room has no calendar or its copy was stale).
-  meetingsAffected Int     @default(0)
+  meetingsAffected Int       @default(0)
   /// The severity was raised a step because a meeting was affected. `severity` holds the raised value.
-  severityRaised   Boolean @default(false)
+  severityRaised   Boolean   @default(false)
   /// The group this belongs to: devices on one network going silent together are one problem. Null for an ordinary incident and for the group itself.
-  parentId         String? @db.Uuid
+  parentId         String?   @db.Uuid
 
   org      Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
   room     Room?      @relation(fields: [roomId], references: [id], onDelete: Cascade)
@@ -729,7 +729,7 @@ model RemoteCommand {
   sentAt      DateTime?
   finishedAt  DateTime?
 
-  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  org  Org   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   room Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
   @@index([gatewayId, status])
@@ -823,9 +823,28 @@ model OrgBilling {
   billingInterval      String    @default("month")
   /// Billed on the 1st of each month (first period pro rata). Chosen when first subscribing; never changed on a live subscription.
   anchorFirstOfMonth   Boolean   @default(false)
+  /// Pay by invoice instead of card (yearly only). The owner asks, staff decide: "none", "requested", "approved" or "declined".
+  invoiceStatus        String    @default("none")
+  invoiceRequestedAt   DateTime?
+  invoiceRequestNote   String?
+  invoiceDecidedAt     DateTime?
+  invoiceDecidedBy     String?   @db.Uuid
+  /// Shown to the owner when a request is declined.
+  invoiceDeclineReason String?
+  /// Days to pay an invoice. Staff set it per organisation; 14 unless changed.
+  invoiceDays          Int       @default(14)
+  /// Stripe's collection method on the subscription: "charge_automatically" (card) or "send_invoice".
+  collectionMethod     String    @default("charge_automatically")
+  /// The latest invoice sent for this subscription, kept from Stripe's invoice events. Cleared once paid.
+  openInvoiceId        String?
+  openInvoiceUrl       String?
+  openInvoiceDueAt     DateTime?
   updatedAt            DateTime  @default(now()) @updatedAt
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceStatus])
+  @@index([openInvoiceDueAt])
 }
 
 // Stripe events already handled, so a redelivered webhook changes nothing.
@@ -1247,29 +1266,39 @@ model Area {
 /// design. Which gateway polls an active device: its own `gatewayId`, else its room's, else the
 /// site's default (resolved in code, see docs/pivot-monitoring.md).
 model Device {
-  id              String  @id @default(uuid()) @db.Uuid
-  orgId           String  @db.Uuid
-  siteId          String  @db.Uuid
+  id                String    @id @default(uuid()) @db.Uuid
+  orgId             String    @db.Uuid
+  siteId            String    @db.Uuid
   /// The room it is in. Null for a spare or a device shared by several rooms.
-  roomId          String? @db.Uuid
-  name            String
+  roomId            String?   @db.Uuid
+  name              String
   /// active or passive
-  kind            String  @default("passive")
+  kind              String    @default("passive")
   /// The device category (display, camera, dsp, laptop, media_player, ...).
-  category        String
+  category          String
   /// Active only: { kind: "driver", driverId } or { kind: "generic", protocol }.
-  control         Json?
+  control           Json?
   /// Active only: design settings the driver reads (not addresses or logins).
-  settings        Json    @default("{}")
+  settings          Json      @default("{}")
   /// Active only: addresses, setting key -> value.
-  values          Json    @default("{}")
+  values            Json      @default("{}")
   /// Active only: logins sealed with KESTREL_SECRETS_KEY. Never sent to a browser.
-  sealed          String?
-  credentialSetId String? @db.Uuid
+  sealed            String?
+  credentialSetId   String?   @db.Uuid
   /// Active only: the gateway that polls it. Null: the room's gateway, then the site's.
-  gatewayId       String? @db.Uuid
+  gatewayId         String?   @db.Uuid
   /// Goes up whenever anything a gateway needs (driver, address, login) changes.
-  version         Int     @default(1)
+  version           Int       @default(1)
+  /// "fixed" (the address never changes) or "tracked" (the gateway finds the device again if it moves). Active only.
+  addressMode       String    @default("fixed")
+  /// Tracked only: a name the gateway can look up, tried before anything else when the device goes quiet.
+  hostname          String?
+  /// Tracked only: the last 20 address changes, newest first: { at, from, to, how: "hostname" | "mac" | "identity" | "manual" }.
+  addressHistory    Json      @default("[]")
+  /// Tracked only: what the gateway could not settle on its own: { at, issue?, candidates?: [{ address, note }] }. Cleared once it is online again.
+  addressSuggestion Json?
+  /// Set when someone presses "Find again"; the gateway looks for the device at once when it changes.
+  refindAt          DateTime?
 
   // Asset record. The value here is the one shown; `provenance` says where each came from.
   make              String?

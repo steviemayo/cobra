@@ -10,6 +10,7 @@ import {
   type PaidPlan,
   type StoredPlan,
 } from '@kestrel/model';
+import { applyStripeInvoice, type StripeInvoiceLike } from './invoice-billing';
 
 // Billing state and entitlements. Functions take the database as a parameter so they can be tested
 // without one. Stripe itself is only touched in stripe.ts.
@@ -217,6 +218,7 @@ export interface StripeSubscriptionLike {
   customer: string | { id: string };
   status: string;
   cancel_at_period_end?: boolean;
+  collection_method?: string;
   current_period_end?: number;
   metadata?: Record<string, string> | null;
   items: {
@@ -260,6 +262,7 @@ export async function applyStripeSubscription(
       status: sub.status,
       // An unknown price leaves the plan and interval alone rather than guessing.
       ...(known ? { plan: known.plan, billingInterval: known.interval } : {}),
+      ...(sub.collection_method ? { collectionMethod: sub.collection_method } : {}),
       quantity: item?.quantity ?? billing.quantity,
       currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
       cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
@@ -315,6 +318,14 @@ export async function handleStripeEvent(
           });
         result = 'applied';
       } else result = 'unmatched';
+      break;
+    }
+    case 'invoice.finalized':
+    case 'invoice.paid':
+    case 'invoice.voided':
+    case 'invoice.marked_uncollectible': {
+      const ok = await applyStripeInvoice(db, event.data.object as StripeInvoiceLike);
+      result = ok ? 'applied' : 'ignored';
       break;
     }
     default:

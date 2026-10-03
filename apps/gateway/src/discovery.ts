@@ -1,5 +1,6 @@
 import { connect } from 'node:net';
 import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
+import { readArp, type ArpReader } from './arp';
 
 // Finding equipment on the gateway's own network, so an installer does not have to hunt for
 // addresses. Only ever looks at private networks the gateway itself sits on (one /24 per address, at
@@ -32,6 +33,8 @@ export interface FoundDevice {
   name?: string;
   manufacturer?: string;
   model?: string;
+  /** Its MAC, read from the gateway's own network. Only for a device on the same network segment. */
+  mac?: string;
   /** Something to tell the person, such as a password being needed. */
   note?: string;
 }
@@ -163,6 +166,7 @@ export interface DiscoveryOptions {
   nets?: NodeJS.Dict<NetworkInterfaceInfo[]>;
   open?: typeof tcpOpen;
   probe?: typeof pjlinkInfo;
+  arp?: ArpReader;
   now?: () => number;
 }
 
@@ -227,6 +231,15 @@ export async function discoverDevices(opts: DiscoveryOptions = {}): Promise<Disc
     }
     found.push(dev);
   });
+
+  // Connecting made the network answer for each of them, so the table now knows their MACs.
+  if (found.length > 0) {
+    const table = await (opts.arp ?? readArp)();
+    for (const dev of found) {
+      const mac = table.get(dev.host);
+      if (mac) dev.mac = mac;
+    }
+  }
 
   found.sort((a, b) => numeric(a.host) - numeric(b.host));
   if (found.length > MAX_FOUND) cut = true;

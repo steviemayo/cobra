@@ -86,7 +86,12 @@ describe('mergeManual', () => {
   });
 
   it('flags editing an existing serial', () => {
-    const r = mergeManual('serial', { value: 'A', provenance: { source: 'manual', at: now } }, 'B', now);
+    const r = mergeManual(
+      'serial',
+      { value: 'A', provenance: { source: 'manual', at: now } },
+      'B',
+      now,
+    );
     expect(r.change?.possibleSwap).toBe(true);
   });
 
@@ -111,12 +116,22 @@ describe('mergeManual', () => {
   });
 
   it('does nothing when the value is unchanged', () => {
-    const r = mergeManual('model', { value: 'X', provenance: { source: 'manual', at: now } }, 'x', now);
+    const r = mergeManual(
+      'model',
+      { value: 'X', provenance: { source: 'manual', at: now } },
+      'x',
+      now,
+    );
     expect(r.change).toBeUndefined();
   });
 
   it('clears a field', () => {
-    const r = mergeManual('model', { value: 'X', provenance: { source: 'manual', at: now } }, '', now);
+    const r = mergeManual(
+      'model',
+      { value: 'X', provenance: { source: 'manual', at: now } },
+      '',
+      now,
+    );
     expect(r.value).toBeNull();
     expect(r.provenance).toBeUndefined();
   });
@@ -145,7 +160,9 @@ describe('identityFromDetails', () => {
 
 describe('gateway resolution and state', () => {
   it('prefers the device gateway, then the room, then the site', () => {
-    expect(resolveGatewayId({ deviceGatewayId: 'd', roomGatewayId: 'r', siteGatewayId: 's' })).toBe('d');
+    expect(resolveGatewayId({ deviceGatewayId: 'd', roomGatewayId: 'r', siteGatewayId: 's' })).toBe(
+      'd',
+    );
     expect(resolveGatewayId({ roomGatewayId: 'r', siteGatewayId: 's' })).toBe('r');
     expect(resolveGatewayId({ siteGatewayId: 's' })).toBe('s');
     expect(resolveGatewayId({})).toBeNull();
@@ -157,5 +174,17 @@ describe('gateway resolution and state', () => {
     expect(deviceLiveState({ kind: 'active', online: true, gatewayOnline: true })).toBe('online');
     expect(deviceLiveState({ kind: 'active', online: null, gatewayOnline: true })).toBe('unknown');
     expect(deviceLiveState({ kind: 'passive', online: null, gatewayOnline: true })).toBe('none');
+  });
+});
+
+describe('addresses a gateway can follow', () => {
+  it('writes a MAC in one form whatever it was typed as, and refuses what is not one', async () => {
+    const { normaliseMac } = await import('./devices');
+    expect(normaliseMac('AA-BB-CC-DD-EE-01')).toBe('aa:bb:cc:dd:ee:01');
+    expect(normaliseMac('aabb.ccdd.ee01')).toBe('aa:bb:cc:dd:ee:01');
+    expect(normaliseMac(' aabbccddee01 ')).toBe('aa:bb:cc:dd:ee:01');
+    expect(normaliseMac('aa:bb:cc:dd:ee')).toBeNull();
+    expect(normaliseMac('zz:bb:cc:dd:ee:01')).toBeNull();
+    expect(normaliseMac(undefined)).toBeNull();
   });
 });

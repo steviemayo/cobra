@@ -13,6 +13,10 @@ import {
   switchParams,
   type BillingDb,
 } from './billing';
+import {
+  assertInvoiceAllowed,
+  invoiceSubscriptionParams,
+} from './invoice-billing';
 
 export class BillingNotConfigured extends Error {
   constructor(what = 'Billing') {
@@ -113,6 +117,79 @@ export async function startSubscription(
   });
   if (!session.url) throw new Error('Stripe did not return a checkout address');
   return { url: session.url };
+}
+
+/**
+ * Starts (or switches to) a yearly subscription billed by invoice. Needs staff approval first. Stripe
+ * emails the invoice, due in INVOICE_DAYS; access starts now and the year runs from today.
+ */
+export async function startInvoiceSubscription(
+  db: BillingDb,
+  input: {
+    orgId: string;
+    orgName: string;
+    plan: PaidPlan;
+    rooms: number;
+    email: string | null;
+  },
+): Promise<{ invoiced: true }> {
+  const stripe = getStripe();
+  const billing = await ensureBilling(db, input.orgId);
+  assertInvoiceAllowed(billing, 'year');
+  const price = priceFor(input.plan, 'year');
+
+  if (billing.stripeSubscriptionId && billing.stripeItemId && PAYING.has(billing.status)) {
+    // Already subscribed (by card): move to a yearly plan billed by invoice. The date restarts today.
+    await stripe.subscriptions.update(billing.stripeSubscriptionId, {
+      items: [{ id: billing.stripeItemId, price, quantity: Math.max(1, input.rooms) }],
+      collection_method: 'send_invoice',
+      days_until_due: billing.invoiceDays,
+      billing_cycle_anchor: 'now',
+      proration_behavior: 'always_invoice',
+    });
+    return { invoiced: true };
+  }
+
+  let customer = billing.stripeCustomerId;
+  if (!customer) {
+    const created = await stripe.customers.create({
+      name: input.orgName,
+      ...(input.email ? { email: input.email } : {}),
+      metadata: { orgId: input.orgId },
+    });
+    customer = created.id;
+    await db.orgBilling.update({ where: { id: billing.id }, data: { stripeCustomerId: customer } });
+  }
+  await db.orgBilling.update({ where: { id: billing.id }, data: { anchorFirstOfMonth: false } });
+  await stripe.subscriptions.create(
+    invoiceSubscriptionParams({
+      orgId: input.orgId,
+      customer,
+      price,
+      quantity: input.rooms,
+      days: billing.invoiceDays,
+    }),
+  );
+  // The subscription and invoice webhooks record the rest.
+  return { invoiced: true };
+}
+
+/** Applies a new days-to-pay to a running invoiced subscription, for invoices issued from now on. */
+export async function updateInvoiceDays(subscriptionId: string, days: number): Promise<void> {
+  await getStripe().subscriptions.update(subscriptionId, { days_until_due: days });
+}
+
+/** Whether the customer has a card (or other saved method) that can be charged. */
+export async function customerHasCard(customerId: string): Promise<boolean> {
+  const c = await getStripe().customers.retrieve(customerId);
+  if (c.deleted) return false;
+  return !!(c.invoice_settings?.default_payment_method || c.default_source);
+}
+
+/** Charges an open invoice to the customer's saved card. True if it was paid. */
+export async function chargeInvoiceToCard(invoiceId: string): Promise<boolean> {
+  const inv = await getStripe().invoices.pay(invoiceId);
+  return inv.status === 'paid';
 }
 
 /** Stripe's own page for cards, invoices and cancelling. */
