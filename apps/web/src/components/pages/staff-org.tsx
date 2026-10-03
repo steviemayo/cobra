@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { DeletionPanel } from '@/components/staff/deletion-panel';
+import { BillingArrangementPanel } from '@/components/staff/billing-arrangement-panel';
 import { LicencePanel } from '@/components/staff/licence-panel';
 import { NotesPanel } from '@/components/staff/notes-panel';
 import { RetentionPanel } from '@/components/staff/retention-panel';
@@ -76,6 +77,8 @@ export function StaffOrg({ orgId }: { orgId: string }) {
       <SessionPanel orgId={orgId} blocked={o.staffAccessBlocked} />
 
       <LicencePanel orgId={orgId} />
+
+      <BillingArrangementPanel orgId={orgId} />
 
       <NotesPanel orgId={orgId} />
 

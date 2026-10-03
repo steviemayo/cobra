@@ -169,7 +169,7 @@ export function AlertsView() {
                     <div className="font-medium">{c.name}</div>
                     <div className="text-xs text-muted-foreground">
                       {TYPE_LABEL[c.type] ?? c.type}
-                      {c.locked && ' · paused, needs Pro'}
+                      {c.locked && ' · paused, needs Premium'}
                     </div>
                   </TableCell>
                   <TableCell className="max-w-64 truncate text-muted-foreground">
@@ -305,7 +305,7 @@ function AddChannelDialog({
 }) {
   const trpc = useTRPC();
   const { orgId } = useOrg();
-  // Basic keeps email only; the other channels need Pro.
+  // Basic keeps email only; the other channels need Premium.
   const allChannels = useBilling().data?.entitlements.allAlertChannels ?? true;
   const [type, setType] = useState<ChannelType>('email');
   const [name, setName] = useState('');
@@ -376,7 +376,7 @@ function AddChannelDialog({
                 onValueChange={setType}
                 options={Object.entries(TYPE_LABEL).map(([value, label]) => ({
                   value: value as ChannelType,
-                  label: value === 'email' || allChannels ? label : `${label} (Pro)`,
+                  label: value === 'email' || allChannels ? label : `${label} (Premium)`,
                   disabled: value !== 'email' && !allChannels,
                 }))}
               />
