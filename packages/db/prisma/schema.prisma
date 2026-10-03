@@ -66,6 +66,7 @@ model Org {
   deviceStatus        DeviceStatus[]
   incidents           Incident[]
   alertChannels       AlertChannel[]
+  briefingSubs        BriefingSubscription[]
   alertDeliveries     AlertDelivery[]
   commands            RemoteCommand[]
   tickets             Ticket[]
@@ -105,6 +106,10 @@ model Member {
   email     String? // denormalised from auth.users for the team list
   role      OrgRole
   createdAt DateTime @default(now())
+  /// When this person was last in the portal; the login recap covers what happened since. Null until their first visit.
+  lastSeenAt   DateTime?
+  /// They asked not to be shown the login recap.
+  recapSilenced Boolean @default(false)
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
@@ -661,9 +666,29 @@ model AlertChannel {
   createdBy   String?  @db.Uuid
   createdAt   DateTime @default(now())
 
-  org        Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  org        Org                    @relation(fields: [orgId], references: [id], onDelete: Cascade)
   deliveries AlertDelivery[]
+  briefings  BriefingSubscription[]
 
+  @@index([orgId])
+}
+
+// A person's sign-up for the daily briefing (status and a short hit list), sent to one of the
+// organisation's alert channels. `siteId` null covers the whole organisation.
+model BriefingSubscription {
+  id         String    @id @default(uuid()) @db.Uuid
+  orgId      String    @db.Uuid
+  userId     String    @db.Uuid
+  channelId  String    @db.Uuid
+  siteId     String?   @db.Uuid
+  enabled    Boolean   @default(true)
+  lastSentAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  org     Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  channel AlertChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channelId, siteId])
   @@index([orgId])
 }
 

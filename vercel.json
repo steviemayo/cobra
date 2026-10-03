@@ -1,0 +1,7 @@
+{
+  "regions": ["syd1"],
+  "crons": [
+    { "path": "/api/cron/retention", "schedule": "0 16 * * *" },
+    { "path": "/api/cron/briefing", "schedule": "0 20 * * *" }
+  ]
+}
