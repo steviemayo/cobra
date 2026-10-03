@@ -15,6 +15,8 @@ import {
   type BrandingDraft,
 } from '@/components/common/branding-fields';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
+import { BriefingSetting } from '@/components/common/briefing-setting';
+import { RecapSetting } from '@/components/common/recap-setting';
 import { ServiceProvidersSetting } from '@/components/common/service-providers-setting';
 import { StaffAccessSetting } from '@/components/common/staff-access-setting';
 import { orgPath, useOrg } from '@/components/shell/org-context';
@@ -161,6 +163,8 @@ export function ActivityLog() {
           ) : undefined
         }
       />
+      <RecapSetting />
+      <BriefingSetting />
       {retention.data && (
         <p className="text-sm text-muted-foreground">
           Kept for {months(retention.data.days)} months. Billing and access changes are kept for{' '}
