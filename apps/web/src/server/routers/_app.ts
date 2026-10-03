@@ -24,6 +24,8 @@ import { joinRequestRouter } from './join-request';
 import { latencyRouter } from './latency';
 import { memberRouter } from './member';
 import { monitoringRouter } from './monitoring';
+import { recapRouter } from './recap';
+import { briefingRouter } from './briefing';
 import { orgRouter } from './org';
 import { reportRouter } from './report';
 import { roomRouter } from './room';
@@ -43,6 +45,8 @@ export const appRouter = router({
   gateway: gatewayRouter,
   discovery: discoveryRouter,
   monitoring: monitoringRouter,
+  recap: recapRouter,
+  briefing: briefingRouter,
   alert: alertRouter,
   ticket: ticketRouter,
   billing: billingRouter,

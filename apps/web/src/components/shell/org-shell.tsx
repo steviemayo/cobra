@@ -13,6 +13,7 @@ import { CommandMenu, usePalette } from './command-menu';
 import { DialogsProvider } from './dialogs';
 import { IncidentToaster } from './incident-toaster';
 import { PortalAccent } from './portal-accent';
+import { RecapDialog } from './recap-dialog';
 import { OrgProvider, type OrgSummary, type PortalBrandMark } from './org-context';
 import { ThemeToggle } from './theme-toggle';
 
@@ -80,6 +81,7 @@ export function OrgShell({
           <CommandMenu>
             <AppSidebar />
             <IncidentToaster />
+            <RecapDialog />
             <SidebarInset className="min-w-0">
               {viewAs && <ViewAsBanner session={viewAs} email={user.email} />}
               <ViaProviderBanner />
