@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import {
+  ADDRESS_MODES,
   AssetCategory,
   AssetStatus,
   ControlPoint,
@@ -17,6 +18,7 @@ import {
   updateDevice,
   type DeviceInput,
 } from '../devices';
+import { AddressError, requestRefind, useAddress } from '../address-tracking';
 import { deviceViews } from '../device-views';
 import { setDeviceRooms } from '../device-sharing';
 import { MAX_POINTS, setDevicePoints } from '../device-points';
@@ -66,6 +68,8 @@ const patchShape = {
   mac: optText(40),
   ip: optText(80),
   firmware: optText(100),
+  addressMode: z.enum(ADDRESS_MODES).optional(),
+  hostname: optText(253),
 };
 
 // Devices, active and passive (docs/pivot-monitoring.md). Logins are write-only: a browser only
@@ -149,6 +153,46 @@ export const deviceRouter = router({
       });
       after(() => syncQuantity(db, ctx.orgId).catch(() => undefined));
       return res;
+    }),
+
+  /** A person picks the address of a tracked device (one the gateway suggested, or typed). The gateway is told to use it. */
+  useAddress: orgProcedure
+    .input(z.object({ orgId, deviceId: id, address: text(253).min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev', 'support']);
+      try {
+        await useAddress(db, {
+          orgId: ctx.orgId,
+          deviceId: input.deviceId,
+          address: input.address,
+          actorId: ctx.user.id,
+        });
+      } catch (e) {
+        if (e instanceof AddressError) return fail(e.message);
+        throw e;
+      }
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'device.use_address',
+        target: input.deviceId,
+        meta: { address: input.address },
+      });
+      return { ok: true };
+    }),
+
+  /** "Find again": the gateway looks for a tracked device at once. */
+  findAgain: orgProcedure
+    .input(z.object({ orgId, deviceId: id }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev', 'support']);
+      try {
+        await requestRefind(db, { orgId: ctx.orgId, deviceId: input.deviceId });
+      } catch (e) {
+        if (e instanceof AddressError) return fail(e.message);
+        throw e;
+      }
+      return { ok: true };
     }),
 
   /** The device's history, newest first. */

@@ -35,6 +35,7 @@ const FoundHost = z.object({
   name: str(100),
   manufacturer: str(100),
   model: str(100),
+  mac: str(40),
   note: str(200),
 });
 export type FoundHost = z.infer<typeof FoundHost>;

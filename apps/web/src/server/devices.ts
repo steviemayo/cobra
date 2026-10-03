@@ -32,6 +32,7 @@ import { recordLatency, type LatencyDb } from './latency';
 import { linkedRoomIds } from './device-sharing';
 import { groupOutages, type GroupDb } from './incident-groups';
 import type { SigningKey } from './signing';
+import { applyAddressReport, checkTrackingInput, withTracking } from './address-tracking';
 
 // v2 devices (docs/pivot-monitoring.md): the cloud's half. Functions take the database as a
 // parameter so they can be tested without one, and return alert jobs instead of sending anything.
@@ -231,12 +232,15 @@ export async function signedDeviceSetFor(
       name: d.name,
       category: d.category,
       control: control.data,
-      settings: {
-        ...(isObject(d.settings) ? d.settings : {}),
-        ...set.fields,
-        ...(isObject(d.values) ? d.values : {}),
-        ...own,
-      },
+      settings: withTracking(
+        {
+          ...(isObject(d.settings) ? d.settings : {}),
+          ...set.fields,
+          ...(isObject(d.values) ? d.values : {}),
+          ...own,
+        },
+        d,
+      ),
       points: pointsOf(d.points),
     });
     stamp.push(`${d.id}:${d.version}:${set.updatedAt}`);
@@ -314,10 +318,30 @@ export async function ingestDeviceReports(
       ...(details?.success ? identityFromDetails(details.data) : {}),
       ...(rep.firmware ? { firmware: rep.firmware } : {}),
     };
-    const configured = isObject(row.values)
-      ? (row.values.host ?? row.values.address ?? row.values.ip)
-      : undefined;
+    // A tracked device the gateway found at a new address: the address it is given moves with it.
+    const moved = applyAddressReport(row, rep.address, rep.online, patch, now);
+    if (rep.address?.mac && row.addressMode === 'tracked') seen.mac = rep.address.mac;
+    const configured = moved
+      ? moved.to
+      : isObject(row.values)
+        ? (row.values.host ?? row.values.address ?? row.values.ip)
+        : undefined;
     if (typeof configured === 'string') seen.ip = configured;
+    if (moved)
+      await log(
+        db,
+        row.orgId,
+        row.id,
+        {
+          type: 'address_changed',
+          field: 'address',
+          oldValue: moved.from,
+          newValue: moved.to,
+          source: 'discovered',
+          data: { how: moved.how },
+        },
+        now,
+      );
     let swap = row.swapPending;
     for (const field of DISCOVERABLE_FIELDS) {
       if (!seen[field]) continue;
@@ -459,6 +483,10 @@ export interface DeviceInput {
   mac?: string | null;
   ip?: string | null;
   firmware?: string | null;
+  /** fixed (default) or tracked: the gateway finds the device again if its address changes. */
+  addressMode?: 'fixed' | 'tracked';
+  /** Tracked only: a name the gateway can look up. */
+  hostname?: string | null;
 }
 
 const PLAIN = [
@@ -520,6 +548,10 @@ export async function createDevice(
   const key = secretsKey();
   const hasSecrets = !!input.secrets && Object.keys(input.secrets).length > 0;
   if (hasSecrets && !key) return bad('Storing logins needs KESTREL_SECRETS_KEY on the server');
+  const tracking = checkTrackingInput(input, input.addressMode === 'tracked');
+  if (!tracking.ok) return bad(tracking.message);
+  if (input.addressMode === 'tracked' && input.kind !== 'active')
+    return bad('Only a monitored device can have its address tracked.');
   const prov: Provenance = {};
   const data: Record<string, unknown> = {};
   for (const f of ASSET_FIELDS) {
@@ -533,6 +565,9 @@ export async function createDevice(
       };
     }
   }
+  // A tracked device's MAC is kept in one form so the gateway can compare it.
+  if (input.addressMode === 'tracked' && typeof tracking.mac === 'string' && tracking.mac)
+    data.mac = tracking.mac;
   const created = await db.device.create({
     data: {
       orgId: input.orgId,
@@ -547,6 +582,8 @@ export async function createDevice(
       sealed: hasSecrets ? seal(JSON.stringify(input.secrets), key!) : null,
       credentialSetId: input.credentialSetId ?? null,
       gatewayId: input.kind === 'active' ? (input.gatewayId ?? null) : null,
+      addressMode: input.kind === 'active' ? (input.addressMode ?? 'fixed') : 'fixed',
+      hostname: input.addressMode === 'tracked' ? (tracking.hostname ?? null) : null,
       status: input.status ?? 'in_service',
       assetTag: input.assetTag ?? null,
       installedOn: input.installedOn ?? null,
@@ -579,7 +616,7 @@ export async function updateDevice(
 ): Promise<DeviceResult> {
   const row = await db.device.findFirst({ where: { id: input.deviceId, orgId: input.orgId } });
   if (!row) return bad('No such device');
-  const p = input.patch;
+  const p = { ...input.patch };
   const patch: Record<string, unknown> = {};
   const key = secretsKey();
 
@@ -703,6 +740,60 @@ export async function updateDevice(
         now,
       );
     }
+  const mode = p.addressMode ?? row.addressMode;
+  const tracking = checkTrackingInput(p, mode === 'tracked');
+  if (!tracking.ok) return bad(tracking.message);
+  if (mode === 'tracked' && typeof tracking.mac === 'string' && tracking.mac) p.mac = tracking.mac;
+  if (p.addressMode !== undefined && p.addressMode !== row.addressMode) {
+    if (p.addressMode === 'tracked' && row.kind !== 'active')
+      return bad('Only a monitored device can have its address tracked.');
+    patch.addressMode = p.addressMode;
+    if (p.addressMode === 'fixed') {
+      patch.addressSuggestion = Prisma.DbNull;
+      patch.refindAt = null;
+    }
+    bump = true;
+    await log(
+      db,
+      row.orgId,
+      row.id,
+      {
+        type: 'field_changed',
+        field: 'address tracking',
+        oldValue: row.addressMode,
+        newValue: p.addressMode,
+        source: 'manual',
+        actorId: input.actorId,
+      },
+      now,
+    );
+  }
+  if (p.hostname !== undefined && (tracking.hostname ?? null) !== (row.hostname ?? null)) {
+    patch.hostname = tracking.hostname ?? null;
+    bump = true;
+    await log(
+      db,
+      row.orgId,
+      row.id,
+      {
+        type: 'field_changed',
+        field: 'hostname',
+        oldValue: row.hostname,
+        newValue: tracking.hostname ?? null,
+        source: 'manual',
+        actorId: input.actorId,
+      },
+      now,
+    );
+  }
+  // The MAC, serial and name are what a gateway recognises a tracked device by, so a change to any of them goes to it.
+  if (
+    mode === 'tracked' &&
+    ((p.mac !== undefined && p.mac !== row.mac) ||
+      (p.serial !== undefined && p.serial !== row.serial) ||
+      (p.name !== undefined && p.name !== row.name))
+  )
+    bump = true;
   if (p.secrets !== undefined) {
     const has = Object.keys(p.secrets).length > 0;
     if (has && !key) return bad('Storing logins needs KESTREL_SECRETS_KEY on the server');

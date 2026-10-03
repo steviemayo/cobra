@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createDriver, type DeviceDriver } from '@kestrel/drivers/real';
 import {
+  ADDRESS_TRACKING_KEY,
   Device,
   type DeviceCommand,
   DeviceDetails,
@@ -10,6 +11,7 @@ import {
   type WatchedPoint,
   checkWatch,
 } from '@kestrel/model';
+import { AddressWatch, swapAddress, trackingOf, type AddressDeps } from './address-tracker';
 import type { Logger } from './log';
 import { deviceFeedback } from './device-feedback';
 import { FastFail } from './fastfail';
@@ -43,10 +45,33 @@ const fingerprintOf = (d: MonitoredDevice) =>
     .update(JSON.stringify([d.name, d.category, d.control, d.settings, d.points]))
     .digest('hex');
 
+/** How often tracked devices are looked after (quiet ones searched for, healthy ones checked). */
+const ADDRESS_TICK_MS = 5_000;
+
+const hostOf = (settings: Record<string, unknown>): string | undefined => {
+  for (const k of ['host', 'address', 'ip'])
+    if (typeof settings[k] === 'string' && settings[k]) return settings[k] as string;
+  return undefined;
+};
+
+/** The control port to look for a device on: its own setting, or the standard one for PJLink. */
+const portOf = (d: MonitoredDevice): number | undefined => {
+  const own = Number(d.settings.port);
+  if (Number.isInteger(own) && own > 0) return own;
+  return isPjlink(d) ? 4352 : undefined;
+};
+const isPjlink = (d: MonitoredDevice) =>
+  (d.control?.kind === 'generic' && d.control.protocol === 'pjlink') ||
+  (d.control?.kind === 'driver' && d.control.driverId === 'pjlink');
+
 export class DeviceHost {
   private readonly running = new Map<string, Running>();
   private readonly sentDetails = new Map<string, { json: string; at: number }>();
   private version: string | null = null;
+  private lastSet: SignedDeviceSet | null = null;
+  private addressTimer: ReturnType<typeof setInterval> | null = null;
+  /** Looks after devices whose address can change: finds them again when they move. */
+  private readonly address: AddressWatch;
 
   constructor(
     private readonly log: Logger,
@@ -55,7 +80,10 @@ export class DeviceHost {
       driverOnline: (id) => this.running.get(id)?.driver.getState().online,
       onChange: () => this.onUrgent?.(),
     }),
-  ) {}
+    addressDeps?: AddressDeps,
+  ) {
+    this.address = new AddressWatch(log, addressDeps, () => this.reapply());
+  }
 
   /** Called when a device is confirmed down or comes back, so the gateway can tell the cloud at once. */
   onUrgent: (() => void) | null = null;
@@ -64,6 +92,37 @@ export class DeviceHost {
   start() {
     this.prober.start();
     this.fastFail.start();
+    if (!this.addressTimer) {
+      this.addressTimer = setInterval(() => void this.tickAddresses(), ADDRESS_TICK_MS);
+      this.addressTimer.unref?.();
+    }
+  }
+
+  /** Whether a device looks reachable now: the fast check's word if it has one, else its driver's. */
+  private looksOnline(id: string): boolean {
+    const verdict = this.fastFail.verdict(id);
+    return verdict ? verdict.online : (this.running.get(id)?.driver.getState().online ?? true);
+  }
+
+  /** Every address a running device is using, so one device is never taken for another. */
+  private claimedAddresses(): Set<string> {
+    const out = new Set<string>();
+    for (const r of this.running.values()) {
+      const h = hostOf(r.device.settings);
+      if (h) out.add(h);
+    }
+    return out;
+  }
+
+  /** One pass over the tracked devices (also called by tests). */
+  tickAddresses(): Promise<void> {
+    return this.address.tick((id) => this.looksOnline(id), this.claimedAddresses());
+  }
+
+  /** A device was found at a new address: run it there now, until the cloud's set says so too. */
+  private reapply() {
+    if (this.lastSet) this.apply(this.lastSet);
+    this.onUrgent?.();
   }
 
   /** The version of the device set now running, or null when none has been applied. */
@@ -80,6 +139,7 @@ export class DeviceHost {
    * removed ones closed. A device whose driver cannot be built is skipped and logged, never fatal.
    */
   apply(signed: SignedDeviceSet | null) {
+    this.lastSet = signed;
     const wanted = new Map((signed?.payload.devices ?? []).map((d) => [d.id, d]));
     for (const [id, run] of this.running)
       if (!wanted.has(id)) {
@@ -89,9 +149,27 @@ export class DeviceHost {
         this.sentDetails.delete(id);
         this.prober.untrack(id);
         this.fastFail.untrack(id);
+        this.address.untrack(id);
         this.log('info', 'Stopped polling a device', { device: run.device.name, deviceId: id });
       }
-    for (const [id, d] of wanted) {
+    for (const [id, cloud] of wanted) {
+      // A tracked device that has moved runs at its new address until the cloud's set carries it.
+      const tracking = trackingOf(cloud.settings);
+      const cloudHost = hostOf(cloud.settings);
+      this.address.track(
+        id,
+        tracking && cloudHost
+          ? { host: cloudHost, port: portOf(cloud), tracking, pjlink: isPjlink(cloud) }
+          : undefined,
+      );
+      const moved = this.address.override(id);
+      // The tracking details are for this gateway, not the driver, and changing them rebuilds nothing.
+      const { [ADDRESS_TRACKING_KEY]: _tracking, ...rest } = cloud.settings;
+      void _tracking;
+      const d: MonitoredDevice = {
+        ...cloud,
+        settings: moved ? swapAddress(rest, moved.from, moved.to) : rest,
+      };
       const fingerprint = fingerprintOf(d);
       const current = this.running.get(id);
       if (current?.fingerprint === fingerprint) continue;
@@ -174,13 +252,19 @@ export class DeviceHost {
               : undefined;
         const details = this.detailsFor(device.id, state.details, now);
         const verdict = this.fastFail.verdict(device.id);
-        const latency = this.prober.take(device.id, verdict?.online ?? state.online ?? true);
+        // Something else answers at a tracked device's address, so it is not there, whatever its driver says.
+        const wrongDevice = this.address.identityChanged(device.id);
+        const online = wrongDevice ? false : (verdict?.online ?? state.online ?? true);
+        const latency = this.prober.take(device.id, online);
+        const address = this.address.report(device.id);
         const { readings, watched } = this.pointsOf(device, state.points);
         return {
           deviceId: device.id,
           name: device.name,
-          online: verdict?.online ?? state.online ?? true,
+          online,
           ...(verdict?.confirmed && { confirmed: true, offlineForMs: verdict.offlineForMs }),
+          ...(wrongDevice && !verdict?.confirmed && { confirmed: true, offlineForMs: 0 }),
+          ...(address && { address }),
           ...(driverName && { driver: driverName }),
           ...(state.firmware && { firmware: state.firmware }),
           ...(latency && { latency }),
@@ -252,6 +336,8 @@ export class DeviceHost {
   }
 
   shutdown() {
+    if (this.addressTimer) clearInterval(this.addressTimer);
+    this.addressTimer = null;
     this.prober.stop();
     for (const run of this.running.values()) {
       run.off();

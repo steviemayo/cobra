@@ -32,7 +32,7 @@ const URGENT_COALESCE_MS = 1_500;
 const URGENT_MIN_GAP_MS = 3_000;
 
 /** What this gateway can do, sent in every heartbeat so the portal only hands it work it can run. */
-const FEATURES = ['discovery', 'firmware', 'self-update', 'device-set', 'config-enforce'];
+const FEATURES = ['discovery', 'firmware', 'self-update', 'device-set', 'config-enforce', 'address-tracking'];
 
 /** An update is not started again for the same version this soon: an attempt that has reached the installer is left to finish. */
 const UPDATE_RETRY_MS = 20 * 60_000;

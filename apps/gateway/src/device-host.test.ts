@@ -275,3 +275,73 @@ describe('DeviceHost', () => {
     expect(host.size).toBe(0);
   });
 });
+
+describe('DeviceHost tracked addresses', () => {
+  const MAC = 'aa:bb:cc:dd:ee:01';
+  const tracked = (host: string, extra: Record<string, unknown> = {}): SignedDeviceSet => {
+    const base = set('v1', [{ id: A, host }]);
+    base.payload.devices[0]!.settings = {
+      host,
+      port: 4352,
+      addressTracking: { mac: MAC, name: 'Display', ...extra },
+    };
+    return base;
+  };
+  const addressDeps = (now: { t: number }) => ({
+    lookupHost: async () => undefined,
+    arp: async () => new Map([['10.0.0.9', MAC]]),
+    open: async (h: string) => h === '10.0.0.9',
+    pjlink: async () => ({}),
+    subnets: () => [{ prefix: '10.0.0', own: new Set(['10.0.0.2']) }],
+    now: () => now.t,
+  });
+
+  it('keeps the tracking details away from the driver and does not rebuild when they change', () => {
+    const host = new DeviceHost(silentLogger);
+    host.apply(tracked('10.0.0.1'));
+    expect(built).toHaveLength(1);
+    host.apply(tracked('10.0.0.1', { refindAt: '2026-10-03T09:00:00Z' }));
+    expect(built).toHaveLength(1);
+  });
+
+  it('runs a moved device at its new address and reports the move until the cloud agrees', async () => {
+    const now = { t: 5_000_000 };
+    const host = new DeviceHost(silentLogger, undefined, undefined, addressDeps(now));
+    const urgent = vi.fn();
+    host.onUrgent = urgent;
+    host.apply(tracked('10.0.0.1'));
+    built[0]!.state.online = false;
+    await host.tickAddresses();
+    now.t += 15_000;
+    await host.tickAddresses();
+    // A new driver is running at the new address, the old one is closed, and the cloud is told at once.
+    expect(built).toHaveLength(2);
+    expect(built[0]!.closes).toBe(1);
+    expect(urgent).toHaveBeenCalled();
+    const report = host.reports(LATER()).find((r) => r.deviceId === A)!;
+    expect(report.address?.change).toEqual({ from: '10.0.0.1', to: '10.0.0.9', how: 'mac' });
+    // The next set still has the old address: nothing is rebuilt and the move is still reported.
+    host.apply(tracked('10.0.0.1'));
+    expect(built).toHaveLength(2);
+    expect(host.reports(LATER()).find((r) => r.deviceId === A)!.address?.change?.to).toBe(
+      '10.0.0.9',
+    );
+    // Once the cloud's set carries the new address the report stops.
+    host.apply(tracked('10.0.0.9'));
+    expect(built).toHaveLength(2);
+    expect(host.reports(LATER()).find((r) => r.deviceId === A)!.address?.change).toBeUndefined();
+    host.shutdown();
+  });
+
+  it('never moves a device that is not tracked', async () => {
+    const now = { t: 5_000_000 };
+    const host = new DeviceHost(silentLogger, undefined, undefined, addressDeps(now));
+    host.apply(set('v1', [{ id: A, host: '10.0.0.1' }]));
+    built[0]!.state.online = false;
+    await host.tickAddresses();
+    now.t += 15_000;
+    await host.tickAddresses();
+    expect(built).toHaveLength(1);
+    expect(host.reports(LATER())[0]!.address).toBeUndefined();
+  });
+});
