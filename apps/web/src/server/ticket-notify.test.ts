@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { parseAddresses } from './resend';
-import { notifyOrg, notifyStaff, type NotifyDb, type TicketEvent } from './ticket-notify';
+import {
+  notifyInvoiceRequest,
+  notifyOrg,
+  notifyStaff,
+  type NotifyDb,
+  type TicketEvent,
+} from './ticket-notify';
 import { table } from './test-db';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
@@ -285,5 +291,39 @@ describe('email', () => {
     // Without email set up on the server, an email channel is skipped and the rest still go out.
     const again = fakeFetch();
     expect(await notifyOrg(world(), event, deps(again.f))).toBe(1);
+  });
+});
+
+describe('telling Kestrel staff about an invoice request', () => {
+  const mail = { RESEND_API_KEY: 'key', ALERT_FROM_EMAIL: 'kestrel@example.com' };
+  it('sends the webhook and the email with the organisation, the note and a link to the queue', async () => {
+    const { f, calls } = fakeFetch();
+    const ok = await notifyInvoiceRequest(
+      { orgId: ORG, orgName: 'Acme', note: 'AP  wants\n an invoice' },
+      deps(f, {
+        ...mail,
+        STAFF_TICKET_EMAIL: 'support@kestrel.test',
+        STAFF_TICKET_WEBHOOK_URL: 'https://hooks.example.com/staff',
+        NEXT_PUBLIC_APP_URL: 'https://app.example.com',
+      }),
+    );
+    expect(ok).toBe(true);
+    expect(calls.map((c) => c.url)).toEqual([
+      'https://hooks.example.com/staff',
+      'https://api.resend.com/emails',
+    ]);
+    expect(calls[0]!.body.text).toBe(
+      'Acme asked to pay by invoice instead of card\nAP wants an invoice\nhttps://app.example.com/staff/invoices',
+    );
+    expect(calls[1]!.body).toMatchObject({
+      to: ['support@kestrel.test'],
+      subject: '[Kestrel] Invoice billing request: Acme',
+    });
+  });
+
+  it('quietly does nothing when no staff channel is set up', async () => {
+    const { f, calls } = fakeFetch();
+    expect(await notifyInvoiceRequest({ orgId: ORG, orgName: 'Acme' }, deps(f))).toBe(false);
+    expect(calls).toHaveLength(0);
   });
 });

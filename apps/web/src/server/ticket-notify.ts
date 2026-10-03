@@ -90,6 +90,49 @@ export async function notifyStaff(e: TicketEvent, d: NotifyDeps = realDeps()): P
   return reached;
 }
 
+/**
+ * Tells Kestrel staff an organisation asked to pay by invoice, on the same staff channels as tickets
+ * (STAFF_TICKET_WEBHOOK_URL, STAFF_TICKET_EMAIL). Best effort. True if at least one was reached.
+ */
+export async function notifyInvoiceRequest(
+  e: { orgId: string; orgName: string; note?: string },
+  d: NotifyDeps = realDeps(),
+): Promise<boolean> {
+  const base = d.env.NEXT_PUBLIC_APP_URL;
+  const url = base ? `${base}/staff/invoices` : null;
+  const note = snip(e.note);
+  const text = [`${e.orgName} asked to pay by invoice instead of card`, note, url]
+    .filter(Boolean)
+    .join('\n');
+  let reached = false;
+  const hook = d.env.STAFF_TICKET_WEBHOOK_URL;
+  if (hook)
+    try {
+      await postSigned(d, hook, {
+        text,
+        event: 'billing.invoice_request',
+        organisation: { id: e.orgId, name: e.orgName },
+        note,
+        url,
+      });
+      reached = true;
+    } catch (err) {
+      console.error(
+        '[billing] staff notification failed',
+        err instanceof Error ? err.message : err,
+      );
+    }
+  const to = parseAddresses(d.env.STAFF_TICKET_EMAIL);
+  if (to.length > 0)
+    try {
+      if (await sendEmail(d, to, `[Kestrel] Invoice billing request: ${e.orgName}`, text))
+        reached = true;
+    } catch (err) {
+      console.error('[billing] staff email failed', err instanceof Error ? err.message : err);
+    }
+  return reached;
+}
+
 /** The organisation's own Teams, webhook and email channels. Returns how many were reached. */
 export async function notifyOrg(
   db: NotifyDb,

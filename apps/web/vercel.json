@@ -2,6 +2,7 @@
   "regions": ["syd1"],
   "crons": [
     { "path": "/api/cron/retention", "schedule": "0 16 * * *" },
-    { "path": "/api/cron/briefing", "schedule": "0 20 * * *" }
+    { "path": "/api/cron/briefing", "schedule": "0 20 * * *" },
+    { "path": "/api/cron/invoices", "schedule": "0 21 * * *" }
   ]
 }

@@ -983,3 +983,16 @@ Not done: photo upload for checklist items, the visit being done offline on a ph
 - FF-5: alerts wait 2s (something critical) or 5s, then problems that belong together go out as one message: same room, then 3+ rooms at one site, then same gateway. Members are recorded as `batched` deliveries. The wait is in server memory, so it only joins alerts on the same instance. Webhook/ITSM payloads gain an optional `batch` object
 - FF-6: a channel at its hourly limit gets one notice that the rest are only in the portal, instead of silence
 - Not done: grouping by model/vendor, and a sub-30s gateway-offline path (needs a short keepalive and a faster sweep)
+
+## Pay by invoice (2026-10-03, migration `20261003000200_invoice_billing`)
+
+An organisation can pay yearly by invoice instead of card. Still a Stripe subscription.
+
+- IB-1: card through Checkout stays the default. Invoice billing is **yearly only** and **staff approved per organisation**: the owner asks (optional note), staff approve or decline in Staff > Invoice requests. A decline needs a reason the owner sees; the owner may ask again
+- IB-2: the queue lives on `OrgBilling` (`invoiceStatus` none/requested/approved/declined, who, when, reason), not a table of its own. Staff see a pending count in the nav; a request also goes to the staff channels already used for tickets (`STAFF_TICKET_EMAIL`, `STAFF_TICKET_WEBHOOK_URL`), best effort
+- IB-3: an approved owner starts a subscription with `collection_method: send_invoice` and `days_until_due`. **Access starts when the invoice is issued** and the year runs from then, so paying later is effectively backdated. `active` and `past_due` already count as paying, so entitlements are unchanged. A card subscriber is moved over by switching to yearly (date restarts today, charged now with credit)
+- IB-4: **days to pay is per customer**, 14 by default, 1 to 90, set when approving and changeable afterwards (`OrgBilling.invoiceDays`). A change updates a running invoiced subscription, so it applies to invoices issued from then on
+- IB-5: a card on file is an optional backup, added through Stripe's billing portal. A daily job (`/api/cron/invoices`) charges an open invoice that is past due to the customer's saved card. With no card, or a failed charge, it does nothing itself
+- IB-6: what happens to a subscription whose invoice stays unpaid is **Stripe's setting** (Billing > Subscriptions and emails, overdue invoices), not Kestrel's. Set it to cancel, otherwise access continues
+- IB-7: the latest open invoice (id, hosted link, due date) is kept from the `invoice.finalized`, `invoice.paid`, `invoice.voided` and `invoice.marked_uncollectible` events, and cleared when paid. The webhook endpoint must be subscribed to them
+- IB-8: staff can **revoke** an approval (reason required, shown to the owner). It stops the owner choosing invoice billing again; a running invoiced term is left alone, cancel it in Stripe if needed. Mid-year room changes follow the existing true up setting (TM-15)
