@@ -100,6 +100,8 @@ export function BillingView() {
   const paid = e.plan === 'basic' || e.plan === 'pro';
   const live = ['active', 'trialing', 'past_due'].includes(b.subscription.status);
   const currentInterval = b.subscription.interval;
+  // Asking for invoice billing needs no Stripe; starting the invoiced subscription does.
+  const canInvoice = b.available && b.yearlyAvailable;
   // Yearly is only offered when the server has both yearly prices.
   const interval: BillingInterval = !b.yearlyAvailable
     ? 'month'
@@ -176,7 +178,7 @@ export function BillingView() {
         </section>
       )}
 
-      {b.available && b.yearlyAvailable && (
+      <>
         <section className="space-y-3 rounded-lg border p-4">
           <div className="text-sm font-medium">Pay by invoice</div>
           {b.subscription.collectionMethod === 'send_invoice' ? (
@@ -213,13 +215,19 @@ export function BillingView() {
                 have {b.invoiceBilling.days} days to pay the invoice. Adding a card as a backup is
                 optional.
               </p>
+              {!canInvoice && (
+                <p className="text-sm text-muted-foreground">
+                  Starting an invoiced subscription needs payments and yearly prices to be set up on
+                  this Kestrel server.
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
                 {PAID_PLANS.map((plan: PaidPlan) => (
                   <Button
                     key={plan}
                     variant="outline"
                     size="sm"
-                    disabled={subscribeByInvoice.isPending}
+                    disabled={subscribeByInvoice.isPending || !canInvoice}
                     onClick={() => subscribeByInvoice.mutate({ orgId, plan })}
                   >
                     {subscribeByInvoice.isPending &&
@@ -264,7 +272,7 @@ export function BillingView() {
             </div>
           )}
         </section>
-      )}
+      </>
 
       {!b.available && (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
