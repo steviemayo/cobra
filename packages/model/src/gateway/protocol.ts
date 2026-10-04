@@ -128,6 +128,7 @@ export const COMMAND_TYPES = [
   'discover_devices',
   'discover_components',
   'discover_controls',
+  'browse_points',
 ] as const;
 export const CommandType = z.enum(COMMAND_TYPES);
 export type CommandType = z.infer<typeof CommandType>;
@@ -171,6 +172,12 @@ export const COMMAND_INFO: Record<
     label: 'List a component’s controls',
     description: 'Ask a point-based device what controls one named component has. Changes nothing.',
     needsDevice: true,
+  },
+  browse_points: {
+    label: 'List what a device can report',
+    description:
+      'Read a monitored device’s own tree and list the values a control point can watch. Changes nothing.',
+    needsDevice: false,
   },
   room_off: {
     label: 'Turn room off',

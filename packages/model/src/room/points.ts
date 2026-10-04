@@ -132,6 +132,28 @@ export interface DiscoveredControl {
   value?: number | boolean | string;
 }
 
+/**
+ * One value a device can report, found by reading the device's own tree (a Crestron unit's /Device),
+ * so a control point can be picked from a list instead of its path being typed. `expect` is what a
+ * person usually wants it to hold (an IP table entry that should be ONLINE), when the driver knows.
+ */
+export const BrowsedPoint = z.object({
+  path: z.string().min(1).max(200),
+  label: z.string().max(120),
+  group: z.string().max(120),
+  value: z.union([z.number(), z.boolean(), z.string().max(80)]).optional(),
+  expect: z.union([z.number(), z.boolean(), z.string().max(40)]).optional(),
+});
+export type BrowsedPoint = z.infer<typeof BrowsedPoint>;
+
+/** What a device's gateway sends back when asked to list a device's points. */
+export const BrowsedPoints = z.object({
+  points: z.array(BrowsedPoint).max(1000),
+  /** There were more values than were listed. */
+  truncated: z.boolean().default(false),
+});
+export type BrowsedPoints = z.infer<typeof BrowsedPoints>;
+
 /** Points and their state values: 0 to 100 for a level, true or false for a mute. */
 export type PointValue = number | boolean | string;
 

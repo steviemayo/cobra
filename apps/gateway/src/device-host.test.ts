@@ -27,6 +27,10 @@ class FakeDriver {
   emit() {
     for (const l of this.listeners) l(this.getState());
   }
+  browsed: unknown = { points: [{ path: 'Device.A', label: 'A', group: 'G' }], truncated: false };
+  async browsePoints() {
+    return this.browsed;
+  }
   async send(c: unknown) {
     if (this.failSend) throw new Error('refused');
     this.sent.push(c);
@@ -343,5 +347,28 @@ describe('DeviceHost tracked addresses', () => {
     await host.tickAddresses();
     expect(built).toHaveLength(1);
     expect(host.reports(LATER())[0]!.address).toBeUndefined();
+  });
+});
+
+describe('DeviceHost browse', () => {
+  it('lists a running device and says why when it cannot', async () => {
+    const host = new DeviceHost(silentLogger);
+    host.apply(set('v1', [{ id: A }]));
+    expect(await host.browse(A)).toEqual({
+      ok: true,
+      found: { points: [{ path: 'Device.A', label: 'A', group: 'G' }], truncated: false },
+    });
+    expect(await host.browse(B)).toEqual({
+      ok: false,
+      error: 'This gateway is not polling that device yet',
+    });
+    built[0]!.browsePoints = async () => {
+      throw new Error('The device is offline, so it cannot be browsed right now');
+    };
+    expect(await host.browse(A)).toEqual({
+      ok: false,
+      error: 'The device is offline, so it cannot be browsed right now',
+    });
+    host.shutdown();
   });
 });

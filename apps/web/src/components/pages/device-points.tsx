@@ -1,10 +1,11 @@
 'use client';
-import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   BUILT_IN_DRIVERS,
+  type BrowsedPoint,
   ControlPoint,
   POINT_TYPE_LABEL,
   pointToLevel,
@@ -458,14 +459,173 @@ function AddQsys({
   );
 }
 
+/** How often to ask whether the gateway has answered, and when to stop asking. */
+const BROWSE_POLL_MS = 2000;
+const BROWSE_GIVE_UP_MS = 2 * 60_000;
+const MAX_LISTED = 100;
+
+/** A control point's value type, from the value the device reported for it. */
+const valueTypeOf = (v: BrowsedPoint['value']): ControlPoint['valueType'] =>
+  typeof v === 'boolean'
+    ? 'boolean'
+    : typeof v === 'number'
+      ? Number.isInteger(v)
+        ? 'integer'
+        : 'float'
+      : typeof v === 'string'
+        ? 'text'
+        : undefined;
+
+/**
+ * Lists what the live device can report, read through its gateway, so a point is picked from the
+ * device instead of its path being typed. The device has to be online and answer with its whole tree.
+ */
+function PointPicker({
+  deviceId,
+  onPick,
+}: {
+  deviceId: string;
+  onPick: (p: BrowsedPoint) => void;
+}) {
+  const trpc = useTRPC();
+  const { orgId } = useOrg();
+  const [commandId, setCommandId] = useState<string | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
+  const [filter, setFilter] = useState('');
+  const asked = useRef(false);
+
+  const start = useMutation(
+    trpc.device.browsePoints.mutationOptions({
+      onSuccess: (res) => {
+        setStartError(null);
+        setTimedOut(false);
+        setCommandId(res.commandId);
+      },
+      onError: (e) => setStartError(e.message),
+    }),
+  );
+  const ask = () => {
+    setCommandId(null);
+    setStartError(null);
+    start.mutate({ orgId, deviceId });
+  };
+  // Ask once when the dialog opens; "Try again" asks again.
+  useEffect(() => {
+    if (asked.current) return;
+    asked.current = true;
+    start.mutate({ orgId, deviceId });
+  }, [start, orgId, deviceId]);
+  useEffect(() => {
+    if (!commandId) return;
+    const t = setTimeout(() => setTimedOut(true), BROWSE_GIVE_UP_MS);
+    return () => clearTimeout(t);
+  }, [commandId]);
+
+  const result = useQuery({
+    ...trpc.device.browseResult.queryOptions({ orgId, commandId: commandId ?? '' }),
+    enabled: !!commandId,
+    retry: false,
+    refetchInterval: (q) => {
+      const status = q.state.data?.status;
+      return timedOut ||
+        q.state.status === 'error' ||
+        (status && status !== 'pending' && status !== 'sent')
+        ? false
+        : BROWSE_POLL_MS;
+    },
+  });
+  const status = result.data?.status;
+  const waiting =
+    start.isPending ||
+    (!!commandId && !timedOut && (!status || status === 'pending' || status === 'sent'));
+  const problem =
+    startError ??
+    (status === 'failed' || status === 'expired'
+      ? (result.data?.error ?? 'The gateway could not read the device.')
+      : timedOut && !status
+        ? 'The gateway did not answer in time.'
+        : null);
+  const points = status === 'succeeded' ? (result.data?.points ?? []) : [];
+  const q = filter.trim().toLowerCase();
+  const matches = q
+    ? points.filter((p) =>
+        `${p.label} ${p.group} ${p.path} ${p.value ?? ''}`.toLowerCase().includes(q),
+      )
+    : points;
+
+  return (
+    <div className="space-y-2 rounded-lg border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <Label>Pick from the device</Label>
+        {!waiting && (
+          <Button variant="ghost" size="sm" onClick={ask}>
+            {problem ? 'Try again' : 'Read again'}
+          </Button>
+        )}
+      </div>
+      {waiting && (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Spinner /> Asking the gateway to read the device. This can take up to 30 seconds.
+        </p>
+      )}
+      {problem && !waiting && (
+        <p className="text-xs text-destructive">
+          {problem} The device has to be online. You can still type the path below.
+        </p>
+      )}
+      {points.length > 0 && (
+        <>
+          <Input
+            placeholder="Search, for example IP table, TSW or ONLINE"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            aria-label="Search what the device reports"
+          />
+          <div className="max-h-56 overflow-y-auto rounded-md border">
+            {matches.slice(0, MAX_LISTED).map((p) => (
+              <button
+                key={p.path}
+                type="button"
+                onClick={() => onPick(p)}
+                className="flex w-full items-start justify-between gap-3 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium">{p.label}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{p.group}</span>
+                </span>
+                {p.value !== undefined && (
+                  <span className="shrink-0 text-xs tabular-nums">{String(p.value)}</span>
+                )}
+              </button>
+            ))}
+            {matches.length === 0 && (
+              <p className="px-3 py-2 text-xs text-muted-foreground">Nothing matches.</p>
+            )}
+          </div>
+          {(matches.length > MAX_LISTED || result.data?.truncated) && (
+            <p className="text-xs text-muted-foreground">
+              {matches.length > MAX_LISTED
+                ? `Showing the first ${MAX_LISTED} of ${matches.length}. Search to narrow it down.`
+                : 'The device has more values than are listed. Type the path for anything missing.'}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /** Any other driver that takes points: choose the kind and fill in the address it asks for. */
 function AddGeneric({
   driverId,
+  deviceId,
   taken,
   onAdd,
   onClose,
 }: {
   driverId: string;
+  deviceId: string;
   taken: string[];
   onAdd: (points: ControlPoint[]) => void;
   onClose: () => void;
@@ -475,6 +635,10 @@ function AddGeneric({
   const [type, setType] = useState<PointType>(types[0]!);
   const [name, setName] = useState('');
   const [address, setAddress] = useState<Record<string, string>>({});
+  // What was picked from the device: the type of its value, and what it should be (if the driver knows).
+  const [picked, setPicked] = useState<BrowsedPoint | null>(null);
+  const [alertOn, setAlertOn] = useState(true);
+  const [severity, setSeverity] = useState<Severity>('warning');
   const fields = info.points?.[type] ?? [];
   const ready = name.trim() && fields.every((f) => f.optional || (address[f.key] ?? '').trim());
   return (
@@ -500,16 +664,56 @@ function AddGeneric({
               <Input id="g-name" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
           </div>
+          {info.browse && type === 'generic' && (
+            <PointPicker
+              deviceId={deviceId}
+              onPick={(p) => {
+                setPicked(p);
+                setAddress({ ...address, path: p.path });
+                if (!name.trim()) setName(`${p.group}: ${p.label}`.slice(0, 80));
+              }}
+            />
+          )}
           {fields.map((f) => (
             <div key={f.key} className="space-y-1.5">
               <Label htmlFor={`g-${f.key}`}>{f.label}</Label>
               <Input
                 id={`g-${f.key}`}
                 value={address[f.key] ?? ''}
-                onChange={(e) => setAddress({ ...address, [f.key]: e.target.value })}
+                onChange={(e) => {
+                  setPicked(null);
+                  setAddress({ ...address, [f.key]: e.target.value });
+                }}
               />
             </div>
           ))}
+          {picked?.expect !== undefined && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Watch</Label>
+                <SimpleSelect
+                  className="w-full"
+                  value={alertOn ? 'on' : 'off'}
+                  onValueChange={(v) => setAlertOn(v === 'on')}
+                  options={[
+                    { value: 'on', label: `Alert when it is not ${String(picked.expect)}` },
+                    { value: 'off', label: 'Do not watch' },
+                  ]}
+                />
+              </div>
+              {alertOn && (
+                <div className="space-y-1.5">
+                  <Label>How serious</Label>
+                  <SimpleSelect
+                    className="w-full"
+                    value={severity}
+                    onValueChange={(v) => setSeverity(v as Severity)}
+                    options={SEVERITIES}
+                  />
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose}>
               Cancel
@@ -529,6 +733,12 @@ function AddGeneric({
                             (address[f.key] ?? '').trim() ? [[f.key, address[f.key]!.trim()]] : [],
                           ),
                         ),
+                        ...(picked && valueTypeOf(picked.value)
+                          ? { valueType: valueTypeOf(picked.value) }
+                          : {}),
+                        ...(picked && alertOn && picked.expect !== undefined
+                          ? { watch: { expect: picked.expect, severity } }
+                          : {}),
                       },
                     ],
                     taken,
@@ -698,6 +908,7 @@ export function DevicePoints({ device }: { device: Device }) {
         ) : (
           <AddGeneric
             driverId={driverId!}
+            deviceId={device.id}
             taken={list.map((p) => p.id)}
             onAdd={(more) => put([...list, ...more])}
             onClose={() => setAdding(false)}

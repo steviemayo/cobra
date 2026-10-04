@@ -32,7 +32,7 @@ const URGENT_COALESCE_MS = 1_500;
 const URGENT_MIN_GAP_MS = 3_000;
 
 /** What this gateway can do, sent in every heartbeat so the portal only hands it work it can run. */
-const FEATURES = ['discovery', 'firmware', 'self-update', 'device-set', 'config-enforce', 'address-tracking'];
+const FEATURES = ['discovery', 'firmware', 'self-update', 'device-set', 'config-enforce', 'address-tracking', 'browse-points'];
 
 /** An update is not started again for the same version this soon: an attempt that has reached the installer is left to finish. */
 const UPDATE_RETRY_MS = 20 * 60_000;
@@ -666,7 +666,7 @@ export class Gateway {
       for (const cmd of this.inbox.splice(0)) {
         let result: CommandResult;
         try {
-          result = await runCommand(cmd);
+          result = await runCommand(cmd, this.devices);
         } catch (e) {
           result = {
             id: cmd.id,
