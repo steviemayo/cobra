@@ -88,6 +88,16 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return 'revoked an invitation';
     case 'invite.accept':
       return `accepted the invitation (${s(meta.email)} joined as ${role(meta.role)})`;
+    case 'invite.create_by_provider':
+      return `the service provider ${s(meta.provider)} invited ${s(meta.email)} as ${role(meta.role)}`;
+    case 'invite.revoke_by_provider':
+      return `the service provider ${s(meta.provider)} withdrew an invitation it had sent`;
+    case 'invite.create_for_customer':
+      return `invited ${s(meta.email)} as ${role(meta.role)} to a customer's team`;
+    case 'msp.add_people_allowed':
+      return 'let a service provider add people to the team';
+    case 'msp.add_people_stopped':
+      return 'stopped a service provider adding people to the team';
     case 'member.role':
       return `changed ${s(meta.email)} from ${role(meta.from)} to ${role(meta.to)}`;
     case 'member.remove':

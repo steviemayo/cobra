@@ -447,6 +447,8 @@ export async function createCustomer(
       customerOrgId: org.id,
       role: 'manage',
       siteIds: [],
+      // A customer the provider made itself already trusts it with its team (PA-2).
+      mayAddPeople: true,
       status: 'active',
       invitedBy: input.by.userId,
       invitedByEmail: input.by.email,

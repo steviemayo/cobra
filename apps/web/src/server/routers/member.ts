@@ -43,6 +43,22 @@ export const memberRouter = router({
       );
     }
 
+    // People a service provider added say so, and whether it is still connected.
+    const providerIds = [
+      ...new Set(members.flatMap((m) => (m.addedByMspOrgId ? [m.addedByMspOrgId] : []))),
+    ];
+    const [names, grants] = providerIds.length
+      ? await Promise.all([
+          db.org.findMany({ where: { id: { in: providerIds } } }),
+          db.mspGrant.findMany({
+            where: { customerOrgId: ctx.orgId, status: 'active', mspOrgId: { in: providerIds } },
+          }),
+        ])
+      : [[], []];
+    const nameOf = new Map(names.map((o) => [o.id, o.name]));
+    const connected = new Set(
+      grants.filter((g) => !g.endsAt || g.endsAt.getTime() > Date.now()).map((g) => g.mspOrgId),
+    );
     return members.map((m) => ({
       id: m.id,
       userId: m.userId,
@@ -50,6 +66,12 @@ export const memberRouter = router({
       role: m.role,
       createdAt: m.createdAt,
       isYou: m.userId === ctx.user.id,
+      addedByProvider: m.addedByMspOrgId
+        ? {
+            name: nameOf.get(m.addedByMspOrgId) ?? 'A service provider',
+            connected: connected.has(m.addedByMspOrgId),
+          }
+        : null,
     }));
   }),
 
