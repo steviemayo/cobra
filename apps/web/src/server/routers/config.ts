@@ -20,7 +20,7 @@ import {
 } from '../config-service';
 import { featureProcedure, orgProcedure, requireRole, router } from '../trpc';
 
-// Configuration is a Pro feature (and part of a running trial).
+// Configuration is a Premium feature (and part of a running trial).
 const pro = featureProcedure('configuration');
 
 const orgId = z.string().uuid();

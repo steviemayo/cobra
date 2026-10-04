@@ -81,7 +81,7 @@ describe('entitlements', () => {
     });
   });
 
-  it('Pro has everything', () => {
+  it('Premium has everything', () => {
     const e = entitlementsFor(state({ plan: 'pro', status: 'active' }), NOW);
     expect(e).toMatchObject({
       plan: 'pro',
@@ -132,7 +132,7 @@ describe('entitlements', () => {
         );
   });
 
-  it('allows email alerts on Basic, and every channel on Pro and a running trial', () => {
+  it('allows email alerts on Basic, and every channel on Premium and a running trial', () => {
     const basic = entitlementsFor(state({ plan: 'basic', status: 'active' }), NOW);
     const pro = entitlementsFor(state({ plan: 'pro', status: 'active' }), NOW);
     const ended = entitlementsFor(state({ trialEndsAt: new Date(NOW.getTime() - 1) }), NOW);
@@ -146,11 +146,11 @@ describe('entitlements', () => {
   });
 });
 
-describe('Essentials and Pro (v2)', () => {
+describe('Essentials and Premium (v2)', () => {
   const paying = (plan: 'basic' | 'pro') =>
     entitlementsFor({ plan, status: 'active', trialEndsAt: null }, NOW);
 
-  it('Essentials has monitoring, the register, alerts by email and usage, but none of the Pro features', () => {
+  it('Essentials has monitoring, the register, alerts by email and usage, but none of the Premium features', () => {
     const e = paying('basic');
     expect(e).toMatchObject({
       monitoring: true,
@@ -168,7 +168,7 @@ describe('Essentials and Pro (v2)', () => {
     ).toBe(false);
   });
 
-  it('Pro adds configuration, signed register issues, maintenance, service desks, own definitions and every alert channel', () => {
+  it('Premium adds configuration, signed register issues, maintenance, service desks, own definitions and every alert channel', () => {
     expect(paying('pro')).toMatchObject({
       configuration: true,
       registerIssues: true,
@@ -179,7 +179,7 @@ describe('Essentials and Pro (v2)', () => {
     });
   });
 
-  it('an ended trial and a lapsed subscription switch the Pro features off but keep monitoring', () => {
+  it('an ended trial and a lapsed subscription switch the Premium features off but keep monitoring', () => {
     const ended = entitlementsFor(
       { plan: 'trial', status: 'none', trialEndsAt: new Date(NOW.getTime() - 1000) },
       NOW,

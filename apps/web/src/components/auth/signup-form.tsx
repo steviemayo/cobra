@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { PROVIDER_NEXT } from '@/lib/auth-redirect';
+import { signupAcceptanceMetadata } from '@/lib/legal';
 import { createSupabaseBrowser } from '@/lib/supabase/client';
 import { AuthFormFrame, FormError } from './auth-form-frame';
 import { PasswordInput } from './password-input';
@@ -20,6 +21,7 @@ export function SignupForm({ next, provider }: { next: string; provider: boolean
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   // The provider link's own destination is not something to carry to sign-in, or to treat as an invite.
   const plain = next === '/' || next === PROVIDER_NEXT;
   const q = plain ? '' : `?next=${encodeURIComponent(next)}`;
@@ -28,11 +30,14 @@ export function SignupForm({ next, provider }: { next: string; provider: boolean
     e.preventDefault();
     setError(null);
     if (password !== confirm) return setError('Passwords do not match.');
+    if (!agreed) return setError('Please agree to the Terms and Privacy Policy to continue.');
     setBusy(true);
     const { data, error } = await createSupabaseBrowser().auth.signUp({
       email,
       password,
       options: {
+        // Kept on the account, because there is no session yet to record the acceptance with.
+        data: signupAcceptanceMetadata(),
         emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
       },
     });
@@ -110,6 +115,25 @@ export function SignupForm({ next, provider }: { next: string; provider: boolean
             onChange={(e) => setConfirm(e.target.value)}
           />
         </div>
+        <label className="flex items-start gap-2 text-sm text-muted-foreground">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4"
+            checked={agreed}
+            onChange={(e) => setAgreed(e.target.checked)}
+          />
+          <span>
+            I agree to the{' '}
+            <Link href="/terms" target="_blank" className="underline underline-offset-2">
+              Terms of Service
+            </Link>{' '}
+            and the{' '}
+            <Link href="/privacy" target="_blank" className="underline underline-offset-2">
+              Privacy Policy
+            </Link>
+            .
+          </span>
+        </label>
         <FormError message={error} />
         <Button type="submit" className="w-full" size="lg" disabled={busy}>
           {busy && <Spinner />}

@@ -2,7 +2,7 @@ import { db } from '@kestrel/db';
 import { priceMapFromEnv, handleStripeEvent } from '@/server/billing';
 import { fulfilCallout, type CalloutSession } from '@/server/callouts';
 import { fulfilOrder, type MarketplaceSession } from '@/server/marketplace';
-import { getStripe } from '@/server/stripe';
+import { fulfilPayerSetup, getStripe, type PayerSetupSession } from '@/server/stripe';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +31,12 @@ export async function POST(req: Request) {
     const session = event.data.object as unknown as CalloutSession;
     if (session.metadata?.kind === 'callout')
       return Response.json({ received: true, result: await fulfilCallout(db, session) });
+  }
+  // A provider saving a card to pay for its customers (BD-8).
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object as unknown as PayerSetupSession;
+    if (session.metadata?.kind === 'payer_setup')
+      return Response.json({ received: true, result: await fulfilPayerSetup(session) });
   }
   const result = await handleStripeEvent(db, event, priceMapFromEnv());
   return Response.json({ received: true, result });

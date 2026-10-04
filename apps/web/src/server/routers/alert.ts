@@ -92,7 +92,7 @@ export const alertRouter = router({
     return rows.map((c) => {
       const last = recent.find((d) => d.channelId === c.id);
       return {
-        /** True when the plan no longer lets this kind of channel send (a lapsed Pro organisation). */
+        /** True when the plan no longer lets this kind of channel send (a lapsed Premium organisation). */
         locked: !alertChannelAllowed(entitlements, c.type),
         id: c.id,
         name: c.name,

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Sparkles } from 'lucide-react';
+import { Camera, CheckCircle2, Sparkles, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { itemFailed, type PmItem, type PmResult } from '@kestrel/model';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { dateTime } from '@/components/common/health';
+import { shrinkImage } from '@/lib/shrink-image';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 
@@ -42,6 +43,8 @@ export function PmRunView({ runId }: { runId: string }) {
     if (run.data && results === null) {
       setResults(run.data.results);
       setNotes(run.data.notes ?? '');
+      // The visit being corrected may already have raised a ticket, so a correction does not by default.
+      setRaiseTicket(!run.data.correctsRunId);
     }
   }, [run.data, results]);
 
@@ -79,6 +82,40 @@ export function PmRunView({ runId }: { runId: string }) {
     }),
   );
 
+  const addPhoto = useMutation(
+    trpc.pm.addPhoto.mutationOptions({
+      onSuccess: () => qc.invalidateQueries({ queryKey: trpc.pm.run.queryKey() }),
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const removePhoto = useMutation(
+    trpc.pm.removePhoto.mutationOptions({
+      onSuccess: () => qc.invalidateQueries({ queryKey: trpc.pm.run.queryKey() }),
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const [correcting, setCorrecting] = useState(false);
+  const [reason, setReason] = useState('');
+  const correct = useMutation(
+    trpc.pm.correctRun.mutationOptions({
+      onSuccess: async (res) => {
+        toast.success(res.existing ? 'A correction is already open' : 'Correction started');
+        await refresh();
+        router.push(orgPath(orgId, `/pm/runs/${res.id}`));
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const takePhoto = async (itemId: string, file: File | undefined) => {
+    if (!file) return;
+    try {
+      const shrunk = await shrinkImage(file);
+      await addPhoto.mutateAsync({ orgId, runId, itemId, ...shrunk });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not add that photo');
+    }
+  };
+
   if (run.isPending || results === null)
     return (
       <PageContainer>
@@ -106,6 +143,38 @@ export function PmRunView({ runId }: { runId: string }) {
         description={`${r.roomName ?? r.deviceName ?? ''}${r.deviceName && r.roomName ? ` · ${r.deviceName}` : ''}${r.dueOn ? ` · due ${new Date(r.dueOn).toLocaleDateString('en-AU')}` : ''}`}
         actions={signed ? <Badge>Signed off</Badge> : <Badge variant="secondary">Draft</Badge>}
       />
+      {r.corrects && (
+        <div className="rounded-md border border-warning/50 bg-warning/5 p-3 text-sm">
+          This visit corrects{' '}
+          <Link
+            href={orgPath(orgId, `/pm/runs/${r.corrects.id}`)}
+            className="underline underline-offset-2"
+          >
+            an earlier one
+          </Link>
+          {r.corrects.signedByName ? ` signed by ${r.corrects.signedByName}` : ''}. Reason:{' '}
+          {r.correctionReason}. When you sign it, it replaces that visit in reports, and both stay
+          on record.
+        </div>
+      )}
+      {signed && r.corrections.length > 0 && (
+        <div className="rounded-md border p-3 text-sm">
+          {r.corrections.some((c) => c.status === 'signed')
+            ? 'This visit has been corrected. Reports use the correction.'
+            : 'A correction to this visit is in progress.'}{' '}
+          {r.corrections.map((c) => (
+            <Link
+              key={c.id}
+              href={orgPath(orgId, `/pm/runs/${c.id}`)}
+              className="mr-2 underline underline-offset-2"
+            >
+              {c.status === 'signed'
+                ? `Correction signed${c.signedAt ? ` ${dateTime(c.signedAt)}` : ''}`
+                : 'Open the draft correction'}
+            </Link>
+          ))}
+        </div>
+      )}
       <Section title="Checklist">
         <ul className="divide-y">
           {r.items.map((item) => {
@@ -180,9 +249,44 @@ export function PmRunView({ runId }: { runId: string }) {
                   />
                 )}
                 {item.type === 'photo' && (
-                  <p className="text-xs text-muted-foreground">
-                    Photos are not stored yet. Describe what you saw in the note.
-                  </p>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      {r.photos
+                        .filter((p) => p.itemId === item.id)
+                        .map((p) => (
+                          <PhotoThumb
+                            key={p.id}
+                            runId={runId}
+                            photoId={p.id}
+                            onRemove={
+                              signed || !canSupport
+                                ? undefined
+                                : () => removePhoto.mutate({ orgId, runId, photoId: p.id })
+                            }
+                          />
+                        ))}
+                    </div>
+                    {!signed && canSupport && (
+                      <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs hover:bg-muted/50">
+                        <Camera className="size-3.5" />
+                        {addPhoto.isPending ? 'Adding the photo' : 'Take or add a photo'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          className="sr-only"
+                          disabled={addPhoto.isPending}
+                          onChange={(ev) => {
+                            void takePhoto(item.id, ev.target.files?.[0]);
+                            ev.target.value = '';
+                          }}
+                        />
+                      </label>
+                    )}
+                    {signed && !r.photos.some((p) => p.itemId === item.id) && (
+                      <p className="text-xs text-muted-foreground">No photos were taken.</p>
+                    )}
+                  </div>
                 )}
                 {a?.auto && (
                   <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -227,7 +331,39 @@ export function PmRunView({ runId }: { runId: string }) {
             {r.failedCount
               ? `${r.failedCount} item${r.failedCount === 1 ? '' : 's'} failed.`
               : 'Everything passed.'}{' '}
-            This record cannot be changed. To correct it, start a new visit.
+            This record cannot be changed. If something is wrong, start a correction: a new visit
+            that starts from these answers and photos, and replaces this one in reports once signed.
+            {canSupport && (
+              <div className="mt-2">
+                {correcting ? (
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Why does it need correcting?</Label>
+                      <Input
+                        className="h-8 w-72"
+                        maxLength={500}
+                        value={reason}
+                        onChange={(e) => setReason(e.target.value)}
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      disabled={reason.trim().length < 5 || correct.isPending}
+                      onClick={() => correct.mutate({ orgId, runId, reason: reason.trim() })}
+                    >
+                      Start a correction
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setCorrecting(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => setCorrecting(true)}>
+                    Correct this visit
+                  </Button>
+                )}
+              </div>
+            )}
             <div className="mt-2">
               <Link
                 href={orgPath(orgId, '/pm/records')}
@@ -305,5 +441,46 @@ export function PmRunView({ runId }: { runId: string }) {
         </Section>
       ) : null}
     </PageContainer>
+  );
+}
+
+/** One photo of a visit, fetched when it is shown. */
+function PhotoThumb({
+  runId,
+  photoId,
+  onRemove,
+}: {
+  runId: string;
+  photoId: string;
+  onRemove?: () => void;
+}) {
+  const trpc = useTRPC();
+  const { orgId } = useOrg();
+  const photo = useQuery({
+    ...trpc.pm.photo.queryOptions({ orgId, runId, photoId }),
+    staleTime: Infinity,
+  });
+  return (
+    <div className="relative size-24 overflow-hidden rounded-md border bg-muted">
+      {photo.data ? (
+        <img
+          src={photo.data.dataUrl}
+          alt="Photo taken during the visit"
+          className="size-full object-cover"
+        />
+      ) : (
+        <Skeleton className="size-full" />
+      )}
+      {onRemove && (
+        <button
+          type="button"
+          aria-label="Remove photo"
+          onClick={onRemove}
+          className="absolute top-1 right-1 rounded-full bg-background/90 p-0.5 shadow"
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
+    </div>
   );
 }

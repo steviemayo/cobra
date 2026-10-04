@@ -30,9 +30,27 @@ import {
   updateCustomerMeta,
 } from '../msp-portfolio';
 import { writeAudit } from '../audit';
+import { endDelegationForConnection, type DelegationDb } from '../delegated-billing';
+import { delegationEffectsOrUnavailable } from '../stripe';
 import { orgProcedure, requireRole, router } from '../trpc';
 
 const orgId = z.string().uuid();
+
+/**
+ * A connection has ended, so a billing arrangement between the same two organisations ends too
+ * (BD-7). Best effort: the daily sweep ends anything this misses.
+ */
+async function endBillingFor(grant: { mspOrgId: string; customerOrgId: string } | null) {
+  if (!grant) return;
+  await endDelegationForConnection(
+    db as unknown as DelegationDb,
+    delegationEffectsOrUnavailable(),
+    {
+      mspOrgId: grant.mspOrgId,
+      customerOrgId: grant.customerOrgId,
+    },
+  ).catch((e) => console.error('[billing] could not end delegation with the connection', e));
+}
 
 function asTrpc(e: unknown): never {
   if (e instanceof MspError || e instanceof BrandError)
@@ -131,7 +149,9 @@ export const mspRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner']);
       try {
+        const grant = await db.mspGrant.findFirst({ where: { id: input.grantId } });
         await endGrant(db, { grantId: input.grantId, orgId: ctx.orgId, by: ctx.user.id });
+        await endBillingFor(grant);
         return { ok: true };
       } catch (e) {
         return asTrpc(e);
@@ -173,7 +193,9 @@ export const mspRouter = router({
       await assertProvider(ctx.orgId);
       requireRole(ctx.role, ['owner']);
       try {
+        const grant = await db.mspGrant.findFirst({ where: { id: input.grantId } });
         await endGrant(db, { grantId: input.grantId, orgId: ctx.orgId, by: ctx.user.id });
+        await endBillingFor(grant);
         return { ok: true };
       } catch (e) {
         return asTrpc(e);

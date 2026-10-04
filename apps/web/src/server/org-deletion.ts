@@ -47,6 +47,7 @@ export const PURGED_BY_ORG_ID = [
   'pmTemplate',
   'pmSchedule',
   'pmRun',
+  'pmPhoto',
   'registerSchedule',
 ] as const;
 
@@ -54,7 +55,7 @@ export const PURGED_BY_ORG_ID = [
  * Deliberately kept: what staff did (including this deletion), and which trials have been used (so
  * deleting an organisation is not a way to get a new trial).
  */
-export const KEPT = ['staffAudit', 'trialClaim'] as const;
+export const KEPT = ['staffAudit', 'trialClaim', 'legalAcceptance'] as const;
 
 /** The pieces of the outside world a deletion touches, so tests can stand in for it. */
 export interface DeletionEffects {

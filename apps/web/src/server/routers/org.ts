@@ -12,6 +12,9 @@ import {
 } from '../org-signup';
 import { OrgBranding, readOrgBranding } from '../panel-settings';
 import { makeRateLimiter } from '../rate-limit';
+import { recordAcceptance } from '../legal';
+import { MFA_ROLES, MfaError, setRequireMfa } from '../customer-mfa';
+import { hasVerifiedFactor } from '../customer-mfa-admin';
 import { setStaffAccessBlocked } from '../support-sessions';
 import { requestDeletion } from '../org-deletion';
 import { authedProcedure, orgProcedure, requireRole, router } from '../trpc';
@@ -47,7 +50,14 @@ export const orgRouter = router({
   // start with the trial already used (control only, five rooms) and can upgrade any time. A
   // service provider has no rooms of its own, so it never uses a trial up.
   create: authedProcedure
-    .input(z.object({ name, kind: z.enum(['customer', 'msp']).default('customer') }))
+    .input(
+      z.object({
+        name,
+        kind: z.enum(['customer', 'msp']).default('customer'),
+        // Whoever makes an organisation accepts the Terms for it (LR-5).
+        acceptTerms: z.literal(true),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const limit = byUser(ctx.user.id);
       if (limit.ok === false)
@@ -75,6 +85,7 @@ export const orgRouter = router({
         throw e;
       }
       if (claimed) await attachTrialClaim(db, ctx.user.id, org.id);
+      await recordAcceptance(db, { userId: ctx.user.id, orgId: org.id, source: 'org_create' });
       await writeAudit({
         orgId: org.id,
         actorId: ctx.user.id,
@@ -127,6 +138,51 @@ export const orgRouter = router({
         actorId: ctx.user.id,
       });
       return { blocked: input.blocked };
+    }),
+
+  // Two-step sign-in (LR-15): whether this organisation requires an authenticator app for its owners
+  // and developers, and which of them have set one up.
+  getSecurity: orgProcedure.input(z.object({ orgId: z.string().uuid() })).query(async ({ ctx }) => {
+    const org = await db.org.findFirst({
+      where: { id: ctx.orgId },
+      select: { requireMfa: true },
+    });
+    const people = await db.member.findMany({
+      where: { orgId: ctx.orgId, role: { in: [...MFA_ROLES] } },
+      orderBy: { createdAt: 'asc' },
+    });
+    // Only owners see who has not set one up yet.
+    const members =
+      ctx.role === 'owner'
+        ? await Promise.all(
+            people.map(async (m) => ({
+              userId: m.userId,
+              email: m.email,
+              role: m.role as string,
+              enrolled: await hasVerifiedFactor(m.userId).catch(() => false),
+            })),
+          )
+        : [];
+    return { requireMfa: org?.requireMfa ?? false, members };
+  }),
+
+  setRequireMfa: orgProcedure
+    .input(z.object({ orgId: z.string().uuid(), on: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      try {
+        await setRequireMfa(db, {
+          orgId: ctx.orgId,
+          userId: ctx.user.id,
+          role: ctx.role,
+          on: input.on,
+          actorHasFactor: await hasVerifiedFactor(ctx.user.id),
+        });
+        return { requireMfa: input.on };
+      } catch (e) {
+        if (e instanceof MfaError) throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
+        throw e;
+      }
     }),
 
   rename: orgProcedure

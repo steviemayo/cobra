@@ -80,7 +80,7 @@ export function TrialBanner() {
         {ending
           ? `Your trial ends in ${e.trialDaysLeft} ${e.trialDaysLeft === 1 ? 'day' : 'days'}. After that, control, alerts and reports switch off; your rooms are still monitored.`
           : e.plan === 'lapsed'
-            ? 'Your subscription has ended. You are on Basic: control is off; your rooms are still monitored.'
+            ? 'Your subscription has ended. You are on Essentials: control is off; your rooms are still monitored.'
             : 'Your trial has ended. Control, alerts and reports are off; your rooms are still monitored.'}
       </span>
       {isOwner && (

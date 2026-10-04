@@ -13,10 +13,8 @@ import {
   switchParams,
   type BillingDb,
 } from './billing';
-import {
-  assertInvoiceAllowed,
-  invoiceSubscriptionParams,
-} from './invoice-billing';
+import type { DelegationEffects } from './delegated-billing';
+import { assertInvoiceAllowed, invoiceSubscriptionParams } from './invoice-billing';
 
 export class BillingNotConfigured extends Error {
   constructor(what = 'Billing') {
@@ -68,6 +66,10 @@ export async function startSubscription(
     anchorFirstOfMonth?: boolean;
     rooms: number;
     email: string | null;
+    /** Start charging only from then, e.g. when a provider's billing ends (BD-10). Needs 48 hours or more. */
+    startAt?: Date | null;
+    /** Always go to Checkout, never switch the organisation's current subscription in place. */
+    forceNew?: boolean;
   },
 ): Promise<{ url: string } | { changed: true }> {
   const stripe = getStripe();
@@ -76,7 +78,12 @@ export async function startSubscription(
   const price = priceFor(input.plan, interval);
   const anchor = !!input.anchorFirstOfMonth;
 
-  if (billing.stripeSubscriptionId && billing.stripeItemId && PAYING.has(billing.status)) {
+  if (
+    !input.forceNew &&
+    billing.stripeSubscriptionId &&
+    billing.stripeItemId &&
+    PAYING.has(billing.status)
+  ) {
     // The billing date cannot be chosen once subscribed.
     if (anchor) assertAnchorChangeAllowed(billing);
     const params = switchParams({
@@ -89,7 +96,10 @@ export async function startSubscription(
     });
     // An interval switch restarts the billing date from today, so it is no longer on the 1st.
     if (params.billing_cycle_anchor && billing.anchorFirstOfMonth)
-      await db.orgBilling.update({ where: { id: billing.id }, data: { anchorFirstOfMonth: false } });
+      await db.orgBilling.update({
+        where: { id: billing.id },
+        data: { anchorFirstOfMonth: false },
+      });
     return { changed: true };
   }
 
@@ -110,7 +120,13 @@ export async function startSubscription(
         ? { customer_email: input.email }
         : {}),
     line_items: [{ price, quantity: Math.max(1, input.rooms) }],
-    subscription_data: checkoutSubscriptionData({ orgId: input.orgId, anchor }),
+    subscription_data: {
+      ...checkoutSubscriptionData({ orgId: input.orgId, anchor }),
+      // Stripe needs a trial end at least 48 hours away; closer than that, billing starts now.
+      ...(!anchor && input.startAt && input.startAt.getTime() > Date.now() + 49 * 3_600_000
+        ? { trial_end: Math.floor(input.startAt.getTime() / 1000) }
+        : {}),
+    },
     allow_promotion_codes: true,
     success_url: `${back}?checkout=success`,
     cancel_url: `${back}?checkout=cancelled`,
@@ -249,4 +265,150 @@ export async function startMarketplaceCheckout(input: {
   });
   if (!session.url) throw new Error('Stripe did not return a checkout address');
   return session.url;
+}
+
+// ---- Delegated billing (BD-5..BD-14) ---------------------------------------------------------------
+
+/** The real Stripe behind `DelegationEffects`. */
+export function delegationEffects(): DelegationEffects {
+  const stripe = getStripe();
+  const periodEnd = (sub: Stripe.Subscription): Date | null => {
+    const end =
+      sub.items.data[0]?.current_period_end ??
+      (sub as unknown as { current_period_end?: number }).current_period_end;
+    return end ? new Date(end * 1000) : null;
+  };
+  return {
+    hasPaymentMethod: customerHasCard,
+    async resolveCode(code) {
+      const found = await stripe.promotionCodes.list({ code, active: true, limit: 1 });
+      const promo = found.data[0] as unknown as
+        | {
+            id: string;
+            coupon?: string | { id: string; percent_off?: number | null };
+            promotion?: { coupon?: string | { id: string; percent_off?: number | null } | null };
+          }
+        | undefined;
+      if (!promo) return null;
+      let coupon = promo.coupon ?? promo.promotion?.coupon ?? null;
+      if (typeof coupon === 'string') coupon = await stripe.coupons.retrieve(coupon);
+      return { promotionCodeId: promo.id, percentOff: coupon?.percent_off ?? null };
+    },
+    async couponForPercent(percent, existingId) {
+      if (existingId) return existingId;
+      const c = await stripe.coupons.create({
+        percent_off: percent,
+        duration: 'forever',
+        name: `Provider discount ${percent}%`,
+      });
+      return c.id;
+    },
+    async startSubscription(a) {
+      const invoiced = a.invoiceDays !== null;
+      const sub = await stripe.subscriptions.create({
+        customer: a.payerCustomerId,
+        items: [{ price: a.priceId, quantity: a.quantity }],
+        metadata: { orgId: a.customerOrgId, payerOrgId: a.payerOrgId },
+        ...(a.trialEnd ? { trial_end: Math.floor(a.trialEnd.getTime() / 1000) } : {}),
+        ...(a.discount?.promotionCodeId
+          ? { discounts: [{ promotion_code: a.discount.promotionCodeId }] }
+          : a.discount?.couponId
+            ? { discounts: [{ coupon: a.discount.couponId }] }
+            : {}),
+        ...(invoiced
+          ? { collection_method: 'send_invoice' as const, days_until_due: a.invoiceDays! }
+          : { payment_behavior: 'error_if_incomplete' as const }),
+      });
+      return {
+        subscriptionId: sub.id,
+        itemId: sub.items.data[0]?.id ?? null,
+        status: sub.status,
+        currentPeriodEnd: periodEnd(sub),
+        collectionMethod: invoiced ? 'send_invoice' : 'charge_automatically',
+      };
+    },
+    async cancelAtPeriodEnd(id) {
+      const sub = await stripe.subscriptions.update(id, { cancel_at_period_end: true });
+      return periodEnd(sub);
+    },
+    async keepRunning(id) {
+      await stripe.subscriptions.update(id, { cancel_at_period_end: false });
+    },
+    async cancelNow(id) {
+      await stripe.subscriptions.cancel(id);
+    },
+  };
+}
+
+/**
+ * Checkout in setup mode so an organisation can save a card without subscribing, e.g. a provider that
+ * will pay for its customers. Creates the Stripe customer first when there is none yet.
+ */
+export async function startPaymentSetup(
+  db: BillingDb,
+  input: { orgId: string; orgName: string; email: string | null },
+): Promise<string> {
+  const stripe = getStripe();
+  const billing = await ensureBilling(db, input.orgId);
+  let customer = billing.stripeCustomerId;
+  if (!customer) {
+    const created = await stripe.customers.create({
+      name: input.orgName,
+      ...(input.email ? { email: input.email } : {}),
+      metadata: { orgId: input.orgId },
+    });
+    customer = created.id;
+    await db.orgBilling.update({ where: { id: billing.id }, data: { stripeCustomerId: customer } });
+  }
+  const back = `${await baseUrl()}/o/${input.orgId}/settings/billing`;
+  const session = await stripe.checkout.sessions.create({
+    mode: 'setup',
+    customer,
+    currency: 'aud',
+    metadata: { kind: 'payer_setup', orgId: input.orgId },
+    success_url: `${back}?setup=success`,
+    cancel_url: `${back}?setup=cancelled`,
+  });
+  if (!session.url) throw new Error('Stripe did not return a checkout address');
+  return session.url;
+}
+
+export interface PayerSetupSession {
+  customer?: string | null;
+  setup_intent?: string | { id: string; payment_method?: string | { id: string } | null } | null;
+  metadata?: Record<string, string> | null;
+}
+
+/** A saved card becomes the customer's default, so subscriptions it pays for can charge it. */
+export async function fulfilPayerSetup(session: PayerSetupSession): Promise<'saved' | 'ignored'> {
+  if (!session.customer || !session.setup_intent) return 'ignored';
+  const stripe = getStripe();
+  const intent =
+    typeof session.setup_intent === 'string'
+      ? await stripe.setupIntents.retrieve(session.setup_intent)
+      : session.setup_intent;
+  const pm = intent.payment_method;
+  const pmId = typeof pm === 'string' ? pm : pm?.id;
+  if (!pmId) return 'ignored';
+  await stripe.customers.update(session.customer, {
+    invoice_settings: { default_payment_method: pmId },
+  });
+  return 'saved';
+}
+
+/** Stripe for delegation, or something that says payments are not set up when they are not. */
+export function delegationEffectsOrUnavailable(): DelegationEffects {
+  if (stripeConfigured()) return delegationEffects();
+  const refuse = async (): Promise<never> => {
+    throw new BillingNotConfigured();
+  };
+  return {
+    hasPaymentMethod: refuse,
+    resolveCode: refuse,
+    couponForPercent: refuse,
+    startSubscription: refuse,
+    cancelAtPeriodEnd: refuse,
+    keepRunning: refuse,
+    cancelNow: refuse,
+  };
 }

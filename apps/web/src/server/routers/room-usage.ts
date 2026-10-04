@@ -19,7 +19,7 @@ import {
 const orgId = z.string().uuid();
 const id = z.string().uuid();
 const analytics = featureProcedure('analytics');
-// Editing what counts as in use is a Pro feature; every plan gets the usual rule.
+// Editing what counts as in use is a Premium feature; every plan gets the usual rule.
 const definitions = featureProcedure('usageDefinitions');
 const days = z.number().int().min(1).max(90).default(30);
 

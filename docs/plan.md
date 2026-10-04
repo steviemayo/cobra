@@ -600,8 +600,8 @@ From the MVP-to-launch review. Legal items need a lawyer; the rest are build or 
 - [ ] **LR-1 Terms of Service / SaaS agreement.** Liability cap (including a bad deploy taking rooms down), acceptable use, IP ownership of customer room programs.
 - [ ] **LR-2 Privacy Policy.** Australian Privacy Act 1988 / APPs; GDPR too if any EU or UK customers or users. State the real data location (Vercel compute may not be in AU).
 - [ ] **LR-3 Data Processing Addendum (DPA) template.** Kestrel acts as processor. Enterprise customers will ask.
-- [ ] **LR-4 Subprocessor list.** Supabase, Vercel, Stripe, Resend, GitHub/GHCR, plus any email or Teams providers. Publish it.
-- [ ] **LR-5 Acceptance flow.** Click-through at sign-up and org creation; store the terms version and timestamp per user or org. Terms and Privacy pages in the portal.
+- [x] **LR-4 Subprocessor list (built 2026-10-04, draft on /privacy; confirm Vercel and email locations).** Supabase, Vercel, Stripe, Resend, GitHub/GHCR, plus any email or Teams providers. Publish it.
+- [x] **LR-5 Acceptance flow (built 2026-10-04, decisions TA-1 to TA-6; text is a draft, then set LEGAL_ACCEPTANCE=required).** Click-through at sign-up and org creation; store the terms version and timestamp per user or org. Terms and Privacy pages in the portal.
 - [ ] **LR-6 SLA position.** Decide what is promised, or state nothing is promised at launch.
 - [ ] **LR-7 Stripe live and tax.** Move from test to live; GST/tax settings, invoices, refund and cancellation terms.
 - [ ] **LR-8 Company basics.** Registered entity, professional indemnity and cyber insurance, owned domain and sending domain (SPF/DKIM/DMARC; already blocks email in step 6).
@@ -614,7 +614,7 @@ From the MVP-to-launch review. Legal items need a lawyer; the rest are build or 
 
 **Before the first enterprise deal**
 
-- [ ] **LR-15 Customer MFA.** Available to all; enforced for owner and dev roles.
+- [x] **LR-15 Customer MFA (built 2026-10-04, decisions MF-1 to MF-6).** Available to all; enforced for owner and dev roles.
 - [ ] **LR-16 Org deletion and full data export.** Deletion that cascades, plus user and org export (audit export exists; the rest does not).
 - [ ] **LR-17 Retention policy.** Extend beyond the 90-day telemetry and audit settings: tickets, deleted accounts, backups.
 - [ ] **LR-18 Row Level Security as defence-in-depth,** plus cross-tenant access tests on every router.
@@ -704,3 +704,12 @@ Next: the DRY sweep, which waited until the mediums landed.
 - Set `GITHUB_RELEASE_TOKEN` on Vercel (Contents: Read) so the Windows installer download and portal-ordered Windows updates work (decisions N-5, S-3)
 - Set the repository secret `GATEWAY_RELEASE_SIGNING_KEY` (decision V-9); until it is set the Windows workflow will not publish a bundle. Keep a copy of the key in a password manager
 - Security review: medium and low findings pending, see the next section
+
+### Added 2026-10-04 (not started)
+
+- **Gateway on low-cost hardware (research first, then decide).** Question: can the gateway run on a Raspberry Pi or an ESP32 with full functionality, including self-update and the local network scan? First thoughts, to be confirmed by trying:
+  - **Raspberry Pi 4/5 (and a Pi 3 at a push): likely yes.** It is Linux, so the existing Node/TypeScript gateway, SQLite buffer, Docker image and Watchtower update path apply, and the scan (ARP table, hostname lookup, a /24 sweep) works on Linux. Needs a check that the image and native modules (SQLite) build for arm64 (no arm64 target found in the Dockerfile or workflows), memory with ~50 devices, SD-card wear from the telemetry buffer (use an SSD or log less), and a Pi image or install script. Pi Zero 2 W is probably too tight
+  - **ESP32: almost certainly not as the same gateway.** No Node, about 0.5 MB of RAM, no SQLite, and no Docker or ARP-sweep equivalent without a rewrite in C or MicroPython. It could be a much smaller "probe" (heartbeat and ping/port checks for a handful of devices, reporting through a nearby full gateway) as a separate product decision
+  - Deliverable: a short findings note with a recommended supported hardware list, an arm64 build, and what a "Kestrel box" would cost; decide before any build
+- **A provider can add people to a customer's team.** After a service provider has created a customer organisation, let the provider add (invite) more people to that customer's team later, not only at creation. Open points to settle before building: which provider roles may do it (owner only, or manage), which customer role the invited person gets, whether the customer's owners are told and can remove them, whether the person counts as the provider's staff or a normal member (affects the audit trail and ending the connection, BD-7), and an audit entry on both sides
+- **Done 2026-10-03/04:** live plan prices, Pro renamed Premium, and delegated billing (decisions BD-1 to BD-20; PR #163 merged into `feat/dynamic-devices`, then carried to `main` on `feat/billing-delegation`). Still to do for it: one Stripe test-mode run (request, accept with and without a direct subscription, code and standing discount, stop paying, direct billing during an ending delegation), emails when an arrangement changes, and ending delegations when a provider organisation is deleted
