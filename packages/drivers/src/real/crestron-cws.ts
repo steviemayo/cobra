@@ -1,4 +1,5 @@
 import type {
+  BrowsedPoints,
   ControlPoint,
   Device,
   DeviceCommand,
@@ -7,6 +8,7 @@ import type {
 } from '@kestrel/model';
 import { BaseDriver } from './base';
 import { CresNextSession, digPath } from './cresnext';
+import { browseTree } from './crestron-browse';
 import type { DriverContext } from './types';
 
 // The Crestron "CresNext" CWS REST API, shared by DM-NVX (see nvx.ts), 4-series control processors
@@ -156,6 +158,18 @@ export abstract class CrestronCwsMonitor extends BaseDriver {
     if (typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean')
       this.fail(`"${path}" was not found`);
     return { value: v };
+  }
+
+  /**
+   * Everything the unit's /Device tree holds that a point could watch. Only when the unit is online
+   * and has answered with a whole tree: a partial one would offer a short, misleading list.
+   */
+  async browsePoints(): Promise<BrowsedPoints> {
+    if (!this.state.online) this.fail('The device is offline, so it cannot be browsed right now');
+    const tree = await this.ensureSession().get('/Device');
+    const found = browseTree(tree);
+    if (found.points.length === 0) this.fail('The device did not return its /Device tree');
+    return found;
   }
 
   async send(command: DeviceCommand): Promise<void> {

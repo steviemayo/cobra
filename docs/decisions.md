@@ -1088,3 +1088,14 @@ Until now a provider could name a customer's first owner when it created the cus
 - PA-6: **a provider can withdraw only invitations it sent** (and only while it still may add people). It cannot change roles or remove members
 - PA-7: **site-limited provider access is unchanged**: those people cannot reach the Team page at all
 - PA-8: **not built:** a limit on how many people a provider can add, notifying owners by email, and flagging provider-added people for review when the connection ends (they are badged, not removed)
+
+## Picking a control point from the live device (2026-10-05, gateway 0.6.3)
+
+- CP-1: **a Crestron control point is picked, not typed.** In Add a control point, the 4-series and touch panel drivers ask the device's gateway (new allowlisted command `browse_points`, feature `browse-points`) to read the unit's `/Device` tree and list what can be watched. The portal polls for the answer like it does for device discovery. Typing the path stays available
+- CP-2: **the device has to be online and answer with its whole tree.** The driver refuses when it is offline or the tree comes back empty, and the portal shows the reason. A gateway too old to know the command is told to update first
+- CP-3: **what is listed first:** each loaded program slot's status (suggested: should be Started) and each IP table entry's ONLINE/OFFLINE (suggested: should be ONLINE, the processor's own view of whether it can reach that device). Picking one pre-fills the name, the path, the value type and an alert for anything other than the suggested value, which can be switched off or made more or less serious
+- CP-4: **everything else is listed after those**, at most 900 values, depth first, so a one-off field is still one click away. Anything whose name suggests a login, token, key or certificate is never listed or sent. The list is capped because the answer travels in a heartbeat
+- CP-5: **the command is about a device, not a room**, so it has no room and is limited to 6 requests a minute per gateway. It is audited like other commands. Support, developer and owner can ask; a site-limited user can only browse devices at their own sites
+- CP-6: **slow units:** gateway 0.6.2 also makes the Crestron driver wait longer for a slow reply (starts at 10s on a 4-series, doubles up to 30s, never shrinks) instead of showing the unit offline
+- CP-7: **not built:** the same picker for other drivers (Q-SYS and Tesira already have their own browse), and remembering the last list between openings of the dialog
+

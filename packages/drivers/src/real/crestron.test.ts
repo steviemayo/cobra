@@ -242,6 +242,59 @@ describe('Crestron 4-series control processor driver', () => {
     expect(d.getState().online).toBe(true);
   });
 
+  it('lists what the unit reports, IP table entries first, and leaves secrets out', async () => {
+    const unit = await fakeCrestron(CREDS, {
+      ...rmc4Tree,
+      Ethernet: { HostName: 'rmc4' },
+      Authentication: { Token: 'do-not-show' },
+      Wifi: { Password: 'do-not-show' },
+    });
+    const d = new Crestron4SeriesDriver(
+      device('control_processor', 'crestron-4series', settings(unit.port)),
+      ctx,
+    );
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    const found = await d.browsePoints();
+    const entry = 'Device.Programs.ProgramInstanceLibrary.DeviceSlot1.IpTable.Entries';
+    expect(found.points.slice(0, 2)).toEqual([
+      {
+        path: `${entry}.3.Status`,
+        label: 'IP ID 3 · Panel 1 · TSW-770',
+        group: 'IP table, slot 1',
+        value: 'ONLINE',
+        expect: 'ONLINE',
+      },
+      {
+        path: `${entry}.4.Status`,
+        label: 'IP ID 4 · Panel 2 · TSW-770',
+        group: 'IP table, slot 1',
+        value: 'OFFLINE',
+        expect: 'ONLINE',
+      },
+    ]);
+    const paths = found.points.map((p) => p.path);
+    expect(paths).toContain('Device.Ethernet.HostName');
+    expect(paths).toContain('Device.DeviceInfo.SerialNumber');
+    expect(JSON.stringify(found)).not.toContain('do-not-show');
+    // Each path is one the driver can read back as a control point.
+    for (const p of found.points.slice(0, 5)) {
+      const reading = await d.readPoint({ type: 'generic', address: { path: p.path } });
+      expect(reading.value).toBe(p.value);
+    }
+  });
+
+  it('will not list a unit that is offline', async () => {
+    const unit = await fakeCrestron(CREDS, rmc4Tree);
+    const d = new Crestron4SeriesDriver(
+      device('control_processor', 'crestron-4series', settings(unit.port)),
+      ctx,
+    );
+    drivers.push(d);
+    await expect(d.browsePoints()).rejects.toThrow('offline');
+  });
+
   it('accepts no commands: it is monitoring only', async () => {
     const unit = await fakeCrestron(CREDS, rmc4Tree);
     const d = new Crestron4SeriesDriver(

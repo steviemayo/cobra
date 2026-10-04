@@ -5,6 +5,7 @@ import {
   Device,
   type DeviceCommand,
   DeviceDetails,
+  type BrowsedPoints,
   type DeviceReport,
   type MonitoredDevice,
   type SignedDeviceSet,
@@ -332,6 +333,25 @@ export class DeviceHost {
     } catch (e) {
       this.log('warn', 'A device refused a setting', { device: run.device.name, error: String(e) });
       return false;
+    }
+  }
+
+  /**
+   * Lists what one polled device could be watched for, for the portal's pick-list. It has to be
+   * running and answering: a device that is down, or whose driver cannot list itself, says so.
+   */
+  async browse(
+    deviceId: string,
+  ): Promise<{ ok: true; found: BrowsedPoints } | { ok: false; error: string }> {
+    const run = this.running.get(deviceId);
+    if (!run) return { ok: false, error: 'This gateway is not polling that device yet' };
+    if (!run.driver.browsePoints)
+      return { ok: false, error: 'This device cannot list what it can report' };
+    try {
+      return { ok: true, found: await run.driver.browsePoints() };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: message.slice(0, 300) };
     }
   }
 

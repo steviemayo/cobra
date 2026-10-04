@@ -23,7 +23,7 @@ export function rows(source: unknown, fields: [key: string, label: string][]): R
   });
 }
 
-const SENSITIVE = /pass|secret|token|key|auth|credential|cert/i;
+export const SENSITIVE = /pass|secret|token|key|auth|credential|cert/i;
 
 /** "IsSyncDetected" as "Sync detected". */
 export const humanize = (key: string): string =>

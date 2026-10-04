@@ -22,6 +22,8 @@ import { AddressError, requestRefind, useAddress } from '../address-tracking';
 import { deviceViews } from '../device-views';
 import { setDeviceRooms } from '../device-sharing';
 import { MAX_POINTS, setDevicePoints } from '../device-points';
+import { browseResult, requestBrowsePoints } from '../browse-points';
+import { SITE_SCOPED } from '../site-scope';
 import { canMonitorRoom, getEntitlements, monitoredRoomIds, monitorLimitMessage } from '../billing';
 import { syncQuantity } from '../stripe';
 import { after } from 'next/server';
@@ -108,6 +110,39 @@ export const deviceRouter = router({
         meta: { count: input.points.length },
       });
       return { ok: true };
+    }),
+
+  /**
+   * Asks the device's gateway to read the device's own tree and list the values a control point
+   * could watch, so a point is picked rather than typed. The answer comes from `browseResult`.
+   */
+  browsePoints: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, deviceId: id }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev', 'support']);
+      const res = await requestBrowsePoints(db, {
+        orgId: ctx.orgId,
+        deviceId: input.deviceId,
+        siteScope: ctx.siteScope,
+        requestedBy: ctx.user.id,
+      });
+      if (!res.ok) throw new TRPCError({ code: 'BAD_REQUEST', message: res.error });
+      return { commandId: res.id };
+    }),
+
+  browseResult: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, commandId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev', 'support']);
+      const view = await browseResult(db, {
+        orgId: ctx.orgId,
+        commandId: input.commandId,
+        siteScope: ctx.siteScope,
+      });
+      if (!view) throw new TRPCError({ code: 'NOT_FOUND', message: 'Request not found' });
+      return view;
     }),
 
   /**

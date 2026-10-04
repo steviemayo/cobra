@@ -1,4 +1,5 @@
 import { type CommandResult, type GatewayCommand } from '@kestrel/model';
+import type { DeviceHost } from './device-host';
 import { discoverDevices } from './discovery';
 
 const fail = (error: string, output: Record<string, unknown> = {}): CommandResult => ({
@@ -12,11 +13,14 @@ const fail = (error: string, output: Record<string, unknown> = {}): CommandResul
  * Runs one allowlisted command. Anything the cloud sends that is not in the allowlist is refused
  * here as well: the gateway never trusts the far end to have checked.
  */
-export async function runCommand(cmd: GatewayCommand): Promise<CommandResult> {
-  return { ...(await execute(cmd)), id: cmd.id };
+export async function runCommand(
+  cmd: GatewayCommand,
+  devices?: DeviceHost,
+): Promise<CommandResult> {
+  return { ...(await execute(cmd, devices)), id: cmd.id };
 }
 
-async function execute(cmd: GatewayCommand): Promise<CommandResult> {
+async function execute(cmd: GatewayCommand, devices?: DeviceHost): Promise<CommandResult> {
   switch (cmd.type) {
     case 'discover_devices': {
       // Looks at the gateway's own private networks and reports what answers. Reads only.
@@ -32,6 +36,13 @@ async function execute(cmd: GatewayCommand): Promise<CommandResult> {
           { ...found },
         );
       return { id: '', ok: true, output: { ...found } };
+    }
+    case 'browse_points': {
+      // Reads one running device's own tree and lists what a control point could watch. Reads only.
+      const deviceId = cmd.args.deviceId;
+      if (!deviceId || !devices) return fail('That command is not supported by this gateway');
+      const browsed = await devices.browse(deviceId);
+      return browsed.ok ? { id: '', ok: true, output: { ...browsed.found } } : fail(browsed.error);
     }
     default:
       return fail('That command is not supported by this gateway');
