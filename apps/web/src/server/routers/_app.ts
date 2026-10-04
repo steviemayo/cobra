@@ -26,6 +26,7 @@ import { memberRouter } from './member';
 import { monitoringRouter } from './monitoring';
 import { recapRouter } from './recap';
 import { briefingRouter } from './briefing';
+import { legalRouter } from './legal';
 import { orgRouter } from './org';
 import { reportRouter } from './report';
 import { roomRouter } from './room';
@@ -34,6 +35,7 @@ import { ticketRouter } from './ticket';
 import { usageRouter } from './usage';
 
 export const appRouter = router({
+  legal: legalRouter,
   org: orgRouter,
   site: siteRouter,
   room: roomRouter,

@@ -10,6 +10,8 @@ const PUBLIC_PREFIXES = [
   '/invite/',
   '/c/',
   '/verify',
+  '/terms',
+  '/privacy',
 ];
 const GUEST_ONLY = ['/login', '/signup', '/forgot-password'];
 

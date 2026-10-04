@@ -1938,3 +1938,19 @@ model Callout {
   @@index([orgId, status, createdAt])
   @@index([status, createdAt])
 }
+
+/// A person (and, when they were making an organisation, that organisation) accepting a version of the Terms or Privacy Policy (LR-5). Never edited or removed.
+model LegalAcceptance {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  orgId      String?  @db.Uuid
+  /// terms or privacy
+  document   String
+  version    String
+  /// signup, org_create or gate (asked again after the text changed)
+  source     String
+  acceptedAt DateTime @default(now())
+
+  @@unique([userId, document, version])
+  @@index([orgId])
+}
