@@ -75,6 +75,8 @@ export function OnboardingWizard({
   const [siteName, setSiteName] = useState('');
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [roomName, setRoomName] = useState('');
+  // Accepting the Terms on behalf of the organisation being made (LR-5).
+  const [agreed, setAgreed] = useState(false);
 
   const finish = (path: string) => {
     if (orgId) rememberOrg(orgId);
@@ -134,7 +136,7 @@ export function OnboardingWizard({
         staleTime: 0,
       });
       if (found.colleagues.length === 0 && !found.similarName) {
-        createOrg.mutate({ name: orgName, kind });
+        createOrg.mutate({ name: orgName, kind, acceptTerms: true });
       } else {
         setSimilar(found);
         setStage('similar');
@@ -331,6 +333,25 @@ export function OnboardingWizard({
                     onChange={(e) => setOrgName(e.target.value)}
                   />
                 </div>
+                <label className="flex items-start gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4"
+                    checked={agreed}
+                    onChange={(e) => setAgreed(e.target.checked)}
+                  />
+                  <span>
+                    I am allowed to accept the{' '}
+                    <a href="/terms" target="_blank" className="underline underline-offset-2">
+                      Terms of Service
+                    </a>{' '}
+                    and{' '}
+                    <a href="/privacy" target="_blank" className="underline underline-offset-2">
+                      Privacy Policy
+                    </a>{' '}
+                    for this organisation, and I do.
+                  </span>
+                </label>
                 {(checkError || createOrg.error) && (
                   <p className="text-sm text-destructive">
                     {checkError ?? createOrg.error?.message}
@@ -344,7 +365,7 @@ export function OnboardingWizard({
                     type="submit"
                     size="lg"
                     className="flex-1"
-                    disabled={checking || createOrg.isPending || !orgName.trim()}
+                    disabled={checking || createOrg.isPending || !orgName.trim() || !agreed}
                   >
                     {(checking || createOrg.isPending) && <Spinner />}
                     Continue
@@ -415,7 +436,7 @@ export function OnboardingWizard({
                     variant={similar.colleagues.length > 0 ? 'outline' : 'default'}
                     size="lg"
                     disabled={createOrg.isPending}
-                    onClick={() => createOrg.mutate({ name: orgName, kind })}
+                    onClick={() => createOrg.mutate({ name: orgName, kind, acceptTerms: true })}
                   >
                     {createOrg.isPending && <Spinner />}
                     {similar.colleagues.length > 0
@@ -503,9 +524,7 @@ export function OnboardingWizard({
               >
                 <div className="space-y-1.5">
                   <h1 className="text-2xl font-semibold tracking-tight">Add your first room</h1>
-                  <p className="text-sm text-muted-foreground">
-                    You’ll add its devices next.
-                  </p>
+                  <p className="text-sm text-muted-foreground">You’ll add its devices next.</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="room">Room name</Label>

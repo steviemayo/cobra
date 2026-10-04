@@ -12,6 +12,7 @@ import {
 } from '../org-signup';
 import { OrgBranding, readOrgBranding } from '../panel-settings';
 import { makeRateLimiter } from '../rate-limit';
+import { recordAcceptance } from '../legal';
 import { MFA_ROLES, MfaError, setRequireMfa } from '../customer-mfa';
 import { hasVerifiedFactor } from '../customer-mfa-admin';
 import { setStaffAccessBlocked } from '../support-sessions';
@@ -49,7 +50,14 @@ export const orgRouter = router({
   // start with the trial already used (control only, five rooms) and can upgrade any time. A
   // service provider has no rooms of its own, so it never uses a trial up.
   create: authedProcedure
-    .input(z.object({ name, kind: z.enum(['customer', 'msp']).default('customer') }))
+    .input(
+      z.object({
+        name,
+        kind: z.enum(['customer', 'msp']).default('customer'),
+        // Whoever makes an organisation accepts the Terms for it (LR-5).
+        acceptTerms: z.literal(true),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const limit = byUser(ctx.user.id);
       if (limit.ok === false)
@@ -77,6 +85,7 @@ export const orgRouter = router({
         throw e;
       }
       if (claimed) await attachTrialClaim(db, ctx.user.id, org.id);
+      await recordAcceptance(db, { userId: ctx.user.id, orgId: org.id, source: 'org_create' });
       await writeAudit({
         orgId: org.id,
         actorId: ctx.user.id,

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db } from '@kestrel/db';
 import { OrgShell } from '@/components/shell/org-shell';
 import { mfaGate, requiredRolesFor } from '@/server/customer-mfa';
+import { legalGate } from '@/server/legal';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { managedCustomers } from '@/server/msp';
 import { readOrgBranding } from '@/server/panel-settings';
@@ -25,6 +26,8 @@ export default async function OrgLayout({
   const { data } = await supabase.auth.getUser();
   const user = data.user;
   if (!user) redirect('/login');
+  // The Terms and Privacy Policy (LR-5): turns the sign-up checkbox into a record, and asks again when required.
+  if ((await legalGate(db, user)) === 'accept') redirect('/accept-terms');
 
   const memberships = await db.member.findMany({
     where: { userId: user.id },

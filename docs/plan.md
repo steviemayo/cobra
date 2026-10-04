@@ -600,8 +600,8 @@ From the MVP-to-launch review. Legal items need a lawyer; the rest are build or 
 - [ ] **LR-1 Terms of Service / SaaS agreement.** Liability cap (including a bad deploy taking rooms down), acceptable use, IP ownership of customer room programs.
 - [ ] **LR-2 Privacy Policy.** Australian Privacy Act 1988 / APPs; GDPR too if any EU or UK customers or users. State the real data location (Vercel compute may not be in AU).
 - [ ] **LR-3 Data Processing Addendum (DPA) template.** Kestrel acts as processor. Enterprise customers will ask.
-- [ ] **LR-4 Subprocessor list.** Supabase, Vercel, Stripe, Resend, GitHub/GHCR, plus any email or Teams providers. Publish it.
-- [ ] **LR-5 Acceptance flow.** Click-through at sign-up and org creation; store the terms version and timestamp per user or org. Terms and Privacy pages in the portal.
+- [x] **LR-4 Subprocessor list (built 2026-10-04, draft on /privacy; confirm Vercel and email locations).** Supabase, Vercel, Stripe, Resend, GitHub/GHCR, plus any email or Teams providers. Publish it.
+- [x] **LR-5 Acceptance flow (built 2026-10-04, decisions TA-1 to TA-6; text is a draft, then set LEGAL_ACCEPTANCE=required).** Click-through at sign-up and org creation; store the terms version and timestamp per user or org. Terms and Privacy pages in the portal.
 - [ ] **LR-6 SLA position.** Decide what is promised, or state nothing is promised at launch.
 - [ ] **LR-7 Stripe live and tax.** Move from test to live; GST/tax settings, invoices, refund and cancellation terms.
 - [ ] **LR-8 Company basics.** Registered entity, professional indemnity and cyber insurance, owned domain and sending domain (SPF/DKIM/DMARC; already blocks email in step 6).
