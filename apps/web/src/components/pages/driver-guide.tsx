@@ -169,8 +169,8 @@ export function DriverGuideView() {
           <Section id="before" title="Before you start">
             <List>
               <li>
-                Creating drivers is part of the <strong>Pro</strong> plan and needs the owner or dev
-                role. Any member of the organisation can read this guide.
+                Creating drivers is part of the <strong>Premium</strong> plan and needs the owner or
+                dev role. Any member of the organisation can read this guide.
               </li>
               <li>
                 Have the device’s control manual open. You need its <strong>port</strong>, what{' '}

@@ -232,6 +232,11 @@ export interface StripeInvoiceLike {
   hosted_invoice_url?: string | null;
   due_date?: number | null;
   collection_method?: string;
+  /** The subscription it bills, in either shape Stripe has used. */
+  subscription?: string | { id: string } | null;
+  parent?: {
+    subscription_details?: { subscription?: string | { id: string } | null } | null;
+  } | null;
 }
 
 /** Keeps the latest open invoice on the billing row; clears it once paid, voided or written off. */
@@ -244,6 +249,14 @@ export async function applyStripeInvoice(
   if (!customer) return false;
   const billing = await db.orgBilling.findFirst({ where: { stripeCustomerId: customer } });
   if (!billing) return false;
+  // An invoice for a subscription this customer pays on another organisation's behalf (a provider
+  // paying for its customer, BD-6) belongs to that subscription, not to the payer's own plan.
+  const sub = invoice.subscription ?? invoice.parent?.subscription_details?.subscription;
+  const subId = typeof sub === 'string' ? sub : sub?.id;
+  if (subId) {
+    const owner = await db.orgBilling.findFirst({ where: { stripeSubscriptionId: subId } });
+    if (owner && owner.orgId !== billing.orgId) return false;
+  }
   if (invoice.status === 'open') {
     await db.orgBilling.update({
       where: { id: billing.id },

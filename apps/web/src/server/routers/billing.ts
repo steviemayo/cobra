@@ -9,14 +9,32 @@ import {
   ensureBilling,
   getEntitlements,
   monitoredRoomIds,
+  priceIdFor,
   priceMapFromEnv,
   yearlyAvailable,
 } from '../billing';
+import {
+  DelegationError,
+  acceptDelegation,
+  cancelDelegationRequest,
+  declineDelegation,
+  delegatedCustomers,
+  endDelegation,
+  providerReadiness,
+  requestDelegation,
+  requestsForProvider,
+  type DelegationDb,
+} from '../delegated-billing';
 import { InvoiceError, requestInvoice } from '../invoice-billing';
+import { loadPlanPrices } from '../plan-prices';
 import { notifyInvoiceRequest } from '../ticket-notify';
 import {
   BillingNotConfigured,
   billingPortalUrl,
+  delegationEffects,
+  delegationEffectsOrUnavailable,
+  getStripe,
+  startPaymentSetup,
   startInvoiceSubscription,
   startSubscription,
   stripeConfigured,
@@ -28,7 +46,8 @@ const orgId = z.string().uuid();
 function asTrpc(e: unknown): never {
   if (e instanceof BillingNotConfigured)
     throw new TRPCError({ code: 'PRECONDITION_FAILED', message: e.message });
-  if (e instanceof InvoiceError) throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
+  if (e instanceof InvoiceError || e instanceof DelegationError)
+    throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
   if (e instanceof TRPCError) throw e;
   console.error('[billing]', e);
   // Stripe's own error messages are written to be shown to a user (e.g. "No such price: ..."),
@@ -42,6 +61,18 @@ function asTrpc(e: unknown): never {
   });
 }
 
+const effectsFor = delegationEffectsOrUnavailable;
+
+/** While a provider pays, the organisation's own plan changes would reach the provider's subscription. */
+function assertNotDelegated(b: { delegationStatus: string }, allowEnding = false): void {
+  if (b.delegationStatus === 'active' || (b.delegationStatus === 'ending' && !allowEnding))
+    throw new DelegationError(
+      'Your provider handles billing. End that arrangement first to manage billing yourself.',
+    );
+}
+
+const billingDb = db as unknown as DelegationDb;
+
 export const billingRouter = router({
   // Any member can see the plan (the portal uses it to explain what is switched off and why).
   // Only the plan and dates are returned, never Stripe identifiers.
@@ -53,7 +84,43 @@ export const billingRouter = router({
       monitoredRoomIds(db, ctx.orgId).then((ids) => ids.size),
     ]);
     const prices = priceMapFromEnv();
+    const now = new Date();
+    // Providers that could be asked: connected and active, and only while nothing is arranged.
+    const connected =
+      billing.delegationStatus === 'none'
+        ? (
+            await db.mspGrant.findMany({ where: { customerOrgId: ctx.orgId, status: 'active' } })
+          ).filter((g) => !g.endsAt || g.endsAt.getTime() > now.getTime())
+        : [];
+    const orgIds = [
+      ...new Set([
+        ...connected.map((g) => g.mspOrgId),
+        ...(billing.payerOrgId ? [billing.payerOrgId] : []),
+      ]),
+    ];
+    const orgNames = new Map(
+      (orgIds.length ? await db.org.findMany({ where: { id: { in: orgIds } } }) : []).map((o) => [
+        o.id,
+        o.name,
+      ]),
+    );
     return {
+      delegation: {
+        status: billing.delegationStatus as 'none' | 'requested' | 'active' | 'ending',
+        /** Who pays right now: the organisation itself, or a connected provider. */
+        billedBy: billing.billedBy === 'provider' ? ('provider' as const) : ('self' as const),
+        provider: billing.payerOrgId
+          ? { id: billing.payerOrgId, name: orgNames.get(billing.payerOrgId) ?? 'Your provider' }
+          : null,
+        requestedAt: billing.delegationRequestedAt,
+        declineReason: billing.delegationDeclineReason,
+        handoverAt: billing.delegationHandoverAt,
+        endsAt: billing.delegationEndsAt,
+        connected: connected.map((g) => ({
+          id: g.mspOrgId,
+          name: orgNames.get(g.mspOrgId) ?? 'Service provider',
+        })),
+      },
       entitlements,
       rooms,
       subscription: {
@@ -86,6 +153,13 @@ export const billingRouter = router({
     };
   }),
 
+  // What each plan costs per room, read from Stripe (BD-2). Any member may see it. Empty when
+  // payments or prices are not set up, so the page says "price on request" instead of guessing.
+  prices: orgProcedure.input(z.object({ orgId })).query(async () => {
+    if (!stripeConfigured()) return [];
+    return loadPlanPrices(getStripe(), priceMapFromEnv());
+  }),
+
   // Owners only. Sends them to Stripe Checkout, or switches plan in place if they already pay.
   subscribe: orgProcedure
     .input(
@@ -99,6 +173,10 @@ export const billingRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner']);
       try {
+        const own = await ensureBilling(db, ctx.orgId);
+        // While a provider pays, this would reach the provider's subscription. Once it is ending,
+        // the organisation may set up its own, charging from when the provider's stops (BD-10).
+        assertNotDelegated(own, true);
         if (input.anchorFirstOfMonth) {
           try {
             assertAnchorChangeAllowed(await ensureBilling(db, ctx.orgId));
@@ -114,6 +192,9 @@ export const billingRouter = router({
           anchorFirstOfMonth: input.anchorFirstOfMonth,
           rooms,
           email: ctx.user.email ?? null,
+          ...(own.delegationStatus === 'ending'
+            ? { forceNew: true, startAt: own.delegationEndsAt }
+            : {}),
         });
         await writeAudit({
           orgId: ctx.orgId,
@@ -159,6 +240,7 @@ export const billingRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireRole(ctx.role, ['owner']);
       try {
+        assertNotDelegated(await ensureBilling(db, ctx.orgId));
         const org = await db.org.findFirst({ where: { id: ctx.orgId } });
         const rooms = (await monitoredRoomIds(db, ctx.orgId)).size;
         const res = await startInvoiceSubscription(db, {
@@ -206,4 +288,165 @@ export const billingRouter = router({
       return asTrpc(e);
     }
   }),
+
+  // ---- Who pays: the organisation, or a connected provider (BD-5 to BD-14) --------------------------
+
+  // Owners only. Asks a connected provider to pay. Nothing changes until the provider accepts.
+  requestDelegation: orgProcedure
+    .input(z.object({ orgId, providerOrgId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      try {
+        await requestDelegation(billingDb, {
+          orgId: ctx.orgId,
+          userId: ctx.user.id,
+          providerOrgId: input.providerOrgId,
+        });
+        return { ok: true };
+      } catch (e) {
+        return asTrpc(e);
+      }
+    }),
+
+  cancelDelegationRequest: orgProcedure.input(z.object({ orgId })).mutation(async ({ ctx }) => {
+    requireRole(ctx.role, ['owner']);
+    try {
+      await cancelDelegationRequest(billingDb, { orgId: ctx.orgId, userId: ctx.user.id });
+      return { ok: true };
+    } catch (e) {
+      return asTrpc(e);
+    }
+  }),
+
+  // Owners only. Stops the provider paying: at once if it has not started charging, else at the end
+  // of its period.
+  endDelegation: orgProcedure.input(z.object({ orgId })).mutation(async ({ ctx }) => {
+    requireRole(ctx.role, ['owner']);
+    try {
+      const outcome = await endDelegation(billingDb, effectsFor(), {
+        customerOrgId: ctx.orgId,
+        by: 'customer',
+        userId: ctx.user.id,
+      });
+      return { outcome };
+    } catch (e) {
+      return asTrpc(e);
+    }
+  }),
+
+  // The provider's side, on its own billing page: who is waiting, who it pays for, and whether it can pay.
+  delegationInbox: orgProcedure.input(z.object({ orgId })).query(async ({ ctx }) => {
+    requireRole(ctx.role, ['owner']);
+    const requests = await requestsForProvider(
+      billingDb,
+      ctx.orgId,
+      async (id) => (await monitoredRoomIds(db, id)).size,
+    );
+    const customers = await delegatedCustomers(billingDb, ctx.orgId);
+    const own = await ensureBilling(db, ctx.orgId);
+    let readiness: { ok: boolean; reason?: string; invoiced?: boolean } = {
+      ok: false,
+      reason: 'Payments are not set up on this Kestrel server yet.',
+    };
+    if (stripeConfigured()) {
+      const r = await providerReadiness(billingDb, delegationEffects(), ctx.orgId).catch(
+        () => null,
+      );
+      if (r)
+        readiness = r.ok ? { ok: true, invoiced: r.invoiced } : { ok: false, reason: r.reason };
+    }
+    return {
+      requests,
+      customers,
+      readiness,
+      discountPercent: own.providerDiscountPercent,
+      yearlyAvailable: yearlyAvailable(priceMapFromEnv()),
+    };
+  }),
+
+  // The provider's owner saves a card (Stripe Checkout in setup mode) so it can pay for customers.
+  setupPayment: orgProcedure.input(z.object({ orgId })).mutation(async ({ ctx }) => {
+    requireRole(ctx.role, ['owner']);
+    try {
+      const org = await db.org.findFirst({ where: { id: ctx.orgId } });
+      return {
+        url: await startPaymentSetup(db, {
+          orgId: ctx.orgId,
+          orgName: org?.name ?? 'Kestrel provider',
+          email: ctx.user.email ?? null,
+        }),
+      };
+    } catch (e) {
+      return asTrpc(e);
+    }
+  }),
+
+  acceptDelegation: orgProcedure
+    .input(
+      z.object({
+        orgId,
+        customerOrgId: z.string().uuid(),
+        plan: z.enum(PAID_PLANS),
+        interval: z.enum(BILLING_INTERVALS).default('month'),
+        code: z.string().trim().max(64).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      try {
+        const priceId = priceIdFor(priceMapFromEnv(), input.plan, input.interval);
+        if (!priceId) throw new BillingNotConfigured(`The ${input.interval}ly ${input.plan} plan`);
+        const rooms = (await monitoredRoomIds(db, input.customerOrgId)).size;
+        const res = await acceptDelegation(billingDb, effectsFor(), {
+          providerOrgId: ctx.orgId,
+          customerOrgId: input.customerOrgId,
+          userId: ctx.user.id,
+          plan: input.plan,
+          interval: input.interval,
+          priceId,
+          rooms,
+          code: input.code,
+        });
+        return { handoverAt: res.handoverAt };
+      } catch (e) {
+        return asTrpc(e);
+      }
+    }),
+
+  declineDelegation: orgProcedure
+    .input(z.object({ orgId, customerOrgId: z.string().uuid(), reason: z.string().max(500) }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      try {
+        await declineDelegation(billingDb, {
+          providerOrgId: ctx.orgId,
+          customerOrgId: input.customerOrgId,
+          userId: ctx.user.id,
+          reason: input.reason,
+        });
+        return { ok: true };
+      } catch (e) {
+        return asTrpc(e);
+      }
+    }),
+
+  // The provider stops paying for one of its customers.
+  endDelegationAsProvider: orgProcedure
+    .input(z.object({ orgId, customerOrgId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      try {
+        const b = await db.orgBilling.findFirst({ where: { orgId: input.customerOrgId } });
+        if (!b || b.payerOrgId !== ctx.orgId)
+          throw new DelegationError('You do not pay for that organisation.');
+        const outcome = await endDelegation(billingDb, effectsFor(), {
+          customerOrgId: input.customerOrgId,
+          by: 'provider',
+          userId: ctx.user.id,
+        });
+        return { outcome };
+      } catch (e) {
+        return asTrpc(e);
+      }
+    }),
 });

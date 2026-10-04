@@ -24,8 +24,8 @@ const inputDate = (d: Date) => d.toISOString().slice(0, 10);
 const PLAN_OPTIONS = [
   { value: '', label: 'No change' },
   { value: 'trial', label: 'Trial' },
-  { value: 'basic', label: 'Basic' },
-  { value: 'pro', label: 'Pro' },
+  { value: 'basic', label: 'Essentials' },
+  { value: 'pro', label: 'Premium' },
 ];
 const MONITORING_OPTIONS = [
   { value: '', label: 'No change' },
@@ -129,11 +129,11 @@ export function LicencePanel({ orgId }: { orgId: string }) {
     setTrialEnd(inputDate(new Date(from + 14 * DAY)));
     setReason((r) => r || 'Extended the trial by 14 days');
   };
-  const compPro = () => {
+  const compPremium = () => {
     setPlan('pro');
     setTrialEnd('');
     setEnds(inputDate(new Date(Date.now() + 30 * DAY)));
-    setReason((r) => r || 'Pro for 30 days');
+    setReason((r) => r || 'Premium for 30 days');
   };
 
   return (
@@ -199,8 +199,8 @@ export function LicencePanel({ orgId }: { orgId: string }) {
               <Button type="button" size="sm" variant="outline" onClick={extendTrial}>
                 Extend trial 14 days
               </Button>
-              <Button type="button" size="sm" variant="outline" onClick={compPro}>
-                Pro for 30 days
+              <Button type="button" size="sm" variant="outline" onClick={compPremium}>
+                Premium for 30 days
               </Button>
             </div>
           </div>

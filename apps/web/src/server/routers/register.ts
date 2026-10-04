@@ -16,7 +16,7 @@ import { importRegister } from '../register-import';
 import { loadSigningKey, trustedPublicKeys } from '../signing';
 import { featureProcedure, orgProcedure, requireRole, router } from '../trpc';
 
-// Signed register issues are a Pro feature (and part of a running trial). The register, its CSV export and import are on every plan.
+// Signed register issues are a Premium feature (and part of a running trial). The register, its CSV export and import are on every plan.
 const signed = featureProcedure('registerIssues');
 
 const orgId = z.string().uuid();

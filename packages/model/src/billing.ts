@@ -8,7 +8,7 @@ export const TRIAL_DAYS = 30;
 export const TRIAL_MAX_ROOMS = 5;
 /** Rooms a paid organisation may have for now. Staff can raise or lower it per organisation. */
 export const PAID_MAX_ROOMS = 500;
-/** The alert channels Essentials keeps. Pro (and a running trial) has all of them. */
+/** The alert channels Essentials keeps. Premium (and a running trial) has all of them. */
 export const BASIC_ALERT_CHANNELS = ['email'] as const;
 
 /** Stripe statuses under which a paid plan keeps working. past_due gets a grace period. */
@@ -25,7 +25,7 @@ export type EffectivePlan = 'trial' | 'trial_expired' | 'lapsed' | 'basic' | 'pr
 
 export interface Entitlements {
   plan: EffectivePlan;
-  /** Deploying and controlling rooms: the panel, the portal's controls, room design. Pro and a running trial. */
+  /** Deploying and controlling rooms: the panel, the portal's controls, room design. Premium and a running trial. */
   control: boolean;
   /** Watching devices and rooms. Every plan has it, so a room is never left unwatched by billing. */
   monitoring: boolean;
@@ -35,7 +35,7 @@ export interface Entitlements {
   allAlertChannels: boolean;
   /** Usage and reports. */
   analytics: boolean;
-  /** Configuration profiles, drift detection, enforcement, snapshots and deploys. Pro and a running trial. */
+  /** Configuration profiles, drift detection, enforcement, snapshots and deploys. Premium and a running trial. */
   configuration: boolean;
   /** Signed register issues and the public check. The register itself, its import and export are on every plan. */
   registerIssues: boolean;
@@ -74,7 +74,7 @@ const MONITOR_ONLY = {
   maxRooms: 0,
 } as const;
 
-/** Everything Pro adds to Essentials. A running trial has it too. */
+/** Everything Premium adds to Essentials. A running trial has it too. */
 const PRO_EXTRAS = {
   configuration: true,
   registerIssues: true,
@@ -96,8 +96,8 @@ const BASIC = {
 /**
  * What an organisation may do right now. A trial has control and monitoring for 30 days, then drops
  * to monitoring only: existing rooms are still watched, but there are no alerts, no analytics and
- * no new rooms. Basic is monitoring only; Pro adds control, every alert channel, the marketplace and
- * custom drivers. A paid plan that stops paying falls back to Basic.
+ * no new rooms. Essentials is monitoring only; Premium adds control, every alert channel, the marketplace and
+ * custom drivers. A paid plan that stops paying falls back to Essentials.
  */
 export function entitlementsFor(state: BillingState, now = new Date()): Entitlements {
   const trialDaysLeft =
@@ -138,7 +138,7 @@ export const PLAN_LABEL: Record<EffectivePlan, string> = {
   trial_expired: 'Trial ended',
   lapsed: 'Subscription ended',
   basic: 'Essentials',
-  pro: 'Pro',
+  pro: 'Premium',
 };
 
 export const PLAN_FEATURES: Record<
@@ -159,7 +159,7 @@ export const PLAN_FEATURES: Record<
     ],
   },
   pro: {
-    label: 'Pro',
+    label: 'Premium',
     summary: 'Everything in Essentials, plus keeping it in order.',
     features: [
       'Everything in Essentials',

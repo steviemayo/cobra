@@ -22,7 +22,7 @@ import { loadSigningKey } from '../signing';
 import { SITE_SCOPED, roomIdsInScope, type SiteScope } from '../site-scope';
 import { featureProcedure, requireRole, router } from '../trpc';
 
-// Preventative maintenance is a Pro feature (and part of a running trial).
+// Preventative maintenance is a Premium feature (and part of a running trial).
 const orgProcedure = featureProcedure('maintenance');
 
 const orgId = z.string().uuid();

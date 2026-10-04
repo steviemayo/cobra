@@ -804,47 +804,69 @@ model TicketComment {
 // One per organisation. `plan` is what they chose; entitlements are worked out from plan, Stripe
 // `status` and `trialEndsAt` (see @kestrel/model billing). Kestrel never stores card details.
 model OrgBilling {
-  id                   String    @id @default(uuid()) @db.Uuid
-  orgId                String    @unique @db.Uuid
-  plan                 String    @default("trial")
+  id                           String    @id @default(uuid()) @db.Uuid
+  orgId                        String    @unique @db.Uuid
+  plan                         String    @default("trial")
   /// The Stripe subscription status, or "none" before there is one.
-  status               String    @default("none")
-  trialEndsAt          DateTime
-  stripeCustomerId     String?   @unique
-  stripeSubscriptionId String?   @unique
-  stripeItemId         String?
+  status                       String    @default("none")
+  trialEndsAt                  DateTime
+  stripeCustomerId             String?   @unique
+  stripeSubscriptionId         String?   @unique
+  stripeItemId                 String?
   /// Rooms being billed for.
-  quantity             Int       @default(0)
-  currentPeriodEnd     DateTime?
-  cancelAtPeriodEnd    Boolean   @default(false)
+  quantity                     Int       @default(0)
+  currentPeriodEnd             DateTime?
+  cancelAtPeriodEnd            Boolean   @default(false)
   /// Rooms added mid-cycle are charged pro rata to the end of the period straight away, then billed in full from the next cycle.
-  trueUp               Boolean   @default(false)
+  trueUp                       Boolean   @default(false)
   /// How the plan is billed: "month" or "year".
-  billingInterval      String    @default("month")
+  billingInterval              String    @default("month")
   /// Billed on the 1st of each month (first period pro rata). Chosen when first subscribing; never changed on a live subscription.
-  anchorFirstOfMonth   Boolean   @default(false)
+  anchorFirstOfMonth           Boolean   @default(false)
   /// Pay by invoice instead of card (yearly only). The owner asks, staff decide: "none", "requested", "approved" or "declined".
-  invoiceStatus        String    @default("none")
-  invoiceRequestedAt   DateTime?
-  invoiceRequestNote   String?
-  invoiceDecidedAt     DateTime?
-  invoiceDecidedBy     String?   @db.Uuid
+  invoiceStatus                String    @default("none")
+  invoiceRequestedAt           DateTime?
+  invoiceRequestNote           String?
+  invoiceDecidedAt             DateTime?
+  invoiceDecidedBy             String?   @db.Uuid
   /// Shown to the owner when a request is declined.
-  invoiceDeclineReason String?
+  invoiceDeclineReason         String?
   /// Days to pay an invoice. Staff set it per organisation; 14 unless changed.
-  invoiceDays          Int       @default(14)
+  invoiceDays                  Int       @default(14)
   /// Stripe's collection method on the subscription: "charge_automatically" (card) or "send_invoice".
-  collectionMethod     String    @default("charge_automatically")
+  collectionMethod             String    @default("charge_automatically")
   /// The latest invoice sent for this subscription, kept from Stripe's invoice events. Cleared once paid.
-  openInvoiceId        String?
-  openInvoiceUrl       String?
-  openInvoiceDueAt     DateTime?
-  updatedAt            DateTime  @default(now()) @updatedAt
+  openInvoiceId                String?
+  openInvoiceUrl               String?
+  openInvoiceDueAt             DateTime?
+  /// Who pays for this organisation's Kestrel plan: "self" (direct, the default) or "provider" (a connected service provider, BD-6).
+  billedBy                     String    @default("self")
+  /// "none", "requested" (waiting for the provider), "active" or "ending" (the provider's subscription stops at the period end).
+  delegationStatus             String    @default("none")
+  /// The provider asked to pay (requested) or paying (active, ending).
+  payerOrgId                   String?   @db.Uuid
+  delegationRequestedAt        DateTime?
+  delegationRequestedBy        String?   @db.Uuid
+  delegationDecidedAt          DateTime?
+  delegationDecidedBy          String?   @db.Uuid
+  /// Shown to the owner when the provider declines.
+  delegationDeclineReason      String?
+  /// When the provider's subscription starts charging, after the direct one ends (BD-9).
+  delegationHandoverAt         DateTime?
+  /// The direct subscription that stops at the handover. Kept so ending the delegation first can keep it running.
+  delegationFromSubscriptionId String?
+  /// When an ending delegation stops.
+  delegationEndsAt             DateTime?
+  /// On a provider's own row: a standing discount staff give it on every subscription it pays for (BD-12).
+  providerDiscountPercent      Int?
+  providerDiscountCouponId     String?
+  updatedAt                    DateTime  @default(now()) @updatedAt
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([invoiceStatus])
   @@index([openInvoiceDueAt])
+  @@index([payerOrgId, delegationStatus])
 }
 
 // Stripe events already handled, so a redelivered webhook changes nothing.
