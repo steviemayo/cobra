@@ -47,6 +47,7 @@ export const PURGED_BY_ORG_ID = [
   'pmTemplate',
   'pmSchedule',
   'pmRun',
+  'pmPhoto',
   'registerSchedule',
 ] as const;
 

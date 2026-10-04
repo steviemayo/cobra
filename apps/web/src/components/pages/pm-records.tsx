@@ -60,6 +60,7 @@ export function PmRuns({
             </div>
           </div>
           <span className="flex items-center gap-2">
+            {r.correctsRunId && <Badge variant="outline">Correction</Badge>}
             {r.status === 'draft' && <Badge variant="secondary">Draft</Badge>}
             {r.status === 'signed' &&
               (r.failedCount ? (
@@ -206,13 +207,16 @@ export function PmRecordsView() {
                     : `draft ${dateTime(r.createdAt)}`}
                 </div>
               </div>
-              {r.status === 'draft' ? (
-                <Badge variant="secondary">Draft</Badge>
-              ) : r.failedCount ? (
-                <Badge variant="destructive">{r.failedCount} failed</Badge>
-              ) : (
-                <Badge>Passed</Badge>
-              )}
+              <span className="flex items-center gap-2">
+                {r.correctsRunId && <Badge variant="outline">Correction</Badge>}
+                {r.status === 'draft' ? (
+                  <Badge variant="secondary">Draft</Badge>
+                ) : r.failedCount ? (
+                  <Badge variant="destructive">{r.failedCount} failed</Badge>
+                ) : (
+                  <Badge>Passed</Badge>
+                )}
+              </span>
             </li>
           ))}
         </ul>
