@@ -56,6 +56,9 @@ function programSection(
 }
 
 export class Crestron4SeriesDriver extends CrestronCwsMonitor {
+  // A busy processor takes around 4s to build its /Device tree (85 KB), so start the wait higher
+  protected override baseTimeoutMs = 10_000;
+
   protected applyFeedback(tree: unknown, s: DeviceState): void {
     const info = digPath(tree, 'Device.DeviceInfo');
     if (isRecord(info) && typeof info.DeviceVersion === 'string') s.firmware = info.DeviceVersion;

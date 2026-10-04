@@ -55,6 +55,7 @@ interface FakeUnit {
 async function fakeCrestron(
   creds: { user: string; password: string },
   tree: Record<string, unknown>,
+  deviceDelayMs = 0,
 ): Promise<FakeUnit> {
   const fake: FakeUnit = { port: 0, log: [], logins: 0, expireNext: false, close: () => undefined };
   let authed = false;
@@ -90,7 +91,7 @@ async function fakeCrestron(
       }
       if (req.method === 'GET' && req.url === '/Device') {
         res.writeHead(200, { 'content-type': 'application/json' });
-        return void res.end(JSON.stringify({ Device: tree }));
+        return void setTimeout(() => res.end(JSON.stringify({ Device: tree })), deviceDelayMs);
       }
       res.writeHead(404);
       res.end();
@@ -225,6 +226,20 @@ describe('Crestron 4-series control processor driver', () => {
     d.start();
     await wait(400);
     expect(d.getState().online).toBe(false);
+  });
+
+  it('waits longer for a slow unit instead of going offline, and holds the longer wait', async () => {
+    const unit = await fakeCrestron(CREDS, rmc4Tree, 350);
+    const d = new Crestron4SeriesDriver(
+      device('control_processor', 'crestron-4series', settings(unit.port, { timeoutMs: 150 })),
+      ctx,
+    );
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    // Online again on every later poll, not only the first: the wait stayed above the unit's delay
+    await wait(600);
+    expect(d.getState().online).toBe(true);
   });
 
   it('accepts no commands: it is monitoring only', async () => {

@@ -65,6 +65,11 @@ export class CresNextSession {
         : new http.Agent({ keepAlive: true });
   }
 
+  /** How long a request may go silent before it counts as timed out (applies to later requests). */
+  setTimeoutMs(ms: number) {
+    this.o.timeoutMs = ms;
+  }
+
   close() {
     this.closed = true;
     this.agent.destroy();
@@ -116,7 +121,10 @@ export class CresNextSession {
           );
         },
       );
-      req.on('timeout', () => req.destroy(new Error('timed out')));
+      // "timed out" = connected, then silence (a slow unit); "timed out connecting" = never connected
+      req.on('timeout', () =>
+        req.destroy(new Error(req.socket?.connecting ? 'timed out connecting' : 'timed out')),
+      );
       req.on('error', reject);
       if (body !== undefined) req.write(body);
       req.end();

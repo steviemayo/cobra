@@ -16,6 +16,9 @@ import type { DriverContext } from './types';
 
 export { digPath };
 
+/** The longest the wait for a reply is allowed to grow to. */
+const MAX_TIMEOUT_MS = 30_000;
+
 /**
  * Shared machinery for a monitoring-only CresNext device (4-series processor, touch panel): one
  * GET /Device per poll, resolved against any control points the room configured (each addressed by
@@ -23,6 +26,10 @@ export { digPath };
  * Never sends anything: these are watched, not driven.
  */
 export abstract class CrestronCwsMonitor extends BaseDriver {
+  /** Where the wait for a reply starts (the `timeoutMs` setting overrides it). */
+  protected baseTimeoutMs = 4000;
+  /** The wait now: it only grows, when the unit proves slow, and stays there (see refresh). */
+  private timeoutMs = 4000;
   private session: CresNextSession | null = null;
   private poller: ReturnType<typeof setInterval> | null = null;
   private busy = false;
@@ -39,12 +46,16 @@ export abstract class CrestronCwsMonitor extends BaseDriver {
   protected ensureSession(): CresNextSession {
     if (!this.session) {
       const protocol = this.setting<'http' | 'https'>('protocol', 'https');
+      this.timeoutMs = Math.min(
+        MAX_TIMEOUT_MS,
+        this.setting<number>('timeoutMs', this.baseTimeoutMs),
+      );
       this.session = new CresNextSession(this.setting<string>('host', ''), {
         protocol,
         port: this.setting<number>('port', protocol === 'http' ? 80 : 443),
         username: this.setting<string>('username', 'admin'),
         password: this.setting<string>('password', ''),
-        timeoutMs: this.setting<number>('timeoutMs', 4000),
+        timeoutMs: this.timeoutMs,
         allowSelfSigned: this.setting<boolean>('allowSelfSigned', true),
       });
     }
@@ -86,22 +97,51 @@ export abstract class CrestronCwsMonitor extends BaseDriver {
     this.session = null;
   }
 
+  /** Raises the wait for a reply (never lowers it), up to MAX_TIMEOUT_MS. */
+  private growTimeout(ms: number) {
+    const next = Math.min(MAX_TIMEOUT_MS, Math.ceil(ms));
+    if (next <= this.timeoutMs) return;
+    this.timeoutMs = next;
+    this.session?.setTimeoutMs(next);
+  }
+
   protected async refresh() {
     if (this.busy) return;
     this.busy = true;
     try {
-      const tree = await this.ensureSession().get('/Device');
-      const points = this.readPoints(tree);
-      this.update((s) => {
-        s.online = true;
-        s.points = points;
-        this.applyFeedback(tree, s);
-      });
-    } catch (e) {
-      this.ctx.log('warn', `${this.device.name}: ${e instanceof Error ? e.message : String(e)}`);
-      this.update((s) => {
-        s.online = false;
-      });
+      for (;;) {
+        try {
+          const session = this.ensureSession();
+          const started = Date.now();
+          const tree = await session.get('/Device');
+          // Keep the wait comfortably above what the unit actually takes, so a slow one holds steady
+          this.growTimeout((Date.now() - started) * 1.5);
+          const points = this.readPoints(tree);
+          this.update((s) => {
+            s.online = true;
+            s.points = points;
+            this.applyFeedback(tree, s);
+          });
+          return;
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          // It accepted the connection but did not answer in time: wait longer and ask again now,
+          // until it answers or the wait reaches the cap. Never connecting is a real fault.
+          if (message === 'timed out' && this.session && this.timeoutMs < MAX_TIMEOUT_MS) {
+            this.growTimeout(this.timeoutMs * 2);
+            this.ctx.log(
+              'info',
+              `${this.device.name}: slow to answer, now waiting up to ${this.timeoutMs / 1000}s`,
+            );
+            continue;
+          }
+          this.ctx.log('warn', `${this.device.name}: ${message}`);
+          this.update((s) => {
+            s.online = false;
+          });
+          return;
+        }
+      }
     } finally {
       this.busy = false;
     }
