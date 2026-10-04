@@ -33,6 +33,7 @@ function world() {
   const pmTemplate = table([]);
   const pmSchedule = table([]);
   const pmRun = table([]);
+  const pmPhoto = table([]);
   const room = table([{ id: ROOM, orgId: ORG, name: 'Boardroom', siteId: 's' }]);
   const device = table([
     {
@@ -69,6 +70,7 @@ function world() {
     pmTemplate,
     pmSchedule,
     pmRun,
+    pmPhoto,
     room,
     device,
     incident,
@@ -82,6 +84,7 @@ function world() {
     pmTemplate,
     pmSchedule,
     pmRun,
+    pmPhoto,
     device,
     incident,
     ticket,

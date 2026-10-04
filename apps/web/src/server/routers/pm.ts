@@ -4,7 +4,15 @@ import { db } from '@kestrel/db';
 import { PmItems, PmResult, type PmItem } from '@kestrel/model';
 import { writeAudit } from '../audit';
 import {
+  PM_PHOTO_MAX_BYTES,
+  PM_PHOTO_TYPES,
+  addPhoto,
   addStarterTemplates,
+  correctRun,
+  correctionsOf,
+  getPhoto,
+  listPhotos,
+  removePhoto,
   createSchedule,
   createTemplate,
   deleteSchedule,
@@ -253,6 +261,7 @@ export const pmRouter = router({
           signedByName: r.signedByName,
           dueOn: r.dueOn,
           createdAt: r.createdAt,
+          correctsRunId: r.correctsRunId,
         }));
     }),
 
@@ -268,12 +277,32 @@ export const pmRouter = router({
         run.roomId ? db.room.findFirst({ where: { id: run.roomId } }) : null,
         run.deviceId ? db.device.findFirst({ where: { id: run.deviceId } }) : null,
       ]);
+      const [photos, corrections, original] = await Promise.all([
+        listPhotos(db, ctx.orgId, run.id),
+        correctionsOf(db, ctx.orgId, run.id),
+        run.correctsRunId
+          ? db.pmRun.findFirst({ where: { id: run.correctsRunId, orgId: ctx.orgId } })
+          : null,
+      ]);
       return {
         ...run,
         results: PmResult.array().catch([]).parse(run.results),
         items: PmItems.catch([]).parse(template?.items) as PmItem[],
         roomName: room?.name ?? null,
         deviceName: device?.name ?? null,
+        photos,
+        /** Visits that correct this one. A signed one means this visit has been replaced. */
+        corrections: corrections.map((c) => ({
+          id: c.id,
+          status: c.status,
+          signedAt: c.signedAt,
+          signedByName: c.signedByName,
+          reason: c.correctionReason,
+        })),
+        /** Set on a correction: the signed visit it replaces. */
+        corrects: original
+          ? { id: original.id, signedAt: original.signedAt, signedByName: original.signedByName }
+          : null,
       };
     }),
 
@@ -348,6 +377,67 @@ export const pmRouter = router({
       await runFor(ctx, input.runId);
       const res = await discardRun(db, ctx.orgId, input.runId);
       if (!res.ok) return fail(res.message);
+      return res.value;
+    }),
+
+  // Photos for a photo item. The browser shrinks them first; the picture travels as base64.
+  addPhoto: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(
+      z.object({
+        orgId,
+        runId: id,
+        itemId: z.string().min(1).max(40),
+        mime: z.enum(PM_PHOTO_TYPES),
+        data: z.string().max(Math.ceil((PM_PHOTO_MAX_BYTES * 4) / 3) + 8),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, [...TEAM]);
+      await runFor(ctx, input.runId);
+      const res = await addPhoto(db, { ...input, orgId: ctx.orgId, userId: ctx.user.id });
+      if (!res.ok) return fail(res.message);
+      return res.value;
+    }),
+
+  removePhoto: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, runId: id, photoId: id }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, [...TEAM]);
+      await runFor(ctx, input.runId);
+      const res = await removePhoto(db, { ...input, orgId: ctx.orgId });
+      if (!res.ok) return fail(res.message);
+      return res.value;
+    }),
+
+  photo: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, runId: id, photoId: id }))
+    .query(async ({ ctx, input }) => {
+      await runFor(ctx, input.runId);
+      const res = await getPhoto(db, { ...input, orgId: ctx.orgId });
+      if (!res.ok) return fail(res.message);
+      return res.value;
+    }),
+
+  // A signed visit is never edited: this starts a correction (a new draft linked to it).
+  correctRun: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, runId: id, reason: z.string().trim().min(5).max(500) }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, [...TEAM]);
+      await runFor(ctx, input.runId);
+      const res = await correctRun(db, { ...input, orgId: ctx.orgId, userId: ctx.user.id });
+      if (!res.ok) return fail(res.message);
+      if (!res.value.existing)
+        await writeAudit({
+          orgId: ctx.orgId,
+          actorId: ctx.user.id,
+          action: 'pm.run_correct',
+          target: input.runId,
+          meta: { correction: res.value.id, reason: input.reason },
+        });
       return res.value;
     }),
 

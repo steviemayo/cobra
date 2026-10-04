@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { signDocument } from '@kestrel/crypto';
 import type { Prisma, PrismaClient } from '@kestrel/db';
 import {
@@ -28,6 +29,7 @@ export type PmDb = Pick<
   | 'pmTemplate'
   | 'pmSchedule'
   | 'pmRun'
+  | 'pmPhoto'
   | 'room'
   | 'device'
   | 'incident'
@@ -46,6 +48,129 @@ const parseItems = (v: unknown): PmItem[] => {
   const r = PmItems.safeParse(v);
   return r.success ? r.data : [];
 };
+
+// ---- Photos --------------------------------------------------------------------------------------
+
+/** The browser shrinks a photo before sending it; these are the limits the server holds it to. */
+export const PM_PHOTO_MAX_BYTES = 1_500_000;
+export const PM_PHOTO_MAX_PER_ITEM = 4;
+export const PM_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+
+/** Whether the bytes really are the image type they claim, by their first bytes. */
+export function looksLikeImage(mime: string, b: Uint8Array): boolean {
+  const at = (i: number, ...v: number[]) => v.every((x, k) => b[i + k] === x);
+  if (mime === 'image/jpeg') return at(0, 0xff, 0xd8, 0xff);
+  if (mime === 'image/png') return at(0, 0x89, 0x50, 0x4e, 0x47);
+  if (mime === 'image/webp') return at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50);
+  return false;
+}
+
+export interface PmPhotoView {
+  id: string;
+  itemId: string;
+  mime: string;
+  size: number;
+  sha256: string;
+  createdAt: Date;
+}
+
+/** Adds a photo to a photo item of a draft visit. A signed visit never gains one. */
+export async function addPhoto(
+  db: PmDb,
+  input: {
+    orgId: string;
+    runId: string;
+    itemId: string;
+    mime: string;
+    /** The image, base64 encoded. */
+    data: string;
+    userId: string | null;
+  },
+  now = new Date(),
+): Promise<Result> {
+  const run = await db.pmRun.findFirst({ where: { id: input.runId, orgId: input.orgId } });
+  if (!run) return bad('No such visit');
+  if (run.status === 'signed') return bad('A signed visit cannot take more photos.');
+  const template = await db.pmTemplate.findFirst({
+    where: { id: run.templateId, orgId: input.orgId },
+  });
+  const item = parseItems(template?.items).find((i) => i.id === input.itemId);
+  if (!item || item.type !== 'photo') return bad('That item does not take photos.');
+  if (!(PM_PHOTO_TYPES as readonly string[]).includes(input.mime))
+    return bad('Photos must be JPEG, PNG or WebP.');
+  const bytes = Buffer.from(input.data, 'base64');
+  if (!bytes.length) return bad('That photo is empty.');
+  if (bytes.length > PM_PHOTO_MAX_BYTES)
+    return bad(
+      `That photo is too large (the limit is ${Math.round(PM_PHOTO_MAX_BYTES / 1e6)} MB).`,
+    );
+  if (!looksLikeImage(input.mime, bytes)) return bad('That file is not a valid image.');
+  const have = await db.pmPhoto.count({ where: { runId: run.id, itemId: input.itemId } });
+  if (have >= PM_PHOTO_MAX_PER_ITEM)
+    return bad(`An item takes up to ${PM_PHOTO_MAX_PER_ITEM} photos.`);
+  const row = await db.pmPhoto.create({
+    data: {
+      orgId: input.orgId,
+      runId: run.id,
+      itemId: input.itemId,
+      mime: input.mime,
+      size: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      data: bytes,
+      createdBy: input.userId,
+      createdAt: now,
+    },
+  });
+  return { ok: true, value: { id: row.id } };
+}
+
+/** Removes a photo from a draft visit. */
+export async function removePhoto(
+  db: PmDb,
+  input: { orgId: string; runId: string; photoId: string },
+): Promise<Result> {
+  const run = await db.pmRun.findFirst({ where: { id: input.runId, orgId: input.orgId } });
+  if (!run) return bad('No such visit');
+  if (run.status === 'signed') return bad('A signed visit keeps its photos.');
+  const photo = await db.pmPhoto.findFirst({
+    where: { id: input.photoId, runId: run.id, orgId: input.orgId },
+  });
+  if (!photo) return bad('No such photo');
+  await db.pmPhoto.delete({ where: { id: photo.id } });
+  return { ok: true, value: { id: photo.id } };
+}
+
+/** What photos a visit has, without the pictures themselves. */
+export async function listPhotos(db: PmDb, orgId: string, runId: string): Promise<PmPhotoView[]> {
+  const rows = await db.pmPhoto.findMany({
+    where: { orgId, runId },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, itemId: true, mime: true, size: true, sha256: true, createdAt: true },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    itemId: r.itemId,
+    mime: r.mime,
+    size: r.size,
+    sha256: r.sha256,
+    createdAt: r.createdAt,
+  }));
+}
+
+/** One picture, as a data address the page can show. */
+export async function getPhoto(
+  db: PmDb,
+  input: { orgId: string; runId: string; photoId: string },
+): Promise<Result<{ dataUrl: string }>> {
+  const photo = await db.pmPhoto.findFirst({
+    where: { id: input.photoId, runId: input.runId, orgId: input.orgId },
+  });
+  if (!photo) return bad('No such photo');
+  return {
+    ok: true,
+    value: { dataUrl: `data:${photo.mime};base64,${Buffer.from(photo.data).toString('base64')}` },
+  };
+}
 
 // ---- Templates -----------------------------------------------------------------------------------
 
@@ -498,10 +623,16 @@ export async function signRun(
       data: {
         orgId: input.orgId,
         deviceId: run.deviceId,
-        type: failed ? 'pm_failed' : 'pm_passed',
+        // A correction is its own entry, so the device history does not count the visit twice.
+        type: run.correctsRunId ? 'pm_corrected' : failed ? 'pm_failed' : 'pm_passed',
         source: 'manual',
         actorId: input.userId,
-        data: { runId: run.id, template: run.templateName, failed } as Prisma.InputJsonValue,
+        data: {
+          runId: run.id,
+          template: run.templateName,
+          failed,
+          ...(run.correctsRunId ? { corrects: run.correctsRunId } : {}),
+        } as Prisma.InputJsonValue,
         at: now,
       },
     });
@@ -542,6 +673,95 @@ export async function discardRun(db: PmDb, orgId: string, runId: string): Promis
   if (run.status === 'signed') return bad('A signed visit cannot be removed');
   await db.pmRun.delete({ where: { id: runId } });
   return { ok: true, value: { id: runId } };
+}
+
+/**
+ * A signed visit is never edited. To fix a mistake, someone starts a correction: a new draft with the
+ * answers and photos copied across and the reason recorded, linked to the original. Signing it leaves
+ * both on record, and reports count the correction in place of the original. One correction is open at
+ * a time; asking again returns it.
+ */
+export async function correctRun(
+  db: PmDb,
+  input: { orgId: string; runId: string; userId: string | null; reason: string },
+  now = new Date(),
+): Promise<Result<{ id: string; existing: boolean }>> {
+  const reason = input.reason.trim();
+  if (reason.length < 5) return bad('Say why it needs correcting (at least 5 characters).');
+  if (reason.length > 500) return bad('Keep the reason under 500 characters.');
+  const orig = await db.pmRun.findFirst({ where: { id: input.runId, orgId: input.orgId } });
+  if (!orig) return bad('No such visit');
+  if (orig.status !== 'signed')
+    return bad('Only a signed visit needs a correction. Edit the draft instead.');
+  const open = await db.pmRun.findFirst({
+    where: { orgId: input.orgId, correctsRunId: orig.id, status: 'draft' },
+  });
+  if (open) return { ok: true, value: { id: open.id, existing: true } };
+  const template = await db.pmTemplate.findFirst({
+    where: { id: orig.templateId, orgId: input.orgId },
+  });
+  if (!template)
+    return bad('The checklist for this visit has been deleted, so it cannot be corrected.');
+  // Answers carry over for items still on the checklist; anything new starts empty.
+  const items = parseItems(template.items);
+  const before = new Map(
+    PmResult.array()
+      .catch([])
+      .parse(orig.results)
+      .map((r) => [r.itemId, r]),
+  );
+  const results: PmResult[] = items.map((i) => {
+    const o = before.get(i.id);
+    return o
+      ? { ...o, label: i.label, type: i.type }
+      : { itemId: i.id, label: i.label, type: i.type, result: null };
+  });
+  const run = await db.pmRun.create({
+    data: {
+      orgId: input.orgId,
+      // No schedule: the original already moved it on.
+      scheduleId: null,
+      templateId: template.id,
+      templateName: template.name,
+      templateVersion: template.version,
+      roomId: orig.roomId,
+      deviceId: orig.deviceId,
+      status: 'draft',
+      results: results as unknown as Prisma.InputJsonValue,
+      failedCount: 0,
+      dueOn: null,
+      notes: orig.notes,
+      startedBy: input.userId,
+      createdAt: now,
+      correctsRunId: orig.id,
+      correctionReason: reason,
+    },
+  });
+  const keep = new Set(items.filter((i) => i.type === 'photo').map((i) => i.id));
+  const photos = await db.pmPhoto.findMany({ where: { orgId: input.orgId, runId: orig.id } });
+  for (const p of photos.filter((x) => keep.has(x.itemId)))
+    await db.pmPhoto.create({
+      data: {
+        orgId: input.orgId,
+        runId: run.id,
+        itemId: p.itemId,
+        mime: p.mime,
+        size: p.size,
+        sha256: p.sha256,
+        data: p.data,
+        createdBy: input.userId,
+        createdAt: now,
+      },
+    });
+  return { ok: true, value: { id: run.id, existing: false } };
+}
+
+/** The visits that correct a signed visit (newest first), so the original can say it was corrected. */
+export async function correctionsOf(db: PmDb, orgId: string, runId: string) {
+  return db.pmRun.findMany({
+    where: { orgId, correctsRunId: runId },
+    orderBy: { createdAt: 'desc' },
+  });
 }
 
 // ---- Overview, overdue and reports ---------------------------------------------------------------
@@ -633,6 +853,13 @@ export interface PmReportRun {
   failed: number;
   onTime: boolean | null;
   results: { label: string; result: string | number | null; note?: string }[];
+  /** SHA-256 of each photo taken, so the signature covers them. */
+  photos?: { itemId: string; sha256: string }[];
+  /** This visit corrects an earlier signed one. */
+  corrects?: string;
+  correctionReason?: string;
+  /** A later signed visit replaces this one; it is listed but not counted. */
+  supersededBy?: string;
 }
 
 /** Signs a report of every visit signed off between two dates, for keeping. */
@@ -645,7 +872,7 @@ export async function issuePmReport(
   const org = await db.org.findFirst({ where: { id: input.orgId } });
   if (!org) return bad('No such organisation');
   if (input.to.getTime() < input.from.getTime()) return bad('The end date is before the start');
-  const [runs, rooms, devices, last] = await Promise.all([
+  const [runs, rooms, devices, last, photoRows] = await Promise.all([
     db.pmRun.findMany({
       where: { orgId: input.orgId, status: 'signed' },
       orderBy: { signedAt: 'asc' },
@@ -656,7 +883,13 @@ export async function issuePmReport(
       where: { orgId: input.orgId, kind: 'pm_report' },
       orderBy: { number: 'desc' },
     }),
+    db.pmPhoto.findMany({
+      where: { orgId: input.orgId },
+      select: { runId: true, itemId: true, sha256: true },
+    }),
   ]);
+  const supersededBy = new Map<string, string>();
+  for (const r of runs) if (r.correctsRunId) supersededBy.set(r.correctsRunId, r.id);
   const inRange = runs.filter(
     (r) =>
       r.signedAt &&
@@ -677,9 +910,22 @@ export async function issuePmReport(
       result: x.result,
       ...(x.note ? { note: x.note } : {}),
     })),
+    ...(photoRows.some((p) => p.runId === r.id)
+      ? {
+          photos: photoRows
+            .filter((p) => p.runId === r.id)
+            .map((p) => ({ itemId: p.itemId, sha256: p.sha256 })),
+        }
+      : {}),
+    ...(r.correctsRunId
+      ? { corrects: r.correctsRunId, correctionReason: r.correctionReason ?? undefined }
+      : {}),
+    ...(supersededBy.has(r.id) ? { supersededBy: supersededBy.get(r.id) } : {}),
   }));
   const number = (last[0]?.number ?? 0) + 1;
-  const withDue = rows.filter((r) => r.onTime !== null);
+  // A visit that was corrected is listed, but the correction is what counts.
+  const counted = rows.filter((r) => !r.supersededBy);
+  const withDue = counted.filter((r) => r.onTime !== null);
   const payload = {
     orgId: input.orgId,
     orgName: org.name,
@@ -690,9 +936,9 @@ export async function issuePmReport(
     from: input.from.toISOString().slice(0, 10),
     to: input.to.toISOString().slice(0, 10),
     summary: {
-      visits: rows.length,
-      withFailures: rows.filter((r) => r.failed > 0).length,
-      itemsFailed: rows.reduce((n, r) => n + r.failed, 0),
+      visits: counted.length,
+      withFailures: counted.filter((r) => r.failed > 0).length,
+      itemsFailed: counted.reduce((n, r) => n + r.failed, 0),
       onTimePct: withDue.length
         ? Math.round((withDue.filter((r) => r.onTime).length / withDue.length) * 100)
         : null,

@@ -1738,31 +1738,52 @@ model PmSchedule {
 
 /// One completed (or in-progress) check. Once signed it is never edited.
 model PmRun {
-  id              String    @id @default(uuid()) @db.Uuid
-  orgId           String    @db.Uuid
-  scheduleId      String?   @db.Uuid
-  templateId      String    @db.Uuid
-  templateName    String
-  templateVersion Int
-  roomId          String?   @db.Uuid
-  deviceId        String?   @db.Uuid
+  id               String    @id @default(uuid()) @db.Uuid
+  orgId            String    @db.Uuid
+  scheduleId       String?   @db.Uuid
+  templateId       String    @db.Uuid
+  templateName     String
+  templateVersion  Int
+  roomId           String?   @db.Uuid
+  deviceId         String?   @db.Uuid
   /// draft or signed
-  status          String    @default("draft")
+  status           String    @default("draft")
   /// [{ itemId, label, type, result, note?, auto?: { value, at } }]
-  results         Json      @default("[]")
-  failedCount     Int       @default(0)
+  results          Json      @default("[]")
+  failedCount      Int       @default(0)
   /// The date the check was due when it was signed off, to tell on time from late.
-  dueOn           DateTime? @db.Date
-  notes           String?
-  startedBy       String?   @db.Uuid
-  signedBy        String?   @db.Uuid
-  signedByName    String?
-  signedAt        DateTime?
-  createdAt       DateTime  @default(now())
+  dueOn            DateTime? @db.Date
+  notes            String?
+  startedBy        String?   @db.Uuid
+  signedBy         String?   @db.Uuid
+  signedByName     String?
+  signedAt         DateTime?
+  createdAt        DateTime  @default(now())
+  /// Set on a correction: the signed visit it corrects. The original is never edited; it is found as corrected by looking for this.
+  correctsRunId    String?   @db.Uuid
+  correctionReason String?
 
   @@index([orgId, createdAt])
   @@index([roomId])
   @@index([deviceId])
+  @@index([correctsRunId])
+}
+
+/// A photo taken for a photo item in a visit. Stored in the database (downscaled in the browser) so it needs no file store, and its SHA-256 goes into signed reports.
+model PmPhoto {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  runId     String   @db.Uuid
+  itemId    String
+  mime      String
+  size      Int
+  sha256    String
+  data      Bytes
+  createdBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+
+  @@index([runId])
+  @@index([orgId])
 }
 
 /// How often an organisation wants a register issue taken by itself. One row per organisation.
