@@ -17,6 +17,7 @@ import {
 import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { BriefingSetting } from '@/components/common/briefing-setting';
 import { RecapSetting } from '@/components/common/recap-setting';
+import { SecuritySetting } from '@/components/common/security-setting';
 import { ServiceProvidersSetting } from '@/components/common/service-providers-setting';
 import { StaffAccessSetting } from '@/components/common/staff-access-setting';
 import { orgPath, useOrg } from '@/components/shell/org-context';
@@ -84,6 +85,7 @@ export function GeneralSettings() {
       <NetworkHealthSettings />
       <ApiKeysSetting />
       {org.kind !== 'msp' && <ServiceProvidersSetting />}
+      <SecuritySetting />
       <StaffAccessSetting />
       <DeleteOrgSetting />
     </PageContainer>

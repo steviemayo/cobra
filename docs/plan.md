@@ -614,7 +614,7 @@ From the MVP-to-launch review. Legal items need a lawyer; the rest are build or 
 
 **Before the first enterprise deal**
 
-- [ ] **LR-15 Customer MFA.** Available to all; enforced for owner and dev roles.
+- [x] **LR-15 Customer MFA (built 2026-10-04, decisions MF-1 to MF-6).** Available to all; enforced for owner and dev roles.
 - [ ] **LR-16 Org deletion and full data export.** Deletion that cascades, plus user and org export (audit export exists; the rest does not).
 - [ ] **LR-17 Retention policy.** Extend beyond the 90-day telemetry and audit settings: tickets, deleted accounts, backups.
 - [ ] **LR-18 Row Level Security as defence-in-depth,** plus cross-tenant access tests on every router.

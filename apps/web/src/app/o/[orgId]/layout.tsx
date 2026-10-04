@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import { z } from 'zod';
 import { db } from '@kestrel/db';
 import { OrgShell } from '@/components/shell/org-shell';
+import { mfaGate, requiredRolesFor } from '@/server/customer-mfa';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { managedCustomers } from '@/server/msp';
 import { readOrgBranding } from '@/server/panel-settings';
@@ -30,6 +31,18 @@ export default async function OrgLayout({
     orderBy: { createdAt: 'asc' },
     include: { org: { select: { id: true, name: true, kind: true } } },
   });
+  // Two-step sign-in (LR-15). A person with an authenticator app gives a code once per session, and
+  // an owner or developer of an organisation that requires one has to set one up first.
+  if (memberships.length > 0) {
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    const gate = mfaGate({
+      hasFactor: aal?.nextLevel === 'aal2',
+      verified: aal?.currentLevel === 'aal2',
+      requiredRoles: await requiredRolesFor(db, user.id),
+    });
+    if (gate === 'challenge') redirect('/auth/mfa');
+    if (gate === 'enrol') redirect('/auth/mfa?enrol=1');
+  }
   const orgs: {
     id: string;
     name: string;
