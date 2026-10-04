@@ -48,7 +48,9 @@ const roleOptions = OrgRole.options.map((r) => ({ value: r, label: ROLE_LABEL[r]
 export function TeamView() {
   const trpc = useTRPC();
   const qc = useQueryClient();
-  const { orgId, isOwner } = useOrg();
+  const { orgId, isOwner, org } = useOrg();
+  // Reached through a service provider: it may be able to add people (PA-1).
+  const asProvider = !!org.via;
   const members = useQuery(trpc.member.list.queryOptions({ orgId }));
   const invites = useQuery({ ...trpc.invite.list.queryOptions({ orgId }), enabled: isOwner });
   const requests = useQuery({
@@ -59,6 +61,7 @@ export function TeamView() {
   // The role each waiting request will get if approved. Lowest by default: the owner chooses.
   const [roles, setRoles] = useState<Record<string, OrgRole>>({});
   const [inviting, setInviting] = useState(false);
+  const [providerInviting, setProviderInviting] = useState(false);
   const [removing, setRemoving] = useState<Member | null>(null);
 
   const refresh = () =>
@@ -122,11 +125,15 @@ export function TeamView() {
         title="Team"
         description="People with access to this organisation."
         actions={
-          isOwner && (
+          isOwner ? (
             <Button size="sm" onClick={() => setInviting(true)}>
               <Plus data-icon="inline-start" /> Invite people
             </Button>
-          )
+          ) : asProvider ? (
+            <Button size="sm" onClick={() => setProviderInviting(true)}>
+              <Plus data-icon="inline-start" /> Add a person
+            </Button>
+          ) : null
         }
       />
 
@@ -153,6 +160,12 @@ export function TeamView() {
                       {m.isYou && (
                         <Badge variant="secondary" className="ml-2">
                           You
+                        </Badge>
+                      )}
+                      {m.addedByProvider && (
+                        <Badge variant="outline" className="ml-2">
+                          Added by {m.addedByProvider.name}
+                          {m.addedByProvider.connected ? '' : ' (no longer connected)'}
                         </Badge>
                       )}
                     </TableCell>
@@ -258,7 +271,14 @@ export function TeamView() {
                 <TableBody>
                   {invites.data.map((i) => (
                     <TableRow key={i.id}>
-                      <TableCell className="font-medium">{i.email}</TableCell>
+                      <TableCell className="font-medium">
+                        {i.email}
+                        {i.addedByProvider && (
+                          <Badge variant="outline" className="ml-2">
+                            Sent by {i.addedByProvider}
+                          </Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">{ROLE_LABEL[i.role]}</TableCell>
                       <TableCell className="text-right text-muted-foreground">
                         {i.expired ? 'Expired' : `Sent ${timeAgo(i.createdAt)}`}
@@ -284,7 +304,16 @@ export function TeamView() {
         </section>
       )}
 
+      {asProvider && <ProviderAdded />}
+
       <InviteDialog open={inviting} onOpenChange={setInviting} onCreated={refresh} />
+      {asProvider && (
+        <ProviderInviteDialog
+          open={providerInviting}
+          onOpenChange={setProviderInviting}
+          onCreated={refresh}
+        />
+      )}
       <ConfirmDialog
         open={!!removing}
         onOpenChange={(o) => !o && setRemoving(null)}
@@ -414,6 +443,212 @@ function InviteDialog({
                 Cancel
               </Button>
               <Button type="submit" disabled={create.isPending || !email.trim()}>
+                {create.isPending && <Spinner />}
+                Create invite link
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** What a service provider may add here, with its own people and invitations listed. */
+function ProviderAdded() {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const { orgId } = useOrg();
+  const options = useQuery({
+    ...trpc.invite.providerOptions.queryOptions({ orgId }),
+    retry: false,
+  });
+  const revoke = useMutation(
+    trpc.invite.revokeViaProvider.mutationOptions({
+      onSuccess: async () => {
+        await qc.invalidateQueries({ queryKey: trpc.invite.providerOptions.queryKey() });
+        toast.success('Invitation withdrawn');
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const o = options.data;
+  if (!o) return null;
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium">People your organisation added</h2>
+      {o.blocked && <p className="text-sm text-muted-foreground">{o.blocked}</p>}
+      {o.members.length === 0 && o.pending.length === 0 ? (
+        <p className="text-sm text-muted-foreground">You have not added anyone yet.</p>
+      ) : (
+        <ul className="divide-y rounded-lg border text-sm">
+          {o.members.map((m) => (
+            <li key={m.id} className="flex justify-between px-3 py-2">
+              <span>{m.email ?? 'Unknown'}</span>
+              <span className="text-muted-foreground">{ROLE_LABEL[m.role as OrgRole]}</span>
+            </li>
+          ))}
+          {o.pending.map((i) => (
+            <li key={i.id} className="flex items-center justify-between gap-2 px-3 py-2">
+              <span>
+                {i.email}{' '}
+                <span className="text-muted-foreground">
+                  ({ROLE_LABEL[i.role as OrgRole]}, {i.expired ? 'expired' : 'waiting'})
+                </span>
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Withdraw invitation for ${i.email}`}
+                disabled={revoke.isPending || !!o.blocked}
+                onClick={() => revoke.mutate({ orgId, inviteId: i.id })}
+              >
+                <X />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** A provider owner adds someone to this customer, with only the roles it is allowed to give. */
+function ProviderInviteDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: () => void;
+}) {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const { orgId } = useOrg();
+  const options = useQuery({
+    ...trpc.invite.providerOptions.queryOptions({ orgId }),
+    enabled: open,
+    retry: false,
+  });
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState<OrgRole>('support');
+  const [link, setLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const roles = options.data?.roles ?? [];
+  const blocked = options.data?.blocked ?? null;
+  const create = useMutation(
+    trpc.invite.createViaProvider.mutationOptions({
+      onSuccess: async (res) => {
+        setLink(`${window.location.origin}/invite/${res.token}`);
+        await qc.invalidateQueries({ queryKey: trpc.invite.providerOptions.queryKey() });
+        onCreated();
+      },
+    }),
+  );
+  const close = (o: boolean) => {
+    if (!o) {
+      setEmail('');
+      setLink(null);
+      setCopied(false);
+      create.reset();
+    }
+    onOpenChange(o);
+  };
+  const chosen: OrgRole = roles.includes(role) ? role : (roles[0] ?? 'support');
+
+  return (
+    <Dialog open={open} onOpenChange={close}>
+      <DialogContent className="sm:max-w-md">
+        {link ? (
+          <div className="space-y-5">
+            <DialogHeader>
+              <DialogTitle>Invitation ready</DialogTitle>
+              <DialogDescription>
+                Send this link to {email}. It works once, only for that email address, and expires
+                in 7 days. It will not be shown again. This organisation's owners can see that you
+                added them.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border bg-muted/40 px-2.5 py-1.5">
+                <Link2 className="size-4 shrink-0 text-muted-foreground" />
+                <span className="truncate font-mono text-xs">{link}</span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(link);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1800);
+                }}
+              >
+                {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+            <DialogFooter>
+              <Button onClick={() => close(false)}>Done</Button>
+            </DialogFooter>
+          </div>
+        ) : (
+          <form
+            className="space-y-5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              create.mutate({ orgId, email, role: chosen });
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Add a person to this team</DialogTitle>
+              <DialogDescription>
+                You will get a link to send them. This organisation's owners are shown that your
+                organisation added them, and can remove them.
+              </DialogDescription>
+            </DialogHeader>
+            {options.isPending ? (
+              <Skeleton className="h-24 w-full" />
+            ) : blocked ? (
+              <p className="rounded-md border p-3 text-sm">{blocked}</p>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="provider-invite-email">Email</Label>
+                  <Input
+                    id="provider-invite-email"
+                    type="email"
+                    required
+                    autoFocus
+                    placeholder="name@company.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="provider-invite-role">Role</Label>
+                  <SimpleSelect
+                    id="provider-invite-role"
+                    className="w-full"
+                    value={chosen}
+                    options={roles.map((r) => ({ value: r, label: ROLE_LABEL[r] }))}
+                    onValueChange={setRole}
+                  />
+                  <p className="text-xs text-muted-foreground">{ROLE_HELP[chosen]}</p>
+                  {!roles.includes('owner') && (
+                    <p className="text-xs text-muted-foreground">
+                      This organisation already has an owner, so only its owners can add another.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+            {create.error && <p className="text-sm text-destructive">{create.error.message}</p>}
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => close(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={create.isPending || !email.trim() || !!blocked}>
                 {create.isPending && <Spinner />}
                 Create invite link
               </Button>

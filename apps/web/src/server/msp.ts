@@ -195,6 +195,8 @@ export interface CustomerGrantView {
   siteNames: string[];
   /** The owner chose to show this provider's name, logo and colour. */
   useBrand: boolean;
+  /** The owner lets the provider's owners add people to this team. */
+  mayAddPeople: boolean;
   createdAt: Date;
   endsAt: Date | null;
 }
@@ -220,6 +222,7 @@ export async function grantsForCustomer(
     status: g.status,
     siteNames: g.siteIds.map((id) => siteName.get(id) ?? 'Unknown site'),
     useBrand: !!g.useBrand,
+    mayAddPeople: !!g.mayAddPeople,
     endsAt: g.endsAt,
     createdAt: g.createdAt,
   }));
