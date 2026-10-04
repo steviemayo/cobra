@@ -6,6 +6,7 @@ import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { DeletionPanel } from '@/components/staff/deletion-panel';
 import { BillingArrangementPanel } from '@/components/staff/billing-arrangement-panel';
 import { LicencePanel } from '@/components/staff/licence-panel';
+import { MfaResetButton } from '@/components/staff/mfa-reset-button';
 import { NotesPanel } from '@/components/staff/notes-panel';
 import { RetentionPanel } from '@/components/staff/retention-panel';
 import { SessionPanel } from '@/components/staff/session-panel';
@@ -112,9 +113,12 @@ export function StaffOrg({ orgId }: { orgId: string }) {
           <h2 className="text-sm font-medium">People</h2>
           <ul className="divide-y rounded-lg border text-sm">
             {o.team.map((t) => (
-              <li key={t.userId} className="flex justify-between px-3 py-2">
+              <li key={t.userId} className="flex items-center justify-between gap-2 px-3 py-2">
                 <span>{t.email ?? 'No email'}</span>
-                <span className="text-muted-foreground">{t.role.replace('_', ' ')}</span>
+                <span className="flex items-center gap-2 text-muted-foreground">
+                  {t.role.replace('_', ' ')}
+                  <MfaResetButton orgId={orgId} userId={t.userId} />
+                </span>
               </li>
             ))}
           </ul>

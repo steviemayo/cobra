@@ -29,6 +29,8 @@ import {
   sendQuote,
   transferCallout,
 } from '../callouts';
+import { MfaError, resetMfa } from '../customer-mfa';
+import { clearFactors } from '../customer-mfa-admin';
 import {
   DelegationError,
   delegatedCustomers,
@@ -103,6 +105,7 @@ function asTrpc(e: unknown): never {
     e instanceof LicenceError ||
     e instanceof InvoiceError ||
     e instanceof DelegationError ||
+    e instanceof MfaError ||
     e instanceof SessionError ||
     e instanceof TicketError ||
     e instanceof RetentionError ||
@@ -418,6 +421,20 @@ export const staffRouter = router({
             percent: input.percent,
           });
           return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+  }),
+
+  // Two-step sign-in: clear someone's authenticator apps when they have lost their phone.
+  mfa: router({
+    reset: staffProcedure
+      .input(z.object({ orgId, userId: z.string().uuid(), reason: z.string().max(600) }))
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'support');
+        try {
+          return await resetMfa(db, { clearFactors }, { ...input, staffUserId: ctx.staff.userId });
         } catch (e) {
           return asTrpc(e);
         }

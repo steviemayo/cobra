@@ -46,6 +46,8 @@ model Org {
   /// The staff member (StaffUser.userId) who scheduled it, and why.
   deletedBy          String?   @db.Uuid
   deleteReason       String?
+  /// Owners and developers must sign in with an authenticator app (LR-15). Off until an owner turns it on.
+  requireMfa         Boolean   @default(false)
 
   members             Member[]
   sites               Site[]
