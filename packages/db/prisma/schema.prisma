@@ -102,16 +102,18 @@ model Org {
 }
 
 model Member {
-  id            String    @id @default(uuid()) @db.Uuid
-  orgId         String    @db.Uuid
-  userId        String    @db.Uuid // Supabase auth.users.id
-  email         String? // denormalised from auth.users for the team list
-  role          OrgRole
-  createdAt     DateTime  @default(now())
+  id              String    @id @default(uuid()) @db.Uuid
+  orgId           String    @db.Uuid
+  userId          String    @db.Uuid // Supabase auth.users.id
+  email           String? // denormalised from auth.users for the team list
+  role            OrgRole
+  createdAt       DateTime  @default(now())
   /// When this person was last in the portal; the login recap covers what happened since. Null until their first visit.
-  lastSeenAt    DateTime?
+  lastSeenAt      DateTime?
   /// They asked not to be shown the login recap.
-  recapSilenced Boolean   @default(false)
+  recapSilenced   Boolean   @default(false)
+  /// The service provider that added them (PA-1). Stays after the connection ends, so the owners can see it.
+  addedByMspOrgId String?   @db.Uuid
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
@@ -483,16 +485,18 @@ model Template {
 
 // Invite links (no email delivery yet). Only the token hash is stored.
 model Invite {
-  id         String    @id @default(uuid()) @db.Uuid
-  orgId      String    @db.Uuid
-  email      String
-  role       OrgRole
-  tokenHash  String    @unique
-  invitedBy  String?   @db.Uuid
-  expiresAt  DateTime
-  acceptedAt DateTime?
-  revokedAt  DateTime?
-  createdAt  DateTime  @default(now())
+  id          String    @id @default(uuid()) @db.Uuid
+  orgId       String    @db.Uuid
+  email       String
+  role        OrgRole
+  tokenHash   String    @unique
+  invitedBy   String?   @db.Uuid
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  /// Set when a connected service provider sent it (PA-1), so the owners can see who added whom.
+  viaMspOrgId String?   @db.Uuid
 
   org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
@@ -992,6 +996,8 @@ model MspGrant {
   useBrand       Boolean   @default(false)
   /// The connection ends by itself at this time. Null: no end date.
   endsAt         DateTime?
+  /// The customer's owner lets the provider's owners add people to the team (PA-2). Needs the manage role and the whole organisation.
+  mayAddPeople   Boolean   @default(false)
   /// The provider's own notes about this customer, for sorting and filtering its portfolio.
   accountManager String?
   tags           String[]  @default([])

@@ -62,6 +62,17 @@ export function ServiceProvidersSetting() {
       onError: (e) => toast.error(e.message),
     }),
   );
+  const mayAdd = useMutation(
+    trpc.msp.mayAddPeople.mutationOptions({
+      onSuccess: async (_r, vars) => {
+        await refresh();
+        toast.success(
+          vars.on ? 'Their owners can now add people' : 'They can no longer add people',
+        );
+      },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
   const setEnd = useMutation(
     trpc.msp.setEnd.mutationOptions({
       onSuccess: async () => {
@@ -121,6 +132,21 @@ export function ServiceProvidersSetting() {
                     }
                   />
                   Show their name, logo and colour
+                </label>
+              )}
+              {g.status === 'active' && g.role === 'manage' && g.siteNames.length === 0 && (
+                <label
+                  className="flex items-center gap-2 text-xs text-muted-foreground"
+                  title="Their owners can invite support and viewer people, and an owner or developer only if you have none"
+                >
+                  <Checkbox
+                    checked={g.mayAddPeople}
+                    disabled={mayAdd.isPending}
+                    onCheckedChange={(on) =>
+                      mayAdd.mutate({ orgId, grantId: g.id, on: on === true })
+                    }
+                  />
+                  Let them add people to our team
                 </label>
               )}
               <label className="flex items-center gap-2 text-xs text-muted-foreground">

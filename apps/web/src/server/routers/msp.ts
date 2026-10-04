@@ -30,6 +30,7 @@ import {
   updateCustomerMeta,
 } from '../msp-portfolio';
 import { writeAudit } from '../audit';
+import { ProviderMemberError, setMayAddPeople } from '../provider-members';
 import { endDelegationForConnection, type DelegationDb } from '../delegated-billing';
 import { delegationEffectsOrUnavailable } from '../stripe';
 import { orgProcedure, requireRole, router } from '../trpc';
@@ -91,6 +92,26 @@ export const mspRouter = router({
         });
         return { ok: true };
       } catch (e) {
+        return asTrpc(e);
+      }
+    }),
+
+  // Let this provider's owners add people to the team (PA-2). Off until an owner turns it on.
+  mayAddPeople: orgProcedure
+    .input(z.object({ orgId, grantId: z.string().uuid(), on: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      try {
+        await setMayAddPeople(db, {
+          customerOrgId: ctx.orgId,
+          grantId: input.grantId,
+          userId: ctx.user.id,
+          on: input.on,
+        });
+        return { ok: true };
+      } catch (e) {
+        if (e instanceof ProviderMemberError)
+          throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
         return asTrpc(e);
       }
     }),
