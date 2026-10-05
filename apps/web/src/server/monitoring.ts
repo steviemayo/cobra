@@ -442,6 +442,15 @@ export async function sweep(db: MonitoringDb, now = new Date()): Promise<AlertJo
       error: 'The gateway did not pick this up in time.',
     },
   });
+  // A camera picture nobody fetched is wiped, so it never lingers.
+  await db.remoteCommand.updateMany({
+    where: {
+      type: 'snapshot',
+      status: 'succeeded',
+      finishedAt: { lt: new Date(now.getTime() - 2 * 60_000) },
+    },
+    data: { status: 'discarded', output: {} },
+  });
   await db.remoteCommand.updateMany({
     where: { status: 'sent', sentAt: { lt: new Date(now.getTime() - COMMAND_SENT_EXPIRY_MS) } },
     data: { status: 'expired', finishedAt: now, error: 'The gateway never reported a result.' },

@@ -48,6 +48,8 @@ model Org {
   deleteReason       String?
   /// Owners and developers must sign in with an authenticator app (LR-15). Off until an owner turns it on.
   requireMfa         Boolean   @default(false)
+  /// Owners, developers and support may ask a camera for a live snapshot. Off until an owner turns it on: a picture can show people.
+  cameraPreview      Boolean   @default(false)
 
   members             Member[]
   sites               Site[]

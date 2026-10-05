@@ -31,6 +31,8 @@ class FakeDriver {
   async browsePoints() {
     return this.browsed;
   }
+  /** A camera's picture. Undefined means a driver with no snapshot. */
+  snapshot?: () => Promise<{ contentType: 'image/jpeg'; bytes: Buffer }> = undefined;
   async send(c: unknown) {
     if (this.failSend) throw new Error('refused');
     this.sent.push(c);
@@ -369,6 +371,40 @@ describe('DeviceHost browse', () => {
       ok: false,
       error: 'The device is offline, so it cannot be browsed right now',
     });
+    host.shutdown();
+  });
+});
+
+describe('DeviceHost snapshot', () => {
+  it('hands back one picture as base64, and says why when it cannot', async () => {
+    const host = new DeviceHost(silentLogger);
+    host.apply(set('v1', [{ id: A }]));
+    expect(await host.snapshot(A)).toEqual({ ok: false, error: 'This device cannot give a picture' });
+    expect(await host.snapshot(B)).toEqual({
+      ok: false,
+      error: 'This gateway is not polling that device yet',
+    });
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+    built[0]!.snapshot = async () => ({ contentType: 'image/jpeg', bytes: jpeg });
+    expect(await host.snapshot(A)).toEqual({
+      ok: true,
+      contentType: 'image/jpeg',
+      data: jpeg.toString('base64'),
+    });
+    built[0]!.snapshot = async () => {
+      throw new Error('the camera rejected the login');
+    };
+    expect(await host.snapshot(A)).toEqual({ ok: false, error: 'the camera rejected the login' });
+    host.shutdown();
+  });
+
+  it('refuses a picture too large to send in a heartbeat', async () => {
+    const host = new DeviceHost(silentLogger);
+    host.apply(set('v1', [{ id: A }]));
+    built[0]!.snapshot = async () => ({ contentType: 'image/jpeg', bytes: Buffer.alloc(1_600_000) });
+    const res = await host.snapshot(A);
+    expect(res).toMatchObject({ ok: false });
+    expect(res.ok === false && res.error).toContain('too large');
     host.shutdown();
   });
 });

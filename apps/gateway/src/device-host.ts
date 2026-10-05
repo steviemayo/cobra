@@ -23,6 +23,8 @@ import { Prober } from './probe';
 
 /** How long before device details are sent again even though they have not changed. */
 const DETAILS_REFRESH_MS = 5 * 60_000;
+/** The largest picture sent to the cloud, so a heartbeat stays well under its body limit. */
+const MAX_SNAPSHOT_BYTES = 1_500_000;
 
 /**
  * A device that has just been opened is not reported until it has answered once, or this long has
@@ -349,6 +351,30 @@ export class DeviceHost {
       return { ok: false, error: 'This device cannot list what it can report' };
     try {
       return { ok: true, found: await run.driver.browsePoints() };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: message.slice(0, 300) };
+    }
+  }
+
+  /**
+   * One picture from a camera, as base64 for the heartbeat. It is taken now and handed on: nothing
+   * is kept here. A picture too large for the cloud to take is refused, with what to do about it.
+   */
+  async snapshot(
+    deviceId: string,
+  ): Promise<{ ok: true; contentType: 'image/jpeg'; data: string } | { ok: false; error: string }> {
+    const run = this.running.get(deviceId);
+    if (!run) return { ok: false, error: 'This gateway is not polling that device yet' };
+    if (!run.driver.snapshot) return { ok: false, error: 'This device cannot give a picture' };
+    try {
+      const shot = await run.driver.snapshot();
+      if (shot.bytes.length > MAX_SNAPSHOT_BYTES)
+        return {
+          ok: false,
+          error: 'The picture is too large to send. Lower the camera’s snapshot resolution or quality.',
+        };
+      return { ok: true, contentType: shot.contentType, data: shot.bytes.toString('base64') };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       return { ok: false, error: message.slice(0, 300) };
