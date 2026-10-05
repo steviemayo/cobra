@@ -1739,6 +1739,11 @@ model PmSchedule {
   lastRunOn        DateTime? @db.Date
   createdBy        String?   @db.Uuid
   createdAt        DateTime  @default(now())
+  /// room: one room or device (roomId / deviceId). rooms, area or site: every room in scope, one visit with a segment per room (siteId, areaId or roomIds say which).
+  scope            String    @default("room")
+  siteId           String?   @db.Uuid
+  areaId           String?   @db.Uuid
+  roomIds          String[]  @default([]) @db.Uuid
 
   @@index([orgId, nextDueOn])
   @@index([roomId])
@@ -1770,7 +1775,19 @@ model PmRun {
   /// Set on a correction: the signed visit it corrects. The original is never edited; it is found as corrected by looking for this.
   correctsRunId    String?   @db.Uuid
   correctionReason String?
+  /// A visit to several rooms: the parent (multi, no room) holds the sign-off and each room is a child run (parentRunId) with its own answers and photos.
+  multi            Boolean   @default(false)
+  parentRunId      String?   @db.Uuid
+  /// On a parent: what it covers ("Site: Head office", "Level 2", "4 rooms").
+  scopeLabel       String?
+  siteId           String?   @db.Uuid
+  /// On a child: the room was not done, and why. Status is then skipped.
+  skipReason       String?
+  /// On a child: who last saved its answers, so different people can work different rooms.
+  workedBy         String?   @db.Uuid
+  workedByName     String?
 
+  @@index([parentRunId])
   @@index([orgId, createdAt])
   @@index([roomId])
   @@index([deviceId])
