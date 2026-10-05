@@ -1,9 +1,15 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
-import { DriverSetting, checkDriverSpec } from '@kestrel/model';
+import {
+  DriverRequestInput,
+  DriverSetting,
+  assetCategoryLabel,
+  checkDriverSpec,
+} from '@kestrel/model';
 import { writeAudit } from '../audit';
 import { saveDriver } from '../custom-drivers';
+import { DriverRequestError, createDriverRequest, requestsForOrg } from '../driver-requests';
 import { findDriverUpdates } from '../driver-updates';
 import { featureProcedure, orgProcedure, requireRole, router } from '../trpc';
 
@@ -22,14 +28,53 @@ export const driverRouter = router({
       : [];
     return rows.map((d) => {
       const spec = versions.find((v) => v.driverId === d.id && v.version === d.latestVersion)?.spec;
-      const settings = DriverSetting.array().safeParse((spec as { settings?: unknown } | null)?.settings);
+      const raw = (spec ?? {}) as { settings?: unknown; make?: string; model?: string; categories?: string[] };
+      const settings = DriverSetting.array().safeParse(raw.settings);
+      const categories = raw.categories ?? [];
+      // Same shape as the built-in labels: Category – Make Model. A driver with no category is offered everywhere.
+      const kind = categories.length === 1 ? assetCategoryLabel(categories[0]!) : 'Custom';
+      const who = [raw.make, raw.model].filter(Boolean).join(' ');
       return {
         id: `custom:${d.slug}`,
         name: d.name,
+        label: `${kind} – ${who || d.name}`,
+        make: raw.make ?? null,
+        model: raw.model ?? null,
+        categories,
         latestVersion: d.latestVersion,
         settings: settings.success ? settings.data : [],
       };
     });
+  }),
+
+  // Asking Kestrel for a driver. Open to every plan: it feeds the roadmap, and it only raises a ticket.
+  requests: router({
+    list: orgProcedure.input(z.object({ orgId })).query(({ ctx }) => requestsForOrg(db, ctx.orgId)),
+
+    create: orgProcedure
+      .input(z.object({ orgId, request: DriverRequestInput }))
+      .mutation(async ({ ctx, input }) => {
+        requireRole(ctx.role, ['owner', 'dev', 'support']);
+        try {
+          const res = await createDriverRequest(db, {
+            orgId: ctx.orgId,
+            by: { id: ctx.user.id, email: ctx.user.email ?? null },
+            request: input.request,
+          });
+          await writeAudit({
+            orgId: ctx.orgId,
+            actorId: ctx.user.id,
+            action: 'driver.request',
+            target: res.id,
+            meta: { make: input.request.make, model: input.request.model },
+          });
+          return res;
+        } catch (e) {
+          if (e instanceof DriverRequestError)
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message });
+          throw e;
+        }
+      }),
   }),
 
   // Rooms running an older version of one of the organisation's drivers than the latest, so they

@@ -1,4 +1,4 @@
-import type { DeviceCategory } from './catalog';
+import type { AssetCategory } from '../devices';
 import type { DriverClass, SettingScope } from './driver-classes';
 import type { PointForms } from './points';
 
@@ -12,8 +12,28 @@ export interface DriverSettingInfo {
   required?: boolean;
 }
 
+/** The device types the driver picker groups by. */
+export const DRIVER_GROUPS = {
+  display: 'Display and projector',
+  matrix: 'Video matrix and AVoIP',
+  audio: 'Audio and music',
+  conference: 'Conference system',
+  camera: 'Camera',
+  control: 'Control and panels',
+  sensor: 'Sensors',
+  environment: 'Environment and power',
+  network: 'Network and IT',
+  generic: 'Generic',
+} as const;
+export type DriverGroup = keyof typeof DRIVER_GROUPS;
+
 export interface DriverInfo {
   name: string;
+  /** How the picker shows it: `Category – Make Model` (or `Make Series`). */
+  label: string;
+  group: DriverGroup;
+  /** Kept so existing devices load, but not offered for new ones. */
+  hidden?: boolean;
   /** What the driver implies about the box when the device itself reports nothing more specific. */
   make?: string;
   model?: string;
@@ -23,7 +43,7 @@ export interface DriverInfo {
   features: string[];
   /** AVoIP: the family an encoder, decoder and switcher belong to. All three of a system must match. */
   family?: string;
-  categories: DeviceCategory[];
+  categories: AssetCategory[];
   /** Every setting the driver reads. */
   settings: DriverSettingInfo[];
   /** For a point-based driver: the address form of each kind of control point it supports. */
@@ -78,6 +98,8 @@ const CRESTRON_FLEX_JOIN = [
 export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   'visca-ip': {
     name: 'PTZ camera (VISCA over IP)',
+    label: 'Camera – Generic VISCA over IP',
+    group: 'camera',
     description:
       'Recalls camera presets and switches power on cameras that speak VISCA over IP. Map preset names to the camera’s preset numbers.',
     class: 'camera',
@@ -93,6 +115,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'biamp-tesira': {
     name: 'Biamp Tesira DSP',
+    label: 'Audio DSP – Biamp Tesira',
+    group: 'audio',
     make: 'Biamp',
     model: 'Tesira DSP',
     description:
@@ -117,6 +141,9 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'lib:extron-sis': {
     name: 'Extron matrix switcher (SIS)',
+    label: 'Matrix – Extron SIS series',
+    group: 'matrix',
+    make: 'Extron',
     description: 'Extron matrix switchers over Telnet. Routing ties an input to an output.',
     class: 'video_switching',
     features: ['route'],
@@ -126,6 +153,9 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'lib:cisco-roomos': {
     name: 'Cisco RoomOS video conferencing',
+    label: 'Conference – Cisco RoomOS series',
+    group: 'conference',
+    make: 'Cisco',
     description:
       'Cisco Room and Board devices: standby, microphone mute, volume and hang up, over the HTTP API.',
     class: 'conference_system',
@@ -144,6 +174,9 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'lib:sony-bravia': {
     name: 'Sony BRAVIA professional display',
+    label: 'Display – Sony BRAVIA series',
+    group: 'display',
+    make: 'Sony',
     description:
       'Sony BRAVIA professional displays: power, input, volume, remote keys, media keys and apps, over REST and IRCC-IP. Turn on IP control on the display and set a pre-shared key.',
     class: 'display',
@@ -162,6 +195,9 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'lib:lg-signage': {
     name: 'LG signage display',
+    label: 'Display – LG Signage series',
+    group: 'display',
+    make: 'LG',
     description:
       'LG signage and professional displays: power, HDMI 1 and 2, volume, mute and screen blank, over the network port. Turn on network control on the display.',
     class: 'display',
@@ -175,6 +211,9 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'lib:kramer-p3000': {
     name: 'Kramer matrix switcher (Protocol 3000)',
+    label: 'Matrix – Kramer P3000 series',
+    group: 'matrix',
+    make: 'Kramer',
     description:
       'Kramer matrix switchers over Protocol 3000 (TCP 5000). Routing ties an input to an output.',
     class: 'video_switching',
@@ -185,6 +224,9 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'lib:shelly-relay': {
     name: 'Shelly relay (screens and lifters)',
+    label: 'Relay – Shelly (screens and lifters)',
+    group: 'environment',
+    make: 'Shelly',
     description:
       'Motorised screens and lifters through a Shelly relay: command.down and command.up run for a set number of seconds.',
     class: 'relay',
@@ -198,6 +240,11 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'lib:blustream-pwr8iec': {
     name: 'Blustream PWR8IEC power controller',
+    label: 'Power – Blustream PWR8IEC (basic)',
+    group: 'environment',
+    hidden: true,
+    make: 'Blustream',
+    model: 'PWR8IEC',
     description:
       'Blustream PWR8IEC / PWR4IEC / PWR2IEC IEC power controllers, over Telnet. Switch every outlet at once, or add a command action for one outlet (command.outlet1_on, command.outlet1_off, up to outlet8) for whichever the physical unit has.',
     class: 'relay',
@@ -208,6 +255,9 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'lib:lutron-lip': {
     name: 'Lutron lighting (Integration Protocol)',
+    label: 'Lighting – Lutron LIP series',
+    group: 'environment',
+    make: 'Lutron',
     description: 'Lutron processors: switch and dim a zone, press a keypad button for a scene.',
     class: 'environmental',
     features: ['scene', 'zone_level'],
@@ -221,6 +271,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-nvx-encoder': {
     name: 'Crestron NVX encoder',
+    label: 'AVoIP encoder – Crestron NVX',
+    group: 'matrix',
     make: 'Crestron',
     model: 'DM NVX encoder',
     description:
@@ -234,6 +286,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-nvx-decoder': {
     name: 'Crestron NVX decoder',
+    label: 'AVoIP decoder – Crestron NVX',
+    group: 'matrix',
     make: 'Crestron',
     model: 'DM NVX decoder',
     description:
@@ -247,6 +301,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-nvx-switcher': {
     name: 'Crestron NVX virtual switcher',
+    label: 'AVoIP matrix – Crestron NVX (virtual switcher)',
+    group: 'matrix',
     make: 'Crestron',
     model: 'DM NVX virtual switcher',
     description:
@@ -260,6 +316,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-dm-nvx': {
     name: 'Crestron DM NVX (virtual matrix)',
+    label: 'AVoIP matrix – Crestron DM NVX (virtual matrix)',
+    group: 'matrix',
     make: 'Crestron',
     model: 'DM NVX virtual matrix',
     description:
@@ -292,6 +350,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'qsys-core': {
     name: 'Q-SYS Core',
+    label: 'Audio DSP – QSC Q-SYS Core',
+    group: 'audio',
     make: 'QSC',
     model: 'Q-SYS Core',
     description:
@@ -337,6 +397,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-4series': {
     name: 'Crestron 4-series control processor',
+    label: 'Control processor – Crestron 4-Series',
+    group: 'control',
     make: 'Crestron',
     model: '4-Series control processor',
     description:
@@ -355,6 +417,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-tsw': {
     name: 'Crestron TSW / TS touch panel',
+    label: 'Touch panel – Crestron 70 Series Touch',
+    group: 'control',
     make: 'Crestron',
     model: 'TSW touch panel',
     description:
@@ -373,6 +437,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-flex': {
     name: 'Crestron Flex (Microsoft Teams Room)',
+    label: 'Conference – Crestron Flex (Teams Room)',
+    group: 'conference',
     make: 'Crestron',
     model: 'Flex Teams Room',
     description:
@@ -391,6 +457,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'blustream-acm1000': {
     name: 'Blustream ACM1000 virtual AVoIP matrix',
+    label: 'AVoIP matrix – Blustream ACM1000',
+    group: 'matrix',
     make: 'Blustream',
     model: 'ACM1000',
     description:
@@ -406,6 +474,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'blustream-da11abl': {
     name: 'Blustream DA11ABL-WP-V2 Bluetooth wall plate',
+    label: 'Audio – Blustream DA11ABL-WP-V2 (Bluetooth wall plate)',
+    group: 'audio',
     make: 'Blustream',
     model: 'DA11ABL-WP-V2',
     description:
@@ -421,6 +491,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-occupancy': {
     name: 'Crestron occupancy sensor',
+    label: 'Sensor – Crestron CEN-ODT-C-POE',
+    group: 'sensor',
     make: 'Crestron',
     model: 'Occupancy sensor',
     description:
@@ -440,6 +512,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'blustream-pwr': {
     name: 'Blustream IEC power controller (PWR2/4/8IEC)',
+    label: 'Power – Blustream PWR IEC series (2/4/8)',
+    group: 'environment',
     make: 'Blustream',
     model: 'PWR IEC power controller',
     description:
@@ -462,6 +536,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   wiim: {
     name: 'WiiM music player',
+    label: 'Music player – WiiM series',
+    group: 'audio',
     make: 'WiiM',
     description:
       'Monitoring only, over the player’s own HTTP API: reports whether it is playing, paused or stopped, where the audio comes from, volume and mute, the track playing (title, artist, album, quality), and the player’s name, model and firmware. WiiM Mini, Pro, Pro Plus, Amp and Ultra, and other Linkplay-based players. Not yet verified against a real player.',
@@ -483,6 +559,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   bluesound: {
     name: 'Bluesound music player (BluOS)',
+    label: 'Music player – Bluesound BluOS series',
+    group: 'audio',
     make: 'Bluesound',
     description:
       'Monitoring only, over the BluOS HTTP API (port 11000): reports whether the player is playing, paused or stopped, the service or input it is playing from, volume and mute, the track playing (title, artist, album, quality), and the player’s name, model and group. Node, Powernode, Vault, Pulse and the Professional B100S and B400S. Not yet verified against a real player.',

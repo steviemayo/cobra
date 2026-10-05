@@ -13,7 +13,8 @@ import { Switch } from '@/components/ui/switch';
 import { useRoomsOverview } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
-import { DRIVER_OPTIONS, controlFor } from './assets';
+import { controlFor } from './assets';
+import { DriverPicker, useDriverEntries } from './driver-picker';
 import { DeviceConnection } from './device-connection';
 
 type Device = RouterOutputs['device']['get'];
@@ -58,6 +59,7 @@ export function DeviceSettings({ device }: { device: Device }) {
   const { orgId, canSupport } = useOrg();
   const gateways = useQuery(trpc.gateway.list.queryOptions({ orgId }));
   const rooms = useRoomsOverview();
+  const driverEntries = useDriverEntries();
 
   const gatewayNow = device.gatewayOverride ? (device.gatewayId ?? AUTO) : AUTO;
   const driverNow = choiceOf(device.control);
@@ -130,16 +132,13 @@ export function DeviceSettings({ device }: { device: Device }) {
 
         <Row label="Driver" hint="How Kestrel talks to the device.">
           <div className="flex flex-wrap items-center gap-2">
-            <SimpleSelect
+            <DriverPicker
               className="w-full sm:w-96"
               value={driver}
-              onValueChange={setDriver}
-              options={
-                DRIVER_OPTIONS.some((o) => o.value === driverNow) || !driverNow
-                  ? DRIVER_OPTIONS
-                  : [{ value: driverNow, label: driverNow }, ...DRIVER_OPTIONS]
-              }
-              placeholder="Choose a driver"
+              entries={driverEntries}
+              category={device.category}
+              deviceId={device.id}
+              onChange={setDriver}
               disabled={!canSupport}
             />
             {canSupport && (

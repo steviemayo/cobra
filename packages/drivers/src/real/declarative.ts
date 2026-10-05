@@ -1,4 +1,5 @@
-import { connect, type Socket } from 'node:net';
+import { createSocket } from 'node:dgram';
+import { connect, isIPv6, type Socket } from 'node:net';
 import {
   commandValues,
   escapeJson,
@@ -66,6 +67,7 @@ export class DeclarativeDriver extends BaseDriver {
   private readonly missing: string[];
   private readonly patterns: ReturnType<typeof compile>;
   private socket: Socket | null = null;
+  private ws: WebSocket | null = null;
   private buffer = '';
   private waiting: {
     re: RegExp | null;
@@ -95,6 +97,12 @@ export class DeclarativeDriver extends BaseDriver {
   private get http() {
     return this.spec.transport.type === 'http' ? this.spec.transport : null;
   }
+  private get udp() {
+    return this.spec.transport.type === 'udp' ? this.spec.transport : null;
+  }
+  private get wsSpec() {
+    return this.spec.transport.type === 'websocket' ? this.spec.transport : null;
+  }
   private get host() {
     return String(this.settings.host ?? '');
   }
@@ -106,9 +114,16 @@ export class DeclarativeDriver extends BaseDriver {
   }
   private get port() {
     const fromSetting = typeof this.settings.port === 'number' ? this.settings.port : undefined;
-    return (
-      fromSetting ?? this.spec.transport.port ?? (this.http?.https ? 443 : this.http ? 80 : 23)
-    );
+    const fallback = this.http
+      ? this.http.https
+        ? 443
+        : 80
+      : this.wsSpec
+        ? this.wsSpec.secure
+          ? 443
+          : 80
+        : 23;
+    return fromSetting ?? this.spec.transport.port ?? fallback;
   }
 
   override features(): string[] {
@@ -145,7 +160,8 @@ export class DeclarativeDriver extends BaseDriver {
     if (this.tcp) {
       if (this.tcp.keepOpen) this.open();
       else void this.probe();
-    } else void this.probe();
+    } else if (this.wsSpec) this.openWs();
+    else void this.probe();
     for (const p of this.spec.feedback.poll)
       this.pollers.push(setInterval(() => void this.poll(p.action), p.everyMs));
     // The first poll is the reachability probe above. Any other HTTP poll (a slow one that reads
@@ -161,8 +177,11 @@ export class DeclarativeDriver extends BaseDriver {
     this.dropSocket(new Error('closed'));
   }
 
-  /** Without a persistent connection, reachability is a plain connect (TCP) or the first poll (HTTP). */
+  /** Without a persistent connection, reachability is a plain connect (TCP) or the first poll (HTTP, UDP). */
   private async probe() {
+    // UDP is connectionless: with nothing to poll there is nothing to prove, so the device stays
+    // unknown until a command is answered.
+    if (this.udp && !this.spec.feedback.poll[0]) return;
     try {
       if (this.tcp) await this.oneShot(null);
       else if (this.spec.feedback.poll[0]) await this.pollOnce(this.spec.feedback.poll[0].action);
@@ -267,11 +286,17 @@ export class DeclarativeDriver extends BaseDriver {
   }
 
   private async pollOnce(action: DriverAction) {
-    const values = this.baseValues();
+    await this.dispatch(action, this.baseValues(), true);
+  }
+
+  /** Sends one action over whichever transport the driver speaks. */
+  private async dispatch(action: DriverAction, values: Values, isPoll = false) {
     if (this.tcp) {
       if (this.tcp.keepOpen) await this.sendOnSocket(action, values);
       else await this.oneShot(action, values);
-    } else this.readText(await this.httpCall(action, false, values));
+    } else if (this.udp) await this.udpSend(action, values, isPoll);
+    else if (this.wsSpec) await this.sendOnWs(action, values);
+    else this.readText(await this.httpCall(action, false, values));
   }
 
   private async poll(action: DriverAction) {
@@ -312,9 +337,16 @@ export class DeclarativeDriver extends BaseDriver {
 
   private dropSocket(reason: Error) {
     const socket = this.socket;
+    const ws = this.ws;
     this.socket = null;
+    this.ws = null;
     this.buffer = '';
     socket?.destroy();
+    try {
+      ws?.close();
+    } catch {
+      // already closed
+    }
     for (const w of this.waiting.splice(0)) {
       clearTimeout(w.timer);
       w.reject(reason);
@@ -418,6 +450,110 @@ export class DeclarativeDriver extends BaseDriver {
     });
   }
 
+  // ---- UDP ------------------------------------------------------------------------------------
+
+  /** One datagram out. Waits for a reply only when the action expects one, or for a poll that is read. */
+  private udpSend(action: DriverAction, values: Values, isPoll: boolean): Promise<void> {
+    const u = this.udp!;
+    return new Promise((resolve, reject) => {
+      const socket = createSocket(isIPv6(this.host) ? 'udp6' : 'udp4');
+      const expect = safeExpect(action.expect, this.spec, this.ctx.log);
+      const wantReply = !!action.expect || (isPoll && this.patterns.length > 0);
+      let done = false;
+      const finish = (err?: Error) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        socket.close();
+        if (err) reject(err);
+        else resolve();
+      };
+      const timer = setTimeout(
+        () => finish(wantReply ? new Error(`${this.device.name} did not respond`) : undefined),
+        u.timeoutMs,
+      );
+      socket.on('error', (e) => finish(new Error(`${this.device.name}: ${e.message}`)));
+      socket.on('message', (msg) => {
+        const reply = msg.toString('utf8').slice(0, MAX_REPLY_BYTES);
+        this.readText(reply);
+        for (const line of reply.split(/\r?\n/)) if (line && line !== reply) this.readText(line);
+        if (!expect || expect.test(reply)) finish();
+      });
+      const out = Buffer.from(this.text(action, values) + u.terminator);
+      socket.send(out, this.port, this.host, (e) => {
+        if (e) finish(e);
+        else if (!wantReply) finish();
+      });
+    });
+  }
+
+  // ---- WebSocket ------------------------------------------------------------------------------
+
+  private openWs() {
+    const w = this.wsSpec;
+    if (!w || this.reconnect.closed || this.ws) return;
+    const base = this.baseValues();
+    const path = renderTemplate(w.path, base, escapeLine);
+    const url = `${w.secure ? 'wss' : 'ws'}://${this.host}:${this.port}${path}`;
+    const headers = Object.fromEntries(
+      Object.entries(w.headers).map(([k, v]) => [k, renderTemplate(v, base, escapeLine)]),
+    );
+    // Node's built-in WebSocket takes headers as an extra option that the standard type doesn't list.
+    const Ctor = WebSocket as unknown as new (
+      u: string,
+      o?: { headers: Record<string, string> },
+    ) => WebSocket;
+    const ws = new Ctor(url, Object.keys(headers).length > 0 ? { headers } : undefined);
+    this.ws = ws;
+    ws.onopen = () => {
+      this.reconnect.succeeded();
+      this.update((s) => {
+        s.online = true;
+      });
+      for (const p of this.spec.feedback.poll) void this.poll(p.action);
+    };
+    ws.onmessage = (ev) => {
+      if (typeof ev.data === 'string') this.onWsMessage(ev.data.slice(0, MAX_REPLY_BYTES));
+    };
+    ws.onerror = () => undefined;
+    ws.onclose = () => {
+      if (this.ws === ws) this.dropSocket(new Error(`${this.device.name} disconnected`));
+      this.reconnect.schedule();
+    };
+  }
+
+  private onWsMessage(text: string) {
+    if (!text) return;
+    this.readText(text);
+    const w = this.waiting[0];
+    if (w && (!w.re || w.re.test(text))) {
+      this.waiting.shift();
+      clearTimeout(w.timer);
+      w.resolve();
+    }
+  }
+
+  private sendOnWs(action: DriverAction, values: Values): Promise<void> {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== 1)
+      return Promise.reject(new Error(`${this.device.name} is not connected`));
+    const wait = new Promise<void>((resolve, reject) => {
+      if (!action.expect) return resolve();
+      const timer = setTimeout(() => {
+        this.waiting = this.waiting.filter((x) => x.timer !== timer);
+        reject(new Error(`${this.device.name} did not answer`));
+      }, this.wsSpec!.timeoutMs);
+      this.waiting.push({
+        re: safeExpect(action.expect, this.spec, this.ctx.log),
+        resolve,
+        reject,
+        timer,
+      });
+    });
+    ws.send(this.text(action, values));
+    return wait;
+  }
+
   // ---- HTTP -----------------------------------------------------------------------------------
 
   private async httpCall(
@@ -465,10 +601,7 @@ export class DeclarativeDriver extends BaseDriver {
         `${this.host} is a cloud metadata address, not a device (add "allowLocalAddress": true to allow it)`,
       );
     try {
-      if (this.tcp) {
-        if (this.tcp.keepOpen) await this.sendOnSocket(action, values);
-        else await this.oneShot(action, values);
-      } else this.readText(await this.httpCall(action, false, values));
+      await this.dispatch(action, values);
     } catch (e) {
       this.update((s) => {
         s.online = false;

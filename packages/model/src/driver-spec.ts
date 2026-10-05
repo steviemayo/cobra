@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { hasCatastrophicBacktracking } from './regex-safety';
 export { hasCatastrophicBacktracking } from './regex-safety';
+import { AssetCategory } from './devices';
 import { DriverClass, SettingScope, classProblems } from './room/driver-classes';
 import { QuickActionId } from './runtime/quick-actions';
 
@@ -61,9 +62,9 @@ export const DriverSetting = z.object({
 });
 export type DriverSetting = z.infer<typeof DriverSetting>;
 
-/** One thing to send. Text for TCP, a request for HTTP. */
+/** One thing to send. Text for TCP, UDP and WebSocket, a request for HTTP. */
 export const DriverAction = z.object({
-  /** TCP: the text to send, before the terminator. */
+  /** TCP, UDP and WebSocket: the text to send, before the terminator. */
   send: z.string().min(1).max(500).optional(),
   /** HTTP */
   method: z.enum(['GET', 'POST', 'PUT']).optional(),
@@ -114,6 +115,11 @@ export const DriverSpec = z
     /** Bumped on every change. A release pins the exact version it was built with. */
     version: z.number().int().min(1).default(1),
     description: z.string().max(500).default(''),
+    /** Who makes the device and which model or series this driver is for. Shown and searched in the driver picker. */
+    make: z.string().min(1).max(60).optional(),
+    model: z.string().min(1).max(60).optional(),
+    /** The device categories this driver suits, for filtering the picker. Left out: offered for every category. */
+    categories: z.array(AssetCategory).min(1).max(12).optional(),
     transport: z.discriminatedUnion('type', [
       z.object({
         type: z.literal('tcp'),
@@ -129,6 +135,24 @@ export const DriverSpec = z
         type: z.literal('http'),
         port: z.number().int().min(1).max(65535).optional(),
         https: z.boolean().default(false),
+        headers: z.record(z.string().max(60), z.string().max(300)).default({}),
+        timeoutMs: z.number().int().min(200).max(30_000).default(3000),
+      }),
+      z.object({
+        type: z.literal('udp'),
+        port: z.number().int().min(1).max(65535).optional(),
+        /** Added to each datagram sent. Empty by default: most UDP devices want the bare text. */
+        terminator: z.string().max(4).default(''),
+        /** How long to wait for a reply datagram when a command expects one. */
+        timeoutMs: z.number().int().min(200).max(30_000).default(2000),
+      }),
+      z.object({
+        type: z.literal('websocket'),
+        port: z.number().int().min(1).max(65535).optional(),
+        /** wss:// instead of ws://. */
+        secure: z.boolean().default(false),
+        /** The path the socket is opened on. */
+        path: z.string().max(300).default('/'),
         headers: z.record(z.string().max(60), z.string().max(300)).default({}),
         timeoutMs: z.number().int().min(200).max(30_000).default(3000),
       }),
@@ -295,19 +319,24 @@ export function driverProblems(spec: DriverSpec): string[] {
     seen.add(s.key);
   }
   problems.push(...classProblems(spec.class, spec.features, Object.keys(spec.commands)));
-  const tcp = spec.transport.type === 'tcp';
+  const kind = spec.transport.type;
+  const text = kind !== 'http';
+  const kindName = { tcp: 'TCP', udp: 'UDP', websocket: 'WebSocket', http: 'HTTP' }[kind];
 
   const checkAction = (where: string, a: DriverAction, allowed: readonly string[]) => {
-    const texts = tcp
+    const texts = text
       ? [a.send ?? '']
       : [a.path ?? '', a.body ?? '', ...Object.values(a.headers ?? {})];
-    if (tcp && a.headers) problems.push(`${where}: "headers" are for HTTP drivers`);
-    if (tcp && !a.send) problems.push(`${where}: a TCP driver needs "send"`);
-    if (!tcp && !a.path) problems.push(`${where}: an HTTP driver needs "path"`);
-    if (tcp && (a.path || a.method || a.body))
+    if (kind !== 'http' && kind !== 'websocket' && a.headers)
+      problems.push(`${where}: "headers" are for HTTP drivers`);
+    if (kind === 'websocket' && a.headers)
+      problems.push(`${where}: set headers on the driver, not on a command`);
+    if (text && !a.send) problems.push(`${where}: a ${kindName} driver needs "send"`);
+    if (!text && !a.path) problems.push(`${where}: an HTTP driver needs "path"`);
+    if (text && (a.path || a.method || a.body))
       problems.push(`${where}: "path", "method" and "body" are for HTTP drivers`);
-    if (!tcp && a.send) problems.push(`${where}: "send" is for TCP drivers`);
-    if (!tcp && a.path && !a.path.startsWith('/'))
+    if (!text && a.send) problems.push(`${where}: "send" is for TCP, UDP and WebSocket drivers`);
+    if (!text && a.path && !a.path.startsWith('/'))
       problems.push(`${where}: the path must start with /`);
     for (const t of texts)
       for (const p of placeholdersIn(t)) {
@@ -364,10 +393,13 @@ export function driverProblems(spec: DriverSpec): string[] {
   if (
     spec.feedback.patterns.length > 0 &&
     spec.feedback.poll.length === 0 &&
-    spec.transport.type === 'tcp' &&
-    !spec.transport.keepOpen
+    ((spec.transport.type === 'tcp' && !spec.transport.keepOpen) || spec.transport.type === 'udp')
   )
-    problems.push('Feedback patterns on a TCP driver need "keepOpen" or something to poll');
+    problems.push(
+      spec.transport.type === 'udp'
+        ? 'Feedback patterns on a UDP driver need something to poll'
+        : 'Feedback patterns on a TCP driver need "keepOpen" or something to poll',
+    );
   if (
     spec.commands.volume &&
     !spec.volumeScale &&

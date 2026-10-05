@@ -131,3 +131,63 @@ describe('templates', () => {
     expect(resolveSettings(spec, { host: 'h', password: 5 }).missing).toEqual(['Password']);
   });
 });
+
+describe('driver grouping and transports', () => {
+  it('takes a make, a model and the categories the driver suits', () => {
+    const r = checkDriverSpec({
+      ...projector(),
+      make: 'Acme',
+      model: 'P1',
+      categories: ['projector', 'display'],
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('suits any network device, not only AV categories', () => {
+    for (const c of ['network_switch', 'wireless_ap', 'router_firewall', 'ups', 'nas', 'network_device'])
+      expect(checkDriverSpec({ ...projector(), categories: [c] }).ok, c).toBe(true);
+    expect(checkDriverSpec({ ...projector(), categories: ['toaster'] }).ok).toBe(false);
+    expect(checkDriverSpec({ ...projector(), categories: [] }).ok).toBe(false);
+  });
+
+  it('accepts a UDP driver that sends text', () => {
+    const r = checkDriverSpec({
+      id: 'udp-thing',
+      name: 'UDP thing',
+      transport: { type: 'udp', port: 7000 },
+      commands: { 'power.on': { send: 'ON' }, 'power.off': { send: 'OFF' } },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok && r.spec.transport.type === 'udp') expect(r.spec.transport.terminator).toBe('');
+  });
+
+  it('accepts a WebSocket driver that sends text, and keeps HTTP fields off it', () => {
+    const ws = {
+      id: 'ws-thing',
+      name: 'WS thing',
+      transport: { type: 'websocket', port: 8080, path: '/api', secure: true },
+      commands: { 'power.on': { send: '{"power":true}' }, 'power.off': { send: '{"power":false}' } },
+    };
+    expect(checkDriverSpec(ws).ok).toBe(true);
+    const bad = checkDriverSpec({ ...ws, commands: { 'power.on': { path: '/on' } } });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.problems.join(' ')).toContain('WebSocket driver needs "send"');
+  });
+
+  it('a UDP command needs send, and UDP feedback patterns need something to poll', () => {
+    const udp = {
+      id: 'udp-thing',
+      name: 'UDP thing',
+      transport: { type: 'udp' },
+      commands: { 'power.on': { send: 'ON' } },
+    };
+    const noSend = checkDriverSpec({ ...udp, commands: { 'power.on': { path: '/x' } } });
+    expect(noSend.ok).toBe(false);
+    const patterns = checkDriverSpec({
+      ...udp,
+      feedback: { poll: [], patterns: [{ match: '^ON', set: 'power', value: 'on' }] },
+    });
+    expect(patterns.ok).toBe(false);
+    if (!patterns.ok) expect(patterns.problems.join(' ')).toContain('UDP');
+  });
+});

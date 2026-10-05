@@ -6,7 +6,6 @@ import { AlertTriangle, CalendarCheck, Download, Package, Plus, Radar, Search } 
 import { toast } from 'sonner';
 import {
   ASSET_ONLY_CATEGORIES,
-  BUILT_IN_DRIVERS,
   DEVICE_CATALOG,
   DeviceCategory,
   assetCategoryLabel,
@@ -54,6 +53,7 @@ import {
 import { AlignDatesDialog, FixGapsDialog, GAPS, gapKeysOf, type GapKey } from './asset-gaps';
 import { DeviceStateBadge } from './device-detail';
 import { AddressTrackingFields } from './device-address';
+import { DriverPicker, entriesForCategory, useDriverEntries } from './driver-picker';
 import { FindDevicesDialog } from './find-devices';
 import { ImportRegisterDialog } from './import-register-dialog';
 
@@ -66,31 +66,8 @@ const CATEGORY_OPTIONS = [
   ...DeviceCategory.options.map((c) => ({ value: c as string, label: DEVICE_CATALOG[c].label })),
   ...ASSET_ONLY_CATEGORIES.map((c) => ({ value: c as string, label: assetCategoryLabel(c) })),
 ];
-export const DRIVER_OPTIONS = [
-  ...Object.entries(BUILT_IN_DRIVERS).map(([id, info]) => ({ value: id, label: info.name })),
-  { value: 'pjlink', label: 'Generic: PJLink' },
-  { value: 'tcp', label: 'Generic: TCP' },
-];
-
-const GENERIC_DRIVER_OPTIONS = [
-  { value: 'pjlink', label: 'Generic: PJLink' },
-  { value: 'tcp', label: 'Generic: TCP' },
-];
-
-/**
- * The drivers that suit a category: the built-in ones that name it, by name, then the generic ones.
- * A category no driver names (an asset-only kind) gets the whole list, so nothing is ever unreachable.
- */
-export function driverOptionsFor(category: string) {
-  const matching = Object.entries(BUILT_IN_DRIVERS)
-    .filter(([, info]) => (info.categories as string[]).includes(category))
-    .map(([id, info]) => ({ value: id, label: info.name }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-  return matching.length > 0 ? [...matching, ...GENERIC_DRIVER_OPTIONS] : DRIVER_OPTIONS;
-}
-
 export function controlFor(choice: string): DeviceControl {
-  return choice === 'pjlink' || choice === 'tcp'
+  return choice === 'pjlink' || choice === 'tcp' || choice === 'serial' || choice === 'rest'
     ? { kind: 'generic', protocol: choice }
     : { kind: 'driver', driverId: choice };
 }
@@ -659,6 +636,7 @@ export function AddDeviceDialog({
       onError: (e) => toast.error(e.message),
     }),
   );
+  const driverEntries = useDriverEntries();
   const slots = connectionSlots(controlFor(driver));
   const valid =
     name.trim().length > 0 && siteId && (kind === 'passive' || !connectionMissing(slots, conn));
@@ -720,8 +698,9 @@ export function AddDeviceDialog({
               onValueChange={(v) => {
                 setCategory(v);
                 // Keep the driver only if it still suits the new category.
-                if (!driverOptionsFor(v).some((o) => o.value === driver)) {
-                  setDriver(driverOptionsFor(v)[0]?.value ?? 'pjlink');
+                const suits = entriesForCategory(driverEntries, v);
+                if (!suits.some((o) => o.value === driver)) {
+                  setDriver(suits[0]?.value ?? 'tcp');
                   setConn(emptyConnection());
                 }
               }}
@@ -731,13 +710,14 @@ export function AddDeviceDialog({
           {kind === 'active' && (
             <div className="space-y-3">
               <Field label="Driver">
-                <SimpleSelect
+                <DriverPicker
                   value={driver}
-                  onValueChange={(v) => {
+                  entries={driverEntries}
+                  category={category}
+                  onChange={(v) => {
                     setDriver(v);
                     setConn(emptyConnection());
                   }}
-                  options={driverOptionsFor(category)}
                 />
               </Field>
               <ConnectionFields slots={slots} draft={conn} onChange={setConn} />
