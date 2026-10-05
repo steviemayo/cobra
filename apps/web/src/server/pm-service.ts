@@ -31,6 +31,8 @@ export type PmDb = Pick<
   | 'pmRun'
   | 'pmPhoto'
   | 'room'
+  | 'area'
+  | 'site'
   | 'device'
   | 'incident'
   | 'ticket'
@@ -244,7 +246,7 @@ export async function updateTemplate(
 export async function deleteTemplate(db: PmDb, orgId: string, templateId: string): Promise<Result> {
   const row = await db.pmTemplate.findFirst({ where: { id: templateId, orgId } });
   if (!row) return bad('No such checklist');
-  if (await db.pmSchedule.findFirst({ where: { templateId, orgId } }))
+  if (await db.pmSchedule.findFirst({ where: { templateId, orgId, enabled: true } }))
     return bad('A schedule uses this checklist. Remove the schedule first.');
   await db.pmTemplate.delete({ where: { id: templateId } });
   return { ok: true, value: { id: templateId } };
@@ -271,6 +273,134 @@ export async function addStarterTemplates(
   return n;
 }
 
+// ---- Scope: one room or device, several rooms, an area or a whole site ----------------------------
+
+/** room: one room or device. rooms, area, site: a visit with a segment for each room in scope. */
+export const PM_SCOPES = ['room', 'rooms', 'area', 'site'] as const;
+export type PmScope = (typeof PM_SCOPES)[number];
+
+export interface ScopeInput {
+  scope: PmScope;
+  siteId?: string | null;
+  areaId?: string | null;
+  roomIds?: string[] | null;
+}
+
+export interface ScopeRooms {
+  rooms: { id: string; name: string; siteId: string }[];
+  /** What the visit covers, in words: "Site: Head office", "Level 2", "3 rooms". */
+  label: string;
+  siteId: string | null;
+}
+
+/** The rooms a multi-room scope covers right now (ordinary rooms only, not the combined spaces). */
+export async function roomsInScope(
+  db: PmDb,
+  orgId: string,
+  s: ScopeInput,
+): Promise<Result<ScopeRooms>> {
+  const pick = (r: { id: string; name: string; siteId: string }) => ({
+    id: r.id,
+    name: r.name,
+    siteId: r.siteId,
+  });
+  const byName = <T extends { name: string }>(l: T[]) =>
+    [...l].sort((a, b) => a.name.localeCompare(b.name));
+  if (s.scope === 'site') {
+    if (!s.siteId) return bad('Choose a site');
+    const site = await db.site.findFirst({ where: { id: s.siteId, orgId } });
+    if (!site) return bad('No such site');
+    const rooms = await db.room.findMany({
+      where: { orgId, siteId: site.id, kind: 'standard' },
+    });
+    return {
+      ok: true,
+      value: { rooms: byName(rooms.map(pick)), label: `Site: ${site.name}`, siteId: site.id },
+    };
+  }
+  if (s.scope === 'area') {
+    if (!s.areaId) return bad('Choose an area');
+    const area = await db.area.findFirst({ where: { id: s.areaId, orgId } });
+    if (!area) return bad('No such area');
+    // The area and everything inside it.
+    const all = await db.area.findMany({ where: { orgId, siteId: area.siteId } });
+    const ids = new Set([area.id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const a of all)
+        if (a.parentId && ids.has(a.parentId) && !ids.has(a.id)) {
+          ids.add(a.id);
+          grew = true;
+        }
+    }
+    const rooms = await db.room.findMany({
+      where: { orgId, areaId: { in: [...ids] }, kind: 'standard' },
+    });
+    return {
+      ok: true,
+      value: { rooms: byName(rooms.map(pick)), label: `Area: ${area.name}`, siteId: area.siteId },
+    };
+  }
+  if (s.scope === 'rooms') {
+    const want = [...new Set(s.roomIds ?? [])];
+    if (want.length < 2) return bad('Choose at least two rooms, or use a single room schedule');
+    const rooms = await db.room.findMany({ where: { orgId, id: { in: want }, kind: 'standard' } });
+    if (rooms.length !== want.length) return bad('One of those rooms no longer exists');
+    const sites = new Set(rooms.map((r) => r.siteId));
+    return {
+      ok: true,
+      value: {
+        rooms: byName(rooms.map(pick)),
+        label: `${rooms.length} rooms`,
+        siteId: sites.size === 1 ? [...sites][0]! : null,
+      },
+    };
+  }
+  return bad('Choose rooms, an area or a site');
+}
+
+/** The rooms or devices a visit will check: one segment each. */
+async function segmentTargets(
+  db: PmDb,
+  orgId: string,
+  template: { appliesTo: string; category: string | null },
+  rooms: ScopeRooms['rooms'],
+): Promise<
+  { roomId: string; roomName: string; deviceId: string | null; deviceName: string | null }[]
+> {
+  if (template.appliesTo === 'room')
+    return rooms.map((r) => ({ roomId: r.id, roomName: r.name, deviceId: null, deviceName: null }));
+  const devices = await db.device.findMany({
+    where: { orgId, roomId: { in: rooms.map((r) => r.id) }, kind: 'active' },
+  });
+  return devices
+    .filter((d) => !template.category || d.category === template.category)
+    .flatMap((d) => {
+      const room = rooms.find((r) => r.id === d.roomId);
+      return room
+        ? [{ roomId: room.id, roomName: room.name, deviceId: d.id, deviceName: d.name }]
+        : [];
+    })
+    .sort(
+      (a, b) =>
+        a.roomName.localeCompare(b.roomName) ||
+        (a.deviceName ?? '').localeCompare(b.deviceName ?? ''),
+    );
+}
+
+/** The scope a stored schedule covers, as a ScopeInput. */
+const scopeOf = (s: {
+  scope?: string | null;
+  siteId?: string | null;
+  areaId?: string | null;
+  roomIds?: string[] | null;
+}): ScopeInput => ({
+  scope: (s.scope ?? 'room') as PmScope,
+  siteId: s.siteId ?? null,
+  areaId: s.areaId ?? null,
+  roomIds: s.roomIds ?? [],
+});
+
 // ---- Schedules -----------------------------------------------------------------------------------
 
 export async function createSchedule(
@@ -280,7 +410,15 @@ export async function createSchedule(
     templateId: string;
     roomId?: string | null;
     deviceId?: string | null;
+    /** Several rooms, an area or a site: one visit with a segment for each room. Default: one room or device. */
+    scope?: PmScope;
+    siteId?: string | null;
+    areaId?: string | null;
+    roomIds?: string[] | null;
+    /** Ignored for a one-time check. */
     intervalDays: number;
+    /** Done once, then it switches itself off, instead of coming round again. */
+    oneOff?: boolean;
     firstDueOn: Date;
     leadDays?: number;
     assigneeUserId?: string | null;
@@ -292,8 +430,43 @@ export async function createSchedule(
     where: { id: input.templateId, orgId: input.orgId },
   });
   if (!template) return bad('No such checklist');
-  if (!Number.isInteger(input.intervalDays) || input.intervalDays < 1 || input.intervalDays > 1095)
+  const oneOff = input.oneOff === true;
+  const intervalDays = oneOff ? 0 : input.intervalDays;
+  if (!oneOff && (!Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 1095))
     return bad('Choose an interval between 1 day and 3 years');
+  const scope = input.scope ?? 'room';
+  if (scope !== 'room') {
+    const covered = await roomsInScope(db, input.orgId, { ...input, scope });
+    if (!covered.ok) return covered;
+    const targets = await segmentTargets(db, input.orgId, template, covered.value.rooms);
+    if (targets.length === 0)
+      return bad(
+        template.appliesTo === 'room'
+          ? 'There are no rooms there to check'
+          : 'There are no matching devices in those rooms',
+      );
+    const row = await db.pmSchedule.create({
+      data: {
+        orgId: input.orgId,
+        templateId: template.id,
+        roomId: null,
+        deviceId: null,
+        scope,
+        siteId: scope === 'site' ? (input.siteId ?? null) : null,
+        areaId: scope === 'area' ? (input.areaId ?? null) : null,
+        roomIds: scope === 'rooms' ? [...new Set(input.roomIds ?? [])] : [],
+        intervalDays,
+        oneOff,
+        nextDueOn: toDay(input.firstDueOn),
+        leadDays: input.leadDays ?? 7,
+        assigneeUserId: input.assigneeUserId ?? null,
+        assigneeMspOrgId: input.assigneeMspOrgId ?? null,
+        enabled: true,
+        createdBy: input.userId,
+      },
+    });
+    return { ok: true, value: { id: row.id } };
+  }
   if (template.appliesTo === 'room') {
     if (!input.roomId) return bad('This checklist is for a room');
     if (!(await db.room.findFirst({ where: { id: input.roomId, orgId: input.orgId } })))
@@ -311,7 +484,8 @@ export async function createSchedule(
       templateId: template.id,
       roomId: template.appliesTo === 'room' ? input.roomId! : null,
       deviceId: template.appliesTo === 'device' ? input.deviceId! : null,
-      intervalDays: input.intervalDays,
+      intervalDays,
+      oneOff,
       nextDueOn: toDay(input.firstDueOn),
       leadDays: input.leadDays ?? 7,
       assigneeUserId: input.assigneeUserId ?? null,
@@ -342,6 +516,8 @@ export interface ScheduleView {
   roomId: string | null;
   deviceId: string | null;
   intervalDays: number;
+  /** A one-time check, switched off once done. */
+  oneOff: boolean;
   nextDueOn: Date;
   leadDays: number;
   assigneeUserId: string | null;
@@ -349,6 +525,13 @@ export interface ScheduleView {
   enabled: boolean;
   lastRunOn: Date | null;
   state: DueState;
+  scope: PmScope;
+  /** For a multi-room schedule: what it covers, how many rooms, and which. */
+  scopeLabel: string | null;
+  roomCount: number | null;
+  scopeRoomIds: string[];
+  /** A visit started from this schedule and not yet signed, so the page offers Continue. */
+  openRunId: string | null;
 }
 
 export async function listSchedules(
@@ -357,24 +540,46 @@ export async function listSchedules(
   now = new Date(),
   filter: { roomId?: string; deviceId?: string } = {},
 ): Promise<ScheduleView[]> {
-  const [rows, templates] = await Promise.all([
+  const [all, templates, drafts] = await Promise.all([
     db.pmSchedule.findMany({
       where: {
         orgId,
-        ...(filter.roomId ? { roomId: filter.roomId } : {}),
         ...(filter.deviceId ? { deviceId: filter.deviceId } : {}),
       },
       orderBy: { nextDueOn: 'asc' },
     }),
     db.pmTemplate.findMany({ where: { orgId } }),
+    db.pmRun.findMany({
+      where: { orgId, status: 'draft', parentRunId: null, scheduleId: { not: null } },
+      orderBy: { createdAt: 'desc' },
+    }),
   ]);
+  // What each multi-room schedule covers today.
+  const covers = new Map<string, ScopeRooms>();
+  for (const s of all.filter((x) => (x.scope ?? 'room') !== 'room')) {
+    const c = await roomsInScope(db, orgId, scopeOf(s));
+    if (c.ok) covers.set(s.id, c.value);
+  }
+  const rows = all
+    .filter((s) => !(s.oneOff === true && !s.enabled))
+    .filter((s) => {
+      if (!filter.roomId) return true;
+      if ((s.scope ?? 'room') === 'room') return s.roomId === filter.roomId;
+      return covers.get(s.id)?.rooms.some((r) => r.id === filter.roomId) ?? false;
+    });
   return rows.map((s) => ({
+    scope: s.scope as PmScope,
+    scopeLabel: covers.get(s.id)?.label ?? null,
+    roomCount: covers.get(s.id)?.rooms.length ?? null,
+    scopeRoomIds: covers.get(s.id)?.rooms.map((r) => r.id) ?? [],
+    openRunId: drafts.find((d) => d.scheduleId === s.id)?.id ?? null,
     id: s.id,
     templateId: s.templateId,
     templateName: templates.find((t) => t.id === s.templateId)?.name ?? 'Removed checklist',
     roomId: s.roomId,
     deviceId: s.deviceId,
     intervalDays: s.intervalDays,
+    oneOff: s.oneOff === true,
     nextDueOn: s.nextDueOn,
     leadDays: s.leadDays,
     assigneeUserId: s.assigneeUserId,
@@ -452,7 +657,32 @@ export async function autoAnswer(
   }
 }
 
-/** Starts a visit: a draft run with everything monitoring can answer already filled in. */
+/** The answers a fresh visit to a room or device starts with: what monitoring can say is filled in. */
+async function freshResults(
+  db: PmDb,
+  orgId: string,
+  items: PmItem[],
+  target: { roomId: string | null; deviceId: string | null },
+  now: Date,
+): Promise<PmResult[]> {
+  const results: PmResult[] = [];
+  for (const i of items) {
+    const answer = i.auto ? await autoAnswer(db, orgId, i.auto, target) : null;
+    results.push({
+      itemId: i.id,
+      label: i.label,
+      type: i.type,
+      result: answer ? answer.result : null,
+      ...(answer ? { auto: { value: answer.value, at: now.toISOString() } } : {}),
+    });
+  }
+  return results;
+}
+
+/**
+ * Starts a visit: a draft run with everything monitoring can answer already filled in. A schedule (or
+ * a request) for several rooms, an area or a site starts one parent visit with a segment for each room.
+ */
 export async function startRun(
   db: PmDb,
   input: {
@@ -461,6 +691,10 @@ export async function startRun(
     scheduleId?: string | null;
     roomId?: string | null;
     deviceId?: string | null;
+    scope?: PmScope;
+    siteId?: string | null;
+    areaId?: string | null;
+    roomIds?: string[] | null;
     userId: string | null;
   },
   now = new Date(),
@@ -473,6 +707,15 @@ export async function startRun(
     ? await db.pmSchedule.findFirst({ where: { id: input.scheduleId, orgId: input.orgId } })
     : null;
   if (input.scheduleId && !schedule) return bad('No such schedule');
+  const scope: ScopeInput = schedule
+    ? scopeOf(schedule)
+    : {
+        scope: input.scope ?? 'room',
+        siteId: input.siteId,
+        areaId: input.areaId,
+        roomIds: input.roomIds,
+      };
+  if (scope.scope !== 'room') return startMultiRun(db, input, template, schedule, scope, now);
   let roomId = schedule?.roomId ?? input.roomId ?? null;
   const deviceId = schedule?.deviceId ?? input.deviceId ?? null;
   if (template.appliesTo === 'room' && !roomId) return bad('This checklist is for a room');
@@ -485,18 +728,13 @@ export async function startRun(
   if (deviceId && !target) return bad('No such device');
   // A visit to a device is also a visit to the room it is in, so the room's record shows it.
   if (target && !roomId) roomId = target.roomId;
-  const items = parseItems(template.items);
-  const results: PmResult[] = [];
-  for (const i of items) {
-    const answer = i.auto ? await autoAnswer(db, input.orgId, i.auto, { roomId, deviceId }) : null;
-    results.push({
-      itemId: i.id,
-      label: i.label,
-      type: i.type,
-      result: answer ? answer.result : null,
-      ...(answer ? { auto: { value: answer.value, at: now.toISOString() } } : {}),
-    });
-  }
+  const results = await freshResults(
+    db,
+    input.orgId,
+    parseItems(template.items),
+    { roomId, deviceId },
+    now,
+  );
   const run = await db.pmRun.create({
     data: {
       orgId: input.orgId,
@@ -517,15 +755,107 @@ export async function startRun(
   return { ok: true, value: { id: run.id } };
 }
 
+async function startMultiRun(
+  db: PmDb,
+  input: { orgId: string; scheduleId?: string | null; userId: string | null },
+  template: {
+    id: string;
+    name: string;
+    version: number;
+    appliesTo: string;
+    category: string | null;
+    items: unknown;
+  },
+  schedule: { id: string; nextDueOn: Date } | null,
+  scope: ScopeInput,
+  now: Date,
+): Promise<Result> {
+  // One open visit per schedule: asking again goes back to it.
+  if (schedule) {
+    const open = await db.pmRun.findFirst({
+      where: { orgId: input.orgId, scheduleId: schedule.id, status: 'draft', parentRunId: null },
+    });
+    if (open) return { ok: true, value: { id: open.id } };
+  }
+  const covered = await roomsInScope(db, input.orgId, scope);
+  if (!covered.ok) return covered;
+  const targets = await segmentTargets(db, input.orgId, template, covered.value.rooms);
+  if (targets.length === 0)
+    return bad(
+      template.appliesTo === 'room'
+        ? 'There are no rooms there to check'
+        : 'There are no matching devices in those rooms',
+    );
+  const items = parseItems(template.items);
+  const parent = await db.pmRun.create({
+    data: {
+      orgId: input.orgId,
+      scheduleId: schedule?.id ?? null,
+      templateId: template.id,
+      templateName: template.name,
+      templateVersion: template.version,
+      roomId: null,
+      deviceId: null,
+      status: 'draft',
+      results: [] as unknown as Prisma.InputJsonValue,
+      failedCount: 0,
+      dueOn: schedule?.nextDueOn ?? null,
+      startedBy: input.userId,
+      createdAt: now,
+      multi: true,
+      scopeLabel: covered.value.label,
+      siteId: covered.value.siteId,
+    },
+  });
+  // The rooms are fixed now: a room added later joins the next round, not this one.
+  for (const t of targets) {
+    const results = await freshResults(db, input.orgId, items, t, now);
+    await db.pmRun.create({
+      data: {
+        orgId: input.orgId,
+        scheduleId: null,
+        templateId: template.id,
+        templateName: template.name,
+        templateVersion: template.version,
+        roomId: t.roomId,
+        deviceId: t.deviceId,
+        status: 'draft',
+        results: results as unknown as Prisma.InputJsonValue,
+        failedCount: 0,
+        dueOn: null,
+        startedBy: input.userId,
+        createdAt: now,
+        parentRunId: parent.id,
+        siteId: covered.value.siteId,
+      },
+    });
+  }
+  return { ok: true, value: { id: parent.id } };
+}
+
 /** Saves answers to a draft. A signed run is never edited. */
 export async function saveRun(
   db: PmDb,
-  input: { orgId: string; runId: string; results: unknown; notes?: string | null },
+  input: {
+    orgId: string;
+    runId: string;
+    results: unknown;
+    notes?: string | null;
+    /** Who is saving, so a visit with several rooms shows who worked on each. */
+    userId?: string | null;
+    userName?: string | null;
+  },
 ): Promise<Result> {
   const run = await db.pmRun.findFirst({ where: { id: input.runId, orgId: input.orgId } });
   if (!run) return bad('No such visit');
   if (run.status === 'signed')
     return bad('A signed visit cannot be changed. Start a new one to correct it.');
+  if (run.multi) return bad('Save the answers room by room.');
+  if (run.status === 'skipped') return bad('This room was skipped. Bring it back to fill it in.');
+  const parent = run.parentRunId
+    ? await db.pmRun.findFirst({ where: { id: run.parentRunId, orgId: input.orgId } })
+    : null;
+  if (parent?.status === 'signed') return bad('That visit has been signed off.');
   const parsed = PmResult.array().safeParse(input.results);
   if (!parsed.success) return bad('Those answers are not valid');
   const template = await db.pmTemplate.findFirst({
@@ -541,41 +871,93 @@ export async function saveRun(
       results: parsed.data as unknown as Prisma.InputJsonValue,
       notes: input.notes ?? run.notes,
       failedCount: countFailed(items, parsed.data),
+      ...(parent && input.userId
+        ? { workedBy: input.userId, workedByName: input.userName ?? null }
+        : {}),
     },
   });
+  if (parent) await refreshParentFailed(db, input.orgId, parent.id);
   return { ok: true, value: { id: run.id } };
 }
 
-/**
- * Signs a visit off: it can no longer change. Failed items can raise one ticket for the room or
- * device and put a failed device's asset record in repair, and the schedule moves on.
- */
-export async function signRun(
-  db: PmDb,
-  input: {
-    orgId: string;
-    runId: string;
-    userId: string | null;
-    name: string;
-    raiseTicket: boolean;
-    markInRepair: boolean;
-  },
-  now = new Date(),
-): Promise<Result<{ id: string; failed: number; ticketId: string | null }>> {
-  const run = await db.pmRun.findFirst({ where: { id: input.runId, orgId: input.orgId } });
-  if (!run) return bad('No such visit');
-  if (run.status === 'signed') return bad('This visit is already signed off');
-  if (!input.name.trim()) return bad('Type your name to sign it off');
-  const template = await db.pmTemplate.findFirst({
-    where: { id: run.templateId, orgId: input.orgId },
+/** A visit to several rooms counts the failed items of all its rooms. */
+async function refreshParentFailed(db: PmDb, orgId: string, parentId: string) {
+  const rooms = await db.pmRun.findMany({ where: { orgId, parentRunId: parentId } });
+  await db.pmRun.update({
+    where: { id: parentId },
+    data: { failedCount: rooms.reduce((n, c) => n + c.failedCount, 0) },
   });
-  const items = parseItems(template?.items);
+}
+
+/** Marks one room of a visit as not done, with the reason, so one locked room does not hold up the rest. */
+export async function skipSegment(
+  db: PmDb,
+  input: { orgId: string; runId: string; reason: string },
+): Promise<Result> {
+  const reason = input.reason.trim();
+  if (reason.length < 3) return bad('Say why it was skipped.');
+  if (reason.length > 300) return bad('Keep the reason under 300 characters.');
+  const run = await db.pmRun.findFirst({ where: { id: input.runId, orgId: input.orgId } });
+  if (!run?.parentRunId) return bad('Only a room in a multi-room visit can be skipped.');
+  if (run.status !== 'draft') return bad('That room is not open to skip.');
+  const parent = await db.pmRun.findFirst({ where: { id: run.parentRunId, orgId: input.orgId } });
+  if (parent?.status !== 'draft') return bad('That visit has been signed off.');
+  await db.pmRun.update({
+    where: { id: run.id },
+    data: { status: 'skipped', skipReason: reason, failedCount: 0 },
+  });
+  await refreshParentFailed(db, input.orgId, parent.id);
+  return { ok: true, value: { id: run.id } };
+}
+
+/** Brings a skipped room back into the visit. */
+export async function unskipSegment(
+  db: PmDb,
+  input: { orgId: string; runId: string },
+): Promise<Result> {
+  const run = await db.pmRun.findFirst({ where: { id: input.runId, orgId: input.orgId } });
+  if (!run?.parentRunId || run.status !== 'skipped') return bad('That room was not skipped.');
+  const parent = await db.pmRun.findFirst({ where: { id: run.parentRunId, orgId: input.orgId } });
+  if (parent?.status !== 'draft') return bad('That visit has been signed off.');
+  const items = parseItems(
+    (await db.pmTemplate.findFirst({ where: { id: run.templateId, orgId: input.orgId } }))?.items,
+  );
   const results = PmResult.array().catch([]).parse(run.results);
-  const missing = unanswered(items, results);
-  if (missing.length)
-    return bad(
-      `Still to answer: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` and ${missing.length - 3} more` : ''}`,
-    );
+  await db.pmRun.update({
+    where: { id: run.id },
+    data: { status: 'draft', skipReason: null, failedCount: countFailed(items, results) },
+  });
+  await refreshParentFailed(db, input.orgId, parent.id);
+  return { ok: true, value: { id: run.id } };
+}
+
+type SignInput = {
+  orgId: string;
+  runId: string;
+  userId: string | null;
+  name: string;
+  raiseTicket: boolean;
+  markInRepair: boolean;
+};
+
+/**
+ * Signs one room or device's answers: the ticket for what failed, the device's repair status and
+ * history, and the record itself. `corrects` is the signed visit this one replaces, if any.
+ */
+async function finishOne(
+  db: PmDb,
+  run: {
+    id: string;
+    roomId: string | null;
+    deviceId: string | null;
+    templateName: string;
+  },
+  items: PmItem[],
+  results: PmResult[],
+  input: SignInput,
+  now: Date,
+  corrects: string | null,
+): Promise<{ failed: number; ticketId: string | null }> {
   const failed = countFailed(items, results);
   let ticketId: string | null = null;
   if (failed > 0 && input.raiseTicket) {
@@ -624,14 +1006,14 @@ export async function signRun(
         orgId: input.orgId,
         deviceId: run.deviceId,
         // A correction is its own entry, so the device history does not count the visit twice.
-        type: run.correctsRunId ? 'pm_corrected' : failed ? 'pm_failed' : 'pm_passed',
+        type: corrects ? 'pm_corrected' : failed ? 'pm_failed' : 'pm_passed',
         source: 'manual',
         actorId: input.userId,
         data: {
           runId: run.id,
           template: run.templateName,
           failed,
-          ...(run.correctsRunId ? { corrects: run.correctsRunId } : {}),
+          ...(corrects ? { corrects } : {}),
         } as Prisma.InputJsonValue,
         at: now,
       },
@@ -646,15 +1028,111 @@ export async function signRun(
       failedCount: failed,
     },
   });
+  return { failed, ticketId };
+}
+
+/** Names the room (and device) of a segment for a message. */
+async function segmentName(
+  db: PmDb,
+  orgId: string,
+  c: { roomId: string | null; deviceId: string | null },
+): Promise<string> {
+  const [room, device] = await Promise.all([
+    c.roomId ? db.room.findFirst({ where: { id: c.roomId, orgId } }) : null,
+    c.deviceId ? db.device.findFirst({ where: { id: c.deviceId, orgId } }) : null,
+  ]);
+  return [room?.name, device?.name].filter(Boolean).join(' · ') || 'A room';
+}
+
+/**
+ * Signs a visit off: it can no longer change. Failed items can raise one ticket for the room or
+ * device and put a failed device's asset record in repair, and the schedule moves on. A visit to
+ * several rooms is signed once for all of them: every room is answered (or skipped with a reason),
+ * each room keeps its own ticket and device history, and the schedule moves on once.
+ */
+export async function signRun(
+  db: PmDb,
+  input: SignInput,
+  now = new Date(),
+): Promise<Result<{ id: string; failed: number; ticketId: string | null; tickets: number }>> {
+  const run = await db.pmRun.findFirst({ where: { id: input.runId, orgId: input.orgId } });
+  if (!run) return bad('No such visit');
+  if (run.status === 'signed') return bad('This visit is already signed off');
+  if (run.parentRunId) return bad('Sign off the whole visit, not one room.');
+  if (!input.name.trim()) return bad('Type your name to sign it off');
+  const template = await db.pmTemplate.findFirst({
+    where: { id: run.templateId, orgId: input.orgId },
+  });
+  const items = parseItems(template?.items);
+
+  let failed = 0;
+  const tickets: string[] = [];
+  if (run.multi) {
+    const children = await db.pmRun.findMany({
+      where: { orgId: input.orgId, parentRunId: run.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    const active = children.filter((c) => c.status === 'draft');
+    if (active.length === 0) return bad('Every room was skipped. Discard the visit instead.');
+    const problems: string[] = [];
+    for (const c of active) {
+      const missing = unanswered(items, PmResult.array().catch([]).parse(c.results));
+      if (missing.length)
+        problems.push(
+          `${await segmentName(db, input.orgId, c)}: ${missing.slice(0, 2).join(', ')}${missing.length > 2 ? ` and ${missing.length - 2} more` : ''}`,
+        );
+    }
+    if (problems.length)
+      return bad(
+        `Still to answer in ${problems.length} room${problems.length === 1 ? '' : 's'}: ${problems.slice(0, 3).join('; ')}${problems.length > 3 ? ` and ${problems.length - 3} more` : ''}`,
+      );
+    for (const c of active) {
+      const r = await finishOne(
+        db,
+        c,
+        items,
+        PmResult.array().catch([]).parse(c.results),
+        input,
+        now,
+        run.correctsRunId,
+      );
+      failed += r.failed;
+      if (r.ticketId) tickets.push(r.ticketId);
+    }
+    await db.pmRun.update({
+      where: { id: run.id },
+      data: {
+        status: 'signed',
+        signedBy: input.userId,
+        signedByName: input.name.trim(),
+        signedAt: now,
+        failedCount: failed,
+      },
+    });
+  } else {
+    const results = PmResult.array().catch([]).parse(run.results);
+    const missing = unanswered(items, results);
+    if (missing.length)
+      return bad(
+        `Still to answer: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` and ${missing.length - 3} more` : ''}`,
+      );
+    const r = await finishOne(db, run, items, results, input, now, run.correctsRunId);
+    failed = r.failed;
+    if (r.ticketId) tickets.push(r.ticketId);
+  }
   if (run.scheduleId) {
     const s = await db.pmSchedule.findFirst({ where: { id: run.scheduleId, orgId: input.orgId } });
     if (s) {
       await db.pmSchedule.update({
         where: { id: s.id },
-        data: {
-          nextDueOn: nextDueAfter(run.dueOn ?? s.nextDueOn, toDay(now), s.intervalDays),
-          lastRunOn: toDay(now),
-        },
+        data:
+          s.oneOff === true
+            ? // A one-time check is done: it switches itself off and leaves the list.
+              { enabled: false, lastRunOn: toDay(now) }
+            : {
+                nextDueOn: nextDueAfter(run.dueOn ?? s.nextDueOn, toDay(now), s.intervalDays),
+                lastRunOn: toDay(now),
+              },
       });
       await resolveIncident(
         db as unknown as MonitoringDb,
@@ -663,23 +1141,76 @@ export async function signRun(
       );
     }
   }
-  return { ok: true, value: { id: run.id, failed, ticketId } };
+  return {
+    ok: true,
+    value: { id: run.id, failed, ticketId: tickets[0] ?? null, tickets: tickets.length },
+  };
 }
 
-/** Removes a draft that was started by mistake. A signed visit is never removed. */
+/** Removes a draft that was started by mistake (every room of it, with their photos). A signed visit is never removed. */
 export async function discardRun(db: PmDb, orgId: string, runId: string): Promise<Result> {
   const run = await db.pmRun.findFirst({ where: { id: runId, orgId } });
   if (!run) return bad('No such visit');
   if (run.status === 'signed') return bad('A signed visit cannot be removed');
+  if (run.parentRunId) return bad('Discard the whole visit, not one room.');
+  const rooms = run.multi ? await db.pmRun.findMany({ where: { orgId, parentRunId: run.id } }) : [];
+  await db.pmPhoto.deleteMany({
+    where: { orgId, runId: { in: [run.id, ...rooms.map((c) => c.id)] } },
+  });
+  if (rooms.length) await db.pmRun.deleteMany({ where: { orgId, parentRunId: run.id } });
   await db.pmRun.delete({ where: { id: runId } });
   return { ok: true, value: { id: runId } };
+}
+
+/** Answers carry over for items still on the checklist; anything new starts empty. */
+function carryOver(items: PmItem[], orig: unknown): PmResult[] {
+  const before = new Map(
+    PmResult.array()
+      .catch([])
+      .parse(orig)
+      .map((r) => [r.itemId, r]),
+  );
+  return items.map((i) => {
+    const o = before.get(i.id);
+    return o
+      ? { ...o, label: i.label, type: i.type }
+      : { itemId: i.id, label: i.label, type: i.type, result: null };
+  });
+}
+
+async function copyPhotos(
+  db: PmDb,
+  orgId: string,
+  fromRunId: string,
+  toRunId: string,
+  items: PmItem[],
+  userId: string | null,
+  now: Date,
+) {
+  const keep = new Set(items.filter((i) => i.type === 'photo').map((i) => i.id));
+  const photos = await db.pmPhoto.findMany({ where: { orgId, runId: fromRunId } });
+  for (const p of photos.filter((x) => keep.has(x.itemId)))
+    await db.pmPhoto.create({
+      data: {
+        orgId,
+        runId: toRunId,
+        itemId: p.itemId,
+        mime: p.mime,
+        size: p.size,
+        sha256: p.sha256,
+        data: p.data,
+        createdBy: userId,
+        createdAt: now,
+      },
+    });
 }
 
 /**
  * A signed visit is never edited. To fix a mistake, someone starts a correction: a new draft with the
  * answers and photos copied across and the reason recorded, linked to the original. Signing it leaves
  * both on record, and reports count the correction in place of the original. One correction is open at
- * a time; asking again returns it.
+ * a time; asking again returns it. A visit to several rooms is corrected as a whole: every room is
+ * copied across (a skipped room stays skipped until someone brings it back).
  */
 export async function correctRun(
   db: PmDb,
@@ -691,6 +1222,7 @@ export async function correctRun(
   if (reason.length > 500) return bad('Keep the reason under 500 characters.');
   const orig = await db.pmRun.findFirst({ where: { id: input.runId, orgId: input.orgId } });
   if (!orig) return bad('No such visit');
+  if (orig.parentRunId) return bad('Correct the whole visit, not one room of it.');
   if (orig.status !== 'signed')
     return bad('Only a signed visit needs a correction. Edit the draft instead.');
   const open = await db.pmRun.findFirst({
@@ -702,20 +1234,7 @@ export async function correctRun(
   });
   if (!template)
     return bad('The checklist for this visit has been deleted, so it cannot be corrected.');
-  // Answers carry over for items still on the checklist; anything new starts empty.
   const items = parseItems(template.items);
-  const before = new Map(
-    PmResult.array()
-      .catch([])
-      .parse(orig.results)
-      .map((r) => [r.itemId, r]),
-  );
-  const results: PmResult[] = items.map((i) => {
-    const o = before.get(i.id);
-    return o
-      ? { ...o, label: i.label, type: i.type }
-      : { itemId: i.id, label: i.label, type: i.type, result: null };
-  });
   const run = await db.pmRun.create({
     data: {
       orgId: input.orgId,
@@ -727,7 +1246,9 @@ export async function correctRun(
       roomId: orig.roomId,
       deviceId: orig.deviceId,
       status: 'draft',
-      results: results as unknown as Prisma.InputJsonValue,
+      results: (orig.multi
+        ? []
+        : carryOver(items, orig.results)) as unknown as Prisma.InputJsonValue,
       failedCount: 0,
       dueOn: null,
       notes: orig.notes,
@@ -735,24 +1256,43 @@ export async function correctRun(
       createdAt: now,
       correctsRunId: orig.id,
       correctionReason: reason,
+      multi: orig.multi,
+      scopeLabel: orig.scopeLabel,
+      siteId: orig.siteId,
     },
   });
-  const keep = new Set(items.filter((i) => i.type === 'photo').map((i) => i.id));
-  const photos = await db.pmPhoto.findMany({ where: { orgId: input.orgId, runId: orig.id } });
-  for (const p of photos.filter((x) => keep.has(x.itemId)))
-    await db.pmPhoto.create({
-      data: {
-        orgId: input.orgId,
-        runId: run.id,
-        itemId: p.itemId,
-        mime: p.mime,
-        size: p.size,
-        sha256: p.sha256,
-        data: p.data,
-        createdBy: input.userId,
-        createdAt: now,
-      },
+  if (!orig.multi) {
+    await copyPhotos(db, input.orgId, orig.id, run.id, items, input.userId, now);
+  } else {
+    const rooms = await db.pmRun.findMany({
+      where: { orgId: input.orgId, parentRunId: orig.id },
+      orderBy: { createdAt: 'asc' },
     });
+    for (const c of rooms) {
+      const copy = await db.pmRun.create({
+        data: {
+          orgId: input.orgId,
+          scheduleId: null,
+          templateId: template.id,
+          templateName: template.name,
+          templateVersion: template.version,
+          roomId: c.roomId,
+          deviceId: c.deviceId,
+          status: c.status === 'skipped' ? 'skipped' : 'draft',
+          skipReason: c.status === 'skipped' ? c.skipReason : null,
+          results: carryOver(items, c.results) as unknown as Prisma.InputJsonValue,
+          failedCount: 0,
+          dueOn: null,
+          notes: c.notes,
+          startedBy: input.userId,
+          createdAt: now,
+          parentRunId: run.id,
+          siteId: c.siteId,
+        },
+      });
+      await copyPhotos(db, input.orgId, c.id, copy.id, items, input.userId, now);
+    }
+  }
   return { ok: true, value: { id: run.id, existing: false } };
 }
 
@@ -762,6 +1302,273 @@ export async function correctionsOf(db: PmDb, orgId: string, runId: string) {
     where: { orgId, correctsRunId: runId },
     orderBy: { createdAt: 'desc' },
   });
+}
+
+// ---- Records: the list of visits, grouped by site, and what is exported --------------------------
+
+export interface PmSegmentView {
+  id: string;
+  roomId: string | null;
+  roomName: string | null;
+  deviceId: string | null;
+  deviceName: string | null;
+  /** draft, signed or skipped. */
+  status: string;
+  failedCount: number;
+  skipReason: string | null;
+  workedByName: string | null;
+}
+
+export interface PmVisitView {
+  id: string;
+  templateName: string;
+  status: string;
+  failedCount: number;
+  roomId: string | null;
+  roomName: string | null;
+  deviceId: string | null;
+  deviceName: string | null;
+  siteId: string | null;
+  siteName: string | null;
+  signedAt: Date | null;
+  signedByName: string | null;
+  dueOn: Date | null;
+  createdAt: Date;
+  correctsRunId: string | null;
+  /** A visit to several rooms: what it covers and each room as a segment. */
+  multi: boolean;
+  scopeLabel: string | null;
+  segments: PmSegmentView[];
+  /** Set when this row is one room of a multi-room visit (shown on that room's own record). */
+  parentRunId: string | null;
+  parentLabel: string | null;
+}
+
+/**
+ * Visits, newest first. The organisation's list has one row per visit (a visit to several rooms is
+ * one row with a segment for each room). A room's or device's list also has the segments that
+ * belong to it, each pointing at its visit.
+ */
+export async function listRuns(
+  db: PmDb,
+  orgId: string,
+  filter: {
+    runId?: string;
+    roomId?: string;
+    deviceId?: string;
+    status?: 'draft' | 'signed';
+    failedOnly?: boolean;
+    limit?: number;
+  } = {},
+  /** The rooms a site-limited reader may see, or null for everything. */
+  roomIds: Set<string> | null = null,
+): Promise<PmVisitView[]> {
+  const forOne = !!(filter.roomId || filter.deviceId);
+  const [rows, rooms, devices, sites] = await Promise.all([
+    db.pmRun.findMany({
+      where: {
+        orgId,
+        ...(filter.runId ? { id: filter.runId } : {}),
+        ...(forOne || filter.runId ? {} : { parentRunId: null }),
+        ...(filter.roomId ? { roomId: filter.roomId } : {}),
+        ...(filter.deviceId ? { deviceId: filter.deviceId } : {}),
+        ...(filter.status ? { status: filter.status } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: filter.limit ?? 100,
+    }),
+    db.room.findMany({ where: { orgId }, select: { id: true, name: true, siteId: true } }),
+    db.device.findMany({ where: { orgId }, select: { id: true, name: true, roomId: true } }),
+    db.site.findMany({ where: { orgId }, select: { id: true, name: true } }),
+  ]);
+  const ids = rows.filter((r) => r.multi).map((r) => r.id);
+  const kids = ids.length
+    ? await db.pmRun.findMany({
+        where: { orgId, parentRunId: { in: ids } },
+        orderBy: { createdAt: 'asc' },
+      })
+    : [];
+  const parents = forOne
+    ? await db.pmRun.findMany({
+        where: {
+          orgId,
+          id: { in: rows.flatMap((r) => (r.parentRunId ? [r.parentRunId] : [])) },
+        },
+      })
+    : [];
+  const roomOf = (id: string | null) => rooms.find((x) => x.id === id);
+  const deviceOf = (id: string | null) => devices.find((x) => x.id === id);
+  const visible = (roomId: string | null) =>
+    roomIds === null || (roomId !== null && roomIds.has(roomId));
+  const views: PmVisitView[] = [];
+  for (const r of rows) {
+    const segments: PmSegmentView[] = kids
+      .filter((k) => k.parentRunId === r.id && visible(k.roomId))
+      .map((k) => ({
+        id: k.id,
+        roomId: k.roomId,
+        roomName: roomOf(k.roomId)?.name ?? null,
+        deviceId: k.deviceId,
+        deviceName: deviceOf(k.deviceId)?.name ?? null,
+        status: k.status,
+        failedCount: k.failedCount,
+        skipReason: k.skipReason,
+        workedByName: k.workedByName,
+      }));
+    if (r.multi ? segments.length === 0 : !visible(r.roomId)) continue;
+    if (filter.failedOnly && r.failedCount === 0) continue;
+    const room = roomOf(r.roomId) ?? roomOf(deviceOf(r.deviceId)?.roomId ?? null);
+    const siteId = r.siteId ?? room?.siteId ?? null;
+    views.push({
+      id: r.id,
+      templateName: r.templateName,
+      status: r.status,
+      failedCount: r.failedCount,
+      roomId: r.roomId,
+      roomName: roomOf(r.roomId)?.name ?? null,
+      deviceId: r.deviceId,
+      deviceName: deviceOf(r.deviceId)?.name ?? null,
+      siteId,
+      siteName: sites.find((x) => x.id === siteId)?.name ?? null,
+      signedAt: r.signedAt,
+      signedByName: r.signedByName,
+      dueOn: r.dueOn,
+      createdAt: r.createdAt,
+      correctsRunId: r.correctsRunId,
+      multi: r.multi === true,
+      scopeLabel: r.scopeLabel ?? null,
+      segments,
+      parentRunId: r.parentRunId,
+      parentLabel: r.parentRunId
+        ? (parents.find((p) => p.id === r.parentRunId)?.scopeLabel ?? null)
+        : null,
+    });
+  }
+  return views;
+}
+
+export interface PmExportPhoto {
+  id: string;
+  itemId: string;
+  /** The checklist item it was taken for. */
+  itemLabel: string;
+  mime: string;
+  size: number;
+  sha256: string;
+  createdAt: Date;
+}
+
+export interface PmExportSection {
+  /** The run the answers and photos belong to (the room's own run in a multi-room visit). */
+  runId: string;
+  room: string | null;
+  device: string | null;
+  status: string;
+  failedCount: number;
+  skipReason: string | null;
+  workedByName: string | null;
+  results: {
+    itemId: string;
+    type: string;
+    label: string;
+    result: string | number | null;
+    note: string | null;
+    kestrelSaw: string | null;
+  }[];
+  photos: PmExportPhoto[];
+}
+
+export interface PmExportVisit extends PmVisitView {
+  notes: string | null;
+  /** One section for a single visit, one per room for a multi-room visit. */
+  sections: PmExportSection[];
+}
+
+/** Visits with every answer, for the CSV and the printable PDF. */
+export async function exportVisits(
+  db: PmDb,
+  orgId: string,
+  filter: Parameters<typeof listRuns>[2],
+  roomIds: Set<string> | null = null,
+): Promise<PmExportVisit[]> {
+  const visits = await listRuns(db, orgId, filter, roomIds);
+  const want = visits.flatMap((v) => (v.multi ? v.segments.map((s) => s.id) : [v.id]));
+  const runs = want.length ? await db.pmRun.findMany({ where: { orgId, id: { in: want } } }) : [];
+  const answers = (id: string) =>
+    PmResult.array()
+      .catch([])
+      .parse(runs.find((r) => r.id === id)?.results)
+      .map((x) => ({
+        itemId: x.itemId,
+        type: x.type,
+        label: x.label,
+        result: x.result,
+        note: x.note ?? null,
+        kestrelSaw: x.auto?.value ?? null,
+      }));
+  // Photos by the run they were taken in, described without their bytes.
+  const photoRows = want.length
+    ? await db.pmPhoto.findMany({
+        where: { orgId, runId: { in: want } },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          runId: true,
+          itemId: true,
+          mime: true,
+          size: true,
+          sha256: true,
+          createdAt: true,
+        },
+      })
+    : [];
+  const photosOf = (runId: string): PmExportPhoto[] => {
+    const labels = new Map(answers(runId).map((a) => [a.itemId, a.label]));
+    return photoRows
+      .filter((p) => p.runId === runId)
+      .map((p) => ({
+        id: p.id,
+        itemId: p.itemId,
+        itemLabel: labels.get(p.itemId) ?? 'Photo',
+        mime: p.mime,
+        size: p.size,
+        sha256: p.sha256,
+        createdAt: p.createdAt,
+      }));
+  };
+  const parentNotes = visits.some((v) => v.multi)
+    ? await db.pmRun.findMany({ where: { orgId, id: { in: visits.map((v) => v.id) } } })
+    : [];
+  return visits.map((v) => ({
+    ...v,
+    notes:
+      (runs.find((r) => r.id === v.id) ?? parentNotes.find((r) => r.id === v.id))?.notes ?? null,
+    sections: v.multi
+      ? v.segments.map((s) => ({
+          runId: s.id,
+          room: s.roomName,
+          device: s.deviceName,
+          status: s.status,
+          failedCount: s.failedCount,
+          skipReason: s.skipReason,
+          workedByName: s.workedByName,
+          results: s.status === 'skipped' ? [] : answers(s.id),
+          photos: s.status === 'skipped' ? [] : photosOf(s.id),
+        }))
+      : [
+          {
+            runId: v.id,
+            room: v.roomName,
+            device: v.deviceName,
+            status: v.status,
+            failedCount: v.failedCount,
+            skipReason: null,
+            workedByName: null,
+            results: answers(v.id),
+            photos: photosOf(v.id),
+          },
+        ],
+  }));
 }
 
 // ---- Overview, overdue and reports ---------------------------------------------------------------
@@ -782,10 +1589,33 @@ export async function pmStatus(
 ): Promise<PmStatus> {
   const [schedules, runs] = await Promise.all([
     db.pmSchedule.findMany({ where: { orgId, enabled: true } }),
-    db.pmRun.findMany({ where: { orgId, status: 'signed' } }),
+    // A visit to several rooms is one visit: its rooms are not counted again.
+    db.pmRun.findMany({ where: { orgId, status: 'signed', parentRunId: null } }),
   ]);
-  const inScope = (s: { roomId: string | null }) =>
-    roomIds === null || (s.roomId !== null && roomIds.has(s.roomId));
+  // A site-limited reader sees a multi-room schedule or visit when any of its rooms is theirs.
+  const roomsOf = new Map<string, string[]>();
+  if (roomIds !== null) {
+    for (const s of schedules.filter((x) => (x.scope ?? 'room') !== 'room')) {
+      const c = await roomsInScope(db, orgId, scopeOf(s));
+      if (c.ok)
+        roomsOf.set(
+          s.id,
+          c.value.rooms.map((r) => r.id),
+        );
+    }
+    const kids = await db.pmRun.findMany({
+      where: { orgId, status: 'signed', parentRunId: { not: null } },
+    });
+    for (const r of runs.filter((x) => x.multi))
+      roomsOf.set(
+        r.id,
+        kids.filter((k) => k.parentRunId === r.id && k.roomId).map((k) => k.roomId!),
+      );
+  }
+  const touches = (id: string) => (roomsOf.get(id) ?? []).some((x) => roomIds!.has(x));
+  const inScope = (s: { id: string; scope: string; roomId: string | null }) =>
+    roomIds === null ||
+    ((s.scope ?? 'room') === 'room' ? s.roomId !== null && roomIds.has(s.roomId) : touches(s.id));
   const mine = schedules.filter(inScope);
   const states = mine.map((s) => dueState(s.nextDueOn, s.leadDays, now));
   const yearAgo = now.getTime() - 365 * 86_400_000;
@@ -794,7 +1624,7 @@ export async function pmStatus(
       r.dueOn &&
       r.signedAt &&
       r.signedAt.getTime() >= yearAgo &&
-      (roomIds === null || (r.roomId !== null && roomIds.has(r.roomId))),
+      (roomIds === null || (r.multi ? touches(r.id) : r.roomId !== null && roomIds.has(r.roomId))),
   );
   const onTime = recent.filter(
     (r) => toDay(r.signedAt!).getTime() <= toDay(r.dueOn!).getTime(),
@@ -860,6 +1690,21 @@ export interface PmReportRun {
   correctionReason?: string;
   /** A later signed visit replaces this one; it is listed but not counted. */
   supersededBy?: string;
+  /** A visit to several rooms: what it covered, and each room's own answers. */
+  scope?: string;
+  segments?: PmReportSegment[];
+}
+
+export interface PmReportSegment {
+  room: string | null;
+  device: string | null;
+  /** signed, or skipped with a reason. */
+  status: string;
+  skipReason?: string;
+  workedBy?: string;
+  failed: number;
+  results: { label: string; result: string | number | null; note?: string }[];
+  photos?: { itemId: string; sha256: string }[];
 }
 
 /** Signs a report of every visit signed off between two dates, for keeping. */
@@ -874,7 +1719,7 @@ export async function issuePmReport(
   if (input.to.getTime() < input.from.getTime()) return bad('The end date is before the start');
   const [runs, rooms, devices, last, photoRows] = await Promise.all([
     db.pmRun.findMany({
-      where: { orgId: input.orgId, status: 'signed' },
+      where: { orgId: input.orgId, status: 'signed', parentRunId: null },
       orderBy: { signedAt: 'asc' },
     }),
     db.room.findMany({ where: { orgId: input.orgId } }),
@@ -888,6 +1733,18 @@ export async function issuePmReport(
       select: { runId: true, itemId: true, sha256: true },
     }),
   ]);
+  const kids = await db.pmRun.findMany({
+    where: { orgId: input.orgId, parentRunId: { not: null } },
+    orderBy: { createdAt: 'asc' },
+  });
+  const answers = (raw: unknown) =>
+    (PmResult.array().catch([]).parse(raw) ?? []).map((x) => ({
+      label: x.label,
+      result: x.result,
+      ...(x.note ? { note: x.note } : {}),
+    }));
+  const photosOf = (id: string) =>
+    photoRows.filter((p) => p.runId === id).map((p) => ({ itemId: p.itemId, sha256: p.sha256 }));
   const supersededBy = new Map<string, string>();
   for (const r of runs) if (r.correctsRunId) supersededBy.set(r.correctsRunId, r.id);
   const inRange = runs.filter(
@@ -905,16 +1762,23 @@ export async function issuePmReport(
     signedBy: r.signedByName,
     failed: r.failedCount,
     onTime: r.dueOn ? toDay(r.signedAt!).getTime() <= toDay(r.dueOn).getTime() : null,
-    results: (PmResult.array().catch([]).parse(r.results) ?? []).map((x) => ({
-      label: x.label,
-      result: x.result,
-      ...(x.note ? { note: x.note } : {}),
-    })),
-    ...(photoRows.some((p) => p.runId === r.id)
+    results: answers(r.results),
+    ...(photoRows.some((p) => p.runId === r.id) ? { photos: photosOf(r.id) } : {}),
+    ...(r.multi
       ? {
-          photos: photoRows
-            .filter((p) => p.runId === r.id)
-            .map((p) => ({ itemId: p.itemId, sha256: p.sha256 })),
+          scope: r.scopeLabel ?? undefined,
+          segments: kids
+            .filter((k) => k.parentRunId === r.id)
+            .map((k) => ({
+              room: rooms.find((x) => x.id === k.roomId)?.name ?? null,
+              device: devices.find((x) => x.id === k.deviceId)?.name ?? null,
+              status: k.status,
+              ...(k.skipReason ? { skipReason: k.skipReason } : {}),
+              ...(k.workedByName ? { workedBy: k.workedByName } : {}),
+              failed: k.failedCount,
+              results: answers(k.results),
+              ...(photoRows.some((p) => p.runId === k.id) ? { photos: photosOf(k.id) } : {}),
+            })),
         }
       : {}),
     ...(r.correctsRunId

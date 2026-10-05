@@ -336,6 +336,23 @@ export async function estateOverview(
   // Planned maintenance, for the rooms in view (a device check counts against its room).
   const pmStates = pmSchedules
     .filter((p) => {
+      const kind = (p as { scope?: string }).scope ?? 'room';
+      if (kind !== 'room') {
+        // A schedule for several rooms, an area or a site counts when any of its rooms is in view.
+        const m = p as { siteId?: string | null; areaId?: string | null; roomIds?: string[] };
+        if (kind === 'rooms') return (m.roomIds ?? []).some((id) => roomIds.has(id));
+        if (kind === 'site') return rooms.some((r) => r.siteId === m.siteId);
+        const inside = new Set(m.areaId ? [m.areaId] : []);
+        for (let grew = true; grew;) {
+          grew = false;
+          for (const a of allAreas)
+            if (a.parentId && inside.has(a.parentId) && !inside.has(a.id)) {
+              inside.add(a.id);
+              grew = true;
+            }
+        }
+        return rooms.some((r) => r.areaId !== null && inside.has(r.areaId));
+      }
       const roomId = p.roomId ?? devices.find((d) => d.id === p.deviceId)?.roomId ?? null;
       return roomId !== null && roomIds.has(roomId);
     })
