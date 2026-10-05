@@ -201,6 +201,8 @@ export async function recordReports(
   now: Date,
 ): Promise<AlertJob[]> {
   const jobs: AlertJob[] = [];
+  // A gateway that watches devices only reports no rooms: nothing to read.
+  if (reports.length === 0) return jobs;
   const add = (j: AlertJob | null) => void (j && jobs.push(j));
   const rooms = await db.room.findMany({ where: { gatewayId: gw.id, orgId: gw.orgId } });
   const byId = new Map(rooms.map((r) => [r.id, r]));
@@ -398,7 +400,10 @@ export async function recordReports(
  */
 export async function sweep(db: MonitoringDb, now = new Date()): Promise<AlertJob[]> {
   const jobs: AlertJob[] = [];
-  const gateways = await db.gateway.findMany({ where: { enrolledAt: { not: null } } });
+  const gateways = await db.gateway.findMany({
+    where: { enrolledAt: { not: null } },
+    select: { id: true, orgId: true, siteId: true, name: true, enrolledAt: true, lastSeenAt: true },
+  });
   // An organisation scheduled for deletion has had its gateways let go: they are not "offline".
   const suspended = new Set(
     (await db.org.findMany({ where: { deletedAt: { gt: new Date(0) } } })).map((o) => o.id),

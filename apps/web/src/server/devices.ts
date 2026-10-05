@@ -156,44 +156,84 @@ export async function gatewayIdFor(
   d: Pick<DeviceRow, 'gatewayId' | 'roomId' | 'siteId' | 'orgId'>,
 ) {
   const room = d.roomId
-    ? await db.room.findFirst({ where: { id: d.roomId, orgId: d.orgId } })
+    ? await db.room.findFirst({
+        where: { id: d.roomId, orgId: d.orgId },
+        select: { gatewayId: true },
+      })
     : null;
-  const siteDefault = async () => {
-    const site = await db.site.findFirst({ where: { id: d.siteId, orgId: d.orgId } });
-    const named = site?.defaultGatewayId
-      ? await db.gateway.findFirst({
-          where: { id: site.defaultGatewayId, orgId: d.orgId, siteId: d.siteId },
-        })
-      : null;
-    if (named) return named.id;
-    // Not chosen (or the chosen one was removed): the site's oldest gateway.
-    return (
-      (
-        await db.gateway.findMany({
-          where: { siteId: d.siteId, orgId: d.orgId },
-          orderBy: { createdAt: 'asc' },
-        })
-      )[0]?.id ?? null
-    );
-  };
   return resolveGatewayId({
     deviceGatewayId: d.gatewayId,
     roomGatewayId: room?.gatewayId ?? null,
-    siteGatewayId: d.gatewayId || room?.gatewayId ? null : await siteDefault(),
+    siteGatewayId:
+      d.gatewayId || room?.gatewayId ? null : await siteDefaultGatewayId(db, d.orgId, d.siteId),
   });
 }
 
-/** The active devices a gateway should poll. */
+/** The gateway a site's unassigned devices fall to: the one it names, else its oldest. */
+async function siteDefaultGatewayId(db: DevicesDb, orgId: string, siteId: string) {
+  const site = await db.site.findFirst({
+    where: { id: siteId, orgId },
+    select: { defaultGatewayId: true },
+  });
+  const named = site?.defaultGatewayId
+    ? await db.gateway.findFirst({
+        where: { id: site.defaultGatewayId, orgId, siteId },
+        select: { id: true },
+      })
+    : null;
+  if (named) return named.id;
+  // Not chosen (or the chosen one was removed): the site's oldest gateway.
+  const [oldest] = await db.gateway.findMany({
+    where: { siteId, orgId },
+    orderBy: { createdAt: 'asc' },
+    take: 1,
+    select: { id: true },
+  });
+  return oldest?.id ?? null;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Which active devices a gateway polls (its own, its rooms', or the site's when it is the default),
+ * worked out in the database so another gateway's devices are never downloaded. Same rule as
+ * `gatewayIdFor`. `ids` narrows it to those devices.
+ */
+async function polledBy(
+  db: DevicesDb,
+  gw: { id: string; orgId: string; siteId: string },
+  ids?: string[],
+): Promise<Prisma.DeviceWhereInput> {
+  const rooms = await db.room.findMany({
+    where: { orgId: gw.orgId, siteId: gw.siteId },
+    select: { id: true, gatewayId: true },
+  });
+  const roomsWhere = (has: (gatewayId: string | null) => boolean) =>
+    rooms.filter((r) => has(r.gatewayId)).map((r) => r.id);
+  const isDefault = (await siteDefaultGatewayId(db, gw.orgId, gw.siteId)) === gw.id;
+  return {
+    orgId: gw.orgId,
+    siteId: gw.siteId,
+    kind: 'active',
+    ...(ids ? { id: { in: ids } } : {}),
+    OR: [
+      { gatewayId: gw.id },
+      { gatewayId: null, roomId: { in: roomsWhere((g) => g === gw.id) } },
+      ...(isDefault
+        ? [{ gatewayId: null, OR: [{ roomId: null }, { roomId: { in: roomsWhere((g) => !g) } }] }]
+        : []),
+    ],
+  };
+}
+
+/** The active devices a gateway should poll, or just those of `ids` that it polls. */
 export async function devicesForGateway(
   db: DevicesDb,
   gw: { id: string; orgId: string; siteId: string },
+  ids?: string[],
 ) {
-  const all = await db.device.findMany({
-    where: { orgId: gw.orgId, siteId: gw.siteId, kind: 'active' },
-  });
-  const out: DeviceRow[] = [];
-  for (const d of all) if (d.control && (await gatewayIdFor(db, d)) === gw.id) out.push(d);
-  return out;
+  const rows: DeviceRow[] = await db.device.findMany({ where: await polledBy(db, gw, ids) });
+  return rows.filter((d) => d.control);
 }
 
 // ---- What a gateway gets -------------------------------------------------------------------------
@@ -261,15 +301,28 @@ export async function deviceSetVersion(
   db: DevicesDb,
   gw: { id: string; orgId: string; siteId: string },
 ) {
-  const rows = (await devicesForGateway(db, gw)).sort((a, b) => a.id.localeCompare(b.id));
-  const stamp: string[] = [];
-  for (const d of rows) {
-    if (!d.control) continue;
-    const set = d.credentialSetId
-      ? await db.credentialSet.findFirst({ where: { id: d.credentialSetId, orgId: gw.orgId } })
-      : null;
-    stamp.push(`${d.id}:${d.version}:${set?.updatedAt.getTime() ?? 0}`);
-  }
+  // Runs on every heartbeat, so it reads only what the version is made of.
+  const rows = (
+    await db.device.findMany({
+      where: await polledBy(db, gw),
+      select: { id: true, version: true, control: true, credentialSetId: true },
+    })
+  )
+    .filter((d) => d.control)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const setIds = [...new Set(rows.flatMap((d) => (d.credentialSetId ? [d.credentialSetId] : [])))];
+  const updated = new Map(
+    (setIds.length
+      ? await db.credentialSet.findMany({
+          where: { id: { in: setIds }, orgId: gw.orgId },
+          select: { id: true, updatedAt: true },
+        })
+      : []
+    ).map((s) => [s.id, s.updatedAt.getTime()]),
+  );
+  const stamp = rows.map(
+    (d) => `${d.id}:${d.version}:${d.credentialSetId ? (updated.get(d.credentialSetId) ?? 0) : 0}`,
+  );
   return createHash('sha256').update(stamp.join('|')).digest('hex').slice(0, 16);
 }
 
@@ -291,7 +344,9 @@ export async function ingestDeviceReports(
   const profileCache = new Map<string, import('@kestrel/model').ConfigParam[]>();
   const add = (j: AlertJob | null) => void (j && jobs.push(j));
   if (reports.length === 0) return { jobs, enforce };
-  const mine = new Map((await devicesForGateway(db, gw)).map((d) => [d.id, d]));
+  // A gateway names devices freely: only real ids can be looked up.
+  const reported = [...new Set(reports.map((r) => r.deviceId).filter((id) => UUID.test(id)))];
+  const mine = new Map((await devicesForGateway(db, gw, reported)).map((d) => [d.id, d]));
   const monitoring = db as unknown as MonitoringDb;
   for (const rep of reports) {
     const row = mine.get(rep.deviceId);
@@ -384,7 +439,7 @@ export async function ingestDeviceReports(
       if (v !== undefined && String(v) !== String(before[f]))
         history.push({ field: f, value: String(v) });
     }
-    await db.device.update({ where: { id: row.id }, data: patch });
+    await db.device.update({ where: { id: row.id }, data: patch, select: { id: true } });
     // How the device answered the gateway's pings since the last heartbeat.
     if (rep.latency && db.latencyBucket)
       await recordLatency(
@@ -404,6 +459,7 @@ export async function ingestDeviceReports(
         await db.device.update({
           where: { id: row.id },
           data: { configState: cfg.state as unknown as Prisma.InputJsonValue },
+          select: { id: true },
         });
     }
 
@@ -428,7 +484,9 @@ export async function ingestDeviceReports(
     const affected = [...new Set([...(row.roomId ? [row.roomId] : []), ...alsoRooms])];
     const homeRoom = affected[0] ?? null;
     const names = affected.length
-      ? (await db.room.findMany({ where: { id: { in: affected } } })).map((r) => r.name)
+      ? (await db.room.findMany({ where: { id: { in: affected } }, select: { name: true } })).map(
+          (r) => r.name,
+        )
       : [];
     const roomName = names.length ? names.join(', ') : null;
     if (rep.online)

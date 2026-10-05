@@ -164,17 +164,22 @@ async function assignments(db: Db, gatewayId: string, masterKey = process.env.KE
   });
   const byId = new Map(releases.map((r) => [r.id, r]));
   const bindingRows = rooms.length
-    ? await db.roomBinding.findMany({ where: { roomId: { in: rooms.map((r) => r.id) } } })
+    ? await db.roomBinding.findMany({
+        where: { roomId: { in: rooms.map((r) => r.id) } },
+        select: { roomId: true, version: true },
+      })
     : [];
   const bindingsOf = new Map(bindingRows.map((b) => [b.roomId, b.version]));
   // A room that uses shared devices also changes when one of them does.
   const sharedIds = [...new Set(releases.flatMap((r) => r.siteDeviceIds ?? []))];
   const sharedVersions = new Map(
     sharedIds.length
-      ? (await db.siteDevice.findMany({ where: { id: { in: sharedIds } } })).map((d) => [
-          d.id,
-          d.version,
-        ])
+      ? (
+          await db.siteDevice.findMany({
+            where: { id: { in: sharedIds } },
+            select: { id: true, version: true },
+          })
+        ).map((d) => [d.id, d.version])
       : [],
   );
   const versionFor = (roomId: string, releaseId: string | null) => {
@@ -222,6 +227,7 @@ export async function heartbeat(
       version: parsed.data.gatewayVersion,
       features: parsed.data.features,
     },
+    select: { id: true },
   });
   // Rooms report themselves; a gateway can only report rooms assigned to it.
   await Promise.all(
