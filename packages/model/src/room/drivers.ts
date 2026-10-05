@@ -664,24 +664,30 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     example: { host: '<controller IP>' },
   },
   'netgear-av': {
-    name: 'Netgear AV switch (SNMP)',
+    name: 'Netgear AV switch',
     label: 'Network – Netgear AV series (M4250 / M4300)',
     group: 'network',
     make: 'Netgear',
     description:
-      'Netgear AV line managed switches (M4250, M4300 and similar) over SNMP v2c: whether it answers, its model, serial number and software version, which ports are up and at what speed, and PoE (supply budget and use, and each port\'s state). With a write community it can switch a PoE port off, on, or power-cycle it to reboot what is plugged in (commands poe_off_<group>_<port>, poe_on_… and poe_cycle_…). Any value can also be watched by its OID. Turn on SNMP in the switch first. Not yet checked against a real switch.',
+      'Netgear AV line managed switches (M4250, M4300 and their PoE variants) over the switch\'s own web API, with nothing to turn on: model, serial number, firmware and uptime, temperature, fans, CPU and memory, which ports are up and at what speed, PoE budget and use, and the power each PoE port is drawing. A PoE port can be power-cycled (command poe_cycle_<port>) to reboot what it powers. Sign in with a switch user. Checked against an M4250-26G4F-PoE+ on firmware 13.0.5.14.',
     class: 'infrastructure',
-    features: ['snmp'],
+    features: ['http_health'],
     settings: [
       { key: 'host', label: 'Switch address', scope: 'binding', required: true },
-      { key: 'port', label: 'SNMP port (161)', scope: 'binding' },
-      { key: 'community', label: 'Read community (public)', scope: 'secret' },
-      { key: 'writeCommunity', label: 'Write community (only to switch PoE)', scope: 'secret' },
+      { key: 'port', label: 'Port (443)', scope: 'binding' },
+      { key: 'https', label: 'Use https (true or false)', scope: 'design' },
+      { key: 'username', label: 'Switch user', scope: 'binding', required: true },
+      { key: 'password', label: 'Switch password', scope: 'secret', required: true },
       { key: 'pollMs', label: 'How often to read the switch (ms)', scope: 'design' },
     ],
-    points: { generic: [{ key: 'oid', label: 'OID (for example 1.3.6.1.2.1.1.3.0)' }] },
+    points: {
+      generic: [
+        { key: 'field', label: 'Reading: link, poe, poeWatts, poeEnabled (with a port), or temp, cpu, memory, poeUsedWatts, poeBudgetWatts' },
+        { key: 'port', label: 'Port number (blank for a reading of the whole switch)', optional: true },
+      ],
+    },
     categories: ['network_switch'],
-    example: { host: '<switch IP>', community: '<read community>' },
+    example: { host: '<switch IP>', username: 'admin', password: '<switch password>' },
   },
   'snmp-generic': {
     name: 'Generic SNMP device',

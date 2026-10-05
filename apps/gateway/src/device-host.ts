@@ -3,6 +3,7 @@ import { createDriver, type DeviceDriver } from '@kestrel/drivers/real';
 import {
   ADDRESS_TRACKING_KEY,
   Device,
+  DeviceCategory,
   type DeviceCommand,
   DeviceDetails,
   type BrowsedPoints,
@@ -179,10 +180,13 @@ export class DeviceHost {
       current?.off();
       current?.driver.close();
       this.running.delete(id);
+      // Estate-only categories (a network switch, a UPS, an access point) are not room device
+      // categories. The driver does not read the category, so they run as an infrastructure device.
+      const category = DeviceCategory.safeParse(d.category).success ? d.category : 'control_processor';
       const parsed = Device.safeParse({
         id: d.id,
         name: d.name,
-        category: d.category,
+        category,
         ports: [],
         control: d.control,
         settings: d.settings,
