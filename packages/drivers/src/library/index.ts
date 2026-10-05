@@ -4,13 +4,16 @@ import { checkDriverSpec, type DriverSpec } from '@kestrel/model';
 // docs/driver-sdk.md). A device picks one as `lib:<id>`. They are bundled with the gateway, so a
 // release does not need to carry them.
 
-
 // Sony BRAVIA professional displays. REST calls (JSON) for power, input, volume and apps, and IRCC-IP
 // (SOAP) for remote keys, both authenticated by the pre-shared key set on the display. Checked
 // against Sony's published REST API and IRCC-IP reference (pro-bravia.sony.net).
 const json = (method: string, params: string) =>
   `{"method":"${method}","id":1,"params":[${params}],"version":"1.0"}`;
-const rest = (path: string, method: string, params: string) => ({ method: 'POST', path, body: json(method, params) });
+const rest = (path: string, method: string, params: string) => ({
+  method: 'POST',
+  path,
+  body: json(method, params),
+});
 // IRCC codes from Sony's IRCC-IP reference. "Menu" is the Options key: Sony has no separate Menu.
 const IRCC: Record<string, string> = {
   up: 'AAAAAQAAAAEAAAB0Aw==',
@@ -52,7 +55,11 @@ function bravia(): unknown {
     commands: {
       'power.on': rest('/sony/system', 'setPowerStatus', '{"status":true}'),
       'power.off': rest('/sony/system', 'setPowerStatus', '{"status":false}'),
-      select_input: rest('/sony/avContent', 'setPlayContent', '{"uri":"extInput:hdmi?port={inputNumber}"}'),
+      select_input: rest(
+        '/sony/avContent',
+        'setPlayContent',
+        '{"uri":"extInput:hdmi?port={inputNumber}"}',
+      ),
       volume: rest('/sony/audio', 'setAudioVolume', '{"target":"speaker","volume":"{level}"}'),
       'mute.on': rest('/sony/audio', 'setAudioMute', '{"status":true}'),
       'mute.off': rest('/sony/audio', 'setAudioMute', '{"status":false}'),
@@ -61,10 +68,18 @@ function bravia(): unknown {
     },
     volumeScale: { min: 0, max: 100 },
     feedback: {
-      poll: [{ action: rest('/sony/system', 'getPowerStatus', ''), everyMs: 10000 }],
+      poll: [
+        { action: rest('/sony/system', 'getPowerStatus', ''), everyMs: 10000 },
+        // Who the display is, for the register: model, serial number, MAC and firmware in one call.
+        { action: rest('/sony/system', 'getSystemInformation', ''), everyMs: 300000 },
+      ],
       patterns: [
         { match: '"status"\\s*:\\s*"active"', set: 'power', value: 'on' },
         { match: '"status"\\s*:\\s*"standby"', set: 'power', value: 'off' },
+        { match: '"model"\\s*:\\s*"([^"]+)"', set: 'model', value: '$1' },
+        { match: '"serial"\\s*:\\s*"([^"]+)"', set: 'serial', value: '$1' },
+        { match: '"macAddr"\\s*:\\s*"([^"]+)"', set: 'mac', value: '$1' },
+        { match: '"fwVersion"\\s*:\\s*"([^"]+)"', set: 'firmware', value: '$1' },
       ],
     },
   };
@@ -94,22 +109,63 @@ const raw: unknown[] = [
     name: 'Cisco RoomOS video conferencing',
     description:
       'Cisco Room and Board devices over their HTTP API (/putxml). Set "credentials" to the base64 of "username:password".',
-    transport: { type: 'http', https: true, headers: { authorization: 'Basic {setting.credentials}', 'content-type': 'text/xml' } },
-    settings: [{ key: 'credentials', label: 'Credentials (base64 of user:password)', type: 'secret', required: true }],
+    transport: {
+      type: 'http',
+      https: true,
+      headers: { authorization: 'Basic {setting.credentials}', 'content-type': 'text/xml' },
+    },
+    settings: [
+      {
+        key: 'credentials',
+        label: 'Credentials (base64 of user:password)',
+        type: 'secret',
+        required: true,
+      },
+    ],
     quickActions: ['mics.privacy_mute'],
     commands: {
-      'power.on': { method: 'POST', path: '/putxml', body: '<Command><Standby><Deactivate/></Standby></Command>' },
-      'power.off': { method: 'POST', path: '/putxml', body: '<Command><Standby><Activate/></Standby></Command>' },
-      'mute.on': { method: 'POST', path: '/putxml', body: '<Command><Audio><Microphones><Mute/></Microphones></Audio></Command>' },
-      'mute.off': { method: 'POST', path: '/putxml', body: '<Command><Audio><Microphones><Unmute/></Microphones></Audio></Command>' },
-      volume: { method: 'POST', path: '/putxml', body: '<Command><Audio><Volume><Set><Level>{level}</Level></Set></Volume></Audio></Command>' },
-      'command.hangup': { method: 'POST', path: '/putxml', body: '<Command><Call><Disconnect/></Call></Command>' },
+      'power.on': {
+        method: 'POST',
+        path: '/putxml',
+        body: '<Command><Standby><Deactivate/></Standby></Command>',
+      },
+      'power.off': {
+        method: 'POST',
+        path: '/putxml',
+        body: '<Command><Standby><Activate/></Standby></Command>',
+      },
+      'mute.on': {
+        method: 'POST',
+        path: '/putxml',
+        body: '<Command><Audio><Microphones><Mute/></Microphones></Audio></Command>',
+      },
+      'mute.off': {
+        method: 'POST',
+        path: '/putxml',
+        body: '<Command><Audio><Microphones><Unmute/></Microphones></Audio></Command>',
+      },
+      volume: {
+        method: 'POST',
+        path: '/putxml',
+        body: '<Command><Audio><Volume><Set><Level>{level}</Level></Set></Volume></Audio></Command>',
+      },
+      'command.hangup': {
+        method: 'POST',
+        path: '/putxml',
+        body: '<Command><Call><Disconnect/></Call></Command>',
+      },
     },
     volumeScale: { min: 0, max: 100 },
     feedback: {
       poll: [
-        { action: { method: 'GET', path: '/getxml?location=/Status/Standby/State' }, everyMs: 15000 },
-        { action: { method: 'GET', path: '/getxml?location=/Status/Audio/Microphones/Mute' }, everyMs: 15000 },
+        {
+          action: { method: 'GET', path: '/getxml?location=/Status/Standby/State' },
+          everyMs: 15000,
+        },
+        {
+          action: { method: 'GET', path: '/getxml?location=/Status/Audio/Microphones/Mute' },
+          everyMs: 15000,
+        },
       ],
       patterns: [
         { match: '<State[^>]*>Standby</State>', set: 'power', value: 'off' },
@@ -175,7 +231,14 @@ const raw: unknown[] = [
     name: 'LG signage display',
     description:
       'LG signage and professional displays over the network port (TCP 9761). Turn on network control on the display. "Set ID" is the display Set ID (01 unless changed). Ports in1 and in2 select HDMI 1 and HDMI 2.',
-    transport: { type: 'tcp', port: 9761, terminator: '\r', replyTerminator: 'x', keepOpen: true, timeoutMs: 2000 },
+    transport: {
+      type: 'tcp',
+      port: 9761,
+      terminator: '\r',
+      replyTerminator: 'x',
+      keepOpen: true,
+      timeoutMs: 2000,
+    },
     settings: [{ key: 'setId', label: 'Set ID', type: 'string', scope: 'binding', default: '01' }],
     quickActions: ['display.blank'],
     commands: {
@@ -238,7 +301,8 @@ const raw: unknown[] = [
     class: 'video_switching',
     features: ['route'],
     name: 'Kramer matrix switcher (Protocol 3000)',
-    description: 'Kramer matrix switchers over Protocol 3000 on TCP port 5000. Routes video (layer 1) from an input to an output.',
+    description:
+      'Kramer matrix switchers over Protocol 3000 on TCP port 5000. Routes video (layer 1) from an input to an output.',
     transport: { type: 'tcp', port: 5000, terminator: '\r', keepOpen: true, timeoutMs: 3000 },
     commands: {
       route: { send: '#ROUTE 1,{outputNumber},{inputNumber}', expect: '@ROUTE\\s+\\d+,' },

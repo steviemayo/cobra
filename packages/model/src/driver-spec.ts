@@ -31,7 +31,8 @@ export const COMMAND_KEYS = [
 ] as const;
 
 /** Remote keys a driver may map: `key.up`, `key.play` and so on (see DisplayKey). */
-export const KEY_COMMAND = /^key\.(up|down|left|right|ok|back|home|menu|play|pause|stop|forward|rewind)$/;
+export const KEY_COMMAND =
+  /^key\.(up|down|left|right|ok|back|home|menu|play|pause|stop|forward|rewind)$/;
 
 /** Values a command template may use. `{setting.<key>}` also reads one of the driver's settings. */
 export const PLACEHOLDERS: Record<string, readonly string[]> = {
@@ -47,7 +48,9 @@ export const PLACEHOLDERS: Record<string, readonly string[]> = {
 export const SETTING_TYPES = ['string', 'number', 'boolean', 'secret'] as const;
 
 export const DriverSetting = z.object({
-  key: z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/, 'Setting names use letters, numbers and underscores'),
+  key: z
+    .string()
+    .regex(/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/, 'Setting names use letters, numbers and underscores'),
   label: z.string().min(1).max(80),
   type: z.enum(SETTING_TYPES).default('string'),
   /** design, binding or secret. Left out, it is worked out from the type and the name (see settingScope). */
@@ -73,7 +76,19 @@ export const DriverAction = z.object({
 });
 export type DriverAction = z.infer<typeof DriverAction>;
 
-export const FEEDBACK_FIELDS = ['power', 'muted', 'volume', 'input', 'preset', 'blanked', 'online', 'firmware'] as const;
+export const FEEDBACK_FIELDS = [
+  'power',
+  'muted',
+  'volume',
+  'input',
+  'preset',
+  'blanked',
+  'online',
+  'firmware',
+  'model',
+  'serial',
+  'mac',
+] as const;
 
 /** The commands a quick action needs the driver to have. */
 export const QUICK_ACTION_COMMANDS: Record<QuickActionId, readonly string[]> = {
@@ -128,12 +143,21 @@ export const DriverSpec = z
     quickActions: z.array(QuickActionId).max(10).optional(),
     /** How to scale the room's 0-100 volume to the device's own range, and back. */
     volumeScale: z
-      .object({ min: z.number(), max: z.number(), decimals: z.number().int().min(0).max(3).default(0) })
+      .object({
+        min: z.number(),
+        max: z.number(),
+        decimals: z.number().int().min(0).max(3).default(0),
+      })
       .optional(),
     feedback: z
       .object({
         poll: z
-          .array(z.object({ action: DriverAction, everyMs: z.number().int().min(1000).max(300_000).default(5000) }))
+          .array(
+            z.object({
+              action: DriverAction,
+              everyMs: z.number().int().min(1000).max(300_000).default(5000),
+            }),
+          )
           .max(10)
           .default([]),
         patterns: z.array(DriverPattern).max(40).default([]),
@@ -180,27 +204,33 @@ export function commandValues(
   settings: Record<string, string | number | boolean>,
   input: { level?: number; input?: string; output?: string; name?: string; appId?: string },
 ): Record<string, string | number | boolean> {
-  const digits = (id?: string) => (id ? (id.replace(/\D+/g, '') || id) : '');
+  const digits = (id?: string) => (id ? id.replace(/\D+/g, '') || id : '');
   const scale = spec.volumeScale;
   const level =
     input.level === undefined
       ? undefined
       : scale
-        ? Number((scale.min + (input.level / 100) * (scale.max - scale.min)).toFixed(scale.decimals))
+        ? Number(
+            (scale.min + (input.level / 100) * (scale.max - scale.min)).toFixed(scale.decimals),
+          )
         : input.level;
   const out: Record<string, string | number | boolean> = {};
   for (const [k, v] of Object.entries(settings)) out[`setting.${k}`] = v;
   if (level !== undefined) {
     out.level = level;
     // Two hex digits, for devices that take a level as hexadecimal (LG: 00 to 64 is 0 to 100).
-    out.levelHex = Math.max(0, Math.round(Number(level))).toString(16).toUpperCase().padStart(2, '0');
+    out.levelHex = Math.max(0, Math.round(Number(level)))
+      .toString(16)
+      .toUpperCase()
+      .padStart(2, '0');
   }
   if (input.input !== undefined) {
     out.input = input.input;
     out.inputNumber = digits(input.input);
     // HDMI n as an LG input code: 90 for HDMI 1, 91 for HDMI 2, and so on.
     const n = Number(digits(input.input));
-    if (Number.isInteger(n) && n >= 1 && n <= 16) out.inputHex = (0x8f + n).toString(16).toUpperCase();
+    if (Number.isInteger(n) && n >= 1 && n <= 16)
+      out.inputHex = (0x8f + n).toString(16).toUpperCase();
   }
   if (input.output !== undefined) {
     out.output = input.output;
@@ -220,8 +250,10 @@ export function resolveSettings(
   const missing: string[] = [];
   // host is always a device setting even if the driver does not declare it
   const declared = new Map(spec.settings.map((s) => [s.key, s]));
-  if (!declared.has('host')) declared.set('host', { key: 'host', label: 'Address', type: 'string', required: true });
-  if (!declared.has('port')) declared.set('port', { key: 'port', label: 'Port', type: 'number', required: false });
+  if (!declared.has('host'))
+    declared.set('host', { key: 'host', label: 'Address', type: 'string', required: true });
+  if (!declared.has('port'))
+    declared.set('port', { key: 'port', label: 'Port', type: 'number', required: false });
   for (const [key, s] of declared) {
     const raw = given[key] ?? s.default;
     const ok =
@@ -266,17 +298,24 @@ export function driverProblems(spec: DriverSpec): string[] {
   const tcp = spec.transport.type === 'tcp';
 
   const checkAction = (where: string, a: DriverAction, allowed: readonly string[]) => {
-    const texts = tcp ? [a.send ?? ''] : [a.path ?? '', a.body ?? '', ...Object.values(a.headers ?? {})];
+    const texts = tcp
+      ? [a.send ?? '']
+      : [a.path ?? '', a.body ?? '', ...Object.values(a.headers ?? {})];
     if (tcp && a.headers) problems.push(`${where}: "headers" are for HTTP drivers`);
     if (tcp && !a.send) problems.push(`${where}: a TCP driver needs "send"`);
     if (!tcp && !a.path) problems.push(`${where}: an HTTP driver needs "path"`);
-    if (tcp && (a.path || a.method || a.body)) problems.push(`${where}: "path", "method" and "body" are for HTTP drivers`);
+    if (tcp && (a.path || a.method || a.body))
+      problems.push(`${where}: "path", "method" and "body" are for HTTP drivers`);
     if (!tcp && a.send) problems.push(`${where}: "send" is for TCP drivers`);
-    if (!tcp && a.path && !a.path.startsWith('/')) problems.push(`${where}: the path must start with /`);
+    if (!tcp && a.path && !a.path.startsWith('/'))
+      problems.push(`${where}: the path must start with /`);
     for (const t of texts)
       for (const p of placeholdersIn(t)) {
         const ok = allowed.includes(p) || (p.startsWith('setting.') && settingKeys.has(p.slice(8)));
-        if (!ok) problems.push(`${where}: {${p}} is not available here${p.startsWith('setting.') ? ' (no such setting)' : ''}`);
+        if (!ok)
+          problems.push(
+            `${where}: {${p}} is not available here${p.startsWith('setting.') ? ' (no such setting)' : ''}`,
+          );
       }
     if (a.expect) {
       const p = regexProblem(a.expect);
@@ -286,11 +325,16 @@ export function driverProblems(spec: DriverSpec): string[] {
 
   const keys = new Set<string>(COMMAND_KEYS);
   const cmds = Object.entries(spec.commands);
-  if (cmds.length === 0 && spec.feedback.poll.length === 0) problems.push('A driver needs at least one command or something to poll');
+  if (cmds.length === 0 && spec.feedback.poll.length === 0)
+    problems.push('A driver needs at least one command or something to poll');
   for (const [key, action] of cmds) {
-    const custom = (key.startsWith('command.') && /^command\.[a-zA-Z][\w-]{0,39}$/.test(key)) || KEY_COMMAND.test(key);
+    const custom =
+      (key.startsWith('command.') && /^command\.[a-zA-Z][\w-]{0,39}$/.test(key)) ||
+      KEY_COMMAND.test(key);
     if (!keys.has(key) && !custom) {
-      problems.push(`“${key}” is not a command Kestrel knows (use ${COMMAND_KEYS.join(', ')}, key.<name> or command.<name>)`);
+      problems.push(
+        `“${key}” is not a command Kestrel knows (use ${COMMAND_KEYS.join(', ')}, key.<name> or command.<name>)`,
+      );
       continue;
     }
     const base = key.split('.')[0]!;
@@ -305,12 +349,17 @@ export function driverProblems(spec: DriverSpec): string[] {
     if (bad) problems.push(`Pattern ${i + 1}: "match" ${bad}`);
     else {
       const groups = new RegExp(`${p.match}|`).exec('')!.length - 1;
-      if (p.value.startsWith('$') && !/^\$[1-9]$/.test(p.value)) problems.push(`Pattern ${i + 1}: "value" must be a literal or $1 to $9`);
+      if (p.value.startsWith('$') && !/^\$[1-9]$/.test(p.value))
+        problems.push(`Pattern ${i + 1}: "value" must be a literal or $1 to $9`);
       else if (/^\$[1-9]$/.test(p.value) && Number(p.value.slice(1)) > groups)
-        problems.push(`Pattern ${i + 1}: "value" uses ${p.value} but the pattern has ${groups} group${groups === 1 ? '' : 's'}`);
+        problems.push(
+          `Pattern ${i + 1}: "value" uses ${p.value} but the pattern has ${groups} group${groups === 1 ? '' : 's'}`,
+        );
     }
     if (p.set === 'volume' && !spec.volumeScale && p.value.startsWith('$'))
-      problems.push(`Pattern ${i + 1}: reading a volume needs "volumeScale" so it can be shown as 0-100`);
+      problems.push(
+        `Pattern ${i + 1}: reading a volume needs "volumeScale" so it can be shown as 0-100`,
+      );
   });
   if (
     spec.feedback.patterns.length > 0 &&
@@ -319,16 +368,25 @@ export function driverProblems(spec: DriverSpec): string[] {
     !spec.transport.keepOpen
   )
     problems.push('Feedback patterns on a TCP driver need "keepOpen" or something to poll');
-  if (spec.commands.volume && !spec.volumeScale && placeholdersIn(spec.commands.volume.send ?? spec.commands.volume.path ?? '').length === 0)
+  if (
+    spec.commands.volume &&
+    !spec.volumeScale &&
+    placeholdersIn(spec.commands.volume.send ?? spec.commands.volume.path ?? '').length === 0
+  )
     problems.push('The volume command does not use {level}');
   return problems;
 }
 
 /** Parses and checks in one go, for the portal and the command line. */
-export function checkDriverSpec(raw: unknown): { ok: true; spec: DriverSpec } | { ok: false; problems: string[] } {
+export function checkDriverSpec(
+  raw: unknown,
+): { ok: true; spec: DriverSpec } | { ok: false; problems: string[] } {
   const parsed = DriverSpec.safeParse(raw);
   if (!parsed.success)
-    return { ok: false, problems: parsed.error.issues.map((i) => `${i.path.join('.') || 'driver'}: ${i.message}`) };
+    return {
+      ok: false,
+      problems: parsed.error.issues.map((i) => `${i.path.join('.') || 'driver'}: ${i.message}`),
+    };
   const problems = driverProblems(parsed.data);
   return problems.length ? { ok: false, problems } : { ok: true, spec: parsed.data };
 }

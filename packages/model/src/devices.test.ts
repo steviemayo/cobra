@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { inferFromDriver } from './room/drivers';
 import {
   deviceLiveState,
   identityFromDetails,
@@ -186,5 +187,47 @@ describe('addresses a gateway can follow', () => {
     expect(normaliseMac('aa:bb:cc:dd:ee')).toBeNull();
     expect(normaliseMac('zz:bb:cc:dd:ee:01')).toBeNull();
     expect(normaliseMac(undefined)).toBeNull();
+  });
+});
+
+describe('a make or model inferred from the driver', () => {
+  const inferred = { source: 'discovered' as const, inferred: true, at: now };
+
+  it('is filled by a real reading like an empty field, with no swap flag', () => {
+    const r = mergeDiscovered(
+      'model',
+      { value: 'Q-SYS Core', provenance: inferred },
+      'Core Nano',
+      now,
+    );
+    expect(r.value).toBe('Core Nano');
+    expect(r.provenance?.inferred).toBeUndefined();
+    expect(r.change).toMatchObject({ oldValue: null, newValue: 'Core Nano', possibleSwap: false });
+  });
+
+  it('stays while the device reports nothing', () => {
+    const r = mergeDiscovered('model', { value: 'Q-SYS Core', provenance: inferred }, null, now);
+    expect(r).toMatchObject({ value: 'Q-SYS Core', provenance: inferred });
+  });
+
+  it('becomes a manual value when a person types over it, even the same words', () => {
+    const r = mergeManual(
+      'model',
+      { value: 'Q-SYS Core', provenance: inferred },
+      'Q-SYS Core',
+      now,
+      'u1',
+    );
+    expect(r.value).toBe('Q-SYS Core');
+    expect(r.provenance).toMatchObject({ source: 'manual', by: 'u1' });
+    expect(r.provenance?.inferred).toBeUndefined();
+  });
+
+  it('is read from the driver catalog: a make for every vendor driver, a model for a one-product driver', () => {
+    expect(inferFromDriver('qsys-core')).toEqual({ make: 'QSC', model: 'Q-SYS Core' });
+    expect(inferFromDriver('wiim')).toEqual({ make: 'WiiM' });
+    expect(inferFromDriver('visca-ip')).toEqual({});
+    expect(inferFromDriver('lib:something')).toEqual({});
+    expect(inferFromDriver(null)).toEqual({});
   });
 });

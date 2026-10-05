@@ -43,10 +43,19 @@ export const roomUsageRouter = router({
     .input(z.object({ orgId, kind: UsageKind.default('av'), days }))
     .query(async ({ ctx, input }) => {
       const rows = await estateUsage(db, { ...input, orgId: ctx.orgId });
-      const rooms = await db.room.findMany({ where: { orgId: ctx.orgId } });
+      const [rooms, sites] = await Promise.all([
+        db.room.findMany({ where: { orgId: ctx.orgId } }),
+        db.site.findMany({ where: { orgId: ctx.orgId }, select: { id: true, name: true } }),
+      ]);
       const name = (roomId: string) => rooms.find((r) => r.id === roomId)?.name ?? 'A room';
+      const siteOf = (roomId: string) => rooms.find((r) => r.id === roomId)?.siteId ?? null;
       return {
-        rows: rows.map((r) => ({ ...r, roomName: name(r.roomId) })),
+        rows: rows.map((r) => ({
+          ...r,
+          roomName: name(r.roomId),
+          siteId: siteOf(r.roomId),
+          siteName: sites.find((s) => s.id === siteOf(r.roomId))?.name ?? null,
+        })),
         insights: usageInsights(rows, name, input.days),
         working: await loadWorkingHours(db, ctx.orgId),
       };

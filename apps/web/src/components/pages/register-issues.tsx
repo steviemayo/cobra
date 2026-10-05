@@ -103,9 +103,12 @@ export function RegisterIssuesView() {
         downloadFile({
           filename: `register-R${data.number}.csv`,
           contentType: 'text/csv',
-          body: [head.join(','), ...rows.map((r) => keys.map((k) => cell(r[k])).join(','))].join(
-            '\r\n',
-          ),
+          body: [
+            head.join(','),
+            ...rows.map((r) =>
+              keys.map((k) => cell(k === 'assetTag' ? r[k] || 'n/a' : r[k])).join(','),
+            ),
+          ].join('\r\n'),
         });
       }
     } catch (e) {
