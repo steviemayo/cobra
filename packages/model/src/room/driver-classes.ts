@@ -121,6 +121,7 @@ export const DRIVER_CLASSES: Record<DriverClass, DriverClassInfo> = {
       ptz: 'Pan, tilt and zoom',
       standby: 'Standby and wake',
       tracking: 'Tracking on and off',
+      snapshot: 'A JPEG snapshot on request, shown once and not kept',
     },
   },
   conference_system: {

@@ -37,8 +37,8 @@ export const KEY_COMMAND =
 
 /** Values a command template may use. `{setting.<key>}` also reads one of the driver's settings. */
 export const PLACEHOLDERS: Record<string, readonly string[]> = {
-  volume: ['level', 'levelHex'],
-  select_input: ['input', 'inputNumber', 'inputHex'],
+  volume: ['level', 'levelHex', 'levelHexAscii4'],
+  select_input: ['input', 'inputNumber', 'inputHex', 'inputCode'],
   route: ['input', 'output', 'inputNumber', 'outputNumber'],
   preset: ['name'],
   camera_preset: ['name'],
@@ -66,6 +66,12 @@ export type DriverSetting = z.infer<typeof DriverSetting>;
 export const DriverAction = z.object({
   /** TCP, UDP and WebSocket: the text to send, before the terminator. */
   send: z.string().min(1).max(500).optional(),
+  /**
+   * TCP and UDP: raw bytes to send instead of text, as hex pairs ("AA 11 {setting.displayId} 01 01
+   * {checksum}"). Values go in as hex. `{checksum}` is the transport's checksum of the bytes before it.
+   * No terminator is added.
+   */
+  hex: z.string().min(1).max(500).optional(),
   /** HTTP */
   method: z.enum(['GET', 'POST', 'PUT']).optional(),
   path: z.string().min(1).max(500).optional(),
@@ -106,6 +112,20 @@ export const DriverPattern = z.object({
 });
 export type DriverPattern = z.infer<typeof DriverPattern>;
 
+/** TCP and UDP: replies are raw bytes. Each reply (a chunk read, or a datagram) is shown to patterns as hex pairs: "AA FF 00 03 41 11 01 13". */
+const BinaryReplies = z.boolean().optional();
+
+/**
+ * How a frame's check byte is worked out when a hex payload carries `{checksum}`: the sum of the
+ * bytes (modulo 256) or their XOR, from byte `from` (0 is the first) up to the byte before it.
+ */
+const FrameChecksum = z
+  .object({
+    type: z.enum(['sum8', 'xor8']),
+    from: z.number().int().min(0).max(32).default(0),
+  })
+  .optional();
+
 export const DriverSpec = z
   .object({
     format: z.literal(DRIVER_FORMAT).default(DRIVER_FORMAT),
@@ -130,6 +150,8 @@ export const DriverSpec = z
         /** Keep one connection open. Needed to hear unsolicited feedback from the device. */
         keepOpen: z.boolean().default(false),
         timeoutMs: z.number().int().min(200).max(30_000).default(2000),
+        binary: BinaryReplies,
+        checksum: FrameChecksum,
       }),
       z.object({
         type: z.literal('http'),
@@ -137,6 +159,8 @@ export const DriverSpec = z
         https: z.boolean().default(false),
         headers: z.record(z.string().max(60), z.string().max(300)).default({}),
         timeoutMs: z.number().int().min(200).max(30_000).default(3000),
+        /** https only: accept the device's own certificate, as most AV devices have one. */
+        allowSelfSigned: z.boolean().optional(),
       }),
       z.object({
         type: z.literal('udp'),
@@ -145,6 +169,8 @@ export const DriverSpec = z
         terminator: z.string().max(4).default(''),
         /** How long to wait for a reply datagram when a command expects one. */
         timeoutMs: z.number().int().min(200).max(30_000).default(2000),
+        binary: BinaryReplies,
+        checksum: FrameChecksum,
       }),
       z.object({
         type: z.literal('websocket'),
@@ -173,6 +199,8 @@ export const DriverSpec = z
         decimals: z.number().int().min(0).max(3).default(0),
       })
       .optional(),
+    /** The device's own code for each input port ("in1": "21"), read by commands as {inputCode}. */
+    inputCodes: z.record(z.string().max(20), z.string().min(1).max(40)).optional(),
     feedback: z
       .object({
         poll: z
@@ -222,6 +250,43 @@ export const escapePath = (v: string) => encodeURIComponent(v);
 /** For the inside of a JSON string. */
 export const escapeJson = (v: string) => JSON.stringify(v).slice(1, -1);
 
+/** For hex payloads: only hex digits get through. */
+export const escapeHex = (v: string) => v.replace(/[^0-9a-fA-F]/g, '');
+
+/** Bytes as hex pairs ("AA FF 00"), the way a binary reply is shown to feedback patterns. */
+export const bytesToHex = (bytes: ArrayLike<number>): string =>
+  Array.from(bytes, (b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+
+/**
+ * Builds the bytes of a hex payload. Values are escaped to hex digits, `{checksum}` becomes the
+ * check byte of the bytes before it. Returns null when what comes out is not whole bytes.
+ */
+export function hexFrame(
+  template: string,
+  values: Record<string, string | number | boolean>,
+  checksum?: { type: 'sum8' | 'xor8'; from: number },
+): number[] | null {
+  const parts = template.split('{checksum}');
+  if (parts.length > 2) return null;
+  const bytes = (t: string): number[] | null => {
+    const h = renderTemplate(t, values, escapeHex).replace(/\s+/g, '');
+    if (!/^([0-9a-fA-F]{2})*$/.test(h)) return null;
+    return (h.match(/../g) ?? []).map((x) => parseInt(x, 16));
+  };
+  const head = bytes(parts[0]!);
+  if (!head) return null;
+  if (parts.length === 1) return head;
+  if (!checksum) return null;
+  const tail = bytes(parts[1]!);
+  if (!tail) return null;
+  const body = head.slice(checksum.from);
+  const check =
+    checksum.type === 'sum8'
+      ? body.reduce((a, b) => (a + b) & 0xff, 0)
+      : body.reduce((a, b) => a ^ b, 0);
+  return [...head, check, ...tail];
+}
+
 /** The values a command gets, given the room's request. Port ids like "in2" give inputNumber 2. */
 export function commandValues(
   spec: DriverSpec,
@@ -247,6 +312,12 @@ export function commandValues(
       .toString(16)
       .toUpperCase()
       .padStart(2, '0');
+    // Four hex digits written out as ASCII characters, then as hex bytes (NEC: 50 is "0032" is 30 30 33 32).
+    out.levelHexAscii4 = [
+      ...Math.max(0, Math.round(Number(level))).toString(16).toUpperCase().padStart(4, '0'),
+    ]
+      .map((c) => c.charCodeAt(0).toString(16).toUpperCase())
+      .join('');
   }
   if (input.input !== undefined) {
     out.input = input.input;
@@ -255,6 +326,8 @@ export function commandValues(
     const n = Number(digits(input.input));
     if (Number.isInteger(n) && n >= 1 && n <= 16)
       out.inputHex = (0x8f + n).toString(16).toUpperCase();
+    const code = spec.inputCodes?.[input.input];
+    if (code !== undefined) out.inputCode = code;
   }
   if (input.output !== undefined) {
     out.output = input.output;
@@ -322,25 +395,45 @@ export function driverProblems(spec: DriverSpec): string[] {
   const kind = spec.transport.type;
   const text = kind !== 'http';
   const kindName = { tcp: 'TCP', udp: 'UDP', websocket: 'WebSocket', http: 'HTTP' }[kind];
+  const framed = spec.transport.type === 'tcp' || spec.transport.type === 'udp' ? spec.transport : null;
 
   const checkAction = (where: string, a: DriverAction, allowed: readonly string[]) => {
-    const texts = text
-      ? [a.send ?? '']
-      : [a.path ?? '', a.body ?? '', ...Object.values(a.headers ?? {})];
+    const usesHex = a.hex !== undefined;
+    const texts = usesHex
+      ? [a.hex ?? '']
+      : text
+        ? [a.send ?? '']
+        : [a.path ?? '', a.body ?? '', ...Object.values(a.headers ?? {})];
     if (kind !== 'http' && kind !== 'websocket' && a.headers)
       problems.push(`${where}: "headers" are for HTTP drivers`);
     if (kind === 'websocket' && a.headers)
       problems.push(`${where}: set headers on the driver, not on a command`);
-    if (text && !a.send) problems.push(`${where}: a ${kindName} driver needs "send"`);
+    if (text && !a.send && !usesHex)
+      problems.push(`${where}: a ${kindName} driver needs "send"${framed ? ' or "hex"' : ''}`);
+    if (text && a.send && usesHex) problems.push(`${where}: use "send" or "hex", not both`);
+    if (usesHex && !framed) problems.push(`${where}: "hex" is for TCP and UDP drivers`);
     if (!text && !a.path) problems.push(`${where}: an HTTP driver needs "path"`);
     if (text && (a.path || a.method || a.body))
       problems.push(`${where}: "path", "method" and "body" are for HTTP drivers`);
-    if (!text && a.send) problems.push(`${where}: "send" is for TCP, UDP and WebSocket drivers`);
+    if (!text && (a.send || usesHex))
+      problems.push(`${where}: "send" is for TCP, UDP and WebSocket drivers`);
     if (!text && a.path && !a.path.startsWith('/'))
       problems.push(`${where}: the path must start with /`);
+    if (usesHex && framed) {
+      const hasToken = (a.hex ?? '').includes('{checksum}');
+      if (hasToken && !framed.checksum)
+        problems.push(`${where}: {checksum} needs "checksum" on the transport`);
+      // Every value becomes at least one byte; two digits stand in for each to check it is whole bytes.
+      const probe = (a.hex ?? '').replace(/\{[^}]+\}/g, '00').replace(/\s+/g, '');
+      if (!/^([0-9a-fA-F]{2})+$/.test(probe))
+        problems.push(`${where}: "hex" must be pairs of hex digits (like "AA 11 01")`);
+    }
     for (const t of texts)
       for (const p of placeholdersIn(t)) {
-        const ok = allowed.includes(p) || (p.startsWith('setting.') && settingKeys.has(p.slice(8)));
+        const ok =
+          allowed.includes(p) ||
+          (usesHex && p === 'checksum') ||
+          (p.startsWith('setting.') && settingKeys.has(p.slice(8)));
         if (!ok)
           problems.push(
             `${where}: {${p}} is not available here${p.startsWith('setting.') ? ' (no such setting)' : ''}`,
@@ -352,6 +445,8 @@ export function driverProblems(spec: DriverSpec): string[] {
     }
   };
 
+  if (spec.transport.type === 'http' && spec.transport.allowSelfSigned && !spec.transport.https)
+    problems.push('"allowSelfSigned" only applies when "https" is on');
   const keys = new Set<string>(COMMAND_KEYS);
   const cmds = Object.entries(spec.commands);
   if (cmds.length === 0 && spec.feedback.poll.length === 0)
@@ -403,7 +498,9 @@ export function driverProblems(spec: DriverSpec): string[] {
   if (
     spec.commands.volume &&
     !spec.volumeScale &&
-    placeholdersIn(spec.commands.volume.send ?? spec.commands.volume.path ?? '').length === 0
+    placeholdersIn(
+      spec.commands.volume.send ?? spec.commands.volume.hex ?? spec.commands.volume.path ?? '',
+    ).length === 0
   )
     problems.push('The volume command does not use {level}');
   return problems;

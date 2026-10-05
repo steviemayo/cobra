@@ -309,6 +309,318 @@ const raw: unknown[] = [
     },
     feedback: { poll: [{ action: { send: '#ROUTE? 1,1' }, everyMs: 10000 }], patterns: [] },
   },
+  {
+    // Samsung MDC (Multiple Display Control) over TCP 1515. A frame is AA, command, display ID, data
+    // length, data, then a check byte: the sum of every byte after the AA, modulo 256. A reply is
+    // AA FF id length 41 command data... (41 is ACK, 4E is NAK). Checked against Samsung's MDC protocol
+    // reference (command 0x11 power, 0x12 volume, 0x13 mute, 0x14 input source, 0x00 status). Not yet
+    // checked against a real display.
+    id: 'samsung-mdc',
+    class: 'display',
+    features: ['builtin_audio'],
+    name: 'Samsung MDC display',
+    description:
+      'Samsung commercial displays (QM, QB, QH, OM and similar) over MDC on TCP 1515. Turn on MDC over the network in the display menu. "Display ID" is the display ID in hex (FE addresses whichever display answers; use 00 or 01 when the display has an ID set). Ports in1 to in4 select HDMI 1, HDMI 2, HDMI 3 and DisplayPort.',
+    transport: {
+      type: 'tcp',
+      port: 1515,
+      binary: true,
+      keepOpen: true,
+      timeoutMs: 2000,
+      checksum: { type: 'sum8', from: 1 },
+    },
+    settings: [
+      {
+        key: 'displayId',
+        label: 'Display ID (hex)',
+        type: 'string',
+        scope: 'binding',
+        default: 'FE',
+      },
+    ],
+    inputCodes: { in1: '21', in2: '23', in3: '31', in4: '25' },
+    commands: {
+      'power.on': { hex: 'AA 11 {setting.displayId} 01 01 {checksum}', expect: '^AA FF [0-9A-F]{2} 03 41 11' },
+      'power.off': { hex: 'AA 11 {setting.displayId} 01 00 {checksum}', expect: '^AA FF [0-9A-F]{2} 03 41 11' },
+      select_input: { hex: 'AA 14 {setting.displayId} 01 {inputCode} {checksum}' },
+      volume: { hex: 'AA 12 {setting.displayId} 01 {levelHex} {checksum}' },
+      'mute.on': { hex: 'AA 13 {setting.displayId} 01 01 {checksum}' },
+      'mute.off': { hex: 'AA 13 {setting.displayId} 01 00 {checksum}' },
+    },
+    volumeScale: { min: 0, max: 100 },
+    feedback: {
+      // Status control: power, volume, mute, input and aspect in one reply.
+      poll: [{ action: { hex: 'AA 00 {setting.displayId} 00 {checksum}' }, everyMs: 5000 }],
+      patterns: [
+        { match: 'AA FF [0-9A-F]{2} 09 41 00 01 ', set: 'power', value: 'on' },
+        { match: 'AA FF [0-9A-F]{2} 09 41 00 00 ', set: 'power', value: 'off' },
+        { match: 'AA FF [0-9A-F]{2} 03 41 11 01', set: 'power', value: 'on' },
+        { match: 'AA FF [0-9A-F]{2} 03 41 11 00', set: 'power', value: 'off' },
+        { match: 'AA FF [0-9A-F]{2} 09 41 00 [0-9A-F]{2} [0-9A-F]{2} 01 ', set: 'muted', value: 'on' },
+        { match: 'AA FF [0-9A-F]{2} 09 41 00 [0-9A-F]{2} [0-9A-F]{2} 00 ', set: 'muted', value: 'off' },
+      ],
+    },
+  },
+  {
+    // Philips professional displays over SICP on TCP 5000. A frame is size, monitor ID, group, data,
+    // then the XOR of every byte before it; size counts the whole frame. Checked against the Philips
+    // SICP specification V2.03 (0x18 power, 0xAC input, 0x44 volume, 0x19 power state, 0xAD source
+    // state). Platforms without a separate audio-out level answer the volume command differently.
+    // Not yet checked against a real display.
+    id: 'philips-sicp',
+    class: 'display',
+    features: ['builtin_audio'],
+    name: 'Philips SICP display',
+    description:
+      'Philips professional displays (BDL series and similar) over SICP on TCP 5000. "Monitor ID" is the display\'s monitor ID in hex (01 unless changed). Ports in1 to in6 select HDMI 1, HDMI 2, HDMI 3, HDMI 4, DisplayPort and DVI-D. Volume is set on the speakers and the audio out together; there is no mute command.',
+    transport: {
+      type: 'tcp',
+      port: 5000,
+      binary: true,
+      keepOpen: true,
+      timeoutMs: 2000,
+      checksum: { type: 'xor8', from: 0 },
+    },
+    settings: [
+      {
+        key: 'monitorId',
+        label: 'Monitor ID (hex)',
+        type: 'string',
+        scope: 'binding',
+        default: '01',
+      },
+    ],
+    inputCodes: { in1: '0D', in2: '06', in3: '0F', in4: '19', in5: '0A', in6: '0E' },
+    commands: {
+      'power.on': { hex: '06 {setting.monitorId} 00 18 02 {checksum}' },
+      'power.off': { hex: '06 {setting.monitorId} 00 18 01 {checksum}' },
+      select_input: { hex: '09 {setting.monitorId} 00 AC {inputCode} 09 01 00 {checksum}' },
+      volume: { hex: '07 {setting.monitorId} 00 44 {levelHex} {levelHex} {checksum}' },
+    },
+    volumeScale: { min: 0, max: 100 },
+    feedback: {
+      poll: [{ action: { hex: '05 {setting.monitorId} 00 19 {checksum}' }, everyMs: 10000 }],
+      patterns: [
+        { match: '06 [0-9A-F]{2} [0-9A-F]{2} 19 02', set: 'power', value: 'on' },
+        { match: '06 [0-9A-F]{2} [0-9A-F]{2} 19 01', set: 'power', value: 'off' },
+      ],
+    },
+  },
+  {
+    // Sharp NEC Display Solutions external control over TCP 7142. A message is SOH, 0, destination
+    // ID, 0, type, two ASCII length digits, STX, data, ETX, a check byte (the XOR of every byte from
+    // the 0 after SOH to ETX) and CR; everything between STX and ETX is ASCII hex. Type A is a command,
+    // E sets a parameter. Checked against NEC's External Control specification (power C203D6 and 01D6,
+    // input VCP 00-60, volume VCP 00-62). Not yet checked against a real display.
+    id: 'sharp-nec',
+    class: 'display',
+    features: ['builtin_audio'],
+    name: 'Sharp NEC display',
+    description:
+      'Sharp NEC large format displays (MultiSync, and Sharp-branded NEC panels) over their external control protocol on TCP 7142. "Monitor ID" is the display ID as an ASCII letter in hex (41 is ID 1, 42 is ID 2, and so on). Ports in1 to in3 select HDMI 1, HDMI 2 and DisplayPort 1. There is no mute command in this protocol.',
+    transport: {
+      type: 'tcp',
+      port: 7142,
+      terminator: '\r',
+      replyTerminator: '\r',
+      keepOpen: false,
+      timeoutMs: 3000,
+      checksum: { type: 'xor8', from: 1 },
+    },
+    settings: [
+      {
+        key: 'monitorId',
+        label: 'Monitor ID (hex ASCII letter, 41 = ID 1)',
+        type: 'string',
+        scope: 'binding',
+        default: '41',
+      },
+    ],
+    // Input value as four ASCII hex characters: 0011 HDMI 1, 0012 HDMI 2, 000F DisplayPort 1.
+    inputCodes: { in1: '30303131', in2: '30303132', in3: '30303046' },
+    commands: {
+      'power.on': {
+        hex: '01 30 {setting.monitorId} 30 41 30 43 02 43 32 30 33 44 36 30 30 30 31 03 {checksum} 0D',
+        expect: '00C203D6',
+      },
+      'power.off': {
+        hex: '01 30 {setting.monitorId} 30 41 30 43 02 43 32 30 33 44 36 30 30 30 34 03 {checksum} 0D',
+        expect: '00C203D6',
+      },
+      select_input: {
+        hex: '01 30 {setting.monitorId} 30 45 30 41 02 30 30 36 30 {inputCode} 03 {checksum} 0D',
+      },
+      volume: {
+        hex: '01 30 {setting.monitorId} 30 45 30 41 02 30 30 36 32 {levelHexAscii4} 03 {checksum} 0D',
+      },
+    },
+    volumeScale: { min: 0, max: 100 },
+    feedback: {
+      poll: [
+        {
+          action: { hex: '01 30 {setting.monitorId} 30 41 30 36 02 30 31 44 36 03 {checksum} 0D' },
+          everyMs: 10000,
+        },
+      ],
+      patterns: [
+        { match: '0200D60000040001', set: 'power', value: 'on' },
+        { match: '0200D6000004000[24]', set: 'power', value: 'off' },
+        { match: '00C203D60001', set: 'power', value: 'on' },
+        { match: '00C203D60004', set: 'power', value: 'off' },
+      ],
+    },
+  },
+  {
+    // Shure MXA microphones over TCP 2202. Messages are ASCII in angle brackets: < GET name >,
+    // < SET name value >, answered by < REP name value > (also sent whenever the value changes, so the
+    // connection is kept open). Checked against the MXA920 command strings (DEVICE_AUDIO_MUTE, MODEL,
+    // SERIAL_NUM, FW_VER, FLASH); the MXA901, 902, 925, 710 and 320 publish the same strings. Not yet
+    // checked against a real microphone.
+    id: 'shure-mxa',
+    class: 'conferencing_mic',
+    features: ['privacy_mute'],
+    name: 'Shure MXA microphone',
+    description:
+      'Shure Microflex Advance microphones (MXA901, MXA902, MXA925, MXA710, MXA320 and the same family) over command strings on TCP 2202: mute state, mute on and off, and the model, serial number and firmware. "Identify" flashes the unit\'s lights.',
+    transport: {
+      type: 'tcp',
+      port: 2202,
+      terminator: '',
+      replyTerminator: '>',
+      keepOpen: true,
+      timeoutMs: 3000,
+    },
+    quickActions: ['mics.privacy_mute'],
+    commands: {
+      'mute.on': { send: '< SET DEVICE_AUDIO_MUTE ON >', expect: 'REP DEVICE_AUDIO_MUTE ON' },
+      'mute.off': { send: '< SET DEVICE_AUDIO_MUTE OFF >', expect: 'REP DEVICE_AUDIO_MUTE OFF' },
+      'command.identify_on': { send: '< SET FLASH ON >' },
+      'command.identify_off': { send: '< SET FLASH OFF >' },
+    },
+    feedback: {
+      poll: [
+        { action: { send: '< GET DEVICE_AUDIO_MUTE >' }, everyMs: 10000 },
+        { action: { send: '< GET MODEL >' }, everyMs: 300000 },
+        { action: { send: '< GET SERIAL_NUM >' }, everyMs: 300000 },
+        { action: { send: '< GET FW_VER >' }, everyMs: 300000 },
+      ],
+      patterns: [
+        { match: 'REP DEVICE_AUDIO_MUTE (ON|OFF)', set: 'muted', value: '$1' },
+        { match: 'REP MODEL \\{?([A-Za-z0-9._ -]+)', set: 'model', value: '$1' },
+        { match: 'REP SERIAL_NUM \\{?([A-Za-z0-9]+)', set: 'serial', value: '$1' },
+        { match: 'REP FW_VER \\{?([0-9.*]+)', set: 'firmware', value: '$1' },
+      ],
+    },
+  },
+  {
+    // Sennheiser TeamConnect Ceiling 2 over SSC (Sennheiser Sound Control, JSON) on UDP 45: one JSON
+    // message per datagram, a null value asks and a value sets. Checked against the TCC 2 SSC
+    // developer's guide v1.8.0 (/audio/mute, /device/identity/*). Not yet checked against a real unit.
+    id: 'sennheiser-tcc2',
+    class: 'conferencing_mic',
+    features: ['privacy_mute'],
+    name: 'Sennheiser TeamConnect Ceiling 2',
+    description:
+      'Sennheiser TeamConnect Ceiling 2 over the Sennheiser Sound Control protocol on UDP 45: mute state, mute on and off, and the product, serial number and firmware version.',
+    transport: { type: 'udp', port: 45, timeoutMs: 1500 },
+    quickActions: ['mics.privacy_mute'],
+    commands: {
+      'mute.on': { send: '{"audio":{"mute":true}}', expect: '"mute"\\s*:\\s*true' },
+      'mute.off': { send: '{"audio":{"mute":false}}', expect: '"mute"\\s*:\\s*false' },
+    },
+    feedback: {
+      poll: [
+        { action: { send: '{"audio":{"mute":null}}' }, everyMs: 10000 },
+        {
+          action: { send: '{"device":{"identity":{"product":null,"version":null,"serial":null}}}' },
+          everyMs: 300000,
+        },
+      ],
+      patterns: [
+        { match: '"mute"\\s*:\\s*true', set: 'muted', value: 'on' },
+        { match: '"mute"\\s*:\\s*false', set: 'muted', value: 'off' },
+        { match: '"product"\\s*:\\s*"([^"]+)"', set: 'model', value: '$1' },
+        { match: '"serial"\\s*:\\s*"([^"]+)"', set: 'serial', value: '$1' },
+        { match: '"version"\\s*:\\s*"([^"]+)"', set: 'firmware', value: '$1' },
+      ],
+    },
+  },
+  {
+    // Sennheiser TeamConnect Ceiling Medium over SSCv2: a REST API over HTTPS (port 443) with HTTP
+    // basic authentication, user "api" and the third-party password. Third-party access is off from
+    // the factory: turn it on and set the password in Sennheiser Control Cockpit. Monitoring only for
+    // now: it reads /api/device/identity (product, serial, vendor), checked against the SSCv2
+    // specification. The mute resource is in the product's OpenAPI file, which is not built in yet.
+    id: 'sennheiser-tcc-medium',
+    class: 'conferencing_mic',
+    features: [],
+    name: 'Sennheiser TeamConnect Ceiling Medium',
+    description:
+      'Sennheiser TeamConnect Ceiling Medium over SSCv2 (HTTPS, port 443). Monitoring only: whether it answers, its product name and serial number. In Sennheiser Control Cockpit, enable third party access and set a password, then set "credentials" to the base64 of api:<that password>.',
+    transport: { type: 'http', https: true, allowSelfSigned: true, timeoutMs: 4000 },
+    settings: [
+      {
+        key: 'credentials',
+        label: 'Credentials (base64 of api:password)',
+        type: 'secret',
+        required: true,
+      },
+    ],
+    commands: {},
+    feedback: {
+      poll: [
+        {
+          action: {
+            method: 'GET',
+            path: '/api/device/identity',
+            headers: { authorization: 'Basic {setting.credentials}' },
+          },
+          everyMs: 30000,
+        },
+      ],
+      patterns: [
+        { match: '"product"\\s*:\\s*"([^"]+)"', set: 'model', value: '$1' },
+        { match: '"serial"\\s*:\\s*"([^"]+)"', set: 'serial', value: '$1' },
+        { match: '"version"\\s*:\\s*"([^"]+)"', set: 'firmware', value: '$1' },
+      ],
+    },
+  },
+  {
+    // Sennheiser TeamConnect Bar S and M over SSCv2 (see the Ceiling Medium note above).
+    id: 'sennheiser-tc-bar',
+    class: 'conference_system',
+    features: [],
+    name: 'Sennheiser TeamConnect Bar',
+    description:
+      'Sennheiser TeamConnect Bar S and M over SSCv2 (HTTPS, port 443). Monitoring only: whether it answers, its product name and serial number. In Sennheiser Control Cockpit, enable third party access and set a password, then set "credentials" to the base64 of api:<that password>.',
+    transport: { type: 'http', https: true, allowSelfSigned: true, timeoutMs: 4000 },
+    settings: [
+      {
+        key: 'credentials',
+        label: 'Credentials (base64 of api:password)',
+        type: 'secret',
+        required: true,
+      },
+    ],
+    commands: {},
+    feedback: {
+      poll: [
+        {
+          action: {
+            method: 'GET',
+            path: '/api/device/identity',
+            headers: { authorization: 'Basic {setting.credentials}' },
+          },
+          everyMs: 30000,
+        },
+      ],
+      patterns: [
+        { match: '"product"\\s*:\\s*"([^"]+)"', set: 'model', value: '$1' },
+        { match: '"serial"\\s*:\\s*"([^"]+)"', set: 'serial', value: '$1' },
+        { match: '"version"\\s*:\\s*"([^"]+)"', set: 'firmware', value: '$1' },
+      ],
+    },
+  },
 ];
 
 export const LIBRARY: Record<string, DriverSpec> = {};

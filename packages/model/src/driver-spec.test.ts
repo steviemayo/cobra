@@ -8,6 +8,8 @@ import {
   renderTemplate,
   resolveSettings,
   DriverSpec,
+  bytesToHex,
+  hexFrame,
 } from './driver-spec';
 
 const projector = () => ({
@@ -189,5 +191,102 @@ describe('driver grouping and transports', () => {
     });
     expect(patterns.ok).toBe(false);
     if (!patterns.ok) expect(patterns.problems.join(' ')).toContain('UDP');
+  });
+});
+
+describe('hex payloads', () => {
+  const hex = (t: string, c?: { type: 'sum8' | 'xor8'; from: number }, v: Record<string, string> = {}) => {
+    const b = hexFrame(t, v, c);
+    return b ? bytesToHex(b) : null;
+  };
+
+  it('works out the check bytes in the vendors’ own examples', () => {
+    // Samsung MDC: the sum of the bytes after the AA header.
+    expect(hex('AA 11 00 01 01 {checksum}', { type: 'sum8', from: 1 })).toBe('AA 11 00 01 01 13');
+    expect(hex('AA 14 00 01 21 {checksum}', { type: 'sum8', from: 1 })).toBe('AA 14 00 01 21 36');
+    // Philips SICP: the XOR of every byte before it.
+    expect(hex('05 01 00 19 {checksum}', { type: 'xor8', from: 0 })).toBe('05 01 00 19 1D');
+    expect(hex('09 01 00 AC 0D 09 01 00 {checksum}', { type: 'xor8', from: 0 })).toBe(
+      '09 01 00 AC 0D 09 01 00 A1',
+    );
+    // NEC: the XOR from the byte after SOH to ETX, then CR after the check byte (NEC's own example is 77).
+    expect(
+      hex('01 30 41 30 45 30 41 02 30 30 31 30 30 30 36 34 03 {checksum} 0D', { type: 'xor8', from: 1 }),
+    ).toBe('01 30 41 30 45 30 41 02 30 30 31 30 30 30 36 34 03 77 0D');
+  });
+
+  it('fills values in as hex and refuses anything that is not whole bytes', () => {
+    expect(hex('AA 12 {setting.id} 01 {levelHex}', undefined, { 'setting.id': 'FE', levelHex: '32' })).toBe(
+      'AA 12 FE 01 32',
+    );
+    // A value cannot add a byte of its own by carrying anything but hex digits.
+    expect(hex('AA {setting.id}', undefined, { 'setting.id': 'F E; 11' })).toBe('AA FE 11');
+    expect(hex('AA 1')).toBeNull();
+    expect(hex('AA {checksum}')).toBeNull();
+  });
+
+  it('writes a level as four ASCII hex digits for NEC', () => {
+    const v = commandValues(
+      DriverSpec.parse({
+        id: 'x-nec',
+        name: 'X',
+        transport: { type: 'tcp' },
+        commands: { 'power.on': { send: 'x' } },
+      }),
+      {},
+      { level: 50 },
+    );
+    // 50 is 0x32, written "0032", which is the bytes 30 30 33 32.
+    expect(v.levelHexAscii4).toBe('30303332');
+  });
+
+  it('checks a driver’s hex payloads', () => {
+    const spec = (hex: string, extra: Record<string, unknown> = {}) => ({
+      id: 'bin-thing',
+      name: 'Binary thing',
+      transport: { type: 'tcp', binary: true, checksum: { type: 'sum8', from: 1 }, ...extra },
+      commands: { 'power.on': { hex }, 'power.off': { send: 'OFF' } },
+    });
+    expect(checkDriverSpec(spec('AA 11 01 {checksum}')).ok).toBe(true);
+    const odd = checkDriverSpec(spec('AA 1'));
+    expect(odd.ok).toBe(false);
+    if (!odd.ok) expect(odd.problems.join(' ')).toContain('pairs of hex digits');
+    const noSum = checkDriverSpec(spec('AA 11 {checksum}', { checksum: undefined }));
+    expect(noSum.ok).toBe(false);
+    const both = checkDriverSpec({
+      ...spec('AA 11'),
+      commands: { 'power.on': { hex: 'AA 11', send: 'x' }, 'power.off': { send: 'OFF' } },
+    });
+    expect(both.ok).toBe(false);
+    const http = checkDriverSpec({
+      id: 'http-thing',
+      name: 'Http',
+      transport: { type: 'http' },
+      commands: { 'power.on': { path: '/on', hex: 'AA' } },
+    });
+    expect(http.ok).toBe(false);
+  });
+
+  it('allowSelfSigned needs https', () => {
+    const http = (extra: Record<string, unknown>) => ({
+      id: 'web-thing',
+      name: 'Web',
+      transport: { type: 'http', ...extra },
+      commands: { 'power.on': { path: '/on' } },
+    });
+    expect(checkDriverSpec(http({ https: true, allowSelfSigned: true })).ok).toBe(true);
+    expect(checkDriverSpec(http({ allowSelfSigned: true })).ok).toBe(false);
+  });
+
+  it('takes input codes for the {inputCode} placeholder', () => {
+    const spec = DriverSpec.parse({
+      id: 'codes',
+      name: 'Codes',
+      transport: { type: 'tcp', binary: true },
+      inputCodes: { in1: '21', in2: '23' },
+      commands: { select_input: { hex: 'AA 14 {inputCode}' } },
+    });
+    expect(commandValues(spec, {}, { input: 'in2' }).inputCode).toBe('23');
+    expect(commandValues(spec, {}, { input: 'in9' }).inputCode).toBeUndefined();
   });
 });

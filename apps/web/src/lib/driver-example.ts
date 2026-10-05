@@ -1,8 +1,10 @@
 import {
   DriverSpec,
+  bytesToHex,
   commandValues,
   escapeLine,
   escapePath,
+  hexFrame,
   hasCatastrophicBacktracking,
   renderTemplate,
   resolveSettings,
@@ -53,7 +55,12 @@ export function preview(raw: unknown, sample: SampleRequest = DEFAULT_SAMPLE): {
   return Object.entries(spec.commands).map(([key, a]) => ({
     key,
     text:
-      spec.transport.type !== 'http'
+      a.hex !== undefined && (spec.transport.type === 'tcp' || spec.transport.type === 'udp')
+        ? (() => {
+            const bytes = hexFrame(a.hex, values, spec.transport.checksum);
+            return bytes ? bytesToHex(bytes) : '(not whole bytes: check the hex and the checksum)';
+          })()
+        : spec.transport.type !== 'http'
         ? renderTemplate(a.send ?? '', values, escapeLine)
         : `${a.method ?? (a.body ? 'POST' : 'GET')} ${renderTemplate(a.path ?? '', values, escapePath)}${a.body ? `  ${renderTemplate(a.body, values, escapeLine)}` : ''}`,
   }));
