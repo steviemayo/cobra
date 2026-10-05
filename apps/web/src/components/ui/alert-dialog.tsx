@@ -125,8 +125,22 @@ function AlertDialogDescription({
   );
 }
 
-function AlertDialogAction({ className, ...props }: React.ComponentProps<typeof Button>) {
-  return <Button data-slot="alert-dialog-action" className={cn(className)} {...props} />;
+// Like Cancel it closes the dialog: confirming is an answer, so the dialog should not stay behind.
+function AlertDialogAction({
+  className,
+  variant,
+  size,
+  ...props
+}: AlertDialogPrimitive.Close.Props &
+  Pick<React.ComponentProps<typeof Button>, 'variant' | 'size'>) {
+  return (
+    <AlertDialogPrimitive.Close
+      data-slot="alert-dialog-action"
+      className={cn(className)}
+      render={<Button variant={variant} size={size} />}
+      {...props}
+    />
+  );
 }
 
 function AlertDialogCancel({
