@@ -230,10 +230,10 @@ function start(driverId: string, settings: Record<string, unknown>, points: Devi
   return driver;
 }
 
-describe('Netgear AV switch (SNMP) driver', () => {
+describe('Generic SNMP switch driver', () => {
   it('reports identity, ports and PoE', async () => {
     const a = await agent(switchMib());
-    const d = start('netgear-av', { host: '127.0.0.1', port: a.port, timeoutMs: 800 });
+    const d = start('snmp-generic', { host: '127.0.0.1', port: a.port, timeoutMs: 800 });
     await until(() => d.getState().online);
     await until(() => !!d.getState().details);
     expect(d.getState().firmware).toBe('13.0.4.26');
@@ -279,7 +279,7 @@ describe('Netgear AV switch (SNMP) driver', () => {
 
   it('power-cycles a PoE port: off, a pause, then on, with the write community', async () => {
     const a = await agent(switchMib());
-    const d = start('netgear-av', {
+    const d = start('snmp-generic', {
       host: '127.0.0.1',
       port: a.port,
       timeoutMs: 800,
@@ -296,7 +296,7 @@ describe('Netgear AV switch (SNMP) driver', () => {
 
   it('will not switch PoE without a write community, or run an unknown command', async () => {
     const a = await agent(switchMib());
-    const d = start('netgear-av', { host: '127.0.0.1', port: a.port, timeoutMs: 800 });
+    const d = start('snmp-generic', { host: '127.0.0.1', port: a.port, timeoutMs: 800 });
     await until(() => d.getState().online);
     await expect(d.send({ type: 'command', name: 'poe_off_1_1', args: {} })).rejects.toThrow(/write community/);
     await expect(d.send({ type: 'command', name: 'reboot', args: {} })).rejects.toThrow(/does not support/);
@@ -305,7 +305,7 @@ describe('Netgear AV switch (SNMP) driver', () => {
 
   it('is offline when the switch does not answer', async () => {
     const a = await agent(switchMib(), { silent: true });
-    const d = start('netgear-av', { host: '127.0.0.1', port: a.port, timeoutMs: 100 });
+    const d = start('snmp-generic', { host: '127.0.0.1', port: a.port, timeoutMs: 100 });
     await wait(500);
     expect(d.getState().online).toBe(false);
   });
