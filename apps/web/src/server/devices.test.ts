@@ -567,3 +567,62 @@ describe('aligning dates', () => {
     ).toMatchObject({ ok: false, message: 'No such room' });
   });
 });
+
+describe('make and model from the driver', () => {
+  const qsys = { kind: 'driver' as const, driverId: 'qsys-core' };
+  const prov = (w: ReturnType<typeof world>) =>
+    w.device.rows[0]!.provenance as Record<string, { source: string; inferred?: boolean }>;
+
+  it('fills the make and model a driver implies when a device is added, and nothing for a generic driver', async () => {
+    const w = world();
+    await activeDevice(w, { name: 'Core', category: 'audio_matrix', control: qsys });
+    expect(w.device.rows[0]).toMatchObject({ make: 'QSC', model: 'Q-SYS Core' });
+    expect(prov(w).make).toMatchObject({ source: 'discovered', inferred: true });
+    await activeDevice(w, { name: 'Projector' });
+    expect(w.device.rows[1]!.make).toBeUndefined();
+    expect(w.device.rows[1]!.model).toBeUndefined();
+  });
+
+  it('keeps what a person typed', async () => {
+    const w = world();
+    await activeDevice(w, {
+      name: 'Core',
+      category: 'audio_matrix',
+      control: qsys,
+      make: 'Q-SYS',
+      model: 'Core 110f',
+    });
+    expect(w.device.rows[0]).toMatchObject({ make: 'Q-SYS', model: 'Core 110f' });
+    expect(prov(w).model?.source).toBe('manual');
+    expect(prov(w).model?.inferred).toBeUndefined();
+  });
+
+  it("is replaced by the device's own model when it reports one, without calling it a swap", async () => {
+    const w = world();
+    const id = await activeDevice(w, { name: 'Core', category: 'audio_matrix', control: qsys });
+    await recordDeviceReports(
+      w.db,
+      gw,
+      [
+        report(id, {
+          details: [{ title: 'Identity', rows: [{ label: 'Model', value: 'Core Nano' }] }],
+        }),
+      ],
+      T0,
+    );
+    expect(w.device.rows[0]).toMatchObject({ make: 'QSC', model: 'Core Nano', swapPending: false });
+    expect(prov(w).model).toMatchObject({ source: 'discovered' });
+    expect(prov(w).model?.inferred).toBeUndefined();
+    expect(prov(w).make?.inferred).toBe(true);
+    expect(w.deviceEvent.rows.some((e) => e.type === 'swap_flagged')).toBe(false);
+  });
+
+  it('fills a device added before this, at its next report', async () => {
+    const w = world();
+    const id = await activeDevice(w, { name: 'Core', category: 'audio_matrix', control: qsys });
+    Object.assign(w.device.rows[0]!, { make: null, model: null, provenance: {} });
+    await recordDeviceReports(w.db, gw, [report(id)], T0);
+    expect(w.device.rows[0]).toMatchObject({ make: 'QSC', model: 'Q-SYS Core' });
+    expect(prov(w).model?.inferred).toBe(true);
+  });
+});

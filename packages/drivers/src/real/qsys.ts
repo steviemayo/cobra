@@ -11,6 +11,7 @@ import {
   type PointReading,
 } from '@kestrel/model';
 import { BaseDriver } from './base';
+import { fetchCoreInfo } from './qsys-rest';
 import { Reconnect } from './reconnect';
 import type { DriverContext } from './types';
 
@@ -42,6 +43,13 @@ import type { DriverContext } from './types';
 // answers when asked. Either way it fills `details` (platform, design, redundancy, emulator, engine
 // status) rather than `online`: a non-OK engine status (a bad compile, a missing licence) still means
 // the Core answered, which is what `online` means everywhere else in this driver.
+//
+// Identity: QRC does not say what unit the Core is, so the driver also asks the Core's web interface
+// (`GET /api/v0/cores/self`, qsys-rest.ts) for its model, serial number and firmware, once on every
+// connect and then hourly. It logs on with the same name and password. The answer fills `firmware`
+// and an Identity section in `details`, which feed the asset register. Settings: restPort (443),
+// restProtocol (https; http for a Core behind a proxy) and allowSelfSigned (true: a Core's own
+// certificate). A Core that does not answer there is still monitored; the reason is logged once.
 //
 // Discovery: `discoverComponents` (Component.GetComponents) and `discoverControls`
 // (Component.GetControls) let the portal offer a pick-list when someone adds a control point,
@@ -111,6 +119,13 @@ export class QsysDriver extends BaseDriver {
   /** True once this connection's change group is built; false after a drop or a Core that lost it. */
   private grouped = false;
   private warnedMissing = new Set<string>();
+  /** The two sections of `details`: who the unit is (web interface) and how its engine is (QRC). */
+  private identitySection: DeviceDetailSection | null = null;
+  private engineSection: DeviceDetailSection | null = null;
+  private inventoryAt = 0;
+  private inventoryBusy = false;
+  private inventoryDone = false;
+  private warnedInventory = false;
 
   constructor(device: Device, ctx: DriverContext) {
     super(device, ctx);
@@ -172,7 +187,10 @@ export class QsysDriver extends BaseDriver {
       this.setting<number>('pollMs', this.points.length ? 2000 : 5000),
       30_000,
     );
-    this.poller = setInterval(() => void this.refresh(), every);
+    this.poller = setInterval(() => {
+      void this.refresh();
+      this.maybeLoadIdentity();
+    }, every);
     this.poller.unref?.();
   }
 
@@ -218,6 +236,7 @@ export class QsysDriver extends BaseDriver {
         // Some Cores or proxies only ever send it unsolicited; the push still updates details later.
       }
       await this.refresh(true);
+      this.maybeLoadIdentity();
     } catch (e) {
       this.ctx.log('warn', 'Q-SYS logon failed', { device: this.device.name, error: String(e) });
       this.drop(e instanceof Error ? e : new Error(String(e)));
@@ -409,8 +428,63 @@ export class QsysDriver extends BaseDriver {
     this.update((s) => {
       // Receiving this at all proves the Core answered, whatever its own health says.
       s.online = true;
-      if (rows.length) s.details = [{ title: 'Q-SYS Core', rows }];
+      this.engineSection = rows.length ? { title: 'Q-SYS Core', rows } : this.engineSection;
+      const sections = this.sections();
+      if (sections.length) s.details = sections;
     });
+  }
+
+  private sections(): DeviceDetailSection[] {
+    return [this.identitySection, this.engineSection].filter((x): x is DeviceDetailSection => !!x);
+  }
+
+  /** Asks for the Core's identity on connect, retrying each minute until it answers, then hourly. */
+  private maybeLoadIdentity() {
+    if (!this.socket || this.inventoryBusy) return;
+    if (Date.now() - this.inventoryAt < (this.inventoryDone ? 3_600_000 : 60_000)) return;
+    void this.loadIdentity();
+  }
+
+  private async loadIdentity() {
+    this.inventoryBusy = true;
+    this.inventoryAt = Date.now();
+    try {
+      const flag = this.setting<boolean | string>('allowSelfSigned', true);
+      const info = await fetchCoreInfo({
+        host: this.setting<string>('host', ''),
+        port: this.setting<number>('restPort', 443),
+        https: this.setting<string>('restProtocol', 'https') !== 'http',
+        allowSelfSigned: flag !== false && flag !== 'false',
+        username: this.setting<string>('username', '') || undefined,
+        password: this.setting<string>('password', '') || undefined,
+        timeoutMs: Math.max(this.setting<number>('timeoutMs', 3000), 5000),
+      });
+      const rows: DeviceDetailSection['rows'] = [];
+      if (info.model) rows.push({ label: 'Model', value: info.model });
+      if (info.serial) rows.push({ label: 'Serial number', value: info.serial });
+      if (info.firmware) rows.push({ label: 'Firmware', value: info.firmware });
+      if (info.hostname) rows.push({ label: 'Hostname', value: info.hostname });
+      if (info.hardwareId) rows.push({ label: 'Hardware ID', value: info.hardwareId });
+      this.identitySection = rows.length ? { title: 'Identity', rows } : null;
+      this.inventoryDone = true;
+      this.warnedInventory = false;
+      this.update((s) => {
+        if (info.firmware) s.firmware = info.firmware;
+        const sections = this.sections();
+        if (sections.length) s.details = sections;
+      });
+    } catch (e) {
+      // Monitoring carries on without it; say why once, not every minute.
+      if (!this.warnedInventory) {
+        this.warnedInventory = true;
+        this.ctx.log('warn', 'Q-SYS Core did not give its model and serial number', {
+          device: this.device.name,
+          error: String(e),
+        });
+      }
+    } finally {
+      this.inventoryBusy = false;
+    }
   }
 
   /** Lists the design's named components, for a pick-list instead of typing one blind. */

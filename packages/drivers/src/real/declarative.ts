@@ -46,7 +46,11 @@ function compile(spec: DriverSpec, log: DriverContext['log']) {
 }
 
 /** A safe `expect` regex, or null (never matches, never runs) for one that could hang the gateway. */
-function safeExpect(source: string | undefined, spec: DriverSpec, log: DriverContext['log']): RegExp | null {
+function safeExpect(
+  source: string | undefined,
+  spec: DriverSpec,
+  log: DriverContext['log'],
+): RegExp | null {
   if (!source) return null;
   if (hasCatastrophicBacktracking(source)) {
     log('error', `"expect" pattern "${source}" could hang the gateway and was not used`, {
@@ -130,7 +134,10 @@ export class DeclarativeDriver extends BaseDriver {
       this.ctx.log(
         'error',
         `${this.device.name}'s address (${this.host}) is a cloud metadata address, not a device, and was refused`,
-        { device: this.device.name, hint: 'Add "allowLocalAddress": true to this device’s settings if this is deliberate' },
+        {
+          device: this.device.name,
+          hint: 'Add "allowLocalAddress": true to this device’s settings if this is deliberate',
+        },
       );
       return;
     }
@@ -141,6 +148,9 @@ export class DeclarativeDriver extends BaseDriver {
     } else void this.probe();
     for (const p of this.spec.feedback.poll)
       this.pollers.push(setInterval(() => void this.poll(p.action), p.everyMs));
+    // The first poll is the reachability probe above. Any other HTTP poll (a slow one that reads
+    // the model and serial number, say) also runs once now rather than after its first interval.
+    if (this.http) for (const p of this.spec.feedback.poll.slice(1)) void this.poll(p.action);
     for (const t of this.pollers) t.unref?.();
   }
 
@@ -168,6 +178,9 @@ export class DeclarativeDriver extends BaseDriver {
   }
 
   // ---- Feedback -------------------------------------------------------------------------------
+
+  /** Model, serial number and MAC the device has reported, by the feedback field that carried them. */
+  private readonly identity = new Map<string, string>();
 
   private readText(text: string) {
     for (const p of this.patterns) {
@@ -208,6 +221,33 @@ export class DeclarativeDriver extends BaseDriver {
           case 'online':
             s.online = /^(on|1|true)$/i.test(raw);
             break;
+          case 'model':
+          case 'serial':
+          case 'mac': {
+            // What the device says about itself goes to the register through the Identity section.
+            const v = raw
+              .replace(/[^\x20-\x7e]/g, '')
+              .trim()
+              .slice(0, 100);
+            if (v) {
+              this.identity.set(p.set, v);
+              s.details = [
+                {
+                  title: 'Identity',
+                  rows: (
+                    [
+                      ['model', 'Model'],
+                      ['serial', 'Serial number'],
+                      ['mac', 'MAC address'],
+                    ] as const
+                  ).flatMap(([k, label]) =>
+                    this.identity.has(k) ? [{ label, value: this.identity.get(k)! }] : [],
+                  ),
+                },
+              ];
+            }
+            break;
+          }
           case 'firmware': {
             const version = raw
               .replace(/[^\x20-\x7e]/g, '')
@@ -318,7 +358,12 @@ export class DeclarativeDriver extends BaseDriver {
         this.waiting = this.waiting.filter((w) => w.timer !== timer);
         reject(new Error(`${this.device.name} did not answer`));
       }, this.tcp!.timeoutMs);
-      this.waiting.push({ re: safeExpect(action.expect, this.spec, this.ctx.log), resolve, reject, timer });
+      this.waiting.push({
+        re: safeExpect(action.expect, this.spec, this.ctx.log),
+        resolve,
+        reject,
+        timer,
+      });
     });
     socket.write(this.text(action, values) + term);
     return wait;

@@ -119,6 +119,16 @@ const toInput = (d: Date | string | null) => (d ? new Date(d).toISOString().slic
 
 function Source({ field, prov }: { field: string; prov: FieldProvenance | undefined }) {
   if (!prov) return null;
+  if (prov.source === 'discovered' && prov.inferred)
+    return (
+      <Badge
+        variant="secondary"
+        className="font-normal"
+        title="Taken from the driver until the device reports its own"
+      >
+        From driver
+      </Badge>
+    );
   if (prov.source === 'discovered')
     return (
       <Badge variant="secondary" className="font-normal" title="Read from the device by its driver">
@@ -242,7 +252,11 @@ function AssetDetails({ device }: { device: Device }) {
                       ['serial', 'mac'].includes(f.key) && 'font-mono text-xs',
                     )}
                   >
-                    {device[f.key] || <span className="text-muted-foreground">Not recorded</span>}
+                    {device[f.key] || (
+                      <span className="text-muted-foreground">
+                        {f.key === 'assetTag' ? 'n/a' : 'Not recorded'}
+                      </span>
+                    )}
                   </span>
                 )}
               </dd>

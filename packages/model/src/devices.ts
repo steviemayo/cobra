@@ -60,6 +60,8 @@ export const IDENTITY_FIELDS: readonly AssetField[] = ['serial', 'mac', 'model']
 export type FieldSource = 'discovered' | 'manual';
 export interface FieldProvenance {
   source: FieldSource;
+  /** Filled in from the driver, not read from the device. A real reading replaces it without flagging a swap. */
+  inferred?: boolean;
   /** When source is manual and the device reports something different, what it reports. */
   discovered?: string;
   at: string;
@@ -108,8 +110,10 @@ export function mergeDiscovered(
   now: string,
 ): MergeResult {
   const seen = clean(reported);
-  const value = clean(current.value);
-  if (seen === null) return { value, provenance: current.provenance };
+  // A value inferred from the driver is a placeholder: a real reading fills it like an empty field.
+  const inferred = current.provenance?.inferred === true;
+  const value = inferred && seen !== null ? null : clean(current.value);
+  if (seen === null) return { value: clean(current.value), provenance: current.provenance };
   if (current.provenance?.source === 'manual' && value !== null) {
     if (same(field, value, seen)) {
       // The device now agrees with what someone typed: the note of a mismatch goes.
@@ -144,6 +148,16 @@ export function mergeManual(
 ): MergeResult {
   const next = clean(typed);
   const value = clean(current.value);
+  // Typing over an inferred value makes it a manual one, even when it is the same words.
+  const wasInferred = current.provenance?.inferred === true;
+  if (wasInferred) {
+    current = { value: current.value };
+    if (next !== null && same(field, value, next))
+      return {
+        value: next,
+        provenance: { source: 'manual', at: now, ...(by ? { by } : {}) },
+      };
+  }
   if (same(field, value, next) && (next !== null || !current.provenance))
     return { value, provenance: current.provenance };
   const change: FieldChange = {
@@ -151,7 +165,8 @@ export function mergeManual(
     oldValue: value,
     newValue: next,
     source: 'manual',
-    possibleSwap: value !== null && next !== null && IDENTITY_FIELDS.includes(field),
+    possibleSwap:
+      !wasInferred && value !== null && next !== null && IDENTITY_FIELDS.includes(field),
   };
   if (next === null) return { value: null, provenance: undefined, change };
   const reported =
@@ -249,12 +264,16 @@ export const ADDRESS_TRACKING_KEY = 'addressTracking';
 
 /** A MAC as lower-case colon pairs (aa:bb:cc:dd:ee:ff), or null if it is not one. Accepts - . and bare forms. */
 export function normaliseMac(raw: string | null | undefined): string | null {
-  const hex = (raw ?? '').trim().toLowerCase().replace(/[:.\-\s]/g, '');
+  const hex = (raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[:.\-\s]/g, '');
   return /^[0-9a-f]{12}$/.test(hex) ? hex.match(/../g)!.join(':') : null;
 }
 
 /** A hostname a DNS or mDNS lookup could resolve: letters, digits, dots and hyphens, 253 characters at most. */
-export const HOSTNAME_RE = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
+export const HOSTNAME_RE =
+  /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
 
 export const MonitoredDevice = z.object({
   id: z.string().uuid(),

@@ -14,6 +14,9 @@ export interface DriverSettingInfo {
 
 export interface DriverInfo {
   name: string;
+  /** What the driver implies about the box when the device itself reports nothing more specific. */
+  make?: string;
+  model?: string;
   description: string;
   /** The driver class it implements, and the optional features it supports (docs/driver-classes.md). */
   class: DriverClass;
@@ -90,6 +93,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'biamp-tesira': {
     name: 'Biamp Tesira DSP',
+    make: 'Biamp',
+    model: 'Tesira DSP',
     description:
       'Biamp Tesira over the Tesira Text Protocol (Telnet). Add the DSP, then add the levels, mutes and crosspoints to control as control points, each by instance tag and channel. Presets are recalled by name.',
     class: 'point_based',
@@ -216,6 +221,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-nvx-encoder': {
     name: 'Crestron NVX encoder',
+    make: 'Crestron',
+    model: 'DM NVX encoder',
     description:
       'A Crestron NVX encoder (E30, E20 and similar) as a device in the room. Reports the location of its stream and whether its input has a signal. Needs the NVX logon.',
     class: 'avoip_encoder',
@@ -227,6 +234,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-nvx-decoder': {
     name: 'Crestron NVX decoder',
+    make: 'Crestron',
+    model: 'DM NVX decoder',
     description:
       'A Crestron NVX decoder (D30, DM-NVX-351 and similar) as a device in the room. Pointed at an encoder stream by its switcher. Needs the NVX logon.',
     class: 'avoip_decoder',
@@ -238,6 +247,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-nvx-switcher': {
     name: 'Crestron NVX virtual switcher',
+    make: 'Crestron',
+    model: 'DM NVX virtual switcher',
     description:
       'The routing logic for NVX encoders and decoders that are devices in the room. It has no address of its own: routing reads the encoder stream, points the decoder at it and waits until the decoder is receiving.',
     class: 'avoip_switching',
@@ -249,6 +260,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-dm-nvx': {
     name: 'Crestron DM NVX (virtual matrix)',
+    make: 'Crestron',
+    model: 'DM NVX virtual matrix',
     description:
       'Treats NVX encoders (inputs) and decoders (outputs) as one video matrix. Routing points a decoder at an encoder’s stream. Needs the NVX logon.',
     class: 'avoip_switching',
@@ -279,6 +292,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'qsys-core': {
     name: 'Q-SYS Core',
+    make: 'QSC',
+    model: 'Q-SYS Core',
     description:
       'A Q-SYS Core over QRC (port 1710). The driver keeps the connection and reports whether the Core answers and its engine status. Then add the control points to watch: named components (gain: gain and mute; router: select.1 to select.n) and named controls (on or off, a whole number, or text). They are read through a change group, so only what changes is sent. Routing is part of the Q-SYS design.',
     class: 'point_based',
@@ -287,7 +302,22 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
       { key: 'host', label: 'Core address', scope: 'binding', required: true },
       { key: 'username', label: 'Logon name (if the Core needs one)', scope: 'binding' },
       { key: 'password', label: 'Password (if the Core needs one)', scope: 'secret' },
-      { key: 'gainComponent', label: 'Gain component name (older room designs only)', scope: 'design' },
+      {
+        key: 'restPort',
+        label: 'Web port for the model, serial number and firmware (443)',
+        scope: 'design',
+      },
+      { key: 'restProtocol', label: 'https or http for that web port', scope: 'design' },
+      {
+        key: 'allowSelfSigned',
+        label: 'Accept the Core’s own certificate (true)',
+        scope: 'design',
+      },
+      {
+        key: 'gainComponent',
+        label: 'Gain component name (older room designs only)',
+        scope: 'design',
+      },
       { key: 'gainControl', label: 'Gain control name', scope: 'design' },
       { key: 'muteControl', label: 'Mute control name', scope: 'design' },
       { key: 'minDb', label: 'Level at 0 on the panel (dB)', scope: 'design' },
@@ -307,6 +337,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-4series': {
     name: 'Crestron 4-series control processor',
+    make: 'Crestron',
+    model: '4-Series control processor',
     description:
       'Monitoring only, over the same CresNext REST API as DM-NVX: reports firmware, and any control point named by a dotted path into the unit’s /Device tree. Most useful for a program slot’s own status, or one of its IP table entries (ONLINE/OFFLINE) — the processor’s own view of whether it can reach a device on the network.',
     class: 'point_based',
@@ -323,6 +355,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-tsw': {
     name: 'Crestron TSW / TS touch panel',
+    make: 'Crestron',
+    model: 'TSW touch panel',
     description:
       'Monitoring only: the panel keeps running its own Crestron program and UI. Reports firmware, the screen’s awake/asleep state and the running app, over the same CresNext REST API as DM-NVX. Any other field (proximity, Bluetooth, ...) is available as a control point named by a dotted path into the panel’s /Device tree.',
     class: 'point_based',
@@ -339,6 +373,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-flex': {
     name: 'Crestron Flex (Microsoft Teams Room)',
+    make: 'Crestron',
+    model: 'Flex Teams Room',
     description:
       'Monitoring only. Logs in to the UC-Engine’s secure console and reads the Teams Rooms app’s reserved joins: app state, Teams and Exchange sign-in, microphone, speaker, camera and display health, and the room’s occupancy. Watch any reserved join as a control point to alert on it, for example the microphone status (S27702) expecting Healthy.',
     class: 'conference_system',
@@ -355,6 +391,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'blustream-acm1000': {
     name: 'Blustream ACM1000 virtual AVoIP matrix',
+    make: 'Blustream',
+    model: 'ACM1000',
     description:
       'A Blustream ACM1000 AVoIP matrix, controlled as one box: the commissioner’s own scan/assign step wires up the encoders and decoders on the ACM1000 itself, so Kestrel only routes on the ACM1000 and never touches the endpoints. Reports how many inputs and outputs it has seen. Not yet verified against real hardware.',
     class: 'avoip_switching',
@@ -368,6 +406,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'blustream-da11abl': {
     name: 'Blustream DA11ABL-WP-V2 Bluetooth wall plate',
+    make: 'Blustream',
+    model: 'DA11ABL-WP-V2',
     description:
       'A Bluetooth and analogue audio wall plate. Routes the room’s output from its analogue input or a paired phone (route port "in1" is analogue, "in2" is Bluetooth), and reports Bluetooth connection status and the paired device’s name. Not yet verified against real hardware.',
     class: 'video_switching',
@@ -381,6 +421,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'crestron-occupancy': {
     name: 'Crestron occupancy sensor',
+    make: 'Crestron',
+    model: 'Occupancy sensor',
     description:
       'Monitoring only, over the CresNext REST API: reports whether the room is occupied, kept up to date with a long poll, and lists what the sensor says about itself. Not yet checked against a real sensor.',
     class: 'sensor',
@@ -398,6 +440,8 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   'blustream-pwr': {
     name: 'Blustream IEC power controller (PWR2/4/8IEC)',
+    make: 'Blustream',
+    model: 'PWR IEC power controller',
     description:
       'Blustream PWR2IEC, PWR4IEC and PWR8IEC power controllers over the Telnet console. Switches every outlet or one outlet, and reads back each outlet’s state, whether something is connected to it, and its current, power and energy use, plus the unit’s firmware, address and system status. Each outlet can be watched as a control point, so one controller shared by several rooms gives each room its own outlets. Checked against a real PWR4IEC; the other two sizes are expected to answer the same way.',
     class: 'relay',
@@ -418,6 +462,7 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   wiim: {
     name: 'WiiM music player',
+    make: 'WiiM',
     description:
       'Monitoring only, over the player’s own HTTP API: reports whether it is playing, paused or stopped, where the audio comes from, volume and mute, the track playing (title, artist, album, quality), and the player’s name, model and firmware. WiiM Mini, Pro, Pro Plus, Amp and Ultra, and other Linkplay-based players. Not yet verified against a real player.',
     class: 'music_player',
@@ -426,7 +471,11 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
       { key: 'host', label: 'Player address', scope: 'binding', required: true },
       { key: 'port', label: 'Port (443; 80 for plain HTTP)', scope: 'binding' },
       { key: 'protocol', label: 'https or http', scope: 'design' },
-      { key: 'allowSelfSigned', label: 'Accept the player’s own certificate (true)', scope: 'design' },
+      {
+        key: 'allowSelfSigned',
+        label: 'Accept the player’s own certificate (true)',
+        scope: 'design',
+      },
       { key: 'pollMs', label: 'How often to check the player (ms)', scope: 'design' },
     ],
     categories: ['music_player'],
@@ -434,6 +483,7 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
   },
   bluesound: {
     name: 'Bluesound music player (BluOS)',
+    make: 'Bluesound',
     description:
       'Monitoring only, over the BluOS HTTP API (port 11000): reports whether the player is playing, paused or stopped, the service or input it is playing from, volume and mute, the track playing (title, artist, album, quality), and the player’s name, model and group. Node, Powernode, Vault, Pulse and the Professional B100S and B400S. Not yet verified against a real player.',
     class: 'music_player',
@@ -447,3 +497,16 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     example: { host: '<player IP>' },
   },
 };
+
+/**
+ * What a driver implies about the box it talks to: its make, and a model when the driver is for one
+ * product. A device that reports its own model replaces the model; nothing is implied for a driver
+ * that serves many makes (a generic camera protocol).
+ */
+export function inferFromDriver(driverId: string | null | undefined): {
+  make?: string;
+  model?: string;
+} {
+  const d = driverId ? BUILT_IN_DRIVERS[driverId] : undefined;
+  return { ...(d?.make ? { make: d.make } : {}), ...(d?.model ? { model: d.model } : {}) };
+}
