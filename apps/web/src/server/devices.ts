@@ -9,6 +9,7 @@ import {
   DISCOVERABLE_FIELDS,
   resolveGatewayId,
   identityFromDetails,
+  inferFromDriver,
   mergeDiscovered,
   mergeManual,
   type AssetField,
@@ -91,6 +92,12 @@ async function log(db: DevicesDb, orgId: string, deviceId: string, e: EventInput
 const asProvenance = (v: unknown): Provenance => (isObject(v) ? (v as Provenance) : {});
 
 /** Applies a field merge to a patch and records what changed. Returns whether a swap needs a decision. */
+/** The driver a device's control names, if it uses one. */
+function driverIdOf(control: unknown): string | null {
+  const c = isObject(control) ? control : null;
+  return c && c.kind === 'driver' && typeof c.driverId === 'string' ? c.driverId : null;
+}
+
 async function applyField(
   db: DevicesDb,
   row: DeviceRow,
@@ -357,6 +364,15 @@ export async function ingestDeviceReports(
       );
       swap = swap || flagged;
     }
+    // A make or model nobody has set and the device did not report comes from its driver.
+    const implied = inferFromDriver(driverIdOf(row.control));
+    for (const f of ['make', 'model'] as const) {
+      const have = (patch[f] ?? row[f]) as string | null;
+      if (implied[f] && !seen[f] && !(have && have.trim())) {
+        patch[f] = implied[f];
+        prov[f] = { source: 'discovered', inferred: true, at: now.toISOString() };
+      }
+    }
     patch.provenance = prov as Prisma.InputJsonValue;
     patch.swapPending = swap;
     // What changed in the device's readings, for usage sessions and its charts.
@@ -568,6 +584,14 @@ export async function createDevice(
   // A tracked device's MAC is kept in one form so the gateway can compare it.
   if (input.addressMode === 'tracked' && typeof tracking.mac === 'string' && tracking.mac)
     data.mac = tracking.mac;
+  // What the driver implies (the make, and the model when the driver is for one product) fills
+  // whatever was left blank; the device's own report replaces it later.
+  const implied = inferFromDriver(driverIdOf(control));
+  for (const f of ['make', 'model'] as const)
+    if (implied[f] && !data[f]) {
+      data[f] = implied[f];
+      prov[f] = { source: 'discovered', inferred: true, at: now.toISOString() };
+    }
   const created = await db.device.create({
     data: {
       orgId: input.orgId,

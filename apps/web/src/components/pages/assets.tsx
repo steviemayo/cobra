@@ -209,7 +209,7 @@ export function AssetsView() {
         d.mac,
         d.ip,
         d.firmware,
-        d.assetTag,
+        d.assetTag || 'n/a',
         d.status,
         d.installedOn,
         d.warrantyEndsOn,

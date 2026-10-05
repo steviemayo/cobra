@@ -151,7 +151,7 @@ export function RegisterIssueView({ issueId }: { issueId: string }) {
                 <td className="px-2 py-1.5 font-mono">{dash(r.mac)}</td>
                 <td className="px-2 py-1.5">{dash(r.ip)}</td>
                 <td className="px-2 py-1.5">{dash(r.firmware)}</td>
-                <td className="px-2 py-1.5">{dash(r.assetTag)}</td>
+                <td className="px-2 py-1.5">{r.assetTag || 'n/a'}</td>
                 <td className="px-2 py-1.5">{r.status.replace('_', ' ')}</td>
                 <td className="px-2 py-1.5">{dash(r.warrantyEndsOn)}</td>
               </tr>

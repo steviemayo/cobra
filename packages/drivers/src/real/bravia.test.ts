@@ -29,6 +29,25 @@ afterEach(() => {
   servers.splice(0).forEach((s) => s.close());
 });
 
+// What a BRAVIA answers to getSystemInformation (serial and MAC changed).
+const SYSTEM_INFO = JSON.stringify({
+  result: [
+    {
+      generation: '5.6.0',
+      product: 'TV',
+      serial: '1234567',
+      name: 'BRAVIA',
+      language: 'eng',
+      model: 'FW-43BZ35J',
+      macAddr: 'aa:bb:cc:dd:ee:ff',
+      fwVersion: 'PKG0.6.0.81.00.1.00.0951BBA',
+      androidOs: '12',
+      mode: 'Normal',
+    },
+  ],
+  id: 33,
+});
+
 /** A display that answers like a BRAVIA: JSON for REST calls, an empty envelope for IRCC. */
 async function fakeBravia(power: 'active' | 'standby' = 'standby') {
   const seen: Seen[] = [];
@@ -38,7 +57,13 @@ async function fakeBravia(power: 'active' | 'standby' = 'standby') {
     req.on('end', () => {
       seen.push({ method: req.method, url: req.url, headers: req.headers, body });
       res.setHeader('content-type', 'application/json');
-      res.end(body.includes('getPowerStatus') ? `{"result":[{"status":"${power}"}],"id":2}` : '{"result":[],"id":1}');
+      res.end(
+        body.includes('getPowerStatus')
+          ? `{"result":[{"status":"${power}"}],"id":2}`
+          : body.includes('getSystemInformation')
+            ? SYSTEM_INFO
+            : '{"result":[],"id":1}',
+      );
     });
   });
   servers.push(server);
@@ -46,7 +71,10 @@ async function fakeBravia(power: 'active' | 'standby' = 'standby') {
   return { seen, port: (server.address() as { port: number }).port };
 }
 
-function bravia(port: number, apps: unknown = [{ id: 'com.example.app', name: 'Example' }]): DeviceDriver {
+function bravia(
+  port: number,
+  apps: unknown = [{ id: 'com.example.app', name: 'Example' }],
+): DeviceDriver {
   const device: Device = {
     ...base.devices.find((d) => d.category === 'video_destination')!,
     control: { kind: 'driver', driverId: 'lib:sony-bravia' },
@@ -75,7 +103,30 @@ describe('Sony BRAVIA driver', () => {
     expect(call.url).toBe('/sony/system');
     expect(call.headers['x-auth-psk']).toBe('secret-psk');
     expect(call.headers['content-type']).toBe('application/json');
-    expect(JSON.parse(call.body)).toMatchObject({ method: 'setPowerStatus', params: [{ status: true }] });
+    expect(JSON.parse(call.body)).toMatchObject({
+      method: 'setPowerStatus',
+      params: [{ status: true }],
+    });
+  });
+
+  it('reads its model, serial number, MAC and firmware for the register', async () => {
+    const { seen, port } = await fakeBravia();
+    const d = bravia(port);
+    d.start();
+    await until(() => d.getState().firmware === 'PKG0.6.0.81.00.1.00.0951BBA');
+    expect(seen.some((s) => s.body.includes('getSystemInformation'))).toBe(true);
+    expect(d.getState().details).toEqual([
+      {
+        title: 'Identity',
+        rows: [
+          { label: 'Model', value: 'FW-43BZ35J' },
+          { label: 'Serial number', value: '1234567' },
+          { label: 'MAC address', value: 'aa:bb:cc:dd:ee:ff' },
+        ],
+      },
+    ]);
+    // The power poll is not confused by it.
+    await until(() => d.getState().power === 'off');
   });
 
   it('reads an active display as on', async () => {
@@ -110,9 +161,25 @@ describe('Sony BRAVIA driver', () => {
   it('has a code for every key', async () => {
     const { seen, port } = await fakeBravia();
     const d = bravia(port);
-    const keys = ['up', 'down', 'left', 'right', 'ok', 'back', 'home', 'menu', 'play', 'pause', 'stop', 'forward', 'rewind'] as const;
+    const keys = [
+      'up',
+      'down',
+      'left',
+      'right',
+      'ok',
+      'back',
+      'home',
+      'menu',
+      'play',
+      'pause',
+      'stop',
+      'forward',
+      'rewind',
+    ] as const;
     for (const key of keys) await d.send({ type: 'key', key });
-    const codes = seen.filter((s) => s.url === '/sony/ircc').map((s) => /<IRCCCode>(.*)<\/IRCCCode>/.exec(s.body)![1]);
+    const codes = seen
+      .filter((s) => s.url === '/sony/ircc')
+      .map((s) => /<IRCCCode>(.*)<\/IRCCCode>/.exec(s.body)![1]);
     expect(new Set(codes).size).toBe(keys.length);
   });
 
@@ -121,7 +188,10 @@ describe('Sony BRAVIA driver', () => {
     const d = bravia(port);
     await d.send({ type: 'launch_app', appId: 'localapp://webappruntime?url=http%3A%2F%2Fx%2F"q' });
     const body = JSON.parse(seen.find((s) => s.url === '/sony/appControl')!.body);
-    expect(body).toMatchObject({ method: 'setActiveApp', params: [{ uri: 'localapp://webappruntime?url=http%3A%2F%2Fx%2F"q' }] });
+    expect(body).toMatchObject({
+      method: 'setActiveApp',
+      params: [{ uri: 'localapp://webappruntime?url=http%3A%2F%2Fx%2F"q' }],
+    });
     expect(d.getState().activeApp).toBe('localapp://webappruntime?url=http%3A%2F%2Fx%2F"q');
   });
 });

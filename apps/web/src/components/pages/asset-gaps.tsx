@@ -19,10 +19,12 @@ import { Label } from '@/components/ui/label';
 import { useTRPC } from '@/trpc/client';
 import type { DeviceRow } from './assets';
 
-/** What a register still needs: the fields people are asked to keep complete. */
+/**
+ * What a register still needs: the fields people are asked to keep complete. The asset tag is not
+ * one of them: many devices have none, and a blank tag reads as n/a.
+ */
 export const GAPS = [
   { key: 'serial', label: 'Serial', missing: (d: GapDevice) => !d.serial },
-  { key: 'assetTag', label: 'Asset tag', missing: (d: GapDevice) => !d.assetTag },
   { key: 'makeModel', label: 'Make/model', missing: (d: GapDevice) => !d.make || !d.model },
   { key: 'installedOn', label: 'Install date', missing: (d: GapDevice) => !d.installedOn },
   { key: 'warrantyEndsOn', label: 'Warranty end', missing: (d: GapDevice) => !d.warrantyEndsOn },
@@ -31,7 +33,7 @@ export const GAPS = [
 export type GapKey = (typeof GAPS)[number]['key'];
 export type GapDevice = Pick<
   DeviceRow,
-  'serial' | 'assetTag' | 'make' | 'model' | 'installedOn' | 'warrantyEndsOn' | 'endOfLifeOn'
+  'serial' | 'make' | 'model' | 'installedOn' | 'warrantyEndsOn' | 'endOfLifeOn'
 >;
 
 export const gapKeysOf = (d: GapDevice): GapKey[] =>
@@ -71,7 +73,6 @@ export function FixGapsDialog({
   const [gaps] = useState(() => new Set(gapKeysOf(device)));
   const [v, setV] = useState({
     serial: device.serial ?? '',
-    assetTag: device.assetTag ?? '',
     make: device.make ?? '',
     model: device.model ?? '',
     installedOn: dayOf(device.installedOn),
@@ -89,7 +90,7 @@ export function FixGapsDialog({
 
   async function submit(next: boolean) {
     const patch: Record<string, unknown> = {};
-    for (const k of ['serial', 'assetTag', 'make', 'model'] as const)
+    for (const k of ['serial', 'make', 'model'] as const)
       if (v[k].trim() && v[k].trim() !== (device[k] ?? '')) patch[k] = v[k].trim();
     for (const k of ['installedOn', 'warrantyEndsOn', 'endOfLifeOn'] as const)
       if (v[k] && v[k] !== dayOf(device[k])) patch[k] = new Date(v[k]);
@@ -120,11 +121,6 @@ export function FixGapsDialog({
           {gaps.has('serial') && (
             <Field label="Serial number">
               <Input value={v.serial} onChange={set('serial')} maxLength={100} />
-            </Field>
-          )}
-          {gaps.has('assetTag') && (
-            <Field label="Asset tag">
-              <Input value={v.assetTag} onChange={set('assetTag')} maxLength={80} />
             </Field>
           )}
           {gaps.has('makeModel') && (
