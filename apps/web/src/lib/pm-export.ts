@@ -17,6 +17,9 @@ const answerText = (r: string | number | null) =>
 const statusText = (s: string) =>
   s === 'signed' ? 'Signed off' : s === 'skipped' ? 'Skipped' : s === 'draft' ? 'Draft' : s;
 
+/** The most photos one PDF carries, so the page stays a size a browser can print. */
+export const MAX_PDF_PHOTOS = 150;
+
 /** Where a visit was: the site or area it covered, or its room or device. */
 export const visitWhere = (v: ExportVisit) =>
   v.multi
@@ -35,6 +38,7 @@ export function visitsToCsv(visits: ExportVisit[]): string {
     'Room status',
     'Failed items',
     'Failed item names',
+    'Photos',
     'Skip reason',
     'Worked by',
     'Visit status',
@@ -60,6 +64,7 @@ export function visitsToCsv(visits: ExportVisit[]): string {
             .filter((r) => r.result === 'fail')
             .map((r) => r.label)
             .join('; '),
+          s.photos.length,
           s.skipReason,
           s.workedByName,
           statusText(v.status),
@@ -85,9 +90,32 @@ const esc = (v: unknown) =>
 export function visitsToHtml(
   visits: ExportVisit[],
   opts: { title: string; subtitle?: string },
+  /** The pictures, by photo id, as data addresses. A photo with none is listed without its picture. */
+  images: Record<string, string> = {},
 ): string {
   const body = visits
     .map((v) => {
+      // Every photo of the visit, numbered, for the Media / files section at its foot.
+      const media = v.sections.flatMap((s) =>
+        s.photos.map((p) => ({ ...p, room: s.room, device: s.device })),
+      );
+      const numberOf = new Map(media.map((p, i) => [p.id, i + 1]));
+      const mediaHtml = media.length
+        ? `<section class="media"><h3>Media / files <span class="status">${media.length} photo${media.length === 1 ? '' : 's'}</span></h3><div class="grid">${media
+            .map((p, i) => {
+              const src = images[p.id];
+              return `<figure>${
+                src
+                  ? `<img src="${esc(src)}" alt="Photo ${i + 1}">`
+                  : '<div class="missing">Picture not included</div>'
+              }<figcaption><strong>Photo ${i + 1}</strong> · ${esc(
+                [p.room, p.device].filter(Boolean).join(' · '),
+              )}<br>${esc(p.itemLabel)}<br><span class="hash">${esc(day(p.createdAt))} · ${esc(
+                p.mime.replace('image/', '').toUpperCase(),
+              )} · SHA-256 ${esc(p.sha256.slice(0, 16))}</span></figcaption></figure>`;
+            })
+            .join('')}</div></section>`
+        : '';
       const sections = v.sections
         .map((s) => {
           const heading = [s.room, s.device].filter(Boolean).join(' · ') || 'Visit';
@@ -100,10 +128,19 @@ export function visitsToHtml(
                   ? 'Passed'
                   : 'Draft';
           const rows = s.results
-            .map(
-              (r) =>
-                `<tr class="${r.result === 'fail' ? 'fail' : ''}"><td>${esc(r.label)}</td><td>${esc(answerText(r.result))}</td><td>${esc([r.note, r.kestrelSaw ? `Kestrel saw: ${r.kestrelSaw}` : ''].filter(Boolean).join(' · '))}</td></tr>`,
-            )
+            .map((r) => {
+              const mine =
+                r.type === 'photo'
+                  ? s.photos.filter((p) => p.itemId === r.itemId).map((p) => numberOf.get(p.id))
+                  : [];
+              const shown =
+                r.type === 'photo'
+                  ? mine.length
+                    ? `${mine.length} photo${mine.length === 1 ? '' : 's'} (see Media / files: ${mine.join(', ')})`
+                    : 'No photos'
+                  : answerText(r.result);
+              return `<tr class="${r.result === 'fail' ? 'fail' : ''}"><td>${esc(r.label)}</td><td>${esc(shown)}</td><td>${esc([r.note, r.kestrelSaw ? `Kestrel saw: ${r.kestrelSaw}` : ''].filter(Boolean).join(' · '))}</td></tr>`;
+            })
             .join('');
           return `<section class="room"><h3>${v.multi ? `${esc(heading)} <span class="status">${status}</span>` : `<span class="status">${status}</span>`}</h3>${
             s.workedByName ? `<p class="meta">Worked on by ${esc(s.workedByName)}</p>` : ''
@@ -122,7 +159,7 @@ export function visitsToHtml(
           : 'Draft, not signed off'
       }${v.dueOn ? ` · due ${esc(day(v.dueOn))}` : ''}${v.correctsRunId ? ' · correction of an earlier visit' : ''}</p>${
         v.notes ? `<p class="notes">${esc(v.notes)}</p>` : ''
-      }${sections}</article>`;
+      }${sections}${mediaHtml}</article>`;
     })
     .join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(opts.title)}</title><style>
@@ -133,6 +170,11 @@ export function visitsToHtml(
     .room{margin:0 0 10px;break-inside:avoid} .status{font-weight:400;color:#555;margin-left:6px}
     table{border-collapse:collapse;width:100%} th,td{border:1px solid #ccc;padding:3px 6px;text-align:left;vertical-align:top}
     th{background:#f3f3f3} tr.fail td{background:#fdecec}
+    .media{margin:14px 0 0;padding-top:8px;border-top:1px solid #999}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px} figure{margin:0;break-inside:avoid}
+    figure img{width:100%;max-height:220px;object-fit:contain;border:1px solid #ccc;background:#fafafa}
+    figcaption{font-size:10px;margin-top:3px} .hash{color:#555;font-family:ui-monospace,monospace}
+    .missing{border:1px dashed #999;padding:30px 6px;text-align:center;color:#777}
     @media print{body{margin:12mm}}
   </style></head><body><h1>${esc(opts.title)}</h1>${
     opts.subtitle ? `<p class="sub">${esc(opts.subtitle)}</p>` : ''
@@ -154,10 +196,21 @@ export function printHtml(html: string) {
   doc.write(html);
   doc.close();
   win.addEventListener('afterprint', () => frame.remove());
-  // Give the page a moment to lay out, then print; remove the frame even if the dialog is cancelled quietly.
-  setTimeout(() => {
-    win.focus();
-    win.print();
-    setTimeout(() => frame.remove(), 60_000);
-  }, 150);
+  // Wait for the pictures (and a moment to lay out), then print; remove the frame even if the dialog is cancelled quietly.
+  const pictures = [...doc.images].map((img) =>
+    img.complete
+      ? Promise.resolve()
+      : new Promise<void>((done) => {
+          img.addEventListener('load', () => done());
+          img.addEventListener('error', () => done());
+        }),
+  );
+  void Promise.race([Promise.all(pictures), new Promise((done) => setTimeout(done, 15_000))]).then(
+    () =>
+      setTimeout(() => {
+        win.focus();
+        win.print();
+        setTimeout(() => frame.remove(), 60_000);
+      }, 150),
+  );
 }

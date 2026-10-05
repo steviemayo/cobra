@@ -1447,7 +1447,20 @@ export async function listRuns(
   return views;
 }
 
+export interface PmExportPhoto {
+  id: string;
+  itemId: string;
+  /** The checklist item it was taken for. */
+  itemLabel: string;
+  mime: string;
+  size: number;
+  sha256: string;
+  createdAt: Date;
+}
+
 export interface PmExportSection {
+  /** The run the answers and photos belong to (the room's own run in a multi-room visit). */
+  runId: string;
   room: string | null;
   device: string | null;
   status: string;
@@ -1455,11 +1468,14 @@ export interface PmExportSection {
   skipReason: string | null;
   workedByName: string | null;
   results: {
+    itemId: string;
+    type: string;
     label: string;
     result: string | number | null;
     note: string | null;
     kestrelSaw: string | null;
   }[];
+  photos: PmExportPhoto[];
 }
 
 export interface PmExportVisit extends PmVisitView {
@@ -1483,11 +1499,43 @@ export async function exportVisits(
       .catch([])
       .parse(runs.find((r) => r.id === id)?.results)
       .map((x) => ({
+        itemId: x.itemId,
+        type: x.type,
         label: x.label,
         result: x.result,
         note: x.note ?? null,
         kestrelSaw: x.auto?.value ?? null,
       }));
+  // Photos by the run they were taken in, described without their bytes.
+  const photoRows = want.length
+    ? await db.pmPhoto.findMany({
+        where: { orgId, runId: { in: want } },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          runId: true,
+          itemId: true,
+          mime: true,
+          size: true,
+          sha256: true,
+          createdAt: true,
+        },
+      })
+    : [];
+  const photosOf = (runId: string): PmExportPhoto[] => {
+    const labels = new Map(answers(runId).map((a) => [a.itemId, a.label]));
+    return photoRows
+      .filter((p) => p.runId === runId)
+      .map((p) => ({
+        id: p.id,
+        itemId: p.itemId,
+        itemLabel: labels.get(p.itemId) ?? 'Photo',
+        mime: p.mime,
+        size: p.size,
+        sha256: p.sha256,
+        createdAt: p.createdAt,
+      }));
+  };
   const parentNotes = visits.some((v) => v.multi)
     ? await db.pmRun.findMany({ where: { orgId, id: { in: visits.map((v) => v.id) } } })
     : [];
@@ -1497,6 +1545,7 @@ export async function exportVisits(
       (runs.find((r) => r.id === v.id) ?? parentNotes.find((r) => r.id === v.id))?.notes ?? null,
     sections: v.multi
       ? v.segments.map((s) => ({
+          runId: s.id,
           room: s.roomName,
           device: s.deviceName,
           status: s.status,
@@ -1504,9 +1553,11 @@ export async function exportVisits(
           skipReason: s.skipReason,
           workedByName: s.workedByName,
           results: s.status === 'skipped' ? [] : answers(s.id),
+          photos: s.status === 'skipped' ? [] : photosOf(s.id),
         }))
       : [
           {
+            runId: v.id,
             room: v.roomName,
             device: v.deviceName,
             status: v.status,
@@ -1514,6 +1565,7 @@ export async function exportVisits(
             skipReason: null,
             workedByName: null,
             results: answers(v.id),
+            photos: photosOf(v.id),
           },
         ],
   }));

@@ -29,6 +29,7 @@ const visit: ExportVisit = {
   segments: [],
   sections: [
     {
+      runId: 'r1',
       room: 'Boardroom',
       device: null,
       status: 'signed',
@@ -36,11 +37,54 @@ const visit: ExportVisit = {
       skipReason: null,
       workedByName: 'Sam',
       results: [
-        { label: 'Picture, clear', result: 'fail', note: 'Flickers', kestrelSaw: null },
-        { label: 'Audio', result: 'pass', note: null, kestrelSaw: 'All answering' },
+        {
+          itemId: 'picture',
+          type: 'passfail',
+          label: 'Picture, clear',
+          result: 'fail',
+          note: 'Flickers',
+          kestrelSaw: null,
+        },
+        {
+          itemId: 'audio',
+          type: 'passfail',
+          label: 'Audio',
+          result: 'pass',
+          note: null,
+          kestrelSaw: 'All answering',
+        },
+        {
+          itemId: 'rack',
+          type: 'photo',
+          label: 'Photo of the rack',
+          result: null,
+          note: null,
+          kestrelSaw: null,
+        },
+      ],
+      photos: [
+        {
+          id: 'p1',
+          itemId: 'rack',
+          itemLabel: 'Photo of the rack',
+          mime: 'image/jpeg',
+          size: 100,
+          sha256: 'abcdef0123456789abcdef',
+          createdAt: new Date('2026-10-05T10:00:00Z'),
+        },
+        {
+          id: 'p2',
+          itemId: 'rack',
+          itemLabel: 'Photo of the rack',
+          mime: 'image/png',
+          size: 100,
+          sha256: '0123456789abcdef0123',
+          createdAt: new Date('2026-10-05T10:01:00Z'),
+        },
       ],
     },
     {
+      runId: 'r2',
       room: 'Lobby',
       device: 'Lobby screen',
       status: 'skipped',
@@ -48,6 +92,7 @@ const visit: ExportVisit = {
       skipReason: 'Locked, key holder away',
       workedByName: null,
       results: [],
+      photos: [],
     },
   ],
 };
@@ -84,6 +129,22 @@ describe('export of maintenance visits', () => {
     expect(html).toContain('Picture, clear');
     expect(html).toContain('Kestrel saw: All answering');
     expect(html).toContain('Skipped: Locked, key holder away');
+  });
+
+  it('groups the photos in a Media / files section at the foot of the visit', () => {
+    const html = visitsToHtml([visit], { title: 'x' }, { p1: 'data:image/jpeg;base64,AAAA' });
+    const media = html.indexOf('Media / files <span');
+    expect(media).toBeGreaterThan(html.indexOf('Lobby'));
+    expect(html).toContain('2 photos (see Media / files: 1, 2)');
+    expect(html).toContain('<img src="data:image/jpeg;base64,AAAA" alt="Photo 1">');
+    expect(html).toContain('Picture not included');
+    expect(html).toContain('SHA-256 abcdef0123456789');
+  });
+
+  it('counts photos in the CSV and leaves the Media section out when there are none', () => {
+    expect(visitsToCsv([visit]).split('\r\n')[1]).toContain(',2,');
+    const none = { ...visit, sections: visit.sections.map((s) => ({ ...s, photos: [] })) };
+    expect(visitsToHtml([none], { title: 'x' })).not.toContain('Media / files <span');
   });
 
   it('says so when there is nothing to print', () => {

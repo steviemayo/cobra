@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { downloadFile } from '@/lib/download';
-import { printHtml, visitsToCsv, visitsToHtml } from '@/lib/pm-export';
+import { MAX_PDF_PHOTOS, printHtml, visitsToCsv, visitsToHtml } from '@/lib/pm-export';
 import { useTRPC } from '@/trpc/client';
 
 /** Export of maintenance visits: a spreadsheet (CSV), or a printable page to save as a PDF. */
@@ -58,7 +58,52 @@ export function PmExportMenu({
           contentType: 'text/csv',
           body: visitsToCsv(visits),
         });
-      else printHtml(visitsToHtml(visits, { title, subtitle }));
+      else {
+        // The PDF carries the photos, in a Media / files section at the foot of each visit.
+        const wanted = visits
+          .flatMap((v) =>
+            v.sections.flatMap((s) => s.photos.map((p) => ({ runId: s.runId, id: p.id }))),
+          )
+          .slice(0, MAX_PDF_PHOTOS);
+        const total = visits.reduce(
+          (n, v) => n + v.sections.reduce((m, s) => m + s.photos.length, 0),
+          0,
+        );
+        const images: Record<string, string> = {};
+        const progress = wanted.length ? toast.loading(`Adding ${wanted.length} photos…`) : null;
+        try {
+          // A few at a time, so a visit with many photos does not flood the server.
+          for (let i = 0; i < wanted.length; i += 4)
+            await Promise.all(
+              wanted.slice(i, i + 4).map(async (p) => {
+                try {
+                  const r = await qc.fetchQuery({
+                    ...trpc.pm.photo.queryOptions({ orgId, runId: p.runId, photoId: p.id }),
+                    staleTime: Infinity,
+                  });
+                  images[p.id] = r.dataUrl;
+                } catch {
+                  // Listed without its picture.
+                }
+              }),
+            );
+        } finally {
+          if (progress) toast.dismiss(progress);
+        }
+        printHtml(
+          visitsToHtml(
+            visits,
+            {
+              title,
+              subtitle:
+                total > wanted.length
+                  ? `${subtitle ?? ''} · first ${MAX_PDF_PHOTOS} of ${total} photos included`
+                  : subtitle,
+            },
+            images,
+          ),
+        );
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not export');
     } finally {

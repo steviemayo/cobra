@@ -466,12 +466,27 @@ describe('the list of visits', () => {
 
   it('exports every answer by room, and a skipped room has none', async () => {
     const { w } = await signedSite();
+    const rackId = w.pmRun.rows.find((r) => r.parentRunId && r.status === 'signed')!.id as string;
+    w.pmPhoto.rows.push({
+      id: 'ph1',
+      orgId: ORG,
+      runId: rackId,
+      itemId: 'rack',
+      mime: 'image/jpeg',
+      size: 10,
+      sha256: 'ab',
+      createdAt: NOW,
+    });
     const out = await exportVisits(w.db, ORG, {});
     expect(out).toHaveLength(1);
     expect(out[0]!.sections).toHaveLength(4);
     const done = out[0]!.sections.filter((s) => s.status === 'signed');
     expect(done.every((s) => s.results.length === 3)).toBe(true);
     expect(out[0]!.sections.find((s) => s.status === 'skipped')!.results).toEqual([]);
+    expect(done.flatMap((s) => s.photos)).toEqual([
+      expect.objectContaining({ id: 'ph1', itemId: 'rack', itemLabel: 'Photo of the rack' }),
+    ]);
+    expect(out[0]!.sections.find((s) => s.status === 'skipped')!.photos).toEqual([]);
     const one = await exportVisits(w.db, ORG, { runId: out[0]!.id });
     expect(one).toHaveLength(1);
   });
