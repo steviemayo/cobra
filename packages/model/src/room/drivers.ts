@@ -25,6 +25,8 @@ export interface DriverInfo {
   settings: DriverSettingInfo[];
   /** For a point-based driver: the address form of each kind of control point it supports. */
   points?: PointForms;
+  /** The driver can list the values inside the live device, so a point is picked rather than typed. */
+  browse?: boolean;
   /** A complete settings object to start from. Values in <angle brackets> must be replaced. */
   example: Record<string, unknown>;
 }
@@ -311,6 +313,7 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     features: ['generic'],
     settings: CRESTRON_CWS_SETTINGS,
     points: { generic: CRESTRON_CWS_PATH },
+    browse: true,
     categories: ['control_processor'],
     example: {
       host: '<processor IP>',
@@ -326,6 +329,7 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     features: ['generic'],
     settings: CRESTRON_CWS_SETTINGS,
     points: { generic: CRESTRON_CWS_PATH },
+    browse: true,
     categories: ['touch_panel'],
     example: {
       host: '<panel IP>',

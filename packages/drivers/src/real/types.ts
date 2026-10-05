@@ -1,4 +1,5 @@
 import type {
+  BrowsedPoints,
   ControlPoint,
   Device,
   DeviceCommand,
@@ -23,6 +24,8 @@ export interface DeviceDriver {
   streamLocation?(): Promise<string>;
   /** Read one control point, to check it exists and learn its range. Rejects if it cannot. */
   readPoint?(point: Pick<ControlPoint, 'type' | 'address' | 'min' | 'max'>): Promise<PointReading>;
+  /** List every value inside the live device a point could watch, for a pick-list. Rejects if it cannot. */
+  browsePoints?(): Promise<BrowsedPoints>;
   /** List the device's own named components, for a pick-list instead of typing one blind. Rejects if it cannot. */
   discoverComponents?(): Promise<DiscoveredComponent[]>;
   /** List the controls of one named component. Rejects if it cannot. */

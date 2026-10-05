@@ -55,6 +55,7 @@ interface FakeUnit {
 async function fakeCrestron(
   creds: { user: string; password: string },
   tree: Record<string, unknown>,
+  deviceDelayMs = 0,
 ): Promise<FakeUnit> {
   const fake: FakeUnit = { port: 0, log: [], logins: 0, expireNext: false, close: () => undefined };
   let authed = false;
@@ -90,7 +91,7 @@ async function fakeCrestron(
       }
       if (req.method === 'GET' && req.url === '/Device') {
         res.writeHead(200, { 'content-type': 'application/json' });
-        return void res.end(JSON.stringify({ Device: tree }));
+        return void setTimeout(() => res.end(JSON.stringify({ Device: tree })), deviceDelayMs);
       }
       res.writeHead(404);
       res.end();
@@ -225,6 +226,73 @@ describe('Crestron 4-series control processor driver', () => {
     d.start();
     await wait(400);
     expect(d.getState().online).toBe(false);
+  });
+
+  it('waits longer for a slow unit instead of going offline, and holds the longer wait', async () => {
+    const unit = await fakeCrestron(CREDS, rmc4Tree, 350);
+    const d = new Crestron4SeriesDriver(
+      device('control_processor', 'crestron-4series', settings(unit.port, { timeoutMs: 150 })),
+      ctx,
+    );
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    // Online again on every later poll, not only the first: the wait stayed above the unit's delay
+    await wait(600);
+    expect(d.getState().online).toBe(true);
+  });
+
+  it('lists what the unit reports, IP table entries first, and leaves secrets out', async () => {
+    const unit = await fakeCrestron(CREDS, {
+      ...rmc4Tree,
+      Ethernet: { HostName: 'rmc4' },
+      Authentication: { Token: 'do-not-show' },
+      Wifi: { Password: 'do-not-show' },
+    });
+    const d = new Crestron4SeriesDriver(
+      device('control_processor', 'crestron-4series', settings(unit.port)),
+      ctx,
+    );
+    drivers.push(d);
+    d.start();
+    await until(() => d.getState().online);
+    const found = await d.browsePoints();
+    const entry = 'Device.Programs.ProgramInstanceLibrary.DeviceSlot1.IpTable.Entries';
+    expect(found.points.slice(0, 2)).toEqual([
+      {
+        path: `${entry}.3.Status`,
+        label: 'IP ID 3 · Panel 1 · TSW-770',
+        group: 'IP table, slot 1',
+        value: 'ONLINE',
+        expect: 'ONLINE',
+      },
+      {
+        path: `${entry}.4.Status`,
+        label: 'IP ID 4 · Panel 2 · TSW-770',
+        group: 'IP table, slot 1',
+        value: 'OFFLINE',
+        expect: 'ONLINE',
+      },
+    ]);
+    const paths = found.points.map((p) => p.path);
+    expect(paths).toContain('Device.Ethernet.HostName');
+    expect(paths).toContain('Device.DeviceInfo.SerialNumber');
+    expect(JSON.stringify(found)).not.toContain('do-not-show');
+    // Each path is one the driver can read back as a control point.
+    for (const p of found.points.slice(0, 5)) {
+      const reading = await d.readPoint({ type: 'generic', address: { path: p.path } });
+      expect(reading.value).toBe(p.value);
+    }
+  });
+
+  it('will not list a unit that is offline', async () => {
+    const unit = await fakeCrestron(CREDS, rmc4Tree);
+    const d = new Crestron4SeriesDriver(
+      device('control_processor', 'crestron-4series', settings(unit.port)),
+      ctx,
+    );
+    drivers.push(d);
+    await expect(d.browsePoints()).rejects.toThrow('offline');
   });
 
   it('accepts no commands: it is monitoring only', async () => {
