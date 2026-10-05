@@ -71,7 +71,7 @@ const B = '00000000-0000-4000-8000-000000000002';
 
 function set(
   version: string,
-  devices: { id: string; host?: string; name?: string; points?: ControlPoint[] }[],
+  devices: { id: string; host?: string; name?: string; points?: ControlPoint[]; category?: string }[],
 ): SignedDeviceSet {
   return {
     payload: {
@@ -81,7 +81,7 @@ function set(
       devices: devices.map((d) => ({
         id: d.id,
         name: d.name ?? 'Display',
-        category: 'display',
+        category: d.category ?? 'display',
         control: { kind: 'generic' as const, protocol: 'pjlink' as const },
         settings: { host: d.host ?? '10.0.0.1' },
         ...(d.points && { points: d.points }),
@@ -405,6 +405,21 @@ describe('DeviceHost snapshot', () => {
     const res = await host.snapshot(A);
     expect(res).toMatchObject({ ok: false });
     expect(res.ok === false && res.error).toContain('too large');
+    host.shutdown();
+  });
+});
+
+describe('DeviceHost estate-only categories', () => {
+  it('runs a network switch, UPS or access point, which are not room device categories', () => {
+    const host = new DeviceHost(silentLogger);
+    const before = built.length;
+    host.apply(
+      set('v1', [
+        { id: A, category: 'network_switch' },
+        { id: B, category: 'ups' },
+      ]),
+    );
+    expect(built.length - before).toBe(2);
     host.shutdown();
   });
 });

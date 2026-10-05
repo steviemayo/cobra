@@ -24,6 +24,8 @@ services:
       KESTREL_CLOUD_URL: ${KESTREL_CLOUD_URL:?set KESTREL_CLOUD_URL}
       KESTREL_ENROLL_TOKEN: ${KESTREL_ENROLL_TOKEN:-}
       KESTREL_SIMULATE: ${KESTREL_SIMULATE:-off}
+      # Log lines are written in this time zone (for example Australia/Sydney). UTC when unset.
+      TZ: ${TZ:-}
       # How the gateway asks Watchtower to update it (Watchtower publishes this on the host only).
       KESTREL_UPDATE_URL: http://127.0.0.1:18080/v1/update
       KESTREL_UPDATE_TOKEN: ${KESTREL_UPDATE_TOKEN:?set KESTREL_UPDATE_TOKEN}
