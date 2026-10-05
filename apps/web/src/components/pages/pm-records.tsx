@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardCheck, Download, FileCheck2 } from 'lucide-react';
+import { ChevronDown, ClipboardCheck, Download, FileCheck2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmptyState } from '@/components/common/empty-state';
 import { dateTime } from '@/components/common/health';
@@ -15,12 +15,88 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { downloadFile } from '@/lib/download';
+import { plural } from '@/lib/format';
 import { useTRPC } from '@/trpc/client';
+import type { RouterOutputs } from '@/trpc/types';
+import { PmExportMenu } from './pm-export-menu';
 
-const csvCell = (v: unknown) => {
-  const s = v === null || v === undefined ? '' : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
+type Visit = RouterOutputs['pm']['runs'][number];
+
+/** The badge for how a visit or room turned out. */
+function Outcome({ status, failed }: { status: string; failed: number }) {
+  if (status === 'draft') return <Badge variant="secondary">Draft</Badge>;
+  if (status === 'skipped') return <Badge variant="outline">Skipped</Badge>;
+  return failed ? <Badge variant="destructive">{failed} failed</Badge> : <Badge>Passed</Badge>;
+}
+
+/** One visit. A visit to several rooms is one record that opens to show each room as a segment. */
+function VisitRow({ v, compact }: { v: Visit; compact?: boolean }) {
+  const { orgId } = useOrg();
+  const [open, setOpen] = useState(false);
+  const skipped = v.segments.filter((s) => s.status === 'skipped').length;
+  const href = orgPath(orgId, `/pm/runs/${v.parentRunId ?? v.id}`);
+  return (
+    <li className="px-4 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <Link href={href} className="text-sm font-medium hover:underline">
+            {v.templateName}
+          </Link>
+          <div className="text-xs text-muted-foreground">
+            {v.multi ? (
+              <>
+                {v.scopeLabel} · {plural(v.segments.length, 'room')}
+                {skipped > 0 && ` (${skipped} skipped)`} ·{' '}
+              </>
+            ) : (
+              !compact && (v.roomName ?? v.deviceName) && `${v.roomName ?? v.deviceName} · `
+            )}
+            {v.parentRunId && `part of ${v.parentLabel ?? 'a multi-room visit'} · `}
+            {v.status === 'signed'
+              ? `signed by ${v.signedByName} ${v.signedAt ? dateTime(v.signedAt) : ''}`
+              : `draft started ${dateTime(v.createdAt)}`}
+          </div>
+        </div>
+        <span className="flex items-center gap-2">
+          {v.correctsRunId && <Badge variant="outline">Correction</Badge>}
+          <Outcome status={v.status} failed={v.failedCount} />
+          {v.multi && (
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label={open ? 'Hide the rooms' : 'Show the rooms'}
+              aria-expanded={open}
+              onClick={() => setOpen(!open)}
+            >
+              <ChevronDown className={open ? 'rotate-180' : undefined} />
+            </Button>
+          )}
+        </span>
+      </div>
+      {v.multi && open && (
+        <ul className="mt-2 divide-y rounded-md border text-xs">
+          {v.segments.map((s) => (
+            <li
+              key={s.id}
+              className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5"
+            >
+              <span>
+                {[s.roomName, s.deviceName].filter(Boolean).join(' · ')}
+                {s.skipReason && (
+                  <span className="text-muted-foreground"> — skipped: {s.skipReason}</span>
+                )}
+                {s.workedByName && s.status !== 'skipped' && (
+                  <span className="text-muted-foreground"> — {s.workedByName}</span>
+                )}
+              </span>
+              <Outcome status={s.status} failed={s.failedCount} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
 
 /** Visits, for a room or a device: the record kept next to the equipment. */
 export function PmRuns({
@@ -44,34 +120,23 @@ export function PmRuns({
   return (
     <ul className="divide-y rounded-lg border">
       {runs.data.map((r) => (
-        <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
-          <div>
-            <Link
-              href={orgPath(orgId, `/pm/runs/${r.id}`)}
-              className="text-sm font-medium hover:underline"
-            >
-              {r.templateName}
-            </Link>
-            <div className="text-xs text-muted-foreground">
-              {!compact && `${r.roomName ?? r.deviceName ?? ''} · `}
-              {r.status === 'signed'
-                ? `signed by ${r.signedByName} ${r.signedAt ? dateTime(r.signedAt) : ''}`
-                : `draft started ${dateTime(r.createdAt)}`}
-            </div>
-          </div>
-          <span className="flex items-center gap-2">
-            {r.correctsRunId && <Badge variant="outline">Correction</Badge>}
-            {r.status === 'draft' && <Badge variant="secondary">Draft</Badge>}
-            {r.status === 'signed' &&
-              (r.failedCount ? (
-                <Badge variant="destructive">{r.failedCount} failed</Badge>
-              ) : (
-                <Badge>Passed</Badge>
-              ))}
-          </span>
-        </li>
+        <VisitRow key={r.id} v={r} compact={compact} />
       ))}
     </ul>
+  );
+}
+
+/** Visits under their site, sites in name order, visits without one last. */
+function groupBySite(visits: Visit[]) {
+  const by = new Map<string, { key: string; name: string; visits: Visit[] }>();
+  for (const v of visits) {
+    const key = v.siteId ?? '';
+    const g = by.get(key) ?? { key, name: v.siteName ?? 'No site', visits: [] };
+    g.visits.push(v);
+    by.set(key, g);
+  }
+  return [...by.values()].sort(
+    (a, b) => (a.key === '' ? 1 : 0) - (b.key === '' ? 1 : 0) || a.name.localeCompare(b.name),
   );
 }
 
@@ -82,6 +147,7 @@ export function PmRecordsView() {
   const { orgId, canSupport } = useOrg();
   const [failedOnly, setFailedOnly] = useState(false);
   const [status, setStatus] = useState<'' | 'signed' | 'draft'>('');
+  const [bySite, setBySite] = useState(false);
   const runs = useQuery(
     trpc.pm.runs.queryOptions({ orgId, failedOnly, ...(status ? { status } : {}), limit: 500 }),
   );
@@ -98,41 +164,6 @@ export function PmRecordsView() {
       onError: (e) => toast.error(e.message),
     }),
   );
-
-  function exportCsv() {
-    const rows = runs.data ?? [];
-    const head = [
-      'Checklist',
-      'Room',
-      'Device',
-      'Status',
-      'Failed items',
-      'Signed by',
-      'Signed at',
-      'Due',
-    ];
-    downloadFile({
-      filename: `maintenance-records-${new Date().toISOString().slice(0, 10)}.csv`,
-      contentType: 'text/csv',
-      body: [
-        head.join(','),
-        ...rows.map((r) =>
-          [
-            r.templateName,
-            r.roomName,
-            r.deviceName,
-            r.status,
-            r.failedCount,
-            r.signedByName,
-            r.signedAt ? new Date(r.signedAt).toISOString() : '',
-            r.dueOn ? new Date(r.dueOn).toISOString().slice(0, 10) : '',
-          ]
-            .map(csvCell)
-            .join(','),
-        ),
-      ].join('\r\n'),
-    });
-  }
 
   async function downloadReport(issueId: string, number: number) {
     try {
@@ -153,14 +184,13 @@ export function PmRecordsView() {
         title="PM records"
         description="Every maintenance visit, kept as a permanent record. Signed visits cannot be edited."
         actions={
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={exportCsv}
+          <PmExportMenu
+            filter={{ failedOnly, ...(status ? { status } : {}) }}
+            name="maintenance-records"
+            title="Maintenance records"
+            subtitle={`${failedOnly ? 'Visits with failures' : 'All visits'}${status ? `, ${status} only` : ''} · ${new Date().toLocaleDateString('en-AU')}`}
             disabled={(runs.data ?? []).length === 0}
-          >
-            <Download data-icon="inline-start" /> Export CSV
-          </Button>
+          />
         }
       />
       <div className="flex flex-wrap items-center gap-2">
@@ -183,43 +213,39 @@ export function PmRecordsView() {
           />{' '}
           Only visits with failures
         </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={bySite} onChange={(e) => setBySite(e.target.checked)} />{' '}
+          Group by site
+        </label>
       </div>
       {runs.isPending ? (
         <Skeleton className="h-24 w-full" />
       ) : runs.data && runs.data.length > 0 ? (
-        <ul className="divide-y rounded-lg border">
-          {runs.data.map((r) => (
-            <li
-              key={r.id}
-              className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5"
-            >
-              <div>
-                <Link
-                  href={orgPath(orgId, `/pm/runs/${r.id}`)}
-                  className="text-sm font-medium hover:underline"
-                >
-                  {r.templateName}
-                </Link>
-                <div className="text-xs text-muted-foreground">
-                  {r.roomName ?? r.deviceName} ·{' '}
-                  {r.status === 'signed'
-                    ? `signed by ${r.signedByName} ${r.signedAt ? dateTime(r.signedAt) : ''}`
-                    : `draft ${dateTime(r.createdAt)}`}
-                </div>
-              </div>
-              <span className="flex items-center gap-2">
-                {r.correctsRunId && <Badge variant="outline">Correction</Badge>}
-                {r.status === 'draft' ? (
-                  <Badge variant="secondary">Draft</Badge>
-                ) : r.failedCount ? (
-                  <Badge variant="destructive">{r.failedCount} failed</Badge>
-                ) : (
-                  <Badge>Passed</Badge>
-                )}
-              </span>
-            </li>
-          ))}
-        </ul>
+        bySite ? (
+          <div className="space-y-4">
+            {groupBySite(runs.data).map((g) => (
+              <section key={g.key} className="space-y-1.5">
+                <h2 className="text-sm font-medium">
+                  {g.name}{' '}
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {plural(g.visits.length, 'visit')}
+                  </span>
+                </h2>
+                <ul className="divide-y rounded-lg border">
+                  {g.visits.map((r) => (
+                    <VisitRow key={r.id} v={r} />
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <ul className="divide-y rounded-lg border">
+            {runs.data.map((r) => (
+              <VisitRow key={r.id} v={r} />
+            ))}
+          </ul>
+        )
       ) : (
         <EmptyState
           icon={ClipboardCheck}
