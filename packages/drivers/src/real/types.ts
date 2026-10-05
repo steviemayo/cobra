@@ -10,6 +10,12 @@ import type {
   QuickActionId,
 } from '@kestrel/model';
 
+/** One still picture from a camera, fetched on request and not kept. */
+export interface Snapshot {
+  contentType: 'image/jpeg';
+  bytes: Buffer;
+}
+
 /** A driver for one physical device. Translates engine commands into that device's protocol. */
 export interface DeviceDriver {
   readonly deviceId: string;
@@ -30,6 +36,8 @@ export interface DeviceDriver {
   discoverComponents?(): Promise<DiscoveredComponent[]>;
   /** List the controls of one named component. Rejects if it cannot. */
   discoverControls?(component: string): Promise<DiscoveredControl[]>;
+  /** Cameras: one JPEG now. Rejects if the camera cannot give one. The picture is handed back and forgotten. */
+  snapshot?(): Promise<Snapshot>;
   /** Called with a fresh snapshot whenever feedback changes. */
   onChange(listener: (state: DeviceState) => void): () => void;
   /** Start any background polling / connections. */

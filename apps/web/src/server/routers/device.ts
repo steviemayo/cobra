@@ -23,6 +23,7 @@ import { deviceViews } from '../device-views';
 import { setDeviceRooms } from '../device-sharing';
 import { MAX_POINTS, setDevicePoints } from '../device-points';
 import { browseResult, requestBrowsePoints } from '../browse-points';
+import { previewEnabled, requestSnapshot, snapshotResult } from '../camera-preview';
 import { SITE_SCOPED } from '../site-scope';
 import { canMonitorRoom, getEntitlements, monitoredRoomIds, monitorLimitMessage } from '../billing';
 import { syncQuantity } from '../stripe';
@@ -130,6 +131,47 @@ export const deviceRouter = router({
       if (!res.ok) throw new TRPCError({ code: 'BAD_REQUEST', message: res.error });
       return { commandId: res.id };
     }),
+
+  /**
+   * Asks the camera's gateway for one picture. Owners, developers and support only, and only when the
+   * organisation has turned previews on. The picture comes from `snapshotResult`, once.
+   */
+  snapshotRequest: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, deviceId: id }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev', 'support']);
+      const res = await requestSnapshot(db, {
+        orgId: ctx.orgId,
+        deviceId: input.deviceId,
+        siteScope: ctx.siteScope,
+        requestedBy: ctx.user.id,
+      });
+      if (!res.ok) throw new TRPCError({ code: 'BAD_REQUEST', message: res.error });
+      return { commandId: res.id };
+    }),
+
+  // A mutation, not a query: reading the picture takes it (it is shown once and wiped), so nothing
+  // should cache, refetch or prefetch it.
+  snapshotResult: orgProcedure
+    .meta(SITE_SCOPED)
+    .input(z.object({ orgId, commandId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner', 'dev', 'support']);
+      const view = await snapshotResult(db, {
+        orgId: ctx.orgId,
+        commandId: input.commandId,
+        siteScope: ctx.siteScope,
+        requestedBy: ctx.user.id,
+      });
+      if (!view) throw new TRPCError({ code: 'NOT_FOUND', message: 'Request not found' });
+      return view;
+    }),
+
+  /** Whether previews are on, so the page knows whether to offer the button. Anyone in the organisation may ask. */
+  previewEnabled: orgProcedure
+    .input(z.object({ orgId }))
+    .query(async ({ ctx }) => ({ enabled: await previewEnabled(db, ctx.orgId) })),
 
   browseResult: orgProcedure
     .meta(SITE_SCOPED)

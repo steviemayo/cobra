@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { AssetCategory } from '../devices';
 import type { DeviceCategory } from './catalog';
 
 // Driver classes (docs/driver-classes.md). A class is the contract for a kind of device: what a room
@@ -29,8 +30,8 @@ export type DriverClass = z.infer<typeof DriverClass>;
 
 export interface DriverClassInfo {
   label: string;
-  /** Room device categories a driver of this class may be attached to. Empty: not part of a room's design. */
-  categories: DeviceCategory[];
+  /** Device categories a driver of this class may be attached to (room design or estate register). */
+  categories: AssetCategory[];
   /** Optional features a driver of this class may declare, with the words shown to people. */
   features: Record<string, string>;
 }
@@ -120,6 +121,7 @@ export const DRIVER_CLASSES: Record<DriverClass, DriverClassInfo> = {
       ptz: 'Pan, tilt and zoom',
       standby: 'Standby and wake',
       tracking: 'Tracking on and off',
+      snapshot: 'A JPEG snapshot on request, shown once and not kept',
     },
   },
   conference_system: {
@@ -194,7 +196,19 @@ export const DRIVER_CLASSES: Record<DriverClass, DriverClassInfo> = {
   },
   infrastructure: {
     label: 'Infrastructure',
-    categories: [],
+    categories: [
+      'network_switch',
+      'wireless_ap',
+      'router_firewall',
+      'ups',
+      'server',
+      'nas',
+      'signage_player',
+      'intercom',
+      'access_control',
+      'printer',
+      'network_device',
+    ],
     features: { ping: 'Reports online', snmp: 'SNMP health', http_health: 'HTTP health' },
   },
   music_player: {
@@ -210,7 +224,7 @@ export const DRIVER_CLASSES: Record<DriverClass, DriverClassInfo> = {
 };
 
 /** The classes a device of this category can be driven by. */
-export function classesForCategory(category: DeviceCategory): DriverClass[] {
+export function classesForCategory(category: DeviceCategory | AssetCategory): DriverClass[] {
   return DriverClass.options.filter((c) => DRIVER_CLASSES[c].categories.includes(category));
 }
 

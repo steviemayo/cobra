@@ -200,8 +200,15 @@ export function DriverGuideView() {
                 . Rooms refer to the driver as <Code>custom:&lt;id&gt;</Code>.
               </li>
               <li>
-                Set the <Code>transport</Code>: <Code>tcp</Code> for text lines, or{' '}
-                <Code>http</Code> for web requests.
+                Set the <Code>transport</Code>: <Code>tcp</Code> for text lines,{' '}
+                <Code>udp</Code> for one datagram per command, <Code>websocket</Code> for a message
+                socket, or <Code>http</Code> for web requests. For a device that talks in bytes
+                rather than text, send <Code>hex</Code> instead of <Code>send</Code>.
+              </li>
+              <li>
+                Say what the device is: <Code>make</Code>, <Code>model</Code> and the{' '}
+                <Code>categories</Code> it suits. They label the driver in the driver list
+                (Category – Make Model) and show it for the right devices.
               </li>
               <li>
                 Replace the commands with the device’s own text, then add feedback if the device
@@ -218,8 +225,13 @@ export function DriverGuideView() {
                     TCP: <Code>port</Code>, <Code>terminator</Code> (what ends a command),{' '}
                     <Code>replyTerminator</Code> (when replies end differently),{' '}
                     <Code>keepOpen</Code> (hold one connection to hear unprompted messages),{' '}
-                    <Code>timeoutMs</Code>. HTTP: <Code>port</Code>, <Code>https</Code>,{' '}
-                    <Code>headers</Code>, <Code>timeoutMs</Code>.
+                    <Code>timeoutMs</Code>. UDP: <Code>port</Code>, <Code>terminator</Code>,{' '}
+                    <Code>timeoutMs</Code>. WebSocket: <Code>port</Code>, <Code>secure</Code>,{' '}
+                    <Code>path</Code>, <Code>headers</Code>. HTTP: <Code>port</Code>,{' '}
+                    <Code>https</Code>, <Code>allowSelfSigned</Code> (accept the device’s own
+                    certificate), <Code>headers</Code>, <Code>timeoutMs</Code>. TCP and UDP also take{' '}
+                    <Code>binary</Code> (replies shown as hex pairs) and <Code>checksum</Code> (the
+                    check byte for <Code>{'{checksum}'}</Code> in a <Code>hex</Code> payload).
                   </>,
                 ],
                 [

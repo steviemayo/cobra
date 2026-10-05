@@ -48,6 +48,8 @@ model Org {
   deleteReason       String?
   /// Owners and developers must sign in with an authenticator app (LR-15). Off until an owner turns it on.
   requireMfa         Boolean   @default(false)
+  /// Owners, developers and support may ask a camera for a live snapshot. Off until an owner turns it on: a picture can show people.
+  cameraPreview      Boolean   @default(false)
 
   members             Member[]
   sites               Site[]
@@ -90,6 +92,7 @@ model Org {
   listings            MarketplaceListing[]
   purchases           MarketplacePurchase[]
   customDrivers       CustomDriver[]
+  driverRequests      DriverRequest[]
   roomBindings        RoomBinding[]
   credentialSets      CredentialSet[]
   siteDevices         SiteDevice[]
@@ -1226,6 +1229,42 @@ model CustomDriverVersion {
   driver CustomDriver @relation(fields: [driverId], references: [id], onDelete: Cascade)
 
   @@unique([driverId, version])
+}
+
+// A customer asking Kestrel to build a driver for a device that has none. Staff build it as a custom
+// driver inside the asking organisation (private to it until Kestrel chooses to promote it).
+// status: open, in_progress, built, declined.
+model DriverRequest {
+  id               String   @id @default(uuid()) @db.Uuid
+  orgId            String   @db.Uuid
+  /// The device the request was raised from, when there is one.
+  deviceId         String?  @db.Uuid
+  /// The support ticket raised with it, so staff work it from the queue they already use.
+  ticketId         String?  @db.Uuid
+  make             String
+  model            String
+  /// A device category (see AssetCategory).
+  category         String
+  /// monitor or control.
+  need             String   @default("monitor")
+  /// How the device is reached, if known: tcp, udp, http, websocket, snmp, ssh, serial or unknown.
+  protocol         String   @default("unknown")
+  docsUrl          String?
+  notes            String   @default("")
+  status           String   @default("open")
+  /// The custom driver staff built for it (`custom:<slug>`).
+  driverSlug       String?
+  staffNote        String?
+  requestedBy      String?  @db.Uuid
+  requestedByEmail String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now()) @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([status, createdAt])
+  @@index([make, model])
 }
 
 // Someone whose company already has an organisation on Kestrel asking its owners to add them. Only

@@ -14,7 +14,8 @@ import {
   removeStaff,
   setStaff,
 } from '../staff-team';
-import { StaffRole, mspFromRoute } from '@kestrel/model';
+import { DRIVER_REQUEST_STATUSES, StaffRole, mspFromRoute } from '@kestrel/model';
+import { DriverRequestError, staffRequests, updateRequest } from '../driver-requests';
 import { realCalloutStripe } from '../callout-stripe';
 import { coveringProviders, providerCovers } from '../msp';
 import { orgTimezone, siteTimezone } from '../site-zone';
@@ -108,6 +109,7 @@ function asTrpc(e: unknown): never {
     e instanceof MfaError ||
     e instanceof SessionError ||
     e instanceof TicketError ||
+    e instanceof DriverRequestError ||
     e instanceof RetentionError ||
     e instanceof TeamError ||
     e instanceof CalloutError ||
@@ -573,6 +575,38 @@ export const staffRouter = router({
         requireAnyStaffRole(ctx.staff, ['support', 'billing']);
         try {
           await addNote(db, { orgId: input.orgId, authorId: ctx.staff.userId, body: input.body });
+          return { ok: true };
+        } catch (e) {
+          return asTrpc(e);
+        }
+      }),
+  }),
+
+  // Customers asking for a driver for a device that has none. Building one saves it as a custom
+  // driver inside the asking organisation, so it stays private to that organisation.
+  driverRequests: router({
+    list: staffProcedure
+      .input(z.object({ status: z.enum(['active', 'all', ...DRIVER_REQUEST_STATUSES]).optional() }).default({}))
+      .query(({ input }) => staffRequests(db, input)),
+
+    update: staffProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          status: z.enum(DRIVER_REQUEST_STATUSES).optional(),
+          staffNote: z.string().max(1000).optional(),
+          spec: z.unknown().optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireStaffRole(ctx.staff, 'support');
+        try {
+          const res = await updateRequest(db, { ...input, staffUserId: ctx.staff.userId });
+          await recordStaffAudit(db, {
+            staffUserId: ctx.staff.userId,
+            action: 'driver_request.update',
+            orgId: res.orgId,
+          });
           return { ok: true };
         } catch (e) {
           return asTrpc(e);
