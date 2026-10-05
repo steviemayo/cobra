@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
   Building2,
+  Cable,
   FileText,
   LifeBuoy,
   Router,
@@ -22,6 +23,7 @@ const NAV: { href: string; label: string; icon: typeof Building2; needs?: StaffR
   { href: '/staff/gateways', label: 'Unclaimed gateways', icon: Router },
   { href: '/staff/invoices', label: 'Invoice requests', icon: FileText, needs: ['billing'] },
   { href: '/staff/tickets', label: 'Tickets', icon: LifeBuoy },
+  { href: '/staff/driver-requests', label: 'Driver requests', icon: Cable },
   { href: '/staff/callouts', label: 'Callouts', icon: Wrench },
   { href: '/staff/audit', label: 'Audit trail', icon: ScrollText, needs: ['admin', 'support'] },
   { href: '/staff/team', label: 'Team', icon: Users, needs: ['admin'] },

@@ -166,6 +166,28 @@ export const orgRouter = router({
     return { requireMfa: org?.requireMfa ?? false, members };
   }),
 
+  // Camera previews: off until an owner turns them on (a picture can show people).
+  getCameraPreview: orgProcedure
+    .input(z.object({ orgId: z.string().uuid() }))
+    .query(async ({ ctx }) => ({
+      on: (await db.org.findFirst({ where: { id: ctx.orgId }, select: { cameraPreview: true } }))?.cameraPreview === true,
+    })),
+
+  setCameraPreview: orgProcedure
+    .input(z.object({ orgId: z.string().uuid(), on: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      await db.org.update({ where: { id: ctx.orgId }, data: { cameraPreview: input.on } });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'org.camera_preview',
+        target: ctx.orgId,
+        meta: { on: input.on },
+      });
+      return { on: input.on };
+    }),
+
   setRequireMfa: orgProcedure
     .input(z.object({ orgId: z.string().uuid(), on: z.boolean() }))
     .mutation(async ({ ctx, input }) => {

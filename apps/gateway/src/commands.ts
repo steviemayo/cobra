@@ -44,6 +44,16 @@ async function execute(cmd: GatewayCommand, devices?: DeviceHost): Promise<Comma
       const browsed = await devices.browse(deviceId);
       return browsed.ok ? { id: '', ok: true, output: { ...browsed.found } } : fail(browsed.error);
     }
+    case 'snapshot': {
+      // One picture from a camera, sent back and not kept. The portal only asks when the organisation
+      // has turned previews on; the gateway just takes the picture it is asked for.
+      const deviceId = cmd.args.deviceId;
+      if (!deviceId || !devices) return fail('That command is not supported by this gateway');
+      const shot = await devices.snapshot(deviceId);
+      return shot.ok
+        ? { id: '', ok: true, output: { contentType: shot.contentType, data: shot.data } }
+        : fail(shot.error);
+    }
     default:
       return fail('That command is not supported by this gateway');
   }

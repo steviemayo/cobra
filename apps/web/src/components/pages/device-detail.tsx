@@ -41,6 +41,7 @@ import { DeviceConfig } from './device-config';
 import { PmRuns } from './pm-records';
 import { PmSchedules } from './pm-schedule';
 import { DeviceDetailsView } from './device-details';
+import { CameraPreview } from './camera-preview';
 
 type Device = RouterOutputs['device']['get'];
 
@@ -767,6 +768,8 @@ function Overview({ device }: { device: Device }) {
           )}
         </Section>
       )}
+
+      <CameraPreview device={device} />
 
       {details.success && details.data.length > 0 && (
         <Section title="What the device reports">

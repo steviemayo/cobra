@@ -35,7 +35,14 @@ Custom drivers need the **Pro** plan. Kestrel ships built-in drivers for PJLink,
 ```
 
 - **`id`**: lowercase letters, numbers and dashes. Devices refer to it as `custom:<id>`.
-- **`transport`**: `tcp` (text lines; set `keepOpen` to hold one connection and hear the device's unsolicited messages) or `http` (`https`, `headers`, `port`).
+- **`transport`**: one of
+  - `tcp`: text lines. Set `keepOpen` to hold one connection and hear the device's unsolicited messages. `terminator` ends what is sent and `replyTerminator` ends what comes back when it differs (Shure ends replies with `>` and sends nothing after a command: `"terminator": "", "replyTerminator": ">"`).
+  - `udp`: one datagram per command. A reply is waited for only when the command has `expect`, or for a polled action when there are feedback patterns. With nothing to poll, the device stays "unknown" until a command is answered.
+  - `websocket`: one open socket (`secure`, `path`, `headers`). `send` is a text message, and every message received is read for feedback.
+  - `http`: `https`, `headers`, `port`, and `allowSelfSigned` (with `https`: accept the device's own certificate, which most AV devices have).
+- **Binary devices** (`tcp` and `udp`): give an action `hex` instead of `send`: pairs of hex digits, with values filled in as hex (`"AA 11 {setting.displayId} 01 01 {checksum}"`). No terminator is added. `{checksum}` is the check byte of the bytes before it, set on the transport as `"checksum": { "type": "sum8" | "xor8", "from": 1 }` (`from` is the first byte counted: 0 is the first, 1 skips a header byte). Set `"binary": true` on the transport and each reply is shown to feedback patterns as hex pairs (`"AA FF 00 03 41 11 01 13"`), so a pattern can match `"AA FF [0-9A-F]{2} 09 41 00 01 "`. A reply is whatever one read returned, so a pattern should not anchor to the very start of a long stream. `{levelHex}` is two hex digits and `{levelHexAscii4}` is four hex digits written as ASCII characters and then as hex bytes (NEC writes 50 as the bytes `30 30 33 32`).
+- **`inputCodes`**: the device's own code for each input port, read by `select_input` as `{inputCode}` (`"inputCodes": { "in1": "21", "in2": "23" }`). An input with no code is refused, not sent as a short frame.
+- **`make`, `model`, `categories`**: who makes the device and which categories it suits. They label the driver in the picker (Category – Make Model) and filter it to the right devices; with no category it is offered for every one.
 - **`settings`**: what someone fills in per device (`host` and `port` always exist). Types: `string`, `number`, `boolean`, `secret`. Use them in templates as `{setting.password}`.
 - **`commands`**: any of `power.on`, `power.off`, `mute.on`, `mute.off`, `volume`, `select_input`, `route`, `preset`, `camera_preset`, `scene`, `record.on`, `record.off`, `blank.on`, `blank.off`, or `command.<name>` for anything device specific.
   - TCP action: `send` (and optionally `expect`, a regular expression the reply must match).

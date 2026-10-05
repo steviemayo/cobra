@@ -126,6 +126,10 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `added gateway “${s(meta.name)}”`;
     case 'gateway.enroll':
       return `gateway “${s(meta.name)}” connected`;
+    case 'camera.preview':
+      return `asked for a picture from “${s(meta.device)}”`;
+    case 'org.camera_preview':
+      return meta.on ? 'turned camera previews on' : 'turned camera previews off';
     case 'command.request':
       return `asked “${s(meta.room)}” to ${s(meta.type).replace('_', ' ')}`;
     case 'command.result':

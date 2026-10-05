@@ -15,9 +15,11 @@ import { CrestronOccupancyDriver } from './crestron-occupancy';
 import { CrestronTswDriver } from './crestron-tsw';
 import { NvxDriver } from './nvx';
 import { NvxDecoderDriver, NvxEncoderDriver } from './nvx-endpoints';
+import { OnvifDriver } from './onvif';
 import { PjlinkDriver } from './pjlink';
 import { QsysDriver } from './qsys';
 import { SerialDriver } from './serial';
+import { SnmpSwitchDriver } from './snmp-switch';
 import { TesiraDriver } from './tesira';
 import { ViscaDriver } from './visca';
 import type { DeviceDriver, DriverContext } from './types';
@@ -67,6 +69,9 @@ const BUILT_IN: Record<string, (device: Device, ctx: DriverContext) => DeviceDri
   'blustream-da11abl': (d, c) => new BlustreamDa11ablDriver(d, c),
   'blustream-acm1000': (d, c) => new BlustreamAcm1000Driver(d, c),
   'blustream-pwr': (d, c) => new BlustreamPwrDriver(d, c),
+  onvif: (d, c) => new OnvifDriver(d, c),
+  'netgear-av': (d, c) => new SnmpSwitchDriver(d, c),
+  'snmp-generic': (d, c) => new SnmpSwitchDriver(d, c),
   wiim: (d, c) => new WiimDriver(d, c),
   bluesound: (d, c) => new BluesoundDriver(d, c),
 };

@@ -1,10 +1,14 @@
-import { connect, type Socket } from 'node:net';
+import { createSocket } from 'node:dgram';
+import { connect, isIPv6, type Socket } from 'node:net';
+import { request as httpsRequest } from 'node:https';
 import {
+  bytesToHex,
   commandValues,
   escapeJson,
   escapeLine,
   escapePath,
   hasCatastrophicBacktracking,
+  hexFrame,
   renderTemplate,
   resolveSettings,
   type Device,
@@ -66,6 +70,7 @@ export class DeclarativeDriver extends BaseDriver {
   private readonly missing: string[];
   private readonly patterns: ReturnType<typeof compile>;
   private socket: Socket | null = null;
+  private ws: WebSocket | null = null;
   private buffer = '';
   private waiting: {
     re: RegExp | null;
@@ -95,6 +100,12 @@ export class DeclarativeDriver extends BaseDriver {
   private get http() {
     return this.spec.transport.type === 'http' ? this.spec.transport : null;
   }
+  private get udp() {
+    return this.spec.transport.type === 'udp' ? this.spec.transport : null;
+  }
+  private get wsSpec() {
+    return this.spec.transport.type === 'websocket' ? this.spec.transport : null;
+  }
   private get host() {
     return String(this.settings.host ?? '');
   }
@@ -106,9 +117,16 @@ export class DeclarativeDriver extends BaseDriver {
   }
   private get port() {
     const fromSetting = typeof this.settings.port === 'number' ? this.settings.port : undefined;
-    return (
-      fromSetting ?? this.spec.transport.port ?? (this.http?.https ? 443 : this.http ? 80 : 23)
-    );
+    const fallback = this.http
+      ? this.http.https
+        ? 443
+        : 80
+      : this.wsSpec
+        ? this.wsSpec.secure
+          ? 443
+          : 80
+        : 23;
+    return fromSetting ?? this.spec.transport.port ?? fallback;
   }
 
   override features(): string[] {
@@ -145,12 +163,15 @@ export class DeclarativeDriver extends BaseDriver {
     if (this.tcp) {
       if (this.tcp.keepOpen) this.open();
       else void this.probe();
-    } else void this.probe();
+    } else if (this.wsSpec) this.openWs();
+    else void this.probe();
     for (const p of this.spec.feedback.poll)
       this.pollers.push(setInterval(() => void this.poll(p.action), p.everyMs));
-    // The first poll is the reachability probe above. Any other HTTP poll (a slow one that reads
-    // the model and serial number, say) also runs once now rather than after its first interval.
-    if (this.http) for (const p of this.spec.feedback.poll.slice(1)) void this.poll(p.action);
+    // The first poll is the reachability probe above. Any other poll (a slow one that reads the model
+    // and serial number, say) also runs once now rather than after its first interval. A connection
+    // that stays open runs them all when it connects.
+    if (!this.tcp?.keepOpen && !this.wsSpec)
+      for (const p of this.spec.feedback.poll.slice(1)) void this.poll(p.action);
     for (const t of this.pollers) t.unref?.();
   }
 
@@ -161,10 +182,13 @@ export class DeclarativeDriver extends BaseDriver {
     this.dropSocket(new Error('closed'));
   }
 
-  /** Without a persistent connection, reachability is a plain connect (TCP) or the first poll (HTTP). */
+  /** Without a persistent connection, reachability is a plain connect (TCP) or the first poll (HTTP, UDP). */
   private async probe() {
+    // UDP is connectionless: with nothing to poll there is nothing to prove, so the device stays
+    // unknown until a command is answered.
+    if (this.udp && !this.spec.feedback.poll[0]) return;
     try {
-      if (this.tcp) await this.oneShot(null);
+      if (this.tcp && !this.spec.feedback.poll[0]) await this.oneShot(null);
       else if (this.spec.feedback.poll[0]) await this.pollOnce(this.spec.feedback.poll[0].action);
       else await this.httpCall({ method: 'GET', path: '/' }, true);
       this.update((s) => {
@@ -267,11 +291,17 @@ export class DeclarativeDriver extends BaseDriver {
   }
 
   private async pollOnce(action: DriverAction) {
-    const values = this.baseValues();
+    await this.dispatch(action, this.baseValues(), true);
+  }
+
+  /** Sends one action over whichever transport the driver speaks. */
+  private async dispatch(action: DriverAction, values: Values, isPoll = false) {
     if (this.tcp) {
       if (this.tcp.keepOpen) await this.sendOnSocket(action, values);
       else await this.oneShot(action, values);
-    } else this.readText(await this.httpCall(action, false, values));
+    } else if (this.udp) await this.udpSend(action, values, isPoll);
+    else if (this.wsSpec) await this.sendOnWs(action, values);
+    else this.readText(await this.httpCall(action, false, values));
   }
 
   private async poll(action: DriverAction) {
@@ -293,7 +323,7 @@ export class DeclarativeDriver extends BaseDriver {
     if (this.reconnect.closed || this.socket) return;
     const socket = connect({ host: this.host, port: this.port });
     this.socket = socket;
-    socket.setEncoding('utf8');
+    if (!this.tcp?.binary) socket.setEncoding('utf8');
     socket.on('connect', () => {
       this.reconnect.succeeded();
       this.update((s) => {
@@ -302,7 +332,7 @@ export class DeclarativeDriver extends BaseDriver {
       // Say what the device is doing now, without waiting for the first interval.
       for (const p of this.spec.feedback.poll) void this.poll(p.action);
     });
-    socket.on('data', (chunk: string) => this.onData(chunk));
+    socket.on('data', (chunk: string | Buffer) => this.onData(chunk));
     socket.on('error', () => undefined);
     socket.on('close', () => {
       if (this.socket === socket) this.dropSocket(new Error(`${this.device.name} disconnected`));
@@ -312,9 +342,16 @@ export class DeclarativeDriver extends BaseDriver {
 
   private dropSocket(reason: Error) {
     const socket = this.socket;
+    const ws = this.ws;
     this.socket = null;
+    this.ws = null;
     this.buffer = '';
     socket?.destroy();
+    try {
+      ws?.close();
+    } catch {
+      // already closed
+    }
     for (const w of this.waiting.splice(0)) {
       clearTimeout(w.timer);
       w.reject(reason);
@@ -324,7 +361,20 @@ export class DeclarativeDriver extends BaseDriver {
     });
   }
 
-  private onData(chunk: string) {
+  /** One binary reply (a chunk the device sent) as hex pairs, run past the patterns and the command waiting on it. */
+  private onBinary(chunk: Buffer) {
+    const frame = bytesToHex(chunk.subarray(0, MAX_REPLY_BYTES));
+    this.readText(frame);
+    const w = this.waiting[0];
+    if (w && (!w.re || w.re.test(frame))) {
+      this.waiting.shift();
+      clearTimeout(w.timer);
+      w.resolve();
+    }
+  }
+
+  private onData(chunk: string | Buffer) {
+    if (typeof chunk !== 'string') return this.onBinary(chunk);
     this.buffer += chunk;
     if (this.buffer.length > MAX_REPLY_BYTES) this.buffer = this.buffer.slice(-MAX_REPLY_BYTES);
     const term = this.tcp?.replyTerminator ?? this.tcp?.terminator ?? '\r\n';
@@ -347,6 +397,22 @@ export class DeclarativeDriver extends BaseDriver {
     return renderTemplate(action.send ?? '', values, escapeLine);
   }
 
+  /**
+   * What goes on the wire for one action: its text and the transport's terminator, or its hex bytes
+   * with the check byte worked out. A hex payload that does not come out as whole bytes is a driver
+   * fault, not something to send.
+   */
+  private frame(action: DriverAction, values: Values, terminator: string): Buffer {
+    if (action.hex === undefined) return Buffer.from(this.text(action, values) + terminator);
+    // An input the driver has no code for would leave a gap in the frame, so it is refused instead.
+    if (action.hex.includes('{inputCode}') && values.inputCode === undefined)
+      throw new Error(`${this.device.name}: this driver has no code for that input`);
+    const t = this.tcp ?? this.udp;
+    const bytes = hexFrame(action.hex, values, t?.checksum);
+    if (!bytes) throw new Error(`${this.device.name}: the driver's hex payload is not whole bytes`);
+    return Buffer.from(bytes);
+  }
+
   private sendOnSocket(action: DriverAction, values: Values): Promise<void> {
     const socket = this.socket;
     if (!socket || socket.destroyed)
@@ -365,7 +431,7 @@ export class DeclarativeDriver extends BaseDriver {
         timer,
       });
     });
-    socket.write(this.text(action, values) + term);
+    socket.write(this.frame(action, values, term));
     return wait;
   }
 
@@ -389,16 +455,32 @@ export class DeclarativeDriver extends BaseDriver {
         () => finish(new Error(`${this.device.name} did not respond`)),
         t.timeoutMs,
       );
-      socket.setEncoding('utf8');
+      if (!t.binary) socket.setEncoding('utf8');
       socket.on('error', (e) => finish(new Error(`${this.device.name}: ${e.message}`)));
       socket.on('connect', () => {
         if (!action) return finish();
-        socket.write(this.text(action, values) + t.terminator, (e) => {
+        let out: Buffer;
+        try {
+          out = this.frame(action, values, t.terminator);
+        } catch (e) {
+          return finish(e instanceof Error ? e : new Error(String(e)));
+        }
+        socket.write(out, (e) => {
           if (e) finish(e);
           else if (!expect && this.patterns.length === 0) finish();
         });
       });
-      socket.on('data', (chunk: string) => {
+      socket.on('data', (data: string | Buffer) => {
+        if (typeof data !== 'string') {
+          // Binary: each chunk is a reply, shown as hex pairs.
+          const frame = bytesToHex(data.subarray(0, MAX_REPLY_BYTES));
+          buffer = (buffer + ' ' + frame).trim().slice(-MAX_REPLY_BYTES);
+          this.readText(frame);
+          if (expect ? expect.test(frame) || expect.test(buffer) : this.patterns.length > 0)
+            finish();
+          return;
+        }
+        const chunk = data;
         buffer = (buffer + chunk).slice(-MAX_REPLY_BYTES);
         const replyEnd = t.replyTerminator ?? t.terminator;
         for (const line of buffer.split(replyEnd)) if (line) this.readText(line);
@@ -411,11 +493,123 @@ export class DeclarativeDriver extends BaseDriver {
           finish();
       });
       socket.on('close', () => {
-        if (expect && !buffer.split(t.replyTerminator ?? t.terminator).some((l) => expect.test(l)))
+        const parts = t.binary ? [buffer] : buffer.split(t.replyTerminator ?? t.terminator);
+        if (expect && !parts.some((l) => expect.test(l)))
           finish(new Error(`${this.device.name} sent an unexpected reply`));
         else finish();
       });
     });
+  }
+
+  // ---- UDP ------------------------------------------------------------------------------------
+
+  /** One datagram out. Waits for a reply only when the action expects one, or for a poll that is read. */
+  private udpSend(action: DriverAction, values: Values, isPoll: boolean): Promise<void> {
+    const u = this.udp!;
+    return new Promise((resolve, reject) => {
+      const socket = createSocket(isIPv6(this.host) ? 'udp6' : 'udp4');
+      const expect = safeExpect(action.expect, this.spec, this.ctx.log);
+      const wantReply = !!action.expect || (isPoll && this.patterns.length > 0);
+      let done = false;
+      const finish = (err?: Error) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        socket.close();
+        if (err) reject(err);
+        else resolve();
+      };
+      const timer = setTimeout(
+        () => finish(wantReply ? new Error(`${this.device.name} did not respond`) : undefined),
+        u.timeoutMs,
+      );
+      socket.on('error', (e) => finish(new Error(`${this.device.name}: ${e.message}`)));
+      socket.on('message', (msg) => {
+        const reply = u.binary
+          ? bytesToHex(msg.subarray(0, MAX_REPLY_BYTES))
+          : msg.toString('utf8').slice(0, MAX_REPLY_BYTES);
+        this.readText(reply);
+        for (const line of reply.split(/\r?\n/)) if (line && line !== reply) this.readText(line);
+        if (!expect || expect.test(reply)) finish();
+      });
+      let out: Buffer;
+      try {
+        out = this.frame(action, values, u.terminator);
+      } catch (e) {
+        return finish(e instanceof Error ? e : new Error(String(e)));
+      }
+      socket.send(out, this.port, this.host, (e) => {
+        if (e) finish(e);
+        else if (!wantReply) finish();
+      });
+    });
+  }
+
+  // ---- WebSocket ------------------------------------------------------------------------------
+
+  private openWs() {
+    const w = this.wsSpec;
+    if (!w || this.reconnect.closed || this.ws) return;
+    const base = this.baseValues();
+    const path = renderTemplate(w.path, base, escapeLine);
+    const url = `${w.secure ? 'wss' : 'ws'}://${this.host}:${this.port}${path}`;
+    const headers = Object.fromEntries(
+      Object.entries(w.headers).map(([k, v]) => [k, renderTemplate(v, base, escapeLine)]),
+    );
+    // Node's built-in WebSocket takes headers as an extra option that the standard type doesn't list.
+    const Ctor = WebSocket as unknown as new (
+      u: string,
+      o?: { headers: Record<string, string> },
+    ) => WebSocket;
+    const ws = new Ctor(url, Object.keys(headers).length > 0 ? { headers } : undefined);
+    this.ws = ws;
+    ws.onopen = () => {
+      this.reconnect.succeeded();
+      this.update((s) => {
+        s.online = true;
+      });
+      for (const p of this.spec.feedback.poll) void this.poll(p.action);
+    };
+    ws.onmessage = (ev) => {
+      if (typeof ev.data === 'string') this.onWsMessage(ev.data.slice(0, MAX_REPLY_BYTES));
+    };
+    ws.onerror = () => undefined;
+    ws.onclose = () => {
+      if (this.ws === ws) this.dropSocket(new Error(`${this.device.name} disconnected`));
+      this.reconnect.schedule();
+    };
+  }
+
+  private onWsMessage(text: string) {
+    if (!text) return;
+    this.readText(text);
+    const w = this.waiting[0];
+    if (w && (!w.re || w.re.test(text))) {
+      this.waiting.shift();
+      clearTimeout(w.timer);
+      w.resolve();
+    }
+  }
+
+  private sendOnWs(action: DriverAction, values: Values): Promise<void> {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== 1)
+      return Promise.reject(new Error(`${this.device.name} is not connected`));
+    const wait = new Promise<void>((resolve, reject) => {
+      if (!action.expect) return resolve();
+      const timer = setTimeout(() => {
+        this.waiting = this.waiting.filter((x) => x.timer !== timer);
+        reject(new Error(`${this.device.name} did not answer`));
+      }, this.wsSpec!.timeoutMs);
+      this.waiting.push({
+        re: safeExpect(action.expect, this.spec, this.ctx.log),
+        resolve,
+        reject,
+        timer,
+      });
+    });
+    ws.send(this.text(action, values));
+    return wait;
   }
 
   // ---- HTTP -----------------------------------------------------------------------------------
@@ -439,20 +633,75 @@ export class DeclarativeDriver extends BaseDriver {
       headers[k] = renderTemplate(v, this.baseValues(), escapeLine);
     if (body !== undefined && !Object.keys(headers).some((k) => k.toLowerCase() === 'content-type'))
       headers['content-type'] = jsonBody ? 'application/json' : 'text/plain';
-    const url = `${h.https ? 'https' : 'http'}://${this.host}:${this.port}${path}`;
-    const res = await fetch(url, {
-      method: action.method ?? (body === undefined ? 'GET' : 'POST'),
-      headers,
-      body,
-      redirect: 'manual',
-      signal: AbortSignal.timeout(h.timeoutMs),
-    });
-    const text = (await res.text()).slice(0, MAX_REPLY_BYTES);
-    if (!allowAny && !res.ok) throw new Error(`${this.device.name} answered HTTP ${res.status}`);
+    const method = action.method ?? (body === undefined ? 'GET' : 'POST');
+    // Most AV devices have a certificate of their own, so a driver can ask to accept it. fetch has no
+    // way to do that, so this path uses the https module directly.
+    const reply =
+      h.https && h.allowSelfSigned
+        ? await this.insecureHttps(path, method, headers, body, h.timeoutMs)
+        : await (async () => {
+            const res = await fetch(
+              `${h.https ? 'https' : 'http'}://${this.host}:${this.port}${path}`,
+              {
+                method,
+                headers,
+                body,
+                redirect: 'manual',
+                signal: AbortSignal.timeout(h.timeoutMs),
+              },
+            );
+            return {
+              ok: res.ok,
+              status: res.status,
+              text: (await res.text()).slice(0, MAX_REPLY_BYTES),
+            };
+          })();
+    const text = reply.text;
+    if (!allowAny && !reply.ok)
+      throw new Error(`${this.device.name} answered HTTP ${reply.status}`);
     const expect = safeExpect(action.expect, this.spec, this.ctx.log);
     if (expect && !expect.test(text))
       throw new Error(`${this.device.name} sent an unexpected reply`);
     return text;
+  }
+
+  private insecureHttps(
+    path: string,
+    method: string,
+    headers: Record<string, string>,
+    body: string | undefined,
+    timeoutMs: number,
+  ): Promise<{ ok: boolean; status: number; text: string }> {
+    return new Promise((resolve, reject) => {
+      const req = httpsRequest(
+        {
+          host: this.host,
+          port: this.port,
+          path,
+          method,
+          headers: {
+            ...headers,
+            ...(body !== undefined ? { 'content-length': String(Buffer.byteLength(body)) } : {}),
+          },
+          timeout: timeoutMs,
+          rejectUnauthorized: false,
+        },
+        (res) => {
+          let data = '';
+          res.setEncoding('utf8');
+          res.on('data', (d: string) => {
+            if (data.length < MAX_REPLY_BYTES) data += d;
+          });
+          res.on('end', () => {
+            const status = res.statusCode ?? 0;
+            resolve({ ok: status >= 200 && status < 300, status, text: data.slice(0, MAX_REPLY_BYTES) });
+          });
+        },
+      );
+      req.on('timeout', () => req.destroy(new Error(`${this.device.name} did not respond`)));
+      req.on('error', reject);
+      req.end(body);
+    });
   }
 
   // ---- Commands -------------------------------------------------------------------------------
@@ -465,10 +714,7 @@ export class DeclarativeDriver extends BaseDriver {
         `${this.host} is a cloud metadata address, not a device (add "allowLocalAddress": true to allow it)`,
       );
     try {
-      if (this.tcp) {
-        if (this.tcp.keepOpen) await this.sendOnSocket(action, values);
-        else await this.oneShot(action, values);
-      } else this.readText(await this.httpCall(action, false, values));
+      await this.dispatch(action, values);
     } catch (e) {
       this.update((s) => {
         s.online = false;

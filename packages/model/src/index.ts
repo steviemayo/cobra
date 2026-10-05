@@ -7,6 +7,7 @@ export * from './bindings';
 export * from './bulk';
 export * from './room-copy';
 export * from './driver-spec';
+export * from './driver-request';
 export * from './staff';
 export * from './msp';
 export * from './sla';

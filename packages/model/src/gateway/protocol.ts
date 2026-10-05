@@ -129,6 +129,7 @@ export const COMMAND_TYPES = [
   'discover_components',
   'discover_controls',
   'browse_points',
+  'snapshot',
 ] as const;
 export const CommandType = z.enum(COMMAND_TYPES);
 export type CommandType = z.infer<typeof CommandType>;
@@ -177,6 +178,12 @@ export const COMMAND_INFO: Record<
     label: 'List what a device can report',
     description:
       'Read a monitored device’s own tree and list the values a control point can watch. Changes nothing.',
+    needsDevice: false,
+  },
+  snapshot: {
+    label: 'Take a camera snapshot',
+    description:
+      'Ask a camera for one still picture and send it back to be shown once. Changes nothing and nothing is kept.',
     needsDevice: false,
   },
   room_off: {

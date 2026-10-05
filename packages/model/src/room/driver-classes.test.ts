@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AssetCategory,
   BUILT_IN_DRIVERS,
-  DEVICE_CATALOG,
   DRIVER_CLASSES,
   DriverClass,
   LEGACY_CATEGORIES,
@@ -20,7 +20,8 @@ describe('driver classes', () => {
       const info = DRIVER_CLASSES[c];
       expect(info.label, c).not.toBe('');
       expect(Object.keys(info.features).length, c).toBeGreaterThan(0);
-      for (const cat of info.categories) expect(DEVICE_CATALOG[cat], `${c}: ${cat}`).toBeDefined();
+      for (const cat of info.categories)
+        expect(AssetCategory.safeParse(cat).success, `${c}: ${cat}`).toBe(true);
     }
   });
 
