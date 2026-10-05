@@ -527,3 +527,57 @@ describe('schedules', () => {
     });
   });
 });
+
+describe('a one-time check', () => {
+  it('switches itself off once signed, leaves the list, and no longer blocks its checklist', async () => {
+    const w = world();
+    const made = await createSchedule(w.db, {
+      orgId: ORG,
+      templateId: 't-room',
+      scope: 'site',
+      siteId: SITE,
+      oneOff: true,
+      intervalDays: 0,
+      firstDueOn: NOW,
+      userId: USER,
+    });
+    expect(made.ok).toBe(true);
+    const scheduleId = made.ok ? made.value.id : '';
+    expect(w.pmSchedule.rows[0]).toMatchObject({ oneOff: true, intervalDays: 0, enabled: true });
+    const started = await startRun(
+      w.db,
+      { orgId: ORG, templateId: 't-room', scheduleId, userId: USER },
+      NOW,
+    );
+    const runId = started.ok ? started.value.id : '';
+    for (const s of segmentsOf(w, runId)) await answer(w, s.id, 'pass');
+    expect((await sign(w, runId)).ok).toBe(true);
+    expect(w.pmSchedule.rows[0]).toMatchObject({ enabled: false });
+    expect(w.pmSchedule.rows[0]!.lastRunOn).toBeTruthy();
+    expect(await listSchedules(w.db, ORG, NOW)).toHaveLength(0);
+    expect((await pmStatus(w.db, ORG, NOW)).schedules).toBe(0);
+  });
+
+  it('a single room one-off needs no interval', async () => {
+    const w = world();
+    const r = await createSchedule(w.db, {
+      orgId: ORG,
+      templateId: 't-room',
+      roomId: R1,
+      oneOff: true,
+      intervalDays: 0,
+      firstDueOn: NOW,
+      userId: USER,
+    });
+    expect(r.ok).toBe(true);
+    const bad = await createSchedule(w.db, {
+      orgId: ORG,
+      templateId: 't-room',
+      roomId: R1,
+      intervalDays: 0,
+      firstDueOn: NOW,
+      userId: USER,
+    });
+    expect(bad.ok).toBe(false);
+  });
+});

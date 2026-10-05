@@ -1744,6 +1744,8 @@ model PmSchedule {
   siteId           String?   @db.Uuid
   areaId           String?   @db.Uuid
   roomIds          String[]  @default([]) @db.Uuid
+  /// A one-time check: done once, then it switches itself off. intervalDays is 0.
+  oneOff           Boolean   @default(false)
 
   @@index([orgId, nextDueOn])
   @@index([roomId])

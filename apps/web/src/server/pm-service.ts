@@ -246,7 +246,7 @@ export async function updateTemplate(
 export async function deleteTemplate(db: PmDb, orgId: string, templateId: string): Promise<Result> {
   const row = await db.pmTemplate.findFirst({ where: { id: templateId, orgId } });
   if (!row) return bad('No such checklist');
-  if (await db.pmSchedule.findFirst({ where: { templateId, orgId } }))
+  if (await db.pmSchedule.findFirst({ where: { templateId, orgId, enabled: true } }))
     return bad('A schedule uses this checklist. Remove the schedule first.');
   await db.pmTemplate.delete({ where: { id: templateId } });
   return { ok: true, value: { id: templateId } };
@@ -415,7 +415,10 @@ export async function createSchedule(
     siteId?: string | null;
     areaId?: string | null;
     roomIds?: string[] | null;
+    /** Ignored for a one-time check. */
     intervalDays: number;
+    /** Done once, then it switches itself off, instead of coming round again. */
+    oneOff?: boolean;
     firstDueOn: Date;
     leadDays?: number;
     assigneeUserId?: string | null;
@@ -427,7 +430,9 @@ export async function createSchedule(
     where: { id: input.templateId, orgId: input.orgId },
   });
   if (!template) return bad('No such checklist');
-  if (!Number.isInteger(input.intervalDays) || input.intervalDays < 1 || input.intervalDays > 1095)
+  const oneOff = input.oneOff === true;
+  const intervalDays = oneOff ? 0 : input.intervalDays;
+  if (!oneOff && (!Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 1095))
     return bad('Choose an interval between 1 day and 3 years');
   const scope = input.scope ?? 'room';
   if (scope !== 'room') {
@@ -450,7 +455,8 @@ export async function createSchedule(
         siteId: scope === 'site' ? (input.siteId ?? null) : null,
         areaId: scope === 'area' ? (input.areaId ?? null) : null,
         roomIds: scope === 'rooms' ? [...new Set(input.roomIds ?? [])] : [],
-        intervalDays: input.intervalDays,
+        intervalDays,
+        oneOff,
         nextDueOn: toDay(input.firstDueOn),
         leadDays: input.leadDays ?? 7,
         assigneeUserId: input.assigneeUserId ?? null,
@@ -478,7 +484,8 @@ export async function createSchedule(
       templateId: template.id,
       roomId: template.appliesTo === 'room' ? input.roomId! : null,
       deviceId: template.appliesTo === 'device' ? input.deviceId! : null,
-      intervalDays: input.intervalDays,
+      intervalDays,
+      oneOff,
       nextDueOn: toDay(input.firstDueOn),
       leadDays: input.leadDays ?? 7,
       assigneeUserId: input.assigneeUserId ?? null,
@@ -509,6 +516,8 @@ export interface ScheduleView {
   roomId: string | null;
   deviceId: string | null;
   intervalDays: number;
+  /** A one-time check, switched off once done. */
+  oneOff: boolean;
   nextDueOn: Date;
   leadDays: number;
   assigneeUserId: string | null;
@@ -551,11 +560,13 @@ export async function listSchedules(
     const c = await roomsInScope(db, orgId, scopeOf(s));
     if (c.ok) covers.set(s.id, c.value);
   }
-  const rows = all.filter((s) => {
-    if (!filter.roomId) return true;
-    if ((s.scope ?? 'room') === 'room') return s.roomId === filter.roomId;
-    return covers.get(s.id)?.rooms.some((r) => r.id === filter.roomId) ?? false;
-  });
+  const rows = all
+    .filter((s) => !(s.oneOff === true && !s.enabled))
+    .filter((s) => {
+      if (!filter.roomId) return true;
+      if ((s.scope ?? 'room') === 'room') return s.roomId === filter.roomId;
+      return covers.get(s.id)?.rooms.some((r) => r.id === filter.roomId) ?? false;
+    });
   return rows.map((s) => ({
     scope: s.scope as PmScope,
     scopeLabel: covers.get(s.id)?.label ?? null,
@@ -568,6 +579,7 @@ export async function listSchedules(
     roomId: s.roomId,
     deviceId: s.deviceId,
     intervalDays: s.intervalDays,
+    oneOff: s.oneOff === true,
     nextDueOn: s.nextDueOn,
     leadDays: s.leadDays,
     assigneeUserId: s.assigneeUserId,
@@ -1113,10 +1125,14 @@ export async function signRun(
     if (s) {
       await db.pmSchedule.update({
         where: { id: s.id },
-        data: {
-          nextDueOn: nextDueAfter(run.dueOn ?? s.nextDueOn, toDay(now), s.intervalDays),
-          lastRunOn: toDay(now),
-        },
+        data:
+          s.oneOff === true
+            ? // A one-time check is done: it switches itself off and leaves the list.
+              { enabled: false, lastRunOn: toDay(now) }
+            : {
+                nextDueOn: nextDueAfter(run.dueOn ?? s.nextDueOn, toDay(now), s.intervalDays),
+                lastRunOn: toDay(now),
+              },
       });
       await resolveIncident(
         db as unknown as MonitoringDb,

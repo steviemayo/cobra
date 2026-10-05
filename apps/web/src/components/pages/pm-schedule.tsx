@@ -78,7 +78,8 @@ function NewScheduleDialog({
   const [siteId, setSiteId] = useState('');
   const [areaId, setAreaId] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
-  const [interval, setIntervalDays] = useState(90);
+  // A check is once-only unless someone chooses how often it comes round.
+  const [interval, setIntervalDays] = useState(0);
   const [firstDue, setFirstDue] = useState(today());
   const template = usable.find((t) => t.id === templateId);
   const create = useMutation(
@@ -214,11 +215,14 @@ function NewScheduleDialog({
               <SimpleSelect
                 value={String(interval)}
                 onValueChange={(v) => setIntervalDays(Number(v))}
-                options={INTERVAL_CHOICES.map((c) => ({ value: String(c.days), label: c.label }))}
+                options={[
+                  { value: '0', label: 'One time only' },
+                  ...INTERVAL_CHOICES.map((c) => ({ value: String(c.days), label: c.label })),
+                ]}
               />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">First due</Label>
+              <Label className="text-xs">{interval === 0 ? 'Due' : 'First due'}</Label>
               <Input
                 type="date"
                 value={firstDue}
@@ -238,7 +242,7 @@ function NewScheduleDialog({
               create.mutate({
                 orgId,
                 templateId,
-                intervalDays: interval,
+                ...(interval === 0 ? { oneOff: true } : { intervalDays: interval }),
                 firstDueOn: new Date(firstDue),
                 ...(kind === 'room'
                   ? template?.appliesTo === 'room'
@@ -335,11 +339,15 @@ export function PmSchedules({
                 ·{' '}
               </>
             )}
-            {s.state === 'ok' && !s.openRunId ? 'next due ' : 'due '}
+            {s.state === 'ok' && !s.openRunId && !s.oneOff ? 'next due ' : 'due '}
             {formatDate(s.nextDueOn)}
-            {s.state === 'overdue' && `, ${late} day${late === 1 ? '' : 's'} late`} · every{' '}
-            {INTERVAL_CHOICES.find((c) => c.days === s.intervalDays)?.label.toLowerCase() ??
-              `${s.intervalDays} days`}
+            {s.state === 'overdue' && `, ${late} day${late === 1 ? '' : 's'} late`} ·{' '}
+            {s.oneOff
+              ? 'one time only'
+              : `every ${
+                  INTERVAL_CHOICES.find((c) => c.days === s.intervalDays)?.label.toLowerCase() ??
+                  `${s.intervalDays} days`
+                }`}
             {s.lastRunOn && ` · last done ${formatDate(s.lastRunOn)}`}
           </div>
         </div>
