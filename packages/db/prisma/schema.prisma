@@ -751,6 +751,8 @@ model RemoteCommand {
 // status: open, in_progress, resolved, closed. priority: low, normal, high, urgent.
 model Ticket {
   id             String    @id @default(uuid()) @db.Uuid
+  /// The number people and service desks quote (shown as KT-0042). Unique across Kestrel, never reused.
+  number         Int       @unique @default(autoincrement())
   orgId          String    @db.Uuid
   roomId         String?   @db.Uuid
   incidentId     String?   @db.Uuid

@@ -64,6 +64,34 @@ export function TicketStatus({ status }: { status: string }) {
   );
 }
 
+/**
+ * A ticket's identifier. When a service desk is linked, its reference leads (it is the one the desk's
+ * people quote) with Kestrel's number beside it; otherwise Kestrel's number stands alone.
+ */
+export function TicketRef({
+  kestrelRef,
+  externalRefs,
+  className,
+}: {
+  kestrelRef: string;
+  externalRefs: { connector: string; ref: string }[];
+  className?: string;
+}) {
+  const first = externalRefs[0];
+  return (
+    <span className={cn('font-mono', className)}>
+      {first ? (
+        <>
+          <span title={first.connector}>{externalRefs.map((e) => e.ref).join(', ')}</span>
+          <span className="ml-1.5 text-muted-foreground">{kestrelRef}</span>
+        </>
+      ) : (
+        kestrelRef
+      )}
+    </span>
+  );
+}
+
 /** Raise a support request, optionally about a room or an incident. */
 export function NewTicketDialog({
   open,
@@ -85,9 +113,11 @@ export function NewTicketDialog({
   const [toKestrel, setToKestrel] = useState(false);
   const create = useMutation(
     trpc.ticket.create.mutationOptions({
-      onSuccess: async () => {
+      onSuccess: async (made) => {
         await qc.invalidateQueries({ queryKey: trpc.ticket.list.queryKey() });
-        toast.success('Support request sent');
+        // An incident shows the request raised from it.
+        await qc.invalidateQueries({ queryKey: trpc.monitoring.incidents.queryKey() });
+        toast.success(`Support request ${made.ref} sent`);
         setBody('');
         onOpenChange(false);
       },
@@ -273,6 +303,11 @@ export function TicketsView() {
                     >
                       {t.title}
                     </Link>
+                    <TicketRef
+                      kestrelRef={t.ref}
+                      externalRefs={t.externalRefs}
+                      className="ml-2 text-xs font-normal text-muted-foreground"
+                    />
                     {t.routedTo.startsWith('msp:') && (
                       <span className="ml-2 rounded-full border px-2 py-0.5 text-xs font-normal text-muted-foreground">
                         With service provider

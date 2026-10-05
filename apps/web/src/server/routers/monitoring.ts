@@ -12,6 +12,8 @@ import { maybeSweep } from '../monitoring';
 import { estateOverview } from '../estate-overview';
 import { orgDevices, orgOverview, sharedInRoom } from '../monitoring-queries';
 import { affectedForRooms } from '../room-schedule';
+import { ticketRef } from '../../lib/ticket-ref';
+import { externalRefsFor } from '../itsm-service';
 import { roomTimeline } from '../room-timeline';
 import { SITE_SCOPED, siteFilter, type SiteScope } from '../site-scope';
 import { featureProcedure, requireRole, router } from '../trpc';
@@ -296,8 +298,29 @@ export const monitoringRouter = router({
         ],
         new Date(),
       );
+      // The requests raised from these incidents, so an incident shows what became of it.
+      const tickets = rows.length
+        ? await db.ticket.findMany({
+            where: { orgId: ctx.orgId, incidentId: { in: rows.map((r) => r.id) } },
+            select: { id: true, number: true, status: true, incidentId: true },
+            orderBy: { createdAt: 'asc' },
+          })
+        : [];
+      const external = await externalRefsFor(
+        db,
+        ctx.orgId,
+        tickets.map((t) => t.id),
+      );
       return rows.map((r) => ({
         impact: r.status === 'open' && r.roomId ? (impact.get(r.roomId) ?? null) : null,
+        tickets: tickets
+          .filter((t) => t.incidentId === r.id)
+          .map((t) => ({
+            id: t.id,
+            ref: ticketRef(t.number),
+            externalRefs: external.get(t.id) ?? [],
+            status: t.status,
+          })),
         id: r.id,
         kind: r.kind,
         severity: r.severity,
