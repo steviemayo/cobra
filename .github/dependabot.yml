@@ -1,25 +1,31 @@
 version: 2
+# Every Dependabot pull request starts the checks, and Actions minutes are limited, so updates come
+# monthly and in one pull request per ecosystem. An advisory still raises its own pull request at once.
 updates:
   # The workspace's own dependencies (pnpm reads this the same as npm/yarn).
   - package-ecosystem: 'npm'
     directory: '/'
     schedule:
-      interval: 'weekly'
-    open-pull-requests-limit: 10
+      interval: 'monthly'
+    open-pull-requests-limit: 3
     groups:
-      # One PR for routine bumps instead of dozens; anything with an advisory still gets its own.
-      minor-and-patch:
+      all-routine:
         update-types: ['minor', 'patch']
 
-  # The three workflow files: keeps action versions current even though they are pinned by SHA
+  # The workflow files: keeps action versions current even though they are pinned by SHA
   # (Dependabot updates the SHA and refreshes the version comment next to it).
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:
-      interval: 'weekly'
+      interval: 'monthly'
+    open-pull-requests-limit: 1
+    groups:
+      actions:
+        patterns: ['*']
 
   # The gateway's own image and the Watchtower updater it runs alongside.
   - package-ecosystem: 'docker'
     directory: '/apps/gateway'
     schedule:
-      interval: 'weekly'
+      interval: 'monthly'
+    open-pull-requests-limit: 1

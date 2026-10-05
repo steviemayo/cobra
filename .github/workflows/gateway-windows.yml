@@ -6,16 +6,9 @@ name: Gateway Windows bundle
 # and the daily update task read from these releases:
 #   main -> release "gateway-stable"
 #   dev  -> release "gateway-beta" (pre-release)
-# Pull requests only check that the bundle and installer build.
+# It runs only on the push that publishes (and by hand): a Windows runner costs twice a Linux one,
+# so it is not run a second time for the pull request.
 on:
-  pull_request:
-    paths:
-      - 'apps/gateway/**'
-      - 'apps/panel/**'
-      - 'packages/**'
-      - '!packages/db/**'
-      - 'pnpm-lock.yaml'
-      - '.github/workflows/gateway-windows.yml'
   push:
     branches: [main, dev]
     paths:
@@ -24,7 +17,6 @@ on:
       - 'packages/**'
       - '!packages/db/**'
       - 'pnpm-lock.yaml'
-      - '.github/workflows/gateway-windows.yml'
   workflow_dispatch:
 
 # The bundle job needs contents: write to create and upload release assets on a push; a pull
@@ -32,9 +24,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: gateway-windows-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   bundle:
     runs-on: windows-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     defaults:

@@ -1,6 +1,9 @@
 name: Gateway image
 
-# Builds the gateway container. Pull requests only check that it builds; pushes publish to GHCR.
+# Builds and publishes the gateway container. A pull request only runs the version check (seconds);
+# the build itself runs once, on the push that publishes (minutes are limited, and the PR build was a
+# second copy of it).
+
 #   main            -> :stable (and :latest)
 #   dev             -> :beta
 #   gateway-v1.2.3  -> :1.2.3
@@ -22,7 +25,10 @@ on:
       - 'packages/**'
       - '!packages/db/**'
       - 'pnpm-lock.yaml'
-      - '.github/workflows/gateway-image.yml'
+
+concurrency:
+  group: gateway-image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/kestrel-gateway
@@ -41,6 +47,7 @@ jobs:
   version-bump:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: GATEWAY_VERSION must change alongside the gateway
@@ -61,7 +68,9 @@ jobs:
           fi
 
   image:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
