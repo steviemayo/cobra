@@ -101,12 +101,18 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     label: 'Camera – Generic VISCA over IP',
     group: 'camera',
     description:
-      'Recalls camera presets and switches power on cameras that speak VISCA over IP. Map preset names to the camera’s preset numbers.',
+      'Recalls camera presets, points the camera and switches power on cameras that speak VISCA over IP. Map preset names to the camera’s preset numbers. Over UDP it uses the 8 byte VISCA over IP header (port 52381). For a camera that takes plain VISCA over TCP, such as the Crestron 1 Beyond, set Transport to tcp (raw framing, port 5678 unless you set it).',
     class: 'camera',
     features: ['preset', 'ptz', 'standby'],
     settings: [
       { key: 'host', label: 'Camera address', scope: 'binding', required: true },
       { key: 'port', label: 'Port', scope: 'binding' },
+      { key: 'transport', label: 'Transport (udp or tcp, default udp)', scope: 'binding' },
+      {
+        key: 'framing',
+        label: 'Framing (ip = 8 byte header, raw = plain VISCA; default ip for udp, raw for tcp)',
+        scope: 'binding',
+      },
       { key: 'presets', label: 'Preset names and numbers', scope: 'design' },
       { key: 'cameraAddress', label: 'VISCA camera address', scope: 'design' },
     ],
