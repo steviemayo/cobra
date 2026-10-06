@@ -209,13 +209,14 @@ export async function watchedRooms(
   gatewayId: string,
   now = new Date(),
 ): Promise<string[]> {
-  const rooms = await db.room.findMany({ where: { gatewayId } });
+  const rooms = await db.room.findMany({ where: { gatewayId }, select: { id: true } });
   if (rooms.length === 0) return [];
   const sessions = await db.controlSession.findMany({
     where: {
       roomId: { in: rooms.map((r) => r.id) },
       lastActiveAt: { gte: new Date(now.getTime() - WATCH_TTL_MS) },
     },
+    select: { roomId: true },
   });
   return sessions.map((s) => s.roomId);
 }

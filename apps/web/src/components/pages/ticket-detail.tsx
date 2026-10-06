@@ -18,7 +18,7 @@ import { dateTime } from '@/components/common/health';
 import { useTRPC } from '@/trpc/client';
 import { CalloutActions, CalloutHistory } from './callout-actions';
 import { RequestDialog } from './callouts';
-import { PRIORITY_LABEL, TICKET_STATUS_LABEL, TicketStatus } from './tickets';
+import { PRIORITY_LABEL, TICKET_STATUS_LABEL, TicketRef, TicketStatus } from './tickets';
 
 const ROOT_CAUSE_OPTIONS = [
   { value: 'power', label: 'Power' },
@@ -122,6 +122,14 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
         title={t.title}
         meta={
           <>
+            <TicketRef
+              kestrelRef={t.ref}
+              externalRefs={t.externalRefs}
+              className="text-sm font-medium"
+            />
+            <span aria-hidden className="text-muted-foreground/50">
+              ·
+            </span>
             <TicketStatus status={t.status} />
             <span aria-hidden className="text-muted-foreground/50">
               ·
@@ -129,6 +137,19 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
             <span className="text-sm text-muted-foreground">
               {PRIORITY_LABEL[t.priority]} priority
             </span>
+            {t.incident && (
+              <>
+                <span aria-hidden className="text-muted-foreground/50">
+                  ·
+                </span>
+                <Link
+                  href={orgPath(orgId, '/incidents')}
+                  className="text-sm text-muted-foreground hover:text-foreground hover:underline"
+                >
+                  From incident: {t.incident.title}
+                </Link>
+              </>
+            )}
             {t.providerName && (
               <>
                 <span aria-hidden className="text-muted-foreground/50">

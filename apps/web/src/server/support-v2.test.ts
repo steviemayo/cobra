@@ -9,11 +9,13 @@ import {
 } from './ticket-automation';
 import {
   createConnector,
+  externalRefsFor,
   handleEmailIn,
   handleInbound,
   mapStatus,
   mirrorTicket,
   rotateInboundSecret,
+  setConnectorEnabled,
   simulateDemoReply,
   type ItsmDb,
 } from './itsm-service';
@@ -296,6 +298,8 @@ async function ticketWith(w: ReturnType<typeof world>) {
       priority: 'high',
       routedTo: 'org',
       createdAt: NOW,
+      // The database numbers tickets; the stand-in table does not.
+      number: 42,
     },
   }) as never;
 }
@@ -324,7 +328,8 @@ describe('service desk connectors', () => {
     expect(headers['x-kestrel-signature']).toMatch(/^sha256=/);
     expect(JSON.parse(String(d.calls[0]!.init.body))).toMatchObject({
       event: 'ticket.created',
-      ticket: { title: 'Projector is offline', room: 'Boardroom' },
+      // The desk is told the number to quote beside its own reference.
+      ticket: { title: 'Projector is offline', room: 'Boardroom', number: 42, ref: 'KT-0042' },
     });
     expect(w.itsmSyncLog.rows[0]).toMatchObject({ direction: 'out', ok: true });
     const failing = {
@@ -403,6 +408,41 @@ describe('service desk connectors', () => {
     if (!rotated.ok) throw new Error('no rotate');
     expect((await call(c.value.inboundSecret, { externalRef: 'INC0012' })).ok).toBe(false);
     expect((await call(rotated.value.inboundSecret, { externalRef: 'INC0012' })).ok).toBe(true);
+  });
+
+  it('finds a ticket’s reference in the desks it is linked to, for enabled connectors only', async () => {
+    const w = world();
+    const c = await createConnector(
+      w.db,
+      {
+        orgId: ORG,
+        name: 'ConnectWise',
+        type: 'webhook',
+        url: 'https://desk.example.com/hook',
+        userId: null,
+      },
+      { resolve: async () => ['93.184.216.34'] },
+    );
+    if (!c.ok || !c.value.inboundSecret) throw new Error('no connector');
+    const t = (await ticketWith(w)) as { id: string };
+    const other = (await ticketWith(w)) as { id: string };
+    expect(await externalRefsFor(w.db, ORG, [t.id])).toEqual(new Map());
+    await handleInbound(
+      w.db,
+      {
+        connectorId: c.value.id,
+        secret: c.value.inboundSecret,
+        body: { ticketId: t.id, externalRef: 'CW-10442' },
+      },
+      at(1),
+    );
+    const refs = await externalRefsFor(w.db, ORG, [t.id, other.id]);
+    expect(refs.get(t.id)).toEqual([{ connector: 'ConnectWise', ref: 'CW-10442' }]);
+    expect(refs.has(other.id)).toBe(false);
+    // Another organisation never sees it, and a switched-off connector stops being shown.
+    expect(await externalRefsFor(w.db, MSP, [t.id])).toEqual(new Map());
+    await setConnectorEnabled(w.db, ORG, c.value.id, false);
+    expect(await externalRefsFor(w.db, ORG, [t.id])).toEqual(new Map());
   });
 
   it('shows the whole round trip with the demo desk', async () => {

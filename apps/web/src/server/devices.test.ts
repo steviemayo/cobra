@@ -159,6 +159,20 @@ describe('which gateway polls a device', () => {
   });
 });
 
+describe('reading only some of a gateway’s devices', () => {
+  it('narrows to the ids given, and sends a device in a gateway-less room to the site default', async () => {
+    const w = world();
+    const a = await activeDevice(w, { name: 'A' });
+    const b = await activeDevice(w, { name: 'B' });
+    expect((await devicesForGateway(w.db, gw, [a])).map((d) => d.id)).toEqual([a]);
+    expect(await devicesForGateway(w.db, gw, [])).toEqual([]);
+    // The room loses its gateway: its devices fall to the site's oldest gateway, and only to it.
+    (w.room.rows[0] as Record<string, unknown>).gatewayId = null;
+    expect((await devicesForGateway(w.db, gw)).map((d) => d.id).sort()).toEqual([a, b].sort());
+    expect(await devicesForGateway(w.db, { id: GW_OTHER, orgId: ORG, siteId: SITE })).toEqual([]);
+  });
+});
+
 describe('the site default gateway', () => {
   it('uses the gateway the site names, and falls back to the oldest when none is named', async () => {
     const w = world();
