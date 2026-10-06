@@ -6,6 +6,10 @@ allowBuilds:
   '@serialport/bindings-cpp': true
   esbuild: true
   prisma: true
+# source-map-js below 1.2.2 can be stalled by crafted source maps (GHSA-68fv-2mgg-jv7q). It only
+# arrives through postcss (next, shadcn) and prisma's config loader, which all accept 1.x.
+overrides:
+  source-map-js: '>=1.2.2'
 # All from prisma's own bundled Studio/CLI dependency tree (lodash, mysql2, deepmerge-ts), pulled
 # in through @prisma/client even though this app only speaks Postgres and never launches Studio.
 # `.github/workflows/ci.yml` runs `pnpm audit --prod` and fails on anything not listed here.
