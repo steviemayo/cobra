@@ -1,3 +1,4 @@
+import { request } from 'node:https';
 import type { z } from 'zod';
 
 // Integrations pull device state from a vendor's cloud, so a room can be monitored with no gateway.
@@ -26,8 +27,16 @@ export interface ExternalDevice {
   issues?: string[];
 }
 
+/** A client certificate for a vendor that authenticates with mutual TLS. */
+export interface ClientCert {
+  cert: string;
+  key: string;
+}
+
 export interface ProviderDeps {
   fetch: typeof fetch;
+  /** GET with a client certificate (mutual TLS). Node's fetch cannot present one, so this is its own call. */
+  mtlsGet: (url: string, cert: ClientCert) => Promise<Response>;
   now: () => number;
 }
 
@@ -50,8 +59,43 @@ export interface Provider<C = Record<string, unknown>> {
 export const realProviderDeps = (): ProviderDeps => ({
   fetch: (input, init) =>
     fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(20_000) }),
+  mtlsGet: mtlsGet,
   now: () => Date.now(),
 });
+
+/** GET over https presenting a client certificate. Answers as a Response so callers read it like any other. */
+export function mtlsGet(url: string, { cert, key }: ClientCert): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      url,
+      { method: 'GET', cert, key, timeout: 20_000, headers: { accept: 'application/json' } },
+      (res) => {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        res.on('data', (c: Buffer) => {
+          size += c.length;
+          // A listing is a few megabytes at most; stop reading anything larger.
+          if (size > 20 * 1024 * 1024) req.destroy(new Error('The answer was too large'));
+          else chunks.push(c);
+        });
+        res.on('end', () =>
+          resolve(
+            new Response(Buffer.concat(chunks), {
+              status: res.statusCode ?? 502,
+              headers: {
+                'content-type': String(res.headers['content-type'] ?? 'application/json'),
+              },
+            }),
+          ),
+        );
+        res.on('error', reject);
+      },
+    );
+    req.on('timeout', () => req.destroy(new Error('The request timed out')));
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 /** Reads a JSON answer, turning a refusal into words a customer can act on. */
 export async function readJson(res: Response, what: string): Promise<unknown> {

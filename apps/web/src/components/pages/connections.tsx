@@ -24,6 +24,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
@@ -34,7 +35,13 @@ type Connection = RouterOutputs['integration']['list']['integrations'][number];
 const VENDORS: Record<
   string,
   {
-    fields: { key: string; label: string; secret?: boolean }[];
+    fields: {
+      key: string;
+      label: string;
+      secret?: boolean;
+      multiline?: boolean;
+      optional?: boolean;
+    }[];
     steps: string[];
     /** The vendor calls Kestrel, so there are no sign-in details to enter. */
     push?: boolean;
@@ -61,6 +68,24 @@ const VENDORS: Record<
       'After you connect, Kestrel shows a webhook address and a secret (shown once).',
       'In the Teams Rooms Pro Management portal, open Settings, then Integrations, then Create Incident Webhook. Paste the address and send the secret as a Bearer header, or add it to the address as ?secret=.',
       'Then pair each Teams room to a Kestrel device by its Pro Management device ID, or let Kestrel add rooms as they alert.',
+    ],
+  },
+  logitech: {
+    fields: [
+      { key: 'orgId', label: 'Organization ID' },
+      { key: 'certificate', label: 'Certificate (PEM)', multiline: true },
+      { key: 'privateKey', label: 'Private key (PEM)', secret: true, multiline: true },
+      {
+        key: 'apiBase',
+        label: 'API address (only if Logitech gave you a regional one)',
+        optional: true,
+      },
+    ],
+    steps: [
+      'Sync Cloud API needs a Logitech Sync Plus, Essential or Select licence.',
+      'In the Sync portal open Settings, then Sync Cloud API, and choose Generate new certificate.',
+      'Download certificate.pem and privateKey.pem, and copy the Organization ID shown there (not the certificate name).',
+      'Paste the contents of both files and the Organization ID here.',
     ],
   },
   reflect: {
@@ -171,7 +196,7 @@ function ConnectDialog({
   const ready =
     !!vendor &&
     name.trim().length > 0 &&
-    vendor.fields.every((f) => (values[f.key] ?? '').trim()) &&
+    vendor.fields.every((f) => f.optional || (values[f.key] ?? '').trim()) &&
     (!autoCreate || !!defaultSiteId);
 
   return (
@@ -214,13 +239,25 @@ function ConnectDialog({
               {vendor.fields.map((f) => (
                 <div key={f.key} className="space-y-1.5">
                   <Label htmlFor={`conn-${f.key}`}>{f.label}</Label>
-                  <Input
-                    id={`conn-${f.key}`}
-                    type={f.secret ? 'password' : 'text'}
-                    autoComplete="off"
-                    value={values[f.key] ?? ''}
-                    onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
-                  />
+                  {f.multiline ? (
+                    <Textarea
+                      id={`conn-${f.key}`}
+                      rows={4}
+                      spellCheck={false}
+                      autoComplete="off"
+                      className="font-mono text-xs"
+                      value={values[f.key] ?? ''}
+                      onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+                    />
+                  ) : (
+                    <Input
+                      id={`conn-${f.key}`}
+                      type={f.secret ? 'password' : 'text'}
+                      autoComplete="off"
+                      value={values[f.key] ?? ''}
+                      onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+                    />
+                  )}
                 </div>
               ))}
               <div className="space-y-1.5">
@@ -279,7 +316,7 @@ function ConnectDialog({
                 orgId,
                 provider,
                 name: name.trim(),
-                credentials: values,
+                credentials: Object.fromEntries(Object.entries(values).filter(([, v]) => v.trim())),
                 siteIds,
                 defaultSiteId: autoCreate ? defaultSiteId : null,
                 autoCreate,

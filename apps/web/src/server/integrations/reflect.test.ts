@@ -51,6 +51,9 @@ describe('normaliseCore', () => {
 
 const deps = (res: Response): ProviderDeps => ({
   fetch: (async () => res) as typeof fetch,
+  mtlsGet: async () => {
+    throw new Error('no mtls');
+  },
   now: () => 0,
 });
 

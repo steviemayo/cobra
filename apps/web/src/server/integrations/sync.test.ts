@@ -41,7 +41,16 @@ function fakeFetch(rooms: ZoomRoom[], opts: { tokenStatus?: number; listStatus?:
       return Response.json({ zoom_rooms: rooms }, { status: opts.listStatus ?? 200 });
     return new Response('nope', { status: 404 });
   }) as typeof fetch;
-  return { deps: { fetch: f, now: () => T0.getTime() } satisfies ProviderDeps, calls };
+  return {
+    deps: {
+      fetch: f,
+      mtlsGet: async () => {
+        throw new Error('no mtls');
+      },
+      now: () => T0.getTime(),
+    } satisfies ProviderDeps,
+    calls,
+  };
 }
 
 function world(
