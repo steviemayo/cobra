@@ -127,8 +127,15 @@ export const integrationRouter = router({
           code: 'BAD_REQUEST',
           message: 'The default site must be one of the sites it is limited to',
         });
+      // A provider whose credentials rotate hands back the new ones while testing: those are the ones to keep.
+      let rotated: Record<string, unknown> | null = null;
       try {
-        await p.test(parsed.data, realProviderDeps());
+        await p.test(parsed.data, {
+          ...realProviderDeps(),
+          updateCredentials: async (next) => {
+            rotated = next;
+          },
+        });
       } catch (e) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -150,7 +157,7 @@ export const integrationRouter = router({
           siteIds: input.siteIds,
           defaultSiteId: input.defaultSiteId,
           autoCreate: input.autoCreate,
-          sealed: seal(JSON.stringify(parsed.data), key),
+          sealed: seal(JSON.stringify(rotated ?? parsed.data), key),
           inboundHash: secret ? hashSecret(secret) : null,
           createdBy: ctx.user.id,
         },

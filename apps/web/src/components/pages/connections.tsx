@@ -88,6 +88,19 @@ const VENDORS: Record<
       'Paste the contents of both files and the Organization ID here.',
     ],
   },
+  webex: {
+    fields: [
+      { key: 'clientId', label: 'Client ID' },
+      { key: 'clientSecret', label: 'Client secret', secret: true },
+      { key: 'refreshToken', label: 'Refresh token', secret: true },
+    ],
+    steps: [
+      'At developer.webex.com, create a Service App with the scopes spark-admin:devices_read and spark-admin:workspaces_read.',
+      'Ask a Webex org admin to authorise it in Control Hub, under Apps.',
+      'On the Service App page copy the Client ID and Client secret, and generate the access and refresh token pair.',
+      'Paste the Client ID, Client secret and Refresh token here. Kestrel keeps the refresh token current.',
+    ],
+  },
   reflect: {
     fields: [{ key: 'apiToken', label: 'API token', secret: true }],
     steps: [

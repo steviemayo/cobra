@@ -38,6 +38,8 @@ export interface ProviderDeps {
   /** GET with a client certificate (mutual TLS). Node's fetch cannot present one, so this is its own call. */
   mtlsGet: (url: string, cert: ClientCert) => Promise<Response>;
   now: () => number;
+  /** A provider whose credentials rotate (Webex refresh tokens) hands the new ones back to be saved. */
+  updateCredentials?: (creds: Record<string, unknown>) => Promise<void>;
 }
 
 export interface Provider<C = Record<string, unknown>> {

@@ -1,4 +1,4 @@
-import { open } from '@kestrel/crypto';
+import { open, seal } from '@kestrel/crypto';
 import { Prisma, type PrismaClient } from '@kestrel/db';
 import { DISCOVERABLE_FIELDS, mergeDiscovered, type Provenance } from '@kestrel/model';
 import { openIncident, resolveIncident, type AlertJob, type MonitoringDb } from '../monitoring';
@@ -61,7 +61,16 @@ export async function syncIntegration(
   try {
     if (!provider) throw new Error(`Unknown integration type "${integration.provider}"`);
     const creds = provider.credentials.parse(unsealCredentials(integration, secretsKey));
-    found = await provider.list(creds, deps);
+    found = await provider.list(creds, {
+      ...deps,
+      updateCredentials: async (next) => {
+        if (!secretsKey) return;
+        await db.integration.update({
+          where: { id: integration.id },
+          data: { sealed: seal(JSON.stringify(next), secretsKey) },
+        });
+      },
+    });
   } catch (e) {
     const error = e instanceof Error ? e.message : 'The sync failed';
     result.error = error;
