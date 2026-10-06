@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Cloud, Link2, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Cloud, Copy, KeyRound, Link2, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
@@ -33,7 +33,12 @@ type Connection = RouterOutputs['integration']['list']['integrations'][number];
 /** What each vendor needs from the customer, and how they get it. Mirrors the server's credential schemas. */
 const VENDORS: Record<
   string,
-  { fields: { key: string; label: string; secret?: boolean }[]; steps: string[] }
+  {
+    fields: { key: string; label: string; secret?: boolean }[];
+    steps: string[];
+    /** The vendor calls Kestrel, so there are no sign-in details to enter. */
+    push?: boolean;
+  }
 > = {
   zoom: {
     fields: [
@@ -48,6 +53,16 @@ const VENDORS: Record<
       'Zoom Rooms dashboard data needs a Zoom plan that includes the dashboard.',
     ],
   },
+  teams: {
+    push: true,
+    fields: [],
+    steps: [
+      'Microsoft has no supported health API for Teams Rooms, so Teams sends Kestrel its alerts instead.',
+      'After you connect, Kestrel shows a webhook address and a secret (shown once).',
+      'In the Teams Rooms Pro Management portal, open Settings, then Integrations, then Create Incident Webhook. Paste the address and send the secret as a Bearer header, or add it to the address as ?secret=.',
+      'Then pair each Teams room to a Kestrel device by its Pro Management device ID, or let Kestrel add rooms as they alert.',
+    ],
+  },
   reflect: {
     fields: [{ key: 'apiToken', label: 'API token', secret: true }],
     steps: [
@@ -58,7 +73,73 @@ const VENDORS: Record<
   },
 };
 
-function ConnectDialog({ onClose }: { onClose: () => void }) {
+function CopyLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-1">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="flex items-center gap-2">
+        <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 text-xs">{value}</code>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label={`Copy ${label}`}
+          onClick={() =>
+            void navigator.clipboard.writeText(value).then(() => toast.success('Copied'))
+          }
+        >
+          <Copy />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** The address and secret a vendor sends events to. The secret is shown here once and never again. */
+function WebhookDialog({
+  id,
+  name,
+  secret,
+  onClose,
+}: {
+  id: string;
+  name: string;
+  secret: string;
+  onClose: () => void;
+}) {
+  const origin = typeof window === 'undefined' ? '' : window.location.origin;
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{name}: webhook details</DialogTitle>
+          <DialogDescription>Copy these now. The secret is shown only once.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <CopyLine
+            label="Webhook address (POST, JSON)"
+            value={`${origin}/api/integrations/${id}`}
+          />
+          <CopyLine label="Secret (Authorization: Bearer ...)" value={secret} />
+          <p className="text-xs text-muted-foreground">
+            If the sender can only set an address, add <code>?secret=</code> and the secret to the
+            end of it. A header is safer, because addresses end up in logs.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button onClick={onClose}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ConnectDialog({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (r: { id: string; secret: string; name: string }) => void;
+}) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const { orgId } = useOrg();
@@ -78,10 +159,11 @@ function ConnectDialog({ onClose }: { onClose: () => void }) {
 
   const connect = useMutation(
     trpc.integration.connect.mutationOptions({
-      onSuccess: async () => {
+      onSuccess: async (r) => {
         toast.success('Connected');
         await qc.invalidateQueries({ queryKey: trpc.integration.list.queryKey() });
-        onClose();
+        if (r.secret) onCreated({ id: r.id, secret: r.secret, name: name.trim() });
+        else onClose();
       },
       onError: (e) => toast.error(e.message),
     }),
@@ -219,6 +301,8 @@ function PairDialog({ connection, onClose }: { connection: Connection; onClose: 
   const found = useQuery(
     trpc.integration.discover.queryOptions({ orgId, id: connection.id }, { retry: false }),
   );
+  const [manualId, setManualId] = useState('');
+  const [manualDevice, setManualDevice] = useState('');
   const devices = useQuery(trpc.device.list.queryOptions({ orgId }));
   const [picked, setPicked] = useState<Record<string, string>>({});
   const free = (devices.data ?? []).filter(
@@ -263,7 +347,49 @@ function PairDialog({ connection, onClose }: { connection: Connection; onClose: 
             comes from the service, with no gateway.
           </DialogDescription>
         </DialogHeader>
-        {found.isPending ? (
+        {connection.push ? (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Enter the room's device ID from the Pro Management portal (or its room account
+              address) and choose the Kestrel device it is. Rooms that alert before they are paired
+              are added automatically only if this connection is set to create rooms.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="pair-id">Device ID</Label>
+              <Input id="pair-id" value={manualId} onChange={(e) => setManualId(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Kestrel device</Label>
+              <SimpleSelect
+                value={manualDevice}
+                onValueChange={setManualDevice}
+                options={free.map((x) => ({ value: x.id, label: x.name }))}
+                placeholder="Choose a device"
+              />
+            </div>
+            <Button
+              disabled={!manualId.trim() || !manualDevice || pair.isPending}
+              onClick={() =>
+                pair.mutate(
+                  {
+                    orgId,
+                    id: connection.id,
+                    deviceId: manualDevice,
+                    externalId: manualId.trim(),
+                  },
+                  {
+                    onSuccess: () => {
+                      setManualId('');
+                      setManualDevice('');
+                    },
+                  },
+                )
+              }
+            >
+              Pair
+            </Button>
+          </div>
+        ) : found.isPending ? (
           <Skeleton className="h-24 w-full" />
         ) : found.isError ? (
           <p className="text-sm text-destructive">{found.error.message}</p>
@@ -331,7 +457,15 @@ function PairDialog({ connection, onClose }: { connection: Connection; onClose: 
   );
 }
 
-function Row({ c, onPair }: { c: Connection; onPair: () => void }) {
+function Row({
+  c,
+  onPair,
+  onSecret,
+}: {
+  c: Connection;
+  onPair: () => void;
+  onSecret: (r: { id: string; secret: string; name: string }) => void;
+}) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const { orgId, isOwner } = useOrg();
@@ -353,6 +487,12 @@ function Row({ c, onPair }: { c: Connection; onPair: () => void }) {
         else toast.error(r.error ?? 'The sync failed');
         await refresh();
       },
+      onError: (e) => toast.error(e.message),
+    }),
+  );
+  const rotate = useMutation(
+    trpc.integration.rotateSecret.mutationOptions({
+      onSuccess: (r) => onSecret({ id: c.id, secret: r.secret, name: c.name }),
       onError: (e) => toast.error(e.message),
     }),
   );
@@ -398,14 +538,27 @@ function Row({ c, onPair }: { c: Connection; onPair: () => void }) {
       <Button size="sm" variant="outline" onClick={onPair}>
         <Link2 className="size-4" /> Pair
       </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={sync.isPending}
-        onClick={() => sync.mutate({ orgId, id: c.id })}
-      >
-        <RefreshCw className="size-4" /> Read now
-      </Button>
+      {c.push ? (
+        isOwner && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={rotate.isPending}
+            onClick={() => rotate.mutate({ orgId, id: c.id })}
+          >
+            <KeyRound className="size-4" /> New secret
+          </Button>
+        )
+      ) : (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={sync.isPending}
+          onClick={() => sync.mutate({ orgId, id: c.id })}
+        >
+          <RefreshCw className="size-4" /> Read now
+        </Button>
+      )}
       {isOwner && (
         <Button size="icon" variant="ghost" aria-label="Remove" onClick={() => setRemoving(true)}>
           <Trash2 className="size-4" />
@@ -432,6 +585,7 @@ export function ConnectionsView() {
   const list = useQuery(trpc.integration.list.queryOptions({ orgId }));
   const [connecting, setConnecting] = useState(false);
   const [pairing, setPairing] = useState<Connection | null>(null);
+  const [secret, setSecret] = useState<{ id: string; secret: string; name: string } | null>(null);
 
   return (
     <PageContainer>
@@ -461,20 +615,36 @@ export function ConnectionsView() {
             <EmptyState
               icon={Cloud}
               title="No connections yet"
-              description="Connect Zoom Rooms or Q-SYS Reflect to monitor rooms that have no gateway."
+              description="Connect Zoom Rooms, Q-SYS Reflect or Teams Rooms to monitor rooms that have no gateway."
             />
           ) : (
             <Section title="Connections">
               <ul className="divide-y">
                 {list.data.integrations.map((c) => (
-                  <Row key={c.id} c={c} onPair={() => setPairing(c)} />
+                  <Row key={c.id} c={c} onPair={() => setPairing(c)} onSecret={setSecret} />
                 ))}
               </ul>
             </Section>
           )}
         </>
       )}
-      {connecting && <ConnectDialog onClose={() => setConnecting(false)} />}
+      {connecting && (
+        <ConnectDialog
+          onClose={() => setConnecting(false)}
+          onCreated={(r) => {
+            setConnecting(false);
+            setSecret(r);
+          }}
+        />
+      )}
+      {secret && (
+        <WebhookDialog
+          id={secret.id}
+          name={secret.name}
+          secret={secret.secret}
+          onClose={() => setSecret(null)}
+        />
+      )}
       {pairing && <PairDialog connection={pairing} onClose={() => setPairing(null)} />}
     </PageContainer>
   );

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
-import { seal } from '@kestrel/crypto';
+import { generateSecret, hashSecret, seal } from '@kestrel/crypto';
 import { writeAudit } from '../audit';
 import { queueAlerts } from '../alert-batch';
 import { getProvider, listProviders } from '../integrations/registry';
@@ -80,6 +80,7 @@ export const integrationRouter = router({
       integrations: rows.map((r) => ({
         ...r,
         label: getProvider(r.provider)?.label ?? r.provider,
+        push: getProvider(r.provider)?.mode === 'push',
         devices: devices.filter((d) => d.integrationId === r.id).length,
       })),
     };
@@ -139,6 +140,8 @@ export const integrationRouter = router({
           code: 'CONFLICT',
           message: 'An integration with that name already exists',
         });
+      // A vendor that calls us is given a secret to send, shown once and kept only as a hash.
+      const secret = p.mode === 'push' ? generateSecret() : null;
       const created = await db.integration.create({
         data: {
           orgId: ctx.orgId,
@@ -148,6 +151,7 @@ export const integrationRouter = router({
           defaultSiteId: input.defaultSiteId,
           autoCreate: input.autoCreate,
           sealed: seal(JSON.stringify(parsed.data), key),
+          inboundHash: secret ? hashSecret(secret) : null,
           createdBy: ctx.user.id,
         },
       });
@@ -158,8 +162,29 @@ export const integrationRouter = router({
         target: created.id,
         meta: { provider: p.id, name: input.name },
       });
-      return { id: created.id };
+      return { id: created.id, secret };
     }),
+
+  // Replaces the secret a vendor sends. The old one stops working at once; the new one is shown once.
+  rotateSecret: proc.input(z.object({ orgId, id: uuid })).mutation(async ({ ctx, input }) => {
+    requireRole(ctx.role, ['owner']);
+    const row = await db.integration.findFirst({ where: { id: input.id, orgId: ctx.orgId } });
+    if (!row || getProvider(row.provider)?.mode !== 'push')
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Integration not found' });
+    const secret = generateSecret();
+    await db.integration.update({
+      where: { id: row.id },
+      data: { inboundHash: hashSecret(secret) },
+    });
+    await writeAudit({
+      orgId: ctx.orgId,
+      actorId: ctx.user.id,
+      action: 'integration.rotate_secret',
+      target: row.id,
+      meta: { name: row.name },
+    });
+    return { secret };
+  }),
 
   update: proc
     .input(
@@ -242,6 +267,16 @@ export const integrationRouter = router({
     requireRole(ctx.role, ['owner', 'dev']);
     const row = await db.integration.findFirst({ where: { id: input.id, orgId: ctx.orgId } });
     if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Integration not found' });
+    if (getProvider(row.provider)?.mode === 'push')
+      return {
+        ok: false,
+        error:
+          'This connection is updated by the vendor sending events, so there is nothing to read.',
+        seen: 0,
+        updated: 0,
+        created: 0,
+        skipped: 0,
+      };
     const res = await syncIntegration(db, row, new Date());
     if (res.jobs.length) await queueAlerts(db, res.jobs);
     return {
@@ -260,6 +295,7 @@ export const integrationRouter = router({
     const row = await db.integration.findFirst({ where: { id: input.id, orgId: ctx.orgId } });
     if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Integration not found' });
     const p = provider(row.provider);
+    if (p.mode === 'push') return [];
     let found;
     try {
       const creds = p.credentials.parse(unsealCredentials(row, process.env.KESTREL_SECRETS_KEY));

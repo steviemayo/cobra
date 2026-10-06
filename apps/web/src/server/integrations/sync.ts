@@ -301,6 +301,8 @@ export async function syncDue(
   const all = await db.integration.findMany({ where: { enabled: true } });
   const jobs: AlertJob[] = [];
   for (const i of all) {
+    // A vendor that calls us (a webhook) has nothing to read.
+    if (getProvider(i.provider)?.mode === 'push') continue;
     if (i.lastSyncAt && now.getTime() - i.lastSyncAt.getTime() < SYNC_EVERY_MS) continue;
     try {
       jobs.push(...(await syncIntegration(db, i, now, deps)).jobs);

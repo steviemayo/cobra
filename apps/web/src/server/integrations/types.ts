@@ -34,6 +34,11 @@ export interface ProviderDeps {
 export interface Provider<C = Record<string, unknown>> {
   id: string;
   label: string;
+  /**
+   * pull (default): Kestrel reads the vendor on a timer. push: the vendor calls Kestrel (a webhook),
+   * so there is nothing to poll and the customer is given a URL and a secret instead of credentials.
+   */
+  mode?: 'pull' | 'push';
   /** The credentials a customer pastes in. Everything in it is sealed. */
   credentials: z.ZodType<C>;
   /** Signs in and reads once. Throws a plain-language Error when it cannot. */
