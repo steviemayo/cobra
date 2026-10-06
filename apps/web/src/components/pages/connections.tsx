@@ -48,6 +48,14 @@ const VENDORS: Record<
       'Zoom Rooms dashboard data needs a Zoom plan that includes the dashboard.',
     ],
   },
+  reflect: {
+    fields: [{ key: 'apiToken', label: 'API token', secret: true }],
+    steps: [
+      'Sign in to Q-SYS Reflect as an Organization Owner.',
+      'Open the Organizations page and copy the API token.',
+      'Paste it here. Kestrel will list your Cores and their status.',
+    ],
+  },
 };
 
 function ConnectDialog({ onClose }: { onClose: () => void }) {
@@ -453,7 +461,7 @@ export function ConnectionsView() {
             <EmptyState
               icon={Cloud}
               title="No connections yet"
-              description="Connect Zoom Rooms to monitor rooms that have no gateway."
+              description="Connect Zoom Rooms or Q-SYS Reflect to monitor rooms that have no gateway."
             />
           ) : (
             <Section title="Connections">
