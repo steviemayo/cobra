@@ -25,6 +25,85 @@ import type { RouterOutputs } from '@/trpc/types';
 
 type UsageRow = RouterOutputs['roomUsage']['estate']['rows'][number];
 
+/** Below this share of working hours a room is flagged as underused. */
+const UNDERUSED = 0.1;
+
+const pct = (v: number | null) => (v === null ? '–' : `${Math.round(v * 100)}%`);
+
+/** The mean utilisation of the rooms that have one, or null when none do. */
+const averageOf = (rows: UsageRow[]) => {
+  const measured = rows.filter((r) => r.utilisation !== null);
+  return measured.length
+    ? measured.reduce((n, r) => n + r.utilisation!, 0) / measured.length
+    : null;
+};
+
+function Kpi({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
+  return (
+    <div className="px-4 py-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="tabular mt-1 text-2xl font-semibold tracking-tight">{value}</div>
+      {hint && <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>}
+    </div>
+  );
+}
+
+/** Totals for the rooms in view. */
+function UsageSummary({ rows }: { rows: UsageRow[] }) {
+  const sessions = rows.reduce((n, r) => n + r.sessions, 0);
+  const minutes = rows.reduce((n, r) => n + r.minutes, 0);
+  const afterHours = rows.reduce((n, r) => n + r.afterHoursMinutes, 0);
+  const watched = rows.filter((r) => r.inUseNow !== null);
+  const inUse = watched.filter((r) => r.inUseNow).length;
+  return (
+    <div className="grid grid-cols-2 divide-x divide-y overflow-hidden rounded-lg border sm:grid-cols-5 sm:divide-y-0">
+      <Kpi
+        label="Average utilisation"
+        value={pct(averageOf(rows))}
+        hint={`across ${plural(rows.length, 'room')}`}
+      />
+      <Kpi label="Sessions" value={sessions} />
+      <Kpi label="Time in use" value={minutesLabel(minutes)} hint="in total" />
+      <Kpi
+        label="Out of hours"
+        value={minutesLabel(afterHours)}
+        hint={minutes ? `${Math.round((afterHours / minutes) * 100)}% of time in use` : undefined}
+      />
+      <Kpi
+        label="In use now"
+        value={watched.length ? `${inUse} of ${watched.length}` : '–'}
+        hint="rooms"
+      />
+    </div>
+  );
+}
+
+/** Utilisation as a bar, so the ranking reads at a glance. */
+function UtilisationBar({ value }: { value: number | null }) {
+  if (value === null) return <span className="text-muted-foreground">–</span>;
+  const low = value < UNDERUSED;
+  return (
+    <div className="flex items-center justify-end gap-2.5">
+      {low && (
+        <Badge variant="outline" className="text-muted-foreground">
+          Underused
+        </Badge>
+      )}
+      <div
+        className="h-2 w-28 overflow-hidden rounded-full bg-muted"
+        role="img"
+        aria-label={`${pct(value)} utilisation`}
+      >
+        <div
+          className={low ? 'h-full bg-muted-foreground/50' : 'h-full bg-brand'}
+          style={{ width: `${Math.max(2, Math.min(100, Math.round(value * 100)))}%` }}
+        />
+      </div>
+      <span className="tabular w-10 text-right text-sm font-semibold">{pct(value)}</span>
+    </div>
+  );
+}
+
 /** The rooms of one view, with the site each is at. */
 function UsageTable({ rows }: { rows: UsageRow[] }) {
   const { orgId } = useOrg();
@@ -52,24 +131,31 @@ function UsageTable({ rows }: { rows: UsageRow[] }) {
                 </Link>
               </TableCell>
               <TableCell className="text-muted-foreground">{r.siteName ?? '–'}</TableCell>
-              <TableCell className="tabular text-right">
-                {r.utilisation === null ? '–' : `${Math.round(r.utilisation * 100)}%`}
+              <TableCell>
+                <UtilisationBar value={r.utilisation} />
               </TableCell>
-              <TableCell className="tabular text-right">{r.sessions}</TableCell>
-              <TableCell className="tabular text-right">
+              <TableCell className="tabular text-right text-muted-foreground">
+                {r.sessions}
+              </TableCell>
+              <TableCell className="tabular text-right text-muted-foreground">
                 {r.sessions ? minutesLabel(r.averageMinutes) : '–'}
               </TableCell>
-              <TableCell className="tabular text-right">{minutesLabel(r.minutes)}</TableCell>
+              <TableCell className="tabular text-right text-muted-foreground">
+                {minutesLabel(r.minutes)}
+              </TableCell>
               <TableCell className="tabular text-right text-muted-foreground">
                 {minutesLabel(r.afterHoursMinutes)}
               </TableCell>
               <TableCell>
                 {r.inUseNow === null ? (
-                  '–'
-                ) : r.inUseNow ? (
-                  <Badge>In use</Badge>
+                  <span className="text-muted-foreground">–</span>
                 ) : (
-                  <Badge variant="secondary">Empty</Badge>
+                  <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span
+                      className={`size-2 rounded-full ${r.inUseNow ? 'bg-success' : 'bg-muted-foreground/30'}`}
+                    />
+                    {r.inUseNow ? 'In use' : 'Empty'}
+                  </span>
                 )}
               </TableCell>
             </TableRow>
@@ -115,14 +201,7 @@ export function EstateUsageView() {
     .sort((a, b) => (a.key === '' ? 1 : 0) - (b.key === '' ? 1 : 0) || a.name.localeCompare(b.name))
     .map((g) => {
       const mine = rows.filter((r) => (r.siteId ?? '') === g.key);
-      const measured = mine.filter((r) => r.utilisation !== null);
-      return {
-        ...g,
-        rows: mine,
-        average: measured.length
-          ? measured.reduce((n, r) => n + r.utilisation!, 0) / measured.length
-          : null,
-      };
+      return { ...g, rows: mine, average: averageOf(mine) };
     });
 
   return (
@@ -185,6 +264,7 @@ export function EstateUsageView() {
         />
       ) : (
         <>
+          <UsageSummary rows={shown} />
           {insights.length > 0 && (
             <section className="overflow-hidden rounded-lg border">
               <button
@@ -226,14 +306,28 @@ export function EstateUsageView() {
             <div className="space-y-4">
               {bySite.map((g) => (
                 <section key={g.key} className="space-y-1.5">
-                  <h2 className="text-sm font-medium">
-                    {g.name}{' '}
-                    <span className="text-xs font-normal text-muted-foreground">
-                      {plural(g.rows.length, 'room')}
-                      {g.average !== null &&
-                        ` · ${Math.round(g.average * 100)}% average utilisation`}
-                    </span>
-                  </h2>
+                  <div className="flex items-center justify-between gap-4">
+                    <h2 className="text-sm font-medium">
+                      {g.name}{' '}
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {plural(g.rows.length, 'room')}
+                      </span>
+                    </h2>
+                    {g.average !== null && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        Average
+                        <div className="h-2 w-28 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full bg-brand"
+                            style={{ width: `${Math.max(2, Math.round(g.average * 100))}%` }}
+                          />
+                        </div>
+                        <span className="tabular w-10 text-right text-sm font-semibold text-foreground">
+                          {pct(g.average)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                   <UsageTable rows={g.rows} />
                 </section>
               ))}
