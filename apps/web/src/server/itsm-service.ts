@@ -1,6 +1,7 @@
 import { generateSecret, hashSecret, open, seal, secretMatches } from '@kestrel/crypto';
 import type { PrismaClient } from '@kestrel/db';
 import { z } from 'zod';
+import { ticketRef } from '../lib/ticket-ref';
 import { assertPublicUrl, postSigned, type PostDeps } from './outbound';
 
 // Service desk integration (docs/pivot-monitoring.md, "Support"). A connector mirrors tickets to an
@@ -150,6 +151,36 @@ export async function rotateInboundSecret(
   return { ok: true, value: { inboundSecret: inbound } };
 }
 
+/** Each ticket's reference in the service desks it is linked to (enabled connectors only). */
+export async function externalRefsFor(
+  db: Pick<ItsmDb, 'itsmLink' | 'itsmConnector'>,
+  orgId: string,
+  ticketIds: string[],
+): Promise<Map<string, { connector: string; ref: string }[]>> {
+  const out = new Map<string, { connector: string; ref: string }[]>();
+  if (ticketIds.length === 0) return out;
+  const connectors = new Map(
+    (
+      await db.itsmConnector.findMany({
+        where: { orgId, enabled: true },
+        select: { id: true, name: true },
+      })
+    ).map((c) => [c.id, c.name]),
+  );
+  if (connectors.size === 0) return out;
+  const links = await db.itsmLink.findMany({
+    where: { orgId, ticketId: { in: ticketIds }, connectorId: { in: [...connectors.keys()] } },
+    select: { ticketId: true, connectorId: true, externalRef: true },
+    orderBy: { lastSyncAt: 'asc' },
+  });
+  for (const l of links)
+    out.set(l.ticketId, [
+      ...(out.get(l.ticketId) ?? []),
+      { connector: connectors.get(l.connectorId)!, ref: l.externalRef },
+    ]);
+  return out;
+}
+
 // ---- Outbound ------------------------------------------------------------------------------------
 
 type TicketRow = NonNullable<Awaited<ReturnType<ItsmDb['ticket']['findFirst']>>>;
@@ -222,6 +253,9 @@ export async function mirrorTicket(
           event,
           ticket: {
             id: ticket.id,
+            // The number to quote: a service desk keeps it beside its own reference.
+            number: ticket.number,
+            ref: ticketRef(ticket.number),
             title: ticket.title,
             body: ticket.body,
             status: ticket.status,

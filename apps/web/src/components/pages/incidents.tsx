@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, LifeBuoy } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmptyState } from '@/components/common/empty-state';
 import { INCIDENT_KIND_LABEL, SeverityPill, dateTime } from '@/components/common/health';
@@ -15,7 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { timeAgo } from '@/lib/format';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
-import { NewTicketDialog } from './tickets';
+import { NewTicketDialog, TicketRef, TicketStatus } from './tickets';
 
 type Incident = RouterOutputs['monitoring']['incidents'][number];
 
@@ -127,6 +127,22 @@ export function IncidentsView() {
                   {i.occurrences > 1 && ` · came back ${i.occurrences - 1}×`}
                 </div>
                 {i.detail && <p className="text-sm text-muted-foreground">{i.detail}</p>}
+                {i.tickets.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                    {i.tickets.map((t) => (
+                      <span key={t.id} className="inline-flex items-center gap-2">
+                        <LifeBuoy aria-hidden className="size-3.5 text-muted-foreground" />
+                        <Link
+                          href={orgPath(orgId, `/tickets/${t.id}`)}
+                          className="font-medium hover:underline"
+                        >
+                          <TicketRef kestrelRef={t.ref} externalRefs={t.externalRefs} />
+                        </Link>
+                        <TicketStatus status={t.status} />
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {i.impact && <MeetingsAtRisk impact={i.impact} compact />}
                 {(members.get(i.id) ?? []).length > 0 && (
                   <ul className="mt-1 space-y-0.5 border-l pl-3 text-sm text-muted-foreground">
@@ -154,9 +170,12 @@ export function IncidentsView() {
                 {i.acknowledged && i.status === 'open' && (
                   <span className="text-xs text-muted-foreground">Acknowledged</span>
                 )}
-                <Button variant="ghost" size="sm" onClick={() => setTicketFor(i)}>
-                  Raise request
-                </Button>
+                {/* One request at a time: raise another only once the last is resolved or closed. */}
+                {!i.tickets.some((t) => t.status === 'open' || t.status === 'in_progress') && (
+                  <Button variant="ghost" size="sm" onClick={() => setTicketFor(i)}>
+                    {i.tickets.length > 0 ? 'Raise another request' : 'Raise request'}
+                  </Button>
+                )}
               </div>
             </li>
           ))}

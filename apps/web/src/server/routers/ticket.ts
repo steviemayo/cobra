@@ -8,8 +8,9 @@ import { routeForNewTicket } from '../msp';
 import { assigneeLabel, assigneesFor, findAssignee } from '../ticket-assignees';
 import { SITE_SCOPED, roomIdsInScope, ticketVisible } from '../site-scope';
 import { notifyStaff } from '../ticket-notify';
-import { mirrorTicket, type MirrorEvent } from '../itsm-service';
+import { externalRefsFor, mirrorTicket, type MirrorEvent } from '../itsm-service';
 import { deviceOfSubject } from '../maintenance';
+import { ticketRef } from '../../lib/ticket-ref';
 import { pinnedFetch, resolveAll } from '../outbound';
 import {
   STAFF_LABEL,
@@ -152,8 +153,15 @@ export const ticketRouter = router({
             })
           : [];
       const now = new Date();
+      const external = await externalRefsFor(
+        db,
+        ctx.orgId,
+        rows.map((r) => r.id),
+      );
       return rows.map((t) => ({
         id: t.id,
+        ref: ticketRef(t.number),
+        externalRefs: external.get(t.id) ?? [],
         title: t.title,
         status: t.status,
         priority: t.priority,
@@ -194,8 +202,16 @@ export const ticketRouter = router({
       const provider = providerId
         ? await db.org.findFirst({ where: { id: providerId }, select: { name: true } })
         : null;
+      const incident = t.incidentId
+        ? await db.incident.findFirst({
+            where: { id: t.incidentId, orgId: ctx.orgId },
+            select: { id: true, title: true, status: true },
+          })
+        : null;
       return {
         id: t.id,
+        ref: ticketRef(t.number),
+        externalRefs: (await externalRefsFor(db, ctx.orgId, [t.id])).get(t.id) ?? [],
         title: t.title,
         body: t.body,
         providerName: provider?.name ?? null,
@@ -205,6 +221,7 @@ export const ticketRouter = router({
         priority: t.priority,
         room,
         incidentId: t.incidentId,
+        incident,
         deviceId: t.deviceId,
         rootCause: t.rootCause,
         routedTo: t.routedTo,
@@ -308,7 +325,7 @@ export const ticketRouter = router({
       });
       if (input.toKestrel) after(() => tellStaff(ctx.orgId, t.id, 'escalated', t.body));
       after(() => mirror(ctx.orgId, t.id, 'ticket.created'));
-      return { id: t.id };
+      return { id: t.id, ref: ticketRef(t.number) };
     }),
 
   comment: orgProcedure
