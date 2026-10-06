@@ -3,6 +3,9 @@ import {
   createWindow,
   deleteWindow,
   deviceOfSubject,
+  endMaintenanceMode,
+  MAINTENANCE_MODE_NAME,
+  startMaintenanceMode,
   inMaintenance,
   upcomingWindows,
   windowActive,
@@ -149,5 +152,28 @@ describe('managing windows', () => {
       false,
     );
     expect((await deleteWindow(w.db, ORG, ok.value.id)).ok).toBe(true);
+  });
+});
+
+describe('maintenance mode', () => {
+  it('starts now for a room, covers it, and can be ended early', async () => {
+    const w = world();
+    const t = { roomId: ROOM };
+    const res = await startMaintenanceMode(
+      w.db as never,
+      { orgId: ORG, scope: 'room', scopeId: ROOM, hours: 4, userId: null },
+      NOW,
+    );
+    expect(res.ok).toBe(true);
+    expect(await inMaintenance(w.db, ORG, t, at(3))).toBe(true);
+    expect(await inMaintenance(w.db, ORG, t, at(5))).toBe(false);
+    // Ending it stops it now, and leaves other windows alone.
+    const other = win({ id: 'w2', name: 'Works', scope: 'room', scopeId: ROOM, startsAt: at(-1), endsAt: at(10) });
+    await w.maintenanceWindow.create({ data: other });
+    const ended = await endMaintenanceMode(w.db, { orgId: ORG, scope: 'room', scopeId: ROOM }, at(1));
+    expect(ended).toBe(1);
+    const rows = await w.maintenanceWindow.findMany({ where: { name: MAINTENANCE_MODE_NAME } });
+    expect((rows[0] as { endsAt: Date }).endsAt.getTime()).toBe(at(1).getTime());
+    expect(await inMaintenance(w.db, ORG, t, at(2))).toBe(true); // the other window still covers it
   });
 });

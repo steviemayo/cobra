@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { DoorOpen, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { AlertBadges, AlertControls } from '@/components/common/alert-controls';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { PageContainer, PageHeader } from '@/components/common/page-header';
@@ -31,7 +32,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { plural } from '@/lib/format';
-import { useEstate, useInvalidateEstate } from '@/lib/use-estate';
+import { useAlertState, useEstate, useInvalidateEstate } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
 import { SiteNetwork } from './network-health';
 import { AreasPanel, SiteGateways, SiteRooms } from './site-areas';
@@ -43,6 +44,7 @@ export function SiteDetailView({ siteId }: { siteId: string }) {
   const { openNewRoom } = useDialogs();
   const { sites, roomsBySite, isPending } = useEstate();
   const invalidate = useInvalidateEstate();
+  const alerts = useAlertState().forSite(siteId);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -83,9 +85,11 @@ export function SiteDetailView({ siteId }: { siteId: string }) {
       <PageHeader
         title={site.name}
         description={`${site.timezone.replace(/_/g, ' ')} · ${plural(rooms.length, 'room')}`}
+        meta={<AlertBadges state={alerts} />}
         actions={
           canEdit && (
             <>
+              <AlertControls scope="site" scopeId={site.id} state={alerts} />
               <Button size="sm" onClick={() => openNewRoom(site.id)}>
                 <Plus data-icon="inline-start" /> New room
               </Button>

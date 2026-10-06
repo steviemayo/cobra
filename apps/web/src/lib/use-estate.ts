@@ -90,3 +90,41 @@ export function useSiteZone(siteId: string | null | undefined): string | null {
   const sites = useSites();
   return sites.data?.find((s) => s.id === siteId)?.timezone ?? null;
 }
+
+/**
+ * Mute and maintenance state for rooms, sites and the organisation, from the estate query. A room is
+ * muted when its own mute, its site's or the organisation's is on. Empty until that query answers.
+ */
+export function useAlertState() {
+  const estate = useEstateOverview();
+  const data = estate.data;
+  return useMemo(() => {
+    const none = { mutedBy: null, mutedUntil: null, inMaintenance: false } as const;
+    const rooms = new Map((data?.rooms ?? []).map((r) => [r.id, r]));
+    const sites = new Map((data?.sites ?? []).map((s) => [s.id, s]));
+    const org = data?.orgMuted;
+    return {
+      forRoom: (id: string) => {
+        const r = rooms.get(id);
+        return r
+          ? { mutedBy: r.mutedBy, mutedUntil: r.mutedUntil, inMaintenance: r.inMaintenance }
+          : none;
+      },
+      forSite: (id: string) => {
+        const s = sites.get(id);
+        if (!s) return none;
+        const by = s.muted ? ('site' as const) : org?.muted ? ('org' as const) : null;
+        return {
+          mutedBy: by,
+          mutedUntil: by === 'site' ? s.mutedUntil : by === 'org' ? (org?.until ?? null) : null,
+          inMaintenance: s.inMaintenance,
+        };
+      },
+      forOrg: () => ({
+        mutedBy: org?.muted ? ('org' as const) : null,
+        mutedUntil: org?.until ?? null,
+        inMaintenance: org?.inMaintenance ?? false,
+      }),
+    };
+  }, [data]);
+}

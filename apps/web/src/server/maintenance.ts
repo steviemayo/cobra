@@ -169,3 +169,54 @@ export function windowOccurrences(
   }
   return out;
 }
+
+// ---- Maintenance mode: a window that starts now, for a room, site or the whole organisation ---------
+
+/** The name a "maintenance mode" window carries, so it can be found and ended again. */
+export const MAINTENANCE_MODE_NAME = 'Maintenance mode';
+
+export async function startMaintenanceMode(
+  db: MaintenanceDb & Pick<PrismaClient, 'site' | 'device'>,
+  input: {
+    orgId: string;
+    scope: 'org' | 'site' | 'room';
+    scopeId?: string | null;
+    hours: number;
+    reason?: string | null;
+    userId: string | null;
+  },
+  now: Date,
+): Promise<Result> {
+  return createWindow(db, {
+    orgId: input.orgId,
+    name: MAINTENANCE_MODE_NAME,
+    scope: input.scope,
+    scopeId: input.scopeId ?? null,
+    startsAt: now,
+    endsAt: new Date(now.getTime() + input.hours * 3_600_000),
+    reason: input.reason ?? null,
+    userId: input.userId,
+  });
+}
+
+/** Ends maintenance mode early: its windows covering this scope stop now. */
+export async function endMaintenanceMode(
+  db: MaintenanceDb,
+  input: { orgId: string; scope: 'org' | 'site' | 'room'; scopeId?: string | null },
+  now: Date,
+): Promise<number> {
+  const rows = (await db.maintenanceWindow.findMany({
+    where: {
+      orgId: input.orgId,
+      name: MAINTENANCE_MODE_NAME,
+      scope: input.scope,
+      scopeId: input.scope === 'org' ? null : (input.scopeId ?? null),
+    },
+  })) as WindowRow[];
+  let ended = 0;
+  for (const w of rows.filter((w) => windowActive(w, now))) {
+    await db.maintenanceWindow.update({ where: { id: w.id }, data: { endsAt: now } });
+    ended += 1;
+  }
+  return ended;
+}

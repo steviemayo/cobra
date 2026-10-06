@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { PrismaClient } from '@kestrel/db';
 import { alertChannelAllowed } from '@kestrel/model';
+import { incidentMuted } from './alert-mute';
 import { ChannelRules, dueNow, hasRules } from './alert-rules';
 import { getEntitlements, type EntitlementDb } from './billing';
 import { SEVERITY_RANK, type AlertJob, type Severity } from './monitoring';
@@ -11,7 +12,7 @@ import { affectedForRooms, type Impact } from './room-schedule';
 
 // `site` and `roomSchedule` are only needed to say which meetings a fault may affect.
 export type AlertDb = Pick<PrismaClient, 'alertChannel' | 'alertDelivery' | 'incident' | 'room'> &
-  Partial<Pick<PrismaClient, 'site' | 'roomSchedule' | 'org'>>;
+  Partial<Pick<PrismaClient, 'site' | 'roomSchedule' | 'org' | 'gateway'>>;
 
 export const CHANNEL_TYPES = ['email', 'sms', 'teams', 'webhook', 'itsm'] as const;
 export type ChannelType = (typeof CHANNEL_TYPES)[number];
@@ -568,6 +569,8 @@ export async function deliverAlerts(
     try {
       const incident = await db.incident.findFirst({ where: { id: job.incidentId } });
       if (!incident) continue;
+      // A muted room, site or organisation still has its incident; only the notification is held back.
+      if (await incidentMuted(db, incident, now)) continue;
       const msg = await buildMessage(db, incident, job.event, s.env, undefined, now);
       const channels = await db.alertChannel.findMany({
         where: { orgId: incident.orgId, enabled: true },
@@ -630,6 +633,7 @@ export async function deliverDue(
   const roomNames = new Map<string, string | null>();
   let sent = 0;
   for (const incident of incidents) {
+    if (await incidentMuted(db, incident, now)) continue;
     for (const { ch, rules } of withRules) {
       if (ch.orgId !== incident.orgId || !reaches(incident, ch)) continue;
       try {

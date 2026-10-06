@@ -74,6 +74,14 @@ export function describeAudit(action: string, meta: Record<string, unknown>): st
       return `deleted the room shape “${s(meta.name)}”`;
     case 'device.shared':
       return `set a device to serve ${typeof meta.rooms === 'number' ? meta.rooms : 0} other room${meta.rooms === 1 ? '' : 's'}`;
+    case 'alerts.mute':
+      return `muted alerts for the ${s(meta.scope)}${meta.until ? ` until ${s(meta.until)}` : ''}`;
+    case 'alerts.unmute':
+      return `switched alerts back on for the ${s(meta.scope)}`;
+    case 'maintenance.start':
+      return `started maintenance mode for the ${s(meta.scope)}`;
+    case 'maintenance.end':
+      return `ended maintenance mode for the ${s(meta.scope)}`;
     case 'room.staging_copy':
       return `made a staging copy of room “${s(meta.from)}” called “${s(meta.name)}”`;
     case 'room.staging_promote':
