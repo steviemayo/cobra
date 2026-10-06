@@ -101,6 +101,17 @@ const VENDORS: Record<
       'Paste the Client ID, Client secret and Refresh token here. Kestrel keeps the refresh token current.',
     ],
   },
+  xio: {
+    fields: [
+      { key: 'accountId', label: 'Account ID' },
+      { key: 'subscriptionKey', label: 'API subscription key', secret: true },
+    ],
+    steps: [
+      'Public API access must be on for the XiO Cloud account. A Global Administrator turns it on under Account Settings, Profile, Details, Enable API Access. Some accounts need Crestron Technical Support to enable it.',
+      'Copy the Account ID and the API subscription key that XiO Cloud then shows.',
+      'Crestron limits how often the API can be read, so XiO Cloud updates here about every six minutes.',
+    ],
+  },
   reflect: {
     fields: [{ key: 'apiToken', label: 'API token', secret: true }],
     steps: [

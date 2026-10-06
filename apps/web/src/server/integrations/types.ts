@@ -50,6 +50,8 @@ export interface Provider<C = Record<string, unknown>> {
    * so there is nothing to poll and the customer is given a URL and a secret instead of credentials.
    */
   mode?: 'pull' | 'push';
+  /** How often a pull provider may be read. Default 2 minutes; set longer for a vendor with tight rate limits. */
+  intervalMs?: number;
   /** The credentials a customer pastes in. Everything in it is sealed. */
   credentials: z.ZodType<C>;
   /** Signs in and reads once. Throws a plain-language Error when it cannot. */

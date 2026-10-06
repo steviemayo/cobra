@@ -312,7 +312,8 @@ export async function syncDue(
   for (const i of all) {
     // A vendor that calls us (a webhook) has nothing to read.
     if (getProvider(i.provider)?.mode === 'push') continue;
-    if (i.lastSyncAt && now.getTime() - i.lastSyncAt.getTime() < SYNC_EVERY_MS) continue;
+    const every = Math.max(SYNC_EVERY_MS, getProvider(i.provider)?.intervalMs ?? 0);
+    if (i.lastSyncAt && now.getTime() - i.lastSyncAt.getTime() < every) continue;
     try {
       jobs.push(...(await syncIntegration(db, i, now, deps)).jobs);
     } catch (e) {
