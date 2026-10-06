@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { PublicKey } from '@kestrel/model';
 import { BUILT_IN_MANIFEST_KEYS } from './trusted-keys';
 
-export const GATEWAY_VERSION = '0.6.7';
+export const GATEWAY_VERSION = '0.6.8';
 
 const Env = z.object({
   /** Base URL of the Kestrel cloud, e.g. https://app.kestrel.example */

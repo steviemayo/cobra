@@ -545,6 +545,7 @@ const FIELD_TITLE: Record<string, string> = {
   playSource: 'Playing from',
   inMeeting: 'In a meeting',
   roomState: 'Room state',
+  peopleCount: 'People in the room',
 };
 
 /** Charts for only the readings this device has reported: nothing is drawn for what it does not have. */

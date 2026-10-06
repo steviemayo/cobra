@@ -10,6 +10,7 @@ const PUBLIC_PREFIXES = [
   '/invite/',
   '/c/',
   '/verify',
+  '/why-kestrel',
   '/terms',
   '/privacy',
 ];

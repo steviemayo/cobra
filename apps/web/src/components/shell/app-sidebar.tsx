@@ -14,6 +14,7 @@ import {
   History,
   ListChecks,
   Package,
+  Cloud,
   Plug,
   Sigma,
   SlidersHorizontal,
@@ -544,6 +545,12 @@ export function AppSidebar() {
         icon: Plug,
         label: 'Integrations',
         locked: !has.serviceDesk,
+      },
+    canEdit &&
+      full && {
+        href: `${base}/connections`,
+        icon: Cloud,
+        label: 'Cloud connections',
       },
   ]);
 

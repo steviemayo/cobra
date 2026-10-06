@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 export const FIELD_OPTIONS = [
   { value: 'power', label: 'Power' },
   { value: 'occupied', label: 'Occupied' },
+  { value: 'peopleCount', label: 'People in the room' },
   { value: 'recording', label: 'Recording' },
   { value: 'streamConnected', label: 'Receiving a stream' },
   { value: 'input', label: 'Input' },

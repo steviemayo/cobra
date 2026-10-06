@@ -3,6 +3,7 @@ import { db } from '@kestrel/db';
 import { queueAlerts } from '@/server/alert-batch';
 import { deliverDue } from '@/server/alerts';
 import { cronAuthorised } from '@/server/cron-auth';
+import { syncDue } from '@/server/integrations/sync';
 import { latencyJob } from '@/server/latency';
 import { sweep } from '@/server/monitoring';
 import { refreshSchedules } from '@/server/room-schedule';
@@ -15,6 +16,13 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   if (!cronAuthorised(req)) return Response.json({ error: 'Unauthorised' }, { status: 401 });
   const jobs = await sweep(db);
+  // Vendor clouds (Zoom, ...): reads each integration that is due, so rooms with no gateway stay current.
+  jobs.push(
+    ...(await syncDue(db).catch((e: unknown) => {
+      console.error('[integrations] sync failed', e);
+      return [];
+    })),
+  );
   // Response times: rolls the pings up into hours and raises slow-network incidents.
   jobs.push(...(await latencyJob(db)));
   // Keeps the copy of each room's calendar fresh: it feeds fault alerts and maintenance checks.

@@ -236,6 +236,8 @@ export const DeviceFeedback = z.object({
   inMeeting: z.boolean().optional(),
   /** Conference systems: idle, present, in_meeting or other. */
   roomState: z.string().max(40).optional(),
+  /** Sensors and room systems that count people: how many are in the room now. */
+  peopleCount: z.number().int().min(0).max(1000).optional(),
 });
 export type DeviceFeedback = z.infer<typeof DeviceFeedback>;
 /** The fields of `DeviceFeedback`, for code that walks them generically (change detection, history). */
@@ -253,6 +255,7 @@ export const DEVICE_FEEDBACK_FIELDS = [
   'playSource',
   'inMeeting',
   'roomState',
+  'peopleCount',
 ] as const satisfies readonly (keyof DeviceFeedback)[];
 export type DeviceFeedbackField = (typeof DEVICE_FEEDBACK_FIELDS)[number];
 
