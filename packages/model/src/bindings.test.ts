@@ -99,6 +99,8 @@ describe('what a driver starts from', () => {
     expect(declaredSettings(visca())!.map((s) => [s.key, s.scope])).toEqual([
       ['host', 'binding'],
       ['port', 'binding'],
+      ['transport', 'binding'],
+      ['framing', 'binding'],
       ['presets', 'design'],
       ['cameraAddress', 'design'],
     ]);

@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { createSocket, type Socket } from 'node:dgram';
+import { createServer, type AddressInfo, type Socket as NetSocket } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { STARTER_TEMPLATES, type Device } from '@kestrel/model';
 import { createDriver } from './registry';
@@ -233,6 +234,72 @@ async function fakeCamera(): Promise<Camera> {
   return cam;
 }
 
+interface TcpCamera {
+  port: number;
+  received: number[][];
+  power: 'on' | 'off';
+  reject: boolean;
+  dropAll: () => void;
+  stop: () => Promise<void>;
+}
+/** A camera over TCP: raw VISCA (messages end in 0xFF) or the 8 byte IP header form. */
+async function fakeTcpCamera(framing: 'raw' | 'ip'): Promise<TcpCamera> {
+  const clients = new Set<NetSocket>();
+  const cam: TcpCamera = {
+    port: 0,
+    received: [],
+    power: 'off',
+    reject: false,
+    dropAll: () => clients.forEach((c) => c.destroy()),
+    stop: () => new Promise<void>((r) => (cam.dropAll(), server.close(() => r()))),
+  };
+  const server = createServer((c) => {
+    clients.add(c);
+    c.on('close', () => clients.delete(c));
+    c.on('error', () => undefined);
+    let rx = Buffer.alloc(0);
+    const send = (seq: number, bytes: number[]) => {
+      if (framing === 'raw') return void c.write(Buffer.from(bytes));
+      const b = Buffer.alloc(8 + bytes.length);
+      b.writeUInt16BE(0x0111, 0);
+      b.writeUInt16BE(bytes.length, 2);
+      b.writeUInt32BE(seq, 4);
+      Buffer.from(bytes).copy(b, 8);
+      c.write(b);
+    };
+    const handle = (type: number, seq: number, payload: number[]) => {
+      cam.received.push(payload);
+      if (type === 0x0110) return send(seq, [0x90, 0x50, cam.power === 'on' ? 0x02 : 0x03, 0xff]);
+      if (cam.reject) return send(seq, [0x90, 0x60, 0x02, 0xff]);
+      if (payload[3] === 0x00) cam.power = payload[4] === 0x02 ? 'on' : 'off';
+      send(seq, [0x90, 0x41, 0xff]);
+      // Replies arrive late, and in one chunk with the ACK of the next if the driver sent them together.
+      setTimeout(() => send(seq, [0x90, 0x51, 0xff]), 5);
+    };
+    c.on('data', (chunk: Buffer) => {
+      rx = Buffer.concat([rx, chunk]);
+      if (framing === 'raw') {
+        for (let end = rx.indexOf(0xff); end >= 0; end = rx.indexOf(0xff)) {
+          const msg = [...rx.subarray(0, end + 1)];
+          rx = rx.subarray(end + 1);
+          // Inquiries are 8x 09 ..; everything else is a command.
+          handle(msg[1] === 0x09 ? 0x0110 : 0x0100, 0, msg);
+        }
+        return;
+      }
+      while (rx.length >= 8 && rx.length >= 8 + rx.readUInt16BE(2)) {
+        const len = rx.readUInt16BE(2);
+        handle(rx.readUInt16BE(0), rx.readUInt32BE(4), [...rx.subarray(8, 8 + len)]);
+        rx = rx.subarray(8 + len);
+      }
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  cam.port = (server.address() as AddressInfo).port;
+  closers.push(() => void cam.stop());
+  return cam;
+}
+
 describe('VISCA over IP camera driver', () => {
   const make = (cam: Camera, extra: Record<string, unknown> = {}) => {
     const d = new ViscaDriver(
@@ -307,6 +374,77 @@ describe('VISCA over IP camera driver', () => {
     await expect(d.send({ type: 'volume', level: 5 })).rejects.toThrow('does not support');
     cam.reject = true;
     await expect(d.send({ type: 'camera_preset', name: 'Wide' })).rejects.toThrow('refused the command');
+  });
+
+  describe.each(['raw', 'ip'] as const)('over TCP, %s framing', (framing) => {
+    const makeTcp = (cam: TcpCamera, extra: Record<string, unknown> = {}) => {
+      const d = new ViscaDriver(
+        device('dsp', { kind: 'driver', driverId: 'visca-ip' }, { host: '127.0.0.1', transport: 'tcp', framing, port: cam.port, timeoutMs: 400, pollMs: 200, presets: { Wide: 0, Podium: 3 }, ...extra }),
+        ctx,
+      );
+      drivers.push(d);
+      return d;
+    };
+
+    it('comes online, recalls presets and switches power', async () => {
+      const cam = await fakeTcpCamera(framing);
+      cam.power = 'on';
+      const d = makeTcp(cam);
+      d.start();
+      await until(() => d.getState().online);
+      expect(d.getState().power).toBe('on');
+      await d.send({ type: 'camera_preset', name: 'Podium' });
+      expect(cam.received.find((p) => p[3] === 0x3f)).toEqual([0x81, 0x01, 0x04, 0x3f, 0x02, 0x03, 0xff]);
+      await d.send({ type: 'power', on: false });
+      expect(cam.power).toBe('off');
+    });
+
+    it('keeps replies apart when commands are sent together', async () => {
+      const cam = await fakeTcpCamera(framing);
+      const d = makeTcp(cam);
+      d.start();
+      await until(() => d.getState().online);
+      await Promise.all([
+        d.send({ type: 'camera_preset', name: 'Wide' }),
+        d.send({ type: 'camera_move', pan: 1, tilt: 0, zoom: -1 }),
+        d.send({ type: 'power', on: true }),
+      ]);
+      expect(cam.received.filter((p) => p[3] === 0x3f)).toHaveLength(1);
+      expect(cam.power).toBe('on');
+    });
+
+    it('reports an error the camera sends, and reconnects after the connection drops', async () => {
+      const cam = await fakeTcpCamera(framing);
+      const d = makeTcp(cam);
+      d.start();
+      await until(() => d.getState().online);
+      cam.reject = true;
+      await expect(d.send({ type: 'camera_preset', name: 'Wide' })).rejects.toThrow('refused the command');
+      cam.reject = false;
+      cam.dropAll();
+      // The next command (or poll) opens a new connection; the camera is not marked offline for a drop it recovers from.
+      await wait(50);
+      await d.send({ type: 'camera_preset', name: 'Wide' });
+      expect(d.getState().online).toBe(true);
+    });
+
+    it('is offline when nothing is listening', async () => {
+      const cam = await fakeTcpCamera(framing);
+      const port = cam.port;
+      await cam.stop();
+      closers.pop();
+      const d = makeTcp({ ...cam, port });
+      d.start();
+      await wait(500);
+      expect(d.getState().online).toBe(false);
+      await expect(d.send({ type: 'power', on: true })).rejects.toThrow();
+    });
+  });
+
+  it('uses raw framing and port 5678 for TCP unless told otherwise', async () => {
+    const d = new ViscaDriver(device('dsp', { kind: 'driver', driverId: 'visca-ip' }, { host: '127.0.0.1', transport: 'tcp' }), ctx);
+    expect((d as unknown as { framing: string; port: number }).framing).toBe('raw');
+    expect((d as unknown as { framing: string; port: number }).port).toBe(5678);
   });
 
   it('is offline when the camera does not answer', async () => {
