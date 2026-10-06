@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { DoorOpen, MoreHorizontal, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { AlertBadges, AlertControls } from '@/components/common/alert-controls';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { NavTabs } from '@/components/common/nav-tabs';
@@ -21,7 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useInvalidateEstate, useRoomsOverview } from '@/lib/use-estate';
+import { useAlertState, useInvalidateEstate, useRoomsOverview } from '@/lib/use-estate';
 import { useTRPC } from '@/trpc/client';
 
 export function useRoom(roomId: string) {
@@ -36,6 +37,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
   const { orgId, canEdit, canSupport } = useOrg();
   const maintenance = useBilling().data?.entitlements.maintenance ?? true;
   const { room, isPending } = useRoom(roomId);
+  const alerts = useAlertState().forRoom(roomId);
   const onDesign = pathname.endsWith('/design') || pathname.endsWith('/simulate');
   const shellWidth = onDesign ? 'max-w-none' : 'max-w-6xl';
   const invalidate = useInvalidateEstate();
@@ -88,6 +90,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
           meta={
             <>
               {room.kind === 'staging' && <Badge variant="secondary">Staging</Badge>}
+              <AlertBadges state={alerts} />
               <Link
                 href={orgPath(orgId, `/sites/${room.siteId}`)}
                 className="text-sm text-muted-foreground hover:text-foreground hover:underline"
@@ -101,6 +104,7 @@ export function RoomShell({ roomId, children }: { roomId: string; children: Reac
           }
           actions={
             <>
+              <AlertControls scope="room" scopeId={room.id} state={alerts} />
               {canEdit && (
                 <DropdownMenu>
                   <DropdownMenuTrigger
