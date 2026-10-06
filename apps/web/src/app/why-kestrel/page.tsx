@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import {
   Activity,
+  Cloud,
   ClipboardCheck,
   FileCheck2,
   LifeBuoy,
@@ -45,6 +46,11 @@ const pillars = [
 
 const alsoBuiltIn = [
   {
+    icon: Cloud,
+    title: 'Cloud connections (beta)',
+    text: 'Read room health from Zoom Rooms, Teams Rooms, Q-SYS Reflect, Logitech Sync, Webex and Crestron XiO Cloud. No gateway needed.',
+  },
+  {
     icon: ClipboardCheck,
     title: 'Asset register',
     text: 'One register for active and passive equipment. Each field shows whether it was discovered or typed in.',
@@ -80,8 +86,6 @@ const comparison = [
 ];
 
 const soon = [
-  'Microsoft Teams Rooms and Zoom Rooms health, with no gateway needed',
-  'Pull rooms and devices in from other management portals',
   'Scheduled actions, such as powering off every display at a set time',
   'A wider public API with scoped tokens',
 ];
@@ -177,7 +181,7 @@ export default function WhyKestrelPage() {
 
         <section className="mx-auto max-w-5xl space-y-8 px-4 pb-16">
           <h2 className="text-2xl font-semibold tracking-tight">Also built in</h2>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {alsoBuiltIn.map(({ icon: Icon, title, text }) => (
               <div key={title} className="space-y-2">
                 <Icon className="size-5 text-brand" aria-hidden />
