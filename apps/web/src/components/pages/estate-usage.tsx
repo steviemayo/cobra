@@ -1,8 +1,8 @@
-﻿'use client';
+'use client';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, ChevronDown, Lightbulb, Zap } from 'lucide-react';
+import { BarChart3, ChevronDown, Lightbulb } from 'lucide-react';
 import { USAGE_KIND_LABEL, type UsageKind } from '@kestrel/model';
 import { minutesLabel } from '@/components/common/usage-charts';
 import { EmptyState } from '@/components/common/empty-state';
@@ -28,7 +28,7 @@ type UsageRow = RouterOutputs['roomUsage']['estate']['rows'][number];
 /** Below this share of working hours a room is flagged as underused. */
 const UNDERUSED = 0.1;
 
-const pct = (v: number | null) => (v === null ? 'â€“' : `${Math.round(v * 100)}%`);
+const pct = (v: number | null) => (v === null ? '–' : `${Math.round(v * 100)}%`);
 
 /** The mean utilisation of the rooms that have one, or null when none do. */
 const averageOf = (rows: UsageRow[]) => {
@@ -71,7 +71,7 @@ function UsageSummary({ rows }: { rows: UsageRow[] }) {
       />
       <Kpi
         label="In use now"
-        value={watched.length ? `${inUse} of ${watched.length}` : 'â€“'}
+        value={watched.length ? `${inUse} of ${watched.length}` : '–'}
         hint="rooms"
       />
     </div>
@@ -79,67 +79,8 @@ function UsageSummary({ rows }: { rows: UsageRow[] }) {
 }
 
 /** Utilisation as a bar, so the ranking reads at a glance. */
-/** An estimate of what displays and projectors used when nobody was working. A planning number, not a meter. */
-function EnergyCard({ days }: { days: number }) {
-  const trpc = useTRPC();
-  const { orgId } = useOrg();
-  const energy = useQuery({
-    ...trpc.roomUsage.energy.queryOptions({ orgId, days }),
-    retry: false,
-  });
-  if (!energy.data || energy.data.totals.devices === 0) return null;
-  const { totals, rows, assumptions } = energy.data;
-  const top = rows.filter((r) => r.afterHoursKwh > 0).slice(0, 5);
-  return (
-    <section className="overflow-hidden rounded-lg border">
-      <div className="flex items-center justify-between gap-3 border-b bg-muted/40 px-4 py-2.5">
-        <h2 className="flex items-center gap-2 text-sm font-medium">
-          <Zap className="size-4 text-warning" />
-          Energy used out of hours
-        </h2>
-        <span className="text-xs text-muted-foreground">Estimate</span>
-      </div>
-      <div className="grid gap-4 p-4 sm:grid-cols-3">
-        <Kpi
-          label={`Out of hours, last ${days} days`}
-          value={`${totals.afterHoursKwh} kWh`}
-          hint={`${totals.afterHoursCo2Kg} kg CO2`}
-        />
-        <Kpi
-          label="Over a year at this rate"
-          value={`${totals.afterHoursKwhPerYear.toLocaleString()} kWh`}
-          hint="What a power-off schedule could save"
-        />
-        <Kpi
-          label="Share of display energy"
-          value={totals.onKwh > 0 ? pct(totals.afterHoursKwh / totals.onKwh) : 'n/a'}
-          hint={plural(totals.devices, 'display')}
-        />
-      </div>
-      {top.length > 0 && (
-        <ul className="divide-y border-t text-sm">
-          {top.map((r) => (
-            <li key={r.roomId} className="flex items-center justify-between gap-3 px-4 py-2">
-              <span className="truncate">{r.roomName}</span>
-              <span className="tabular text-muted-foreground">
-                {Math.round(r.afterHoursMinutes / 60)} h on out of hours, {r.afterHoursKwh} kWh
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="border-t px-4 py-2 text-xs text-muted-foreground">
-        Estimated from power readings, assuming about {assumptions.wattsByCategory.display} W per
-        display, {assumptions.wattsByCategory.projector} W per projector and{' '}
-        {assumptions.co2KgPerKwh} kg CO2 per kWh. Out of hours means outside the working hours set
-        for your organisation. Real draw varies by model.
-      </p>
-    </section>
-  );
-}
-
 function UtilisationBar({ value }: { value: number | null }) {
-  if (value === null) return <span className="text-muted-foreground">â€“</span>;
+  if (value === null) return <span className="text-muted-foreground">–</span>;
   const low = value < UNDERUSED;
   return (
     <div className="flex items-center justify-end gap-2.5">
@@ -189,7 +130,7 @@ function UsageTable({ rows }: { rows: UsageRow[] }) {
                   {r.roomName}
                 </Link>
               </TableCell>
-              <TableCell className="text-muted-foreground">{r.siteName ?? 'â€“'}</TableCell>
+              <TableCell className="text-muted-foreground">{r.siteName ?? '–'}</TableCell>
               <TableCell>
                 <UtilisationBar value={r.utilisation} />
               </TableCell>
@@ -197,7 +138,7 @@ function UsageTable({ rows }: { rows: UsageRow[] }) {
                 {r.sessions}
               </TableCell>
               <TableCell className="tabular text-right text-muted-foreground">
-                {r.sessions ? minutesLabel(r.averageMinutes) : 'â€“'}
+                {r.sessions ? minutesLabel(r.averageMinutes) : '–'}
               </TableCell>
               <TableCell className="tabular text-right text-muted-foreground">
                 {minutesLabel(r.minutes)}
@@ -207,7 +148,7 @@ function UsageTable({ rows }: { rows: UsageRow[] }) {
               </TableCell>
               <TableCell>
                 {r.inUseNow === null ? (
-                  <span className="text-muted-foreground">â€“</span>
+                  <span className="text-muted-foreground">–</span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                     <span
@@ -324,7 +265,6 @@ export function EstateUsageView() {
       ) : (
         <>
           <UsageSummary rows={shown} />
-          <EnergyCard days={days} />
           {insights.length > 0 && (
             <section className="overflow-hidden rounded-lg border">
               <button
