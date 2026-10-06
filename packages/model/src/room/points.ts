@@ -104,6 +104,8 @@ export interface PointAddressField {
   label: string;
   /** Left blank for a point that has no such part (a Q-SYS named control has no component). */
   optional?: boolean;
+  /** A fixed set of values to pick from, shown as a drop-down instead of a text box. */
+  options?: { value: string; label: string }[];
 }
 /** The address form for each point type a driver supports. A type left out is not supported. */
 export type PointForms = Partial<Record<PointType, PointAddressField[]>>;

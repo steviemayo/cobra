@@ -697,7 +697,18 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     points: {
       generic: [
         { key: 'outlet', label: 'Outlet number' },
-        { key: 'field', label: 'Reading: state, load, amps, watts, kwh or volts' },
+        {
+          key: 'field',
+          label: 'Reading',
+          options: [
+            { value: 'state', label: 'Outlet on or off' },
+            { value: 'load', label: 'Something connected' },
+            { value: 'amps', label: 'Current (amps)' },
+            { value: 'watts', label: 'Power (watts)' },
+            { value: 'kwh', label: 'Energy used (kWh)' },
+            { value: 'volts', label: 'Voltage' },
+          ],
+        },
       ],
     },
     categories: ['power_outlet'],
@@ -722,7 +733,21 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     ],
     points: {
       generic: [
-        { key: 'field', label: 'Reading: link, poe, poeWatts, poeEnabled (with a port), or temp, cpu, memory, poeUsedWatts, poeBudgetWatts' },
+        {
+          key: 'field',
+          label: 'Reading',
+          options: [
+            { value: 'link', label: 'Port link (needs a port)' },
+            { value: 'poe', label: 'Port PoE status (needs a port)' },
+            { value: 'poeWatts', label: 'Port PoE power in watts (needs a port)' },
+            { value: 'poeEnabled', label: 'Port PoE switched on (needs a port)' },
+            { value: 'temp', label: 'Switch temperature' },
+            { value: 'cpu', label: 'Switch CPU use' },
+            { value: 'memory', label: 'Switch memory use' },
+            { value: 'poeUsedWatts', label: 'PoE power in use (watts)' },
+            { value: 'poeBudgetWatts', label: 'PoE power budget (watts)' },
+          ],
+        },
         { key: 'port', label: 'Port number (blank for a reading of the whole switch)', optional: true },
       ],
     },
