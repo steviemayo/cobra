@@ -132,7 +132,8 @@ export async function deviceViews(
       state: deviceLiveState({
         kind: d.kind,
         online: d.online,
-        gatewayOnline: gatewayStatus === 'online',
+        // A device read through a cloud integration has no gateway to be out of touch with.
+        gatewayOnline: gatewayStatus === 'online' || !!d.integrationId,
       }),
       since: d.since,
       lastSeenAt: d.lastSeenAt,

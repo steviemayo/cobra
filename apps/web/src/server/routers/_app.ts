@@ -12,6 +12,7 @@ import { supportRouter } from './support';
 import { registerRouter } from './register';
 import { pmRouter } from './pm';
 import { calendarRouter } from './calendar';
+import { integrationRouter } from './integration';
 import { calloutRouter } from './callout';
 import { mspRouter } from './msp';
 import { staffRouter } from './staff';
@@ -54,6 +55,7 @@ export const appRouter = router({
   billing: billingRouter,
   driver: driverRouter,
   calendar: calendarRouter,
+  integration: integrationRouter,
   callout: calloutRouter,
   latency: latencyRouter,
   msp: mspRouter,
