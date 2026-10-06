@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { db } from '@kestrel/db';
 import { UsageKind } from '@kestrel/model';
 import { writeAudit } from '../audit';
+import { estateEnergy } from '../energy';
 import { featureProcedure, orgProcedure, requireRole, router } from '../trpc';
 import {
   deviceHistoryView,
@@ -60,6 +61,14 @@ export const roomUsageRouter = router({
         working: await loadWorkingHours(db, ctx.orgId),
       };
     }),
+
+  /** What displays and projectors used out of hours, by room: an estimate from their power readings. */
+  energy: analytics.input(z.object({ orgId, days })).query(async ({ ctx, input }) => {
+    const e = await estateEnergy(db, { ...input, orgId: ctx.orgId });
+    const rooms = await db.room.findMany({ where: { orgId: ctx.orgId } });
+    const name = (roomId: string) => rooms.find((r) => r.id === roomId)?.name ?? 'A room';
+    return { ...e, rows: e.rows.map((r) => ({ ...r, roomName: name(r.roomId) })) };
+  }),
 
   /** A device's charts: only the readings it has reported. */
   device: analytics
