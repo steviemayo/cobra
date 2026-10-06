@@ -88,7 +88,11 @@ export function normalisePlace(raw: unknown): ExternalDevice[] {
       serial: str(d.serial),
       firmware: str(d.version),
       online,
-      ...(occupancy === null ? {} : { feedback: { occupied: occupancy > 0 } }),
+      ...(occupancy === null
+        ? {}
+        : {
+            feedback: { occupied: occupancy > 0, peopleCount: Math.max(0, Math.round(occupancy)) },
+          }),
       issues:
         online !== false && health && !HEALTHY.test(health)
           ? [`${name} reports its health as ${health}`]

@@ -43,6 +43,7 @@ const FIELD_LABEL: Record<string, string> = {
   playSource: 'Playing from',
   inMeeting: 'In a meeting',
   roomState: 'Room state',
+  peopleCount: 'People in the room',
 };
 
 const dateLabel = (iso: string) =>

@@ -32,7 +32,15 @@ export interface SyncResult {
 type Integration = NonNullable<Awaited<ReturnType<IntegrationDb['integration']['findFirst']>>>;
 type DeviceRow = NonNullable<Awaited<ReturnType<IntegrationDb['device']['findFirst']>>>;
 
-const FEEDBACK_KEYS = ['inMeeting', 'roomState', 'occupied', 'activeApp', 'power', 'muted'];
+const FEEDBACK_KEYS = [
+  'inMeeting',
+  'roomState',
+  'occupied',
+  'peopleCount',
+  'activeApp',
+  'power',
+  'muted',
+];
 
 export function inScope(i: Pick<Integration, 'siteIds'>, siteId: string): boolean {
   return i.siteIds.length === 0 || i.siteIds.includes(siteId);
