@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { DriverSetting, DriverSpec } from './driver-spec';
-import { BUILT_IN_DRIVERS } from './room/drivers';
+import { BUILT_IN_DRIVERS, type SettingOption } from './room/drivers';
 import { settingScope, type SettingScope } from './room/driver-classes';
 import type { Device } from './room/device';
 import type { RoomModel } from './room/room-model';
@@ -21,6 +21,8 @@ export interface BindingSlot {
   label: string;
   scope: Exclude<SettingScope, 'design'>;
   required: boolean;
+  /** A fixed set of values to pick from. When set, the form shows a drop-down instead of a text box. */
+  options?: SettingOption[];
 }
 
 const HOST: BindingSlot = { key: 'host', label: 'Address', scope: 'binding', required: true };
@@ -33,7 +35,46 @@ const GENERIC_SLOTS: Record<string, BindingSlot[]> = {
     { key: 'password', label: 'PJLink password', scope: 'secret', required: false },
   ],
   tcp: [HOST, { ...PORT, required: true }],
-  serial: [{ key: 'path', label: 'Serial port', scope: 'binding', required: true }],
+  serial: [
+    { key: 'path', label: 'Serial port', scope: 'binding', required: true },
+    {
+      key: 'baudRate',
+      label: 'Speed (baud rate)',
+      scope: 'binding',
+      required: false,
+      options: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200].map((n) => ({
+        value: n,
+        label: `${n}${n === 9600 ? ' (usual)' : ''}`,
+      })),
+    },
+    {
+      key: 'dataBits',
+      label: 'Data bits',
+      scope: 'binding',
+      required: false,
+      options: [5, 6, 7, 8].map((n) => ({ value: n, label: `${n}${n === 8 ? ' (usual)' : ''}` })),
+    },
+    {
+      key: 'stopBits',
+      label: 'Stop bits',
+      scope: 'binding',
+      required: false,
+      options: [1, 1.5, 2].map((n) => ({ value: n, label: `${n}${n === 1 ? ' (usual)' : ''}` })),
+    },
+    {
+      key: 'parity',
+      label: 'Parity',
+      scope: 'binding',
+      required: false,
+      options: [
+        { value: 'none', label: 'None (usual)' },
+        { value: 'even', label: 'Even' },
+        { value: 'odd', label: 'Odd' },
+        { value: 'mark', label: 'Mark' },
+        { value: 'space', label: 'Space' },
+      ],
+    },
+  ],
   rest: [
     HOST,
     PORT,
@@ -59,6 +100,7 @@ export interface DeclaredSetting {
   type?: DriverSetting['type'];
   default?: unknown;
   help?: string;
+  options?: SettingOption[];
 }
 
 /** An example value with a <placeholder> anywhere in it is something to replace, not a value to start from. */
@@ -80,6 +122,7 @@ function declared(device: Device, custom: CustomSettingSources): DeclaredSetting
       type: s.type,
       ...(s.default !== undefined ? { default: s.default } : {}),
       ...(s.help ? { help: s.help } : {}),
+      ...(s.options ? { options: s.options } : {}),
     }));
     const keys = new Set(own.map((s) => s.key));
     return [...(keys.has('host') ? [] : [HOST]), ...(keys.has('port') ? [] : [PORT]), ...own];
@@ -92,6 +135,7 @@ function declared(device: Device, custom: CustomSettingSources): DeclaredSetting
       label: s.label,
       scope: s.scope,
       required: !!s.required,
+      ...(s.options ? { options: s.options } : {}),
       ...(example !== undefined && !isPlaceholder(example) ? { default: example } : {}),
     };
   });
@@ -125,7 +169,15 @@ export function slotsFor(device: Device, custom: CustomDrivers = {}): BindingSlo
   return (declared(device, custom) ?? []).flatMap((s): BindingSlot[] =>
     s.scope === 'design'
       ? []
-      : [{ key: s.key, label: s.label, scope: s.scope, required: s.required }],
+      : [
+          {
+            key: s.key,
+            label: s.label,
+            scope: s.scope,
+            required: s.required,
+            ...(s.options ? { options: s.options } : {}),
+          },
+        ],
   );
 }
 

@@ -12,6 +12,7 @@ import { useTRPC } from '@/trpc/client';
 import { slotsFor, type BindingSlot, type DeviceControl } from '@kestrel/model';
 
 const NO_SET = '__none';
+const DEFAULT_CHOICE = '__default';
 
 /** What a device's driver needs to connect: the address and port, and any login. */
 export function connectionSlots(control: DeviceControl | null | undefined): BindingSlot[] {
@@ -40,7 +41,7 @@ export const emptyConnection = (values: Record<string, string> = {}): Connection
 
 /** What to send: addresses always, logins only when something was typed or a saved login is picked. */
 export function connectionPatch(slots: BindingSlot[], draft: ConnectionDraft) {
-  const values: Record<string, string | number> = {};
+  const values: Record<string, string | number | boolean> = {};
   const secrets: Record<string, string | number> = {};
   for (const s of slots) {
     if (s.scope === 'secret') {
@@ -48,7 +49,10 @@ export function connectionPatch(slots: BindingSlot[], draft: ConnectionDraft) {
       if (v) secrets[s.key] = v;
     } else {
       const v = draft.values[s.key]?.trim();
-      if (v) values[s.key] = s.key === 'port' && /^\d+$/.test(v) ? Number(v) : v;
+      if (!v) continue;
+      // A drop-down keeps the type of the option it stands for (a number, true or false).
+      const picked = s.options?.find((o) => String(o.value) === v);
+      values[s.key] = picked ? picked.value : s.key === 'port' && /^\d+$/.test(v) ? Number(v) : v;
     }
   }
   return {
@@ -98,13 +102,29 @@ export function ConnectionFields({
                 {s.label}
                 {s.required ? '' : ' (optional)'}
               </Label>
-              <Input
-                value={draft.values[s.key] ?? ''}
-                onChange={(e) =>
-                  onChange({ ...draft, values: { ...draft.values, [s.key]: e.target.value } })
-                }
-                maxLength={200}
-              />
+              {s.options ? (
+                <SimpleSelect
+                  value={draft.values[s.key] || DEFAULT_CHOICE}
+                  onValueChange={(v) =>
+                    onChange({
+                      ...draft,
+                      values: { ...draft.values, [s.key]: v === DEFAULT_CHOICE ? '' : v },
+                    })
+                  }
+                  options={[
+                    ...(s.required ? [] : [{ value: DEFAULT_CHOICE, label: 'Default' }]),
+                    ...s.options.map((o) => ({ value: String(o.value), label: o.label })),
+                  ]}
+                />
+              ) : (
+                <Input
+                  value={draft.values[s.key] ?? ''}
+                  onChange={(e) =>
+                    onChange({ ...draft, values: { ...draft.values, [s.key]: e.target.value } })
+                  }
+                  maxLength={200}
+                />
+              )}
             </div>
           ))}
       </div>
@@ -180,7 +200,8 @@ export function DeviceConnection({
   const current: Record<string, string> = {};
   if (values && typeof values === 'object')
     for (const [k, v] of Object.entries(values as Record<string, unknown>))
-      if (typeof v === 'string' || typeof v === 'number') current[k] = String(v);
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')
+        current[k] = String(v);
   const [draft, setDraft] = useState<ConnectionDraft>({
     ...emptyConnection(current),
     credentialSetId: credentialSetId ?? NO_SET,
