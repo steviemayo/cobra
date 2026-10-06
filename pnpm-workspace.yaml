@@ -10,6 +10,11 @@ allowBuilds:
 # arrives through postcss (next, shadcn) and prisma's config loader, which all accept 1.x.
 overrides:
   source-map-js: '>=1.2.2'
+# sharp below 0.35.5 bundles a vulnerable librsvg (GHSA-wq5f-xc86-pv6w), and the MCP SDK below 1.31.0
+# can send OAuth credentials to a server-chosen authorization server (GHSA-6qxp-vccf-f47h). They arrive
+# only through next (image optimisation) and shadcn (its CLI), which accept the newer versions.
+  sharp: '>=0.35.5'
+  '@modelcontextprotocol/sdk': '>=1.31.0'
 # All from prisma's own bundled Studio/CLI dependency tree (lodash, mysql2, deepmerge-ts), pulled
 # in through @prisma/client even though this app only speaks Postgres and never launches Studio.
 # `.github/workflows/ci.yml` runs `pnpm audit --prod` and fails on anything not listed here.
