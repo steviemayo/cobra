@@ -11,7 +11,7 @@ import { affectedForRooms, type Impact } from './room-schedule';
 
 // `site` and `roomSchedule` are only needed to say which meetings a fault may affect.
 export type AlertDb = Pick<PrismaClient, 'alertChannel' | 'alertDelivery' | 'incident' | 'room'> &
-  Partial<Pick<PrismaClient, 'site' | 'roomSchedule'>>;
+  Partial<Pick<PrismaClient, 'site' | 'roomSchedule' | 'org'>>;
 
 export const CHANNEL_TYPES = ['email', 'sms', 'teams', 'webhook', 'itsm'] as const;
 export type ChannelType = (typeof CHANNEL_TYPES)[number];
@@ -62,6 +62,8 @@ export interface AlertMessage {
     impact?: Impact;
   };
   portalUrl: string | null;
+  /** The organisation's name, for channels that show it. Filled in at delivery. */
+  org?: string;
   /**
    * Present when this one message stands for several incidents that belong together (a room's
    * problems, a site's). `incident` is then the headline of the group, and these are its members.
@@ -114,6 +116,168 @@ const headline = (m: AlertMessage) =>
         ? `Test alert: ${m.incident.title}`
         : m.incident.title;
 
+type Tone = { style: string; color: string; label: string };
+
+/** How the card is coloured and labelled: by what happened first, then by how bad the incident is. */
+function toneOf(m: AlertMessage): Tone {
+  switch (m.event) {
+    case 'resolved':
+      return { style: 'good', color: 'Good', label: 'RESOLVED' };
+    case 'test':
+      return { style: 'emphasis', color: 'Default', label: 'TEST' };
+    case 'summary':
+      return m.incident.severity === 'critical' || m.incident.severity === 'warning'
+        ? severityTone(m.incident.severity, 'SUMMARY')
+        : { style: 'accent', color: 'Accent', label: 'SUMMARY' };
+    default:
+      return severityTone(m.incident.severity, m.event === 'reminder' ? 'STILL OPEN' : undefined);
+  }
+}
+
+function severityTone(severity: Severity, label?: string): Tone {
+  if (severity === 'critical')
+    return { style: 'attention', color: 'Attention', label: label ?? 'CRITICAL' };
+  if (severity === 'warning')
+    return { style: 'warning', color: 'Warning', label: label ?? 'WARNING' };
+  return { style: 'accent', color: 'Accent', label: label ?? 'INFO' };
+}
+
+const durationText = (from: string, to: string): string => {
+  const mins = Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 60_000));
+  if (mins < 1) return 'under a minute';
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  return mins % 60 ? `${h} h ${mins % 60} min` : `${h} h`;
+};
+
+/** Adaptive Card for Teams: a coloured header band, the title, a fact table, then the detail. */
+export function teamsCard(m: AlertMessage) {
+  const tone = toneOf(m);
+  const i = m.incident;
+  // Teams turns these into the reader's own date and time format and time zone.
+  const when = (iso: string) => `{{DATE(${iso},SHORT)}} {{TIME(${iso})}}`;
+  const facts: { title: string; value: string }[] = [
+    ...(i.room ? [{ title: 'Room', value: i.room }] : []),
+    ...(m.event === 'opened' || m.event === 'reminder' || m.event === 'resolved'
+      ? [{ title: 'Opened', value: when(i.openedAt) }]
+      : []),
+    ...(i.resolvedAt
+      ? [
+          { title: 'Resolved', value: when(i.resolvedAt) },
+          { title: 'Duration', value: durationText(i.openedAt, i.resolvedAt) },
+        ]
+      : []),
+    ...(m.event !== 'resolved' && m.event !== 'test' && m.event !== 'summary'
+      ? [{ title: 'Severity', value: i.severity[0]!.toUpperCase() + i.severity.slice(1) }]
+      : []),
+  ];
+  const impact = impactText(m);
+  const batch = m.batch?.incidents ?? [];
+  const body = [
+    {
+      type: 'Container',
+      style: tone.style,
+      bleed: true,
+      items: [
+        {
+          type: 'ColumnSet',
+          columns: [
+            {
+              type: 'Column',
+              width: 'stretch',
+              items: [
+                {
+                  type: 'TextBlock',
+                  text: tone.label,
+                  weight: 'Bolder',
+                  size: 'Small',
+                  color: tone.color,
+                  spacing: 'None',
+                },
+              ],
+            },
+            {
+              type: 'Column',
+              width: 'auto',
+              items: [
+                {
+                  type: 'TextBlock',
+                  text: m.org ?? 'Kestrel',
+                  size: 'Small',
+                  isSubtle: true,
+                  horizontalAlignment: 'Right',
+                  spacing: 'None',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      type: 'TextBlock',
+      text: i.title,
+      weight: 'Bolder',
+      size: 'Large',
+      wrap: true,
+      spacing: 'Medium',
+    },
+    ...(facts.length ? [{ type: 'FactSet', facts, spacing: 'Medium' }] : []),
+    ...(i.detail
+      ? [
+          {
+            type: 'Container',
+            separator: true,
+            spacing: 'Medium',
+            items: [{ type: 'TextBlock', text: i.detail.replaceAll('\n', '\n\n'), wrap: true }],
+          },
+        ]
+      : []),
+    ...(batch.length > 1 && !i.detail
+      ? [
+          {
+            type: 'Container',
+            separator: true,
+            spacing: 'Medium',
+            items: batch.map((b) => ({ type: 'TextBlock', text: `- ${b.title}`, wrap: true })),
+          },
+        ]
+      : []),
+    ...(impact
+      ? [
+          {
+            type: 'Container',
+            style: 'emphasis',
+            spacing: 'Medium',
+            items: [
+              { type: 'TextBlock', text: impact.replaceAll('\n', '\n\n'), wrap: true, size: 'Small' },
+            ],
+          },
+        ]
+      : []),
+  ];
+  return {
+    type: 'message',
+    attachments: [
+      {
+        contentType: 'application/vnd.microsoft.card.adaptive',
+        content: {
+          $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+          type: 'AdaptiveCard',
+          version: '1.5',
+          // Teams shows this in notifications and the chat list instead of the card.
+          fallbackText: headline(m),
+          msteams: { width: 'Full' },
+          body,
+          actions: m.portalUrl
+            ? [{ type: 'Action.OpenUrl', title: 'Open in Kestrel', url: m.portalUrl, style: 'positive' }]
+            : [],
+        },
+      },
+    ],
+  };
+}
+
 export function payload(m: AlertMessage) {
   return {
     event: m.event,
@@ -143,56 +307,8 @@ export async function send(s: Senders, config: ChannelConfig, m: AlertMessage): 
       });
       return postJson(s, config.url, body);
     }
-    case 'teams': {
-      const body = JSON.stringify({
-        type: 'message',
-        attachments: [
-          {
-            contentType: 'application/vnd.microsoft.card.adaptive',
-            content: {
-              $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-              type: 'AdaptiveCard',
-              version: '1.4',
-              body: [
-                {
-                  type: 'TextBlock',
-                  weight: 'Bolder',
-                  size: 'Medium',
-                  wrap: true,
-                  text: headline(m),
-                },
-                ...(m.incident.room
-                  ? [
-                      {
-                        type: 'TextBlock',
-                        wrap: true,
-                        isSubtle: true,
-                        text: `Room: ${m.incident.room}`,
-                      },
-                    ]
-                  : []),
-                ...(m.incident.detail
-                  ? [{ type: 'TextBlock', wrap: true, text: m.incident.detail }]
-                  : []),
-                ...(impactText(m)
-                  ? [
-                      {
-                        type: 'TextBlock',
-                        wrap: true,
-                        text: impactText(m).replaceAll('\n', '\n\n'),
-                      },
-                    ]
-                  : []),
-              ],
-              actions: m.portalUrl
-                ? [{ type: 'Action.OpenUrl', title: 'Open in Kestrel', url: m.portalUrl }]
-                : [],
-            },
-          },
-        ],
-      });
-      return postJson(s, config.url, body);
-    }
+    case 'teams':
+      return postJson(s, config.url, JSON.stringify(teamsCard(m)));
     case 'sms': {
       const text = [headline(m), m.incident.room ? `Room: ${m.incident.room}` : '', m.portalUrl ?? '']
         .filter(Boolean)
@@ -357,6 +473,10 @@ export async function deliverToChannel(
     return { status: 'failed', error: 'This channel’s settings are invalid' };
   }
   try {
+    if (config.type === 'teams' && !msg.org && db.org) {
+      const org = await db.org.findFirst({ where: { id: channel.orgId }, select: { name: true } });
+      if (org?.name) msg = { ...msg, org: org.name };
+    }
     await send(s, config, msg);
     await record('sent');
     return { status: 'sent' };

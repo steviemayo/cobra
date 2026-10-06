@@ -6,6 +6,7 @@ import {
   MAX_EMAIL_ALERTS_PER_ORG_PER_DAY,
   deliverAlerts,
   deliverToChannel,
+  teamsCard,
   type AlertDb,
   type AlertMessage,
   type Senders,
@@ -115,6 +116,38 @@ describe('delivery', () => {
     const body = JSON.parse(String(calls[0]!.init.body));
     expect(body.attachments[0].contentType).toBe('application/vnd.microsoft.card.adaptive');
     expect(JSON.stringify(body)).toContain('Resolved: DSP is offline');
+  });
+
+  it('colours and labels the Teams card by what happened', () => {
+    const base = {
+      event: 'opened' as const,
+      incident: {
+        id: 'i1',
+        kind: 'device_offline',
+        severity: 'critical' as const,
+        title: 'DSP is offline',
+        detail: null,
+        room: 'Boardroom',
+        openedAt: '2026-10-06T01:00:00.000Z',
+        resolvedAt: null,
+      },
+      portalUrl: 'https://app.example.com/incidents',
+      org: 'Acme',
+    };
+    const open = JSON.stringify(teamsCard(base));
+    expect(open).toContain('"style":"attention"');
+    expect(open).toContain('CRITICAL');
+    expect(open).toContain('Acme');
+    const done = JSON.stringify(
+      teamsCard({
+        ...base,
+        event: 'resolved',
+        incident: { ...base.incident, resolvedAt: '2026-10-06T02:30:00.000Z' },
+      }),
+    );
+    expect(done).toContain('"style":"good"');
+    expect(done).toContain('RESOLVED');
+    expect(done).toContain('1 h 30 min');
   });
 
   it('sends email through the configured provider, and skips it when email is not set up', async () => {
