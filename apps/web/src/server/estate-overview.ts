@@ -221,7 +221,7 @@ export async function estateOverview(
       const state = deviceLiveState({
         kind: d.kind,
         online: d.online,
-        gatewayOnline: gw?.status === 'online',
+        gatewayOnline: gw?.status === 'online' || !!d.integrationId,
       });
       if (state === 'online') online++;
       else if (state === 'offline') offline++;

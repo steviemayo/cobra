@@ -99,6 +99,7 @@ model Org {
   joinRequests        JoinRequest[]
   areas               Area[]
   devices             Device[]
+  integrations        Integration[]
   deviceRooms         DeviceRoom[]
   roomShapes          RoomShape[]
   deviceEvents        DeviceEvent[]
@@ -1412,17 +1413,23 @@ model Device {
   /// What each point read at the last heartbeat, by point id.
   pointValues   Json?
 
+  /// Set when the device's state comes from a cloud integration (Zoom, Reflect, ...) instead of a gateway: which one, and its id for the device over there.
+  integrationId String? @db.Uuid
+  externalId    String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  org     Org           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  site    Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  room    Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
-  gateway Gateway?      @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
-  events  DeviceEvent[]
+  org         Org           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  site        Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  room        Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  gateway     Gateway?      @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
+  integration Integration?  @relation(fields: [integrationId], references: [id], onDelete: SetNull)
+  events      DeviceEvent[]
   /// The rooms a shared device serves, besides its home room (`roomId`).
   rooms   DeviceRoom[]
 
+  @@unique([integrationId, externalId])
   @@index([orgId])
   @@index([siteId])
   @@index([roomId])
@@ -2018,5 +2025,44 @@ model LegalAcceptance {
   acceptedAt DateTime @default(now())
 
   @@unique([userId, document, version])
+  @@index([orgId])
+}
+
+// ---- Integrations: cloud sources of device state (no gateway needed) ------------------------------
+
+/// A link to a vendor's cloud (Zoom, Q-SYS Reflect, Teams, Logitech Sync, Webex, Crestron XiO) that
+/// holds one customer's credentials. It belongs to the organisation, is scoped to some sites, and
+/// either syncs the vendor's rooms and devices in (`autoCreate`) or only updates devices already
+/// paired to a vendor record (`Device.integrationId` + `externalId`).
+model Integration {
+  id            String    @id @default(uuid()) @db.Uuid
+  orgId         String    @db.Uuid
+  /// zoom, reflect, teams, sync, webex, xio
+  provider      String
+  name          String
+  enabled       Boolean   @default(true)
+  /// Sites this integration may place or update devices in. Empty: every site.
+  siteIds       String[]  @default([]) @db.Uuid
+  /// Where newly found rooms and devices go when the vendor record names no site of ours.
+  defaultSiteId String?   @db.Uuid
+  /// Create rooms and devices that are found but not yet paired. Off: only paired devices are updated.
+  autoCreate    Boolean   @default(false)
+  /// Nothing secret: provider options such as the region or a room filter.
+  config        Json      @default("{}")
+  /// Credentials sealed with KESTREL_SECRETS_KEY. Never sent to a browser.
+  sealed        String
+  /// Hash of the secret a vendor presents when it calls Kestrel (webhook providers).
+  inboundHash   String?
+  lastSyncAt    DateTime?
+  lastOkAt      DateTime?
+  /// Why the last sync failed, in plain words. Null after a good one.
+  lastError     String?
+  createdBy     String?   @db.Uuid
+  createdAt     DateTime  @default(now())
+
+  org     Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  devices Device[]
+
+  @@unique([orgId, name])
   @@index([orgId])
 }
