@@ -50,6 +50,9 @@ model Org {
   requireMfa         Boolean   @default(false)
   /// Owners, developers and support may ask a camera for a live snapshot. Off until an owner turns it on: a picture can show people.
   cameraPreview      Boolean   @default(false)
+  /// Alert notifications are held back while this is on (until `alertsMutedUntil` when set). Incidents are still raised.
+  alertsMuted      Boolean   @default(false)
+  alertsMutedUntil DateTime?
 
   members             Member[]
   sites               Site[]
@@ -133,6 +136,9 @@ model Site {
   /// The gateway that polls devices with no gateway of their own and no room gateway. Null: the oldest at the site.
   defaultGatewayId String?  @db.Uuid
   createdAt        DateTime @default(now())
+  /// Alert notifications are held back while this is on (until `alertsMutedUntil` when set). Incidents are still raised.
+  alertsMuted      Boolean   @default(false)
+  alertsMutedUntil DateTime?
 
   org         Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
   gateways    Gateway[]
@@ -247,6 +253,9 @@ model Room {
   reportedError           String?
   reportedAt              DateTime?
   updatedAt               DateTime  @default(now()) @updatedAt
+  /// Alert notifications are held back while this is on (until `alertsMutedUntil` when set). Incidents are still raised.
+  alertsMuted      Boolean   @default(false)
+  alertsMutedUntil DateTime?
 
   org               Org                 @relation(fields: [orgId], references: [id], onDelete: Cascade)
   site              Site                @relation(fields: [siteId], references: [id], onDelete: Cascade)

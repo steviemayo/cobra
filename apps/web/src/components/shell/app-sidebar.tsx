@@ -62,7 +62,8 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useEstate, useEstateOverview } from '@/lib/use-estate';
+import { MutedBell, type AlertState } from '@/components/common/alert-controls';
+import { useAlertState, useEstate, useEstateOverview } from '@/lib/use-estate';
 import { roomTrouble, useIncidentBadges } from '@/lib/use-incident-badges';
 import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
@@ -156,12 +157,24 @@ function TroubleBadge({ trouble }: { trouble?: { count: number; severity: string
   );
 }
 
+/** The muted bell (or maintenance spanner) beside a room or site in the tree. */
+function TreeBell({ state }: { state: AlertState }) {
+  if (state.inMaintenance)
+    return (
+      <span title="In maintenance mode: nothing is raised or alerted">
+        <Wrench className="size-3.5 text-muted-foreground" aria-label="In maintenance mode" />
+      </span>
+    );
+  return state.mutedBy ? <MutedBell by={state.mutedBy} until={state.mutedUntil} /> : null;
+}
+
 function EstateTree() {
   const { orgId, canSupport } = useOrg();
   const pathname = usePathname();
   const { sites, rooms, roomsBySite, isPending } = useEstate();
   const trouble = roomTrouble(useIncidentBadges(canSupport).data);
   const estate = useEstateOverview();
+  const alerts = useAlertState();
   const health = new Map((estate.data?.rooms ?? []).map((r) => [r.id, r.health]));
   const areas = estate.data?.areas ?? [];
   const [manual, setManual] = useState<Record<string, boolean>>({});
@@ -197,6 +210,7 @@ function EstateTree() {
           >
             <HealthDot level={h?.level ?? 'unknown'} />
             <span title={h?.reasons[0]}>{r.name}</span>
+            <TreeBell state={alerts.forRoom(r.id)} />
             <TroubleBadge trouble={trouble.get(r.id)} />
           </SidebarMenuSubButton>
         </SidebarMenuSubItem>
@@ -259,6 +273,7 @@ function EstateTree() {
               >
                 <Building2 />
                 <span>{site.name}</span>
+                <TreeBell state={alerts.forSite(site.id)} />
               </SidebarMenuButton>
             </div>
             {siteTrouble > 0 && !open && (

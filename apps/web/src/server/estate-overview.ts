@@ -8,7 +8,9 @@ import {
   resolveGatewayId,
   type UsageRule,
 } from '@kestrel/model';
+import { isMutedNow, mutedBy, type MuteScope } from './alert-mute';
 import { effectiveStatus } from './gateway-status';
+import { windowActive, type WindowRow } from './maintenance';
 import type { HealthLevel } from './monitoring';
 import { SEVERITY_RANK, type Severity } from './monitoring';
 import { incidentVisible, inScope, type SiteScope } from './site-scope';
@@ -29,7 +31,7 @@ export type EstateDb = Pick<
   | 'usageDefinition'
   | 'pmSchedule'
 > &
-  Partial<Pick<PrismaClient, 'deviceRoom'>>;
+  Partial<Pick<PrismaClient, 'deviceRoom' | 'org' | 'maintenanceWindow'>>;
 
 type GatewayStatus = 'pending' | 'online' | 'offline';
 
@@ -59,6 +61,12 @@ export interface EstateRoom {
   gatewayStatus: GatewayStatus | null;
   openIncidents: number;
   worstSeverity: Severity | null;
+  /** What is holding this room's alert notifications back (its own mute, its site's or the organisation's), or null. */
+  mutedBy: MuteScope | null;
+  /** When that mute ends. Null for one that stays until switched off. */
+  mutedUntil: Date | null;
+  /** Inside a maintenance window that covers the room, its site or the organisation right now. */
+  inMaintenance: boolean;
   /** In use now, from the room's "in use" definition. Null until definitions exist (M3). */
   inUse: boolean | null;
   updatedAt: Date;
@@ -94,7 +102,9 @@ export interface EstateOverview {
     pmOverdue: number;
     pmDueSoon: number;
   };
-  sites: { id: string; name: string }[];
+  sites: { id: string; name: string; muted: boolean; mutedUntil: Date | null; inMaintenance: boolean }[];
+  /** The whole organisation's alerts are muted. */
+  orgMuted: { muted: boolean; until: Date | null; inMaintenance: boolean };
   areas: EstateArea[];
   rooms: EstateRoom[];
 }
@@ -130,6 +140,15 @@ export async function estateOverview(
     db.usageDefinition.findMany({ where: { orgId, kind: 'av' } }),
     db.pmSchedule.findMany({ where: { orgId, enabled: true } }),
   ]);
+  const orgRow = db.org ? await db.org.findFirst({ where: { id: orgId } }) : null;
+  const windows = db.maintenanceWindow
+    ? ((await db.maintenanceWindow.findMany({ where: { orgId } })) as WindowRow[]).filter((w) =>
+        windowActive(w, now),
+      )
+    : [];
+  const orgInMaintenance = windows.some((w) => w.scope === 'org');
+  const siteInMaintenance = (siteId: string) =>
+    orgInMaintenance || windows.some((w) => w.scope === 'site' && w.scopeId === siteId);
   // Shared devices: a device is also in every room it is linked to, whatever site it is at.
   const links = db.deviceRoom ? await db.deviceRoom.findMany({ where: { orgId } }) : [];
   const deviceById = new Map(allDevices.map((d) => [d.id, d]));
@@ -182,6 +201,12 @@ export async function estateOverview(
     return parts.join(' / ');
   };
 
+  const siteById = new Map(sites.map((s) => [s.id, s]));
+  const muteFor = (r: { alertsMuted: boolean; alertsMutedUntil: Date | null; siteId: string }) => {
+    const by = mutedBy({ room: r, site: siteById.get(r.siteId), org: orgRow }, now);
+    const row = by === 'room' ? r : by === 'site' ? siteById.get(r.siteId) : orgRow;
+    return { mutedBy: by, mutedUntil: by ? (row?.alertsMutedUntil ?? null) : null };
+  };
   const rows: EstateRoom[] = rooms.map((r) => {
     const linkedHere = links
       .filter((l) => l.roomId === r.id)
@@ -312,6 +337,9 @@ export async function estateOverview(
       gatewayStatus,
       openIncidents: open.length,
       worstSeverity: worst,
+      ...muteFor(r),
+      inMaintenance:
+        siteInMaintenance(r.siteId) || windows.some((w) => w.scope === 'room' && w.scopeId === r.id),
       inUse,
       updatedAt: r.updatedAt,
     };
@@ -380,7 +408,18 @@ export async function estateOverview(
       pmOverdue: pmStates.filter((x) => x === 'overdue').length,
       pmDueSoon: pmStates.filter((x) => x === 'due_soon').length,
     },
-    sites: sites.map((s) => ({ id: s.id, name: s.name })),
+    sites: sites.map((s) => ({
+      id: s.id,
+      name: s.name,
+      muted: isMutedNow(s, now),
+      mutedUntil: isMutedNow(s, now) ? s.alertsMutedUntil : null,
+      inMaintenance: siteInMaintenance(s.id),
+    })),
+    orgMuted: {
+      muted: isMutedNow(orgRow, now),
+      until: isMutedNow(orgRow, now) ? (orgRow?.alertsMutedUntil ?? null) : null,
+      inMaintenance: orgInMaintenance,
+    },
     areas: areas.map((a) => ({
       id: a.id,
       siteId: a.siteId,

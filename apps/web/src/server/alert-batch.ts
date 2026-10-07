@@ -1,3 +1,4 @@
+import { incidentMuted } from './alert-mute';
 import { dueNow } from './alert-rules';
 import {
   buildMessage,
@@ -153,6 +154,11 @@ async function sendDigest(
   s: Senders,
   now: Date,
 ): Promise<void> {
+  // Muted rooms, sites and organisations are left out of the digest.
+  const heard = [];
+  for (const i of group.incidents) if (!(await incidentMuted(db, i, now))) heard.push(i);
+  if (heard.length === 0) return;
+  group = { ...group, incidents: heard };
   const first = group.incidents[0]!;
   const base = await buildMessage(db, first, event, s.env, undefined, now);
   const msg = digestFor(group, event, base.portalUrl);

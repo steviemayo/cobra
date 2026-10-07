@@ -59,6 +59,17 @@ export const DriverSetting = z.object({
   required: z.boolean().default(false),
   default: z.union([z.string(), z.number(), z.boolean()]).optional(),
   help: z.string().max(200).optional(),
+  /** A fixed set of values to pick from, shown as a drop-down. Left out of older drivers, so their hash is unchanged. */
+  options: z
+    .array(
+      z.object({
+        value: z.union([z.string().max(80), z.number(), z.boolean()]),
+        label: z.string().min(1).max(80),
+      }),
+    )
+    .min(2)
+    .max(30)
+    .optional(),
 });
 export type DriverSetting = z.infer<typeof DriverSetting>;
 

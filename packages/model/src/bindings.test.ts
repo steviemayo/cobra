@@ -53,7 +53,17 @@ describe('slots and scope', () => {
   it('generic drivers have their own slots', () => {
     expect(slotsFor(pjlink).map((s) => s.key)).toEqual(['host', 'port', 'password']);
     const serial = device({ control: { kind: 'generic', protocol: 'serial' }, settings: { path: 'COM3' } });
-    expect(slotsFor(serial).map((s) => s.key)).toEqual(['path']);
+    expect(slotsFor(serial).map((s) => s.key)).toEqual([
+      'path',
+      'baudRate',
+      'dataBits',
+      'stopBits',
+      'parity',
+    ]);
+    // Line settings are picked from a list, never typed.
+    expect(slotsFor(serial).find((s) => s.key === 'parity')?.options?.map((o) => o.value)).toContain('even');
+    const visca = device({ control: { kind: 'driver', driverId: 'visca-ip' } });
+    expect(slotsFor(visca).find((s) => s.key === 'transport')?.options?.map((o) => o.value)).toEqual(['udp', 'tcp']);
     const rest = device({ control: { kind: 'generic', protocol: 'rest' } });
     expect(scopeOfSetting(rest, 'headers')).toBe('secret');
   });

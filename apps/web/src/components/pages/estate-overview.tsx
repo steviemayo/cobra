@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Building2, DoorOpen, Package, Plus, Search } from 'lucide-react';
 import { EmptyState } from '@/components/common/empty-state';
 import { HEALTH_ORDER, HealthPill } from '@/components/common/health';
+import { AlertBadges, AlertControls, MutedBell } from '@/components/common/alert-controls';
 import { PageContainer, PageHeader, Stagger, StaggerItem } from '@/components/common/page-header';
 import { SimpleSelect } from '@/components/common/simple-select';
 import { useDialogs } from '@/components/shell/dialogs';
@@ -188,6 +189,11 @@ export function EstateOverviewView() {
   }, [data, siteId, areaIds, status, search]);
 
   const k = data?.kpis;
+  const orgAlerts = {
+    mutedBy: data?.orgMuted.muted ? ('org' as const) : null,
+    mutedUntil: data?.orgMuted.until ?? null,
+    inMaintenance: data?.orgMuted.inMaintenance ?? false,
+  };
   const showInUse = (data?.rooms ?? []).some((r) => r.inUse !== null);
 
   return (
@@ -195,9 +201,13 @@ export function EstateOverviewView() {
       <PageHeader
         title="Overview"
         description={`Everything across ${org.name}.`}
+        meta={
+          <AlertBadges state={orgAlerts} />
+        }
         actions={
           canEdit && (
             <>
+              <AlertControls scope="org" state={orgAlerts} />
               <Button variant="outline" size="sm" onClick={openNewSite}>
                 <Building2 data-icon="inline-start" /> New site
               </Button>
@@ -410,6 +420,7 @@ export function EstateOverviewView() {
                             >
                               {r.name}
                               {r.kind === 'staging' && <Badge variant="secondary">Staging</Badge>}
+                              {r.mutedBy && <MutedBell by={r.mutedBy} until={r.mutedUntil} />}
                               {r.tags.slice(0, 2).map((t) => (
                                 <Badge key={t} variant="outline" className="font-normal">
                                   {t}

@@ -10,7 +10,24 @@ export interface DriverSettingInfo {
   label: string;
   scope: SettingScope;
   required?: boolean;
+  /** A fixed set of values to pick from, shown as a drop-down with friendly names instead of a text box. */
+  options?: SettingOption[];
 }
+
+/** One choice for a setting: the value the driver reads, and what a person sees. */
+export interface SettingOption {
+  value: string | number | boolean;
+  label: string;
+}
+
+const HTTPS_OPTIONS: SettingOption[] = [
+  { value: true, label: 'Secure (https)' },
+  { value: false, label: 'Plain (http)' },
+];
+const PROTOCOL_OPTIONS: SettingOption[] = [
+  { value: 'https', label: 'Secure (https)' },
+  { value: 'http', label: 'Plain (http)' },
+];
 
 /** The device types the driver picker groups by. */
 export const DRIVER_GROUPS = {
@@ -107,11 +124,23 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     settings: [
       { key: 'host', label: 'Camera address', scope: 'binding', required: true },
       { key: 'port', label: 'Port', scope: 'binding' },
-      { key: 'transport', label: 'Transport (udp or tcp, default udp)', scope: 'binding' },
+      {
+        key: 'transport',
+        label: 'Connection type',
+        scope: 'binding',
+        options: [
+          { value: 'udp', label: 'UDP (most cameras)' },
+          { value: 'tcp', label: 'TCP (for example Crestron 1 Beyond)' },
+        ],
+      },
       {
         key: 'framing',
-        label: 'Framing (ip = 8 byte header, raw = plain VISCA; default ip for udp, raw for tcp)',
+        label: 'Message format (left as default: VISCA over IP for UDP, plain VISCA for TCP)',
         scope: 'binding',
+        options: [
+          { value: 'ip', label: 'VISCA over IP (8 byte header)' },
+          { value: 'raw', label: 'Plain VISCA' },
+        ],
       },
       { key: 'presets', label: 'Preset names and numbers', scope: 'design' },
       { key: 'cameraAddress', label: 'VISCA camera address', scope: 'design' },
@@ -131,7 +160,7 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     settings: [
       { key: 'host', label: 'Camera address', scope: 'binding', required: true },
       { key: 'port', label: 'Port (80, or 443 with https)', scope: 'binding' },
-      { key: 'https', label: 'Use https (true or false)', scope: 'design' },
+      { key: 'https', label: 'Secure connection', scope: 'binding', options: HTTPS_OPTIONS },
       { key: 'username', label: 'ONVIF user', scope: 'binding', required: true },
       { key: 'password', label: 'ONVIF password', scope: 'secret', required: true },
       { key: 'profile', label: 'Media profile token (the first one when blank)', scope: 'design' },
@@ -502,7 +531,12 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
         label: 'Web port for the model, serial number and firmware (443)',
         scope: 'design',
       },
-      { key: 'restProtocol', label: 'https or http for that web port', scope: 'design' },
+      {
+        key: 'restProtocol',
+        label: 'Web port connection',
+        scope: 'design',
+        options: PROTOCOL_OPTIONS,
+      },
       {
         key: 'allowSelfSigned',
         label: 'Accept the Core’s own certificate (true)',
@@ -663,7 +697,18 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     points: {
       generic: [
         { key: 'outlet', label: 'Outlet number' },
-        { key: 'field', label: 'Reading: state, load, amps, watts, kwh or volts' },
+        {
+          key: 'field',
+          label: 'Reading',
+          options: [
+            { value: 'state', label: 'Outlet on or off' },
+            { value: 'load', label: 'Something connected' },
+            { value: 'amps', label: 'Current (amps)' },
+            { value: 'watts', label: 'Power (watts)' },
+            { value: 'kwh', label: 'Energy used (kWh)' },
+            { value: 'volts', label: 'Voltage' },
+          ],
+        },
       ],
     },
     categories: ['power_outlet'],
@@ -681,14 +726,28 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     settings: [
       { key: 'host', label: 'Switch address', scope: 'binding', required: true },
       { key: 'port', label: 'Port (443)', scope: 'binding' },
-      { key: 'https', label: 'Use https (true or false)', scope: 'design' },
+      { key: 'https', label: 'Secure connection', scope: 'binding', options: HTTPS_OPTIONS },
       { key: 'username', label: 'Switch user', scope: 'binding', required: true },
       { key: 'password', label: 'Switch password', scope: 'secret', required: true },
       { key: 'pollMs', label: 'How often to read the switch (ms)', scope: 'design' },
     ],
     points: {
       generic: [
-        { key: 'field', label: 'Reading: link, poe, poeWatts, poeEnabled (with a port), or temp, cpu, memory, poeUsedWatts, poeBudgetWatts' },
+        {
+          key: 'field',
+          label: 'Reading',
+          options: [
+            { value: 'link', label: 'Port link (needs a port)' },
+            { value: 'poe', label: 'Port PoE status (needs a port)' },
+            { value: 'poeWatts', label: 'Port PoE power in watts (needs a port)' },
+            { value: 'poeEnabled', label: 'Port PoE switched on (needs a port)' },
+            { value: 'temp', label: 'Switch temperature' },
+            { value: 'cpu', label: 'Switch CPU use' },
+            { value: 'memory', label: 'Switch memory use' },
+            { value: 'poeUsedWatts', label: 'PoE power in use (watts)' },
+            { value: 'poeBudgetWatts', label: 'PoE power budget (watts)' },
+          ],
+        },
         { key: 'port', label: 'Port number (blank for a reading of the whole switch)', optional: true },
       ],
     },
@@ -739,7 +798,7 @@ export const BUILT_IN_DRIVERS: Record<string, DriverInfo> = {
     settings: [
       { key: 'host', label: 'Player address', scope: 'binding', required: true },
       { key: 'port', label: 'Port (443; 80 for plain HTTP)', scope: 'binding' },
-      { key: 'protocol', label: 'https or http', scope: 'design' },
+      { key: 'protocol', label: 'Connection', scope: 'binding', options: PROTOCOL_OPTIONS },
       {
         key: 'allowSelfSigned',
         label: 'Accept the player’s own certificate (true)',

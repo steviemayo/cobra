@@ -10,8 +10,11 @@ import {
   setConnectorEnabled,
   simulateDemoReply,
 } from '../itsm-service';
+import { MUTE_SCOPES, setMute } from '../alert-mute';
 import {
   WINDOW_REPEATS,
+  endMaintenanceMode,
+  startMaintenanceMode,
   WINDOW_SCOPES,
   createWindow,
   deleteWindow,
@@ -117,6 +120,75 @@ export const supportRouter = router({
         meta: { name: input.name, scope: input.scope },
       });
       return res.value;
+    }),
+
+  // Mute alert notifications for a room, a site or the whole organisation. Incidents are still raised.
+  setMute: orgProcedure
+    .input(
+      z.object({
+        orgId,
+        scope: z.enum(MUTE_SCOPES),
+        scopeId: id.nullable().optional(),
+        muted: z.boolean(),
+        until: z.coerce.date().nullable().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, [...TEAM]);
+      const res = await setMute(db, { ...input, orgId: ctx.orgId }, new Date());
+      if (!res.ok) return fail(res.message);
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: input.muted ? 'alerts.mute' : 'alerts.unmute',
+        target: input.scopeId ?? ctx.orgId,
+        meta: { scope: input.scope, until: input.until?.toISOString() ?? null },
+      });
+      return { ok: true };
+    }),
+
+  // Maintenance mode: no incidents, alerts or tickets for the scope until the time is up or it is ended.
+  startMaintenance: orgProcedure
+    .input(
+      z.object({
+        orgId,
+        scope: z.enum(MUTE_SCOPES),
+        scopeId: id.nullable().optional(),
+        hours: z.number().min(0.25).max(24 * 31),
+        reason: z.string().trim().max(300).nullable().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, [...TEAM]);
+      const res = await startMaintenanceMode(
+        db,
+        { ...input, orgId: ctx.orgId, userId: ctx.user.id },
+        new Date(),
+      );
+      if (!res.ok) return fail(res.message);
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'maintenance.start',
+        target: res.value.id,
+        meta: { scope: input.scope, hours: input.hours },
+      });
+      return res.value;
+    }),
+
+  endMaintenance: orgProcedure
+    .input(z.object({ orgId, scope: z.enum(MUTE_SCOPES), scopeId: id.nullable().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, [...TEAM]);
+      const ended = await endMaintenanceMode(db, { ...input, orgId: ctx.orgId }, new Date());
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'maintenance.end',
+        target: input.scopeId ?? ctx.orgId,
+        meta: { scope: input.scope },
+      });
+      return { ended };
     }),
 
   deleteWindow: orgProcedure

@@ -41,6 +41,7 @@ import {
   uniqueIds,
   type NamedControlType,
 } from '@/lib/qsys-points';
+import { cascade } from '@/lib/point-tree';
 import { useTRPC } from '@/trpc/client';
 import type { RouterOutputs } from '@/trpc/types';
 
@@ -493,6 +494,8 @@ function PointPicker({
   const [startError, setStartError] = useState<string | null>(null);
   const [timedOut, setTimedOut] = useState(false);
   const [filter, setFilter] = useState('');
+  const [mode, setMode] = useState<'browse' | 'search'>('browse');
+  const [chosen, setChosen] = useState<string[]>([]);
   const asked = useRef(false);
 
   const start = useMutation(
@@ -575,6 +578,49 @@ function PointPicker({
         </p>
       )}
       {points.length > 0 && (
+        <div className="flex gap-1">
+          <Button
+            variant={mode === 'browse' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setMode('browse')}
+          >
+            Browse by section
+          </Button>
+          <Button
+            variant={mode === 'search' ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setMode('search')}
+          >
+            Search
+          </Button>
+        </div>
+      )}
+      {points.length > 0 && mode === 'browse' && (
+        <div className="space-y-2">
+          {cascade(points, chosen).map((level, depth) => (
+            <SimpleSelect
+              key={depth}
+              className="w-full"
+              value={level.value}
+              placeholder={depth === 0 ? 'Choose a section' : 'Choose…'}
+              onValueChange={(v) => {
+                const next = [...chosen.slice(0, depth), v];
+                setChosen(next);
+                const leaf = level.choices.find((c) => c.segment === v);
+                if (leaf?.point && leaf.count === 1) onPick(leaf.point);
+              }}
+              options={level.choices.map((c) => ({
+                value: c.segment,
+                label:
+                  c.point && c.count === 1
+                    ? `${c.point.label}${c.point.value !== undefined ? `  =  ${String(c.point.value)}` : ''}`
+                    : `${c.segment}  (${c.count})`,
+              }))}
+            />
+          ))}
+        </div>
+      )}
+      {points.length > 0 && mode === 'search' && (
         <>
           <Input
             placeholder="Search, for example IP table, TSW or ONLINE"
@@ -677,14 +723,27 @@ function AddGeneric({
           {fields.map((f) => (
             <div key={f.key} className="space-y-1.5">
               <Label htmlFor={`g-${f.key}`}>{f.label}</Label>
-              <Input
-                id={`g-${f.key}`}
-                value={address[f.key] ?? ''}
-                onChange={(e) => {
-                  setPicked(null);
-                  setAddress({ ...address, [f.key]: e.target.value });
-                }}
-              />
+              {f.options ? (
+                <SimpleSelect
+                  className="w-full"
+                  value={address[f.key] ?? ''}
+                  placeholder="Choose…"
+                  onValueChange={(v) => {
+                    setPicked(null);
+                    setAddress({ ...address, [f.key]: v });
+                  }}
+                  options={f.options}
+                />
+              ) : (
+                <Input
+                  id={`g-${f.key}`}
+                  value={address[f.key] ?? ''}
+                  onChange={(e) => {
+                    setPicked(null);
+                    setAddress({ ...address, [f.key]: e.target.value });
+                  }}
+                />
+              )}
             </div>
           ))}
           {picked?.expect !== undefined && (
