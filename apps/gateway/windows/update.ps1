@@ -147,9 +147,15 @@ for ($i = 0; $i -lt 30 -and -not $healthy; $i++) {
 }
 if ($healthy) {
   # Pick up changes to the helper scripts. This script is running, so it is left for the installer.
-  foreach ($name in 'configure.ps1', 'tray.ps1', 'uninstall.ps1') {
+  foreach ($name in 'configure.ps1', 'tray.ps1', 'open-gateway.ps1', 'uninstall.ps1') {
     $fresh = Join-Path $app "windows\$name"
     if (Test-Path $fresh) { Copy-Item -Force $fresh (Join-Path $root $name) }
+  }
+  # The tray icon and the Start menu shortcut read the port from a file anyone may read (gateway.env is
+  # for administrators), which installs made before the tray became a viewer do not have yet.
+  $viewerFile = Join-Path $root 'viewer.json'
+  if (-not (Test-Path $viewerFile)) {
+    Set-Content -Path $viewerFile -Value (@{ port = [int]$port; dataDir = $dataDir } | ConvertTo-Json) -Encoding ASCII
   }
   # Installs made before the data folder was locked down get that now. Service installs only: the
   # account a tray install runs as is not known here.

@@ -187,7 +187,8 @@ export class Gateway {
   localUrls(): string[] {
     if (!this.listener) return [];
     const scheme = this.listener.tls ? 'https' : 'http';
-    const names = new Set<string>();
+    // This machine's own address too: the tray icon and the Start menu shortcut open the page that way.
+    const names = new Set<string>(['127.0.0.1']);
     for (const list of Object.values(networkInterfaces()))
       for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal) names.add(a.address);
     names.add(hostname().toLowerCase());

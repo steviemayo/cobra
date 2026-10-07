@@ -61,8 +61,8 @@ import { FindDevicesDialog } from './find-devices';
 type Gateway = RouterOutputs['gateway']['list'][number];
 
 const IMAGE = process.env.NEXT_PUBLIC_GATEWAY_IMAGE ?? 'ghcr.io/steviemayo/kestrel-gateway:stable';
-// The Windows installer (brings its own Node, no Docker needed; lets you pick service or tray at
-// install time). Proxied through the portal by default since the release lives in a private repo.
+// The Windows installer (brings its own Node, no Docker needed; always installs a service, with a
+// tray icon and shortcuts to open its page). Proxied through the portal by default since the release lives in a private repo.
 const WINDOWS_SETUP_URL =
   process.env.NEXT_PUBLIC_GATEWAY_WINDOWS_URL ?? '/api/gateway/download?platform=windows';
 
@@ -535,9 +535,9 @@ function PlatformInstall({ token }: { token?: string }) {
       </TabsList>
       <TabsContent value="windows" className="space-y-3 pt-3">
         <p className="text-sm text-muted-foreground">
-          The installer lets you choose to run the gateway as a Windows service (starts at boot,
-          before anyone logs in) or from the system tray (starts when you log in). Either way it
-          restarts on its own and keeps running until stopped.
+          The installer sets the gateway up as a Windows service: it starts at boot, before anyone
+          logs in, restarts on its own and keeps running until stopped. A tray icon and a Start menu
+          shortcut open its page, where you sign in with your Kestrel account.
         </p>
         <a href={WINDOWS_SETUP_URL} className={buttonVariants({ size: 'sm' })}>
           <Download data-icon="inline-start" /> Download for Windows

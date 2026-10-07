@@ -10,8 +10,9 @@
 
   What it sets up (all removable with uninstall.ps1):
     - the gateway, with its own copy of Node, under C:\Program Files\Kestrel Gateway
-    - either a Windows service (starts at boot, before anyone logs in) or a system tray app that
-      starts at login (-Mode Tray) — either way, it restarts on its own and runs until stopped
+    - a Windows service (starts at boot, before anyone logs in; restarts on its own and runs until
+      stopped), with a tray icon at login that shows its state and opens its page. (-Mode Tray is
+      still accepted so older scripts keep working, and now also sets up the service.)
     - a scheduled task that updates the gateway, run by the gateway when the portal orders it
     - a firewall rule so touch panels on the LAN can reach the panel port
 

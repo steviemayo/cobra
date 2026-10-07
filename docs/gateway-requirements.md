@@ -41,7 +41,7 @@ Not supported: Docker Desktop on Windows or macOS for production (no host networ
 | Rights | An administrator to install. The gateway then runs as its own service account, `NT SERVICE\KestrelGateway` |
 | PowerShell | Windows PowerShell 5.1 (built in) |
 | Disk and memory | As above. The installer is self-contained (its own Node), nothing else to install |
-| Running as | A Windows service that starts at boot, before anyone signs in |
+| Running as | A Windows service that starts at boot, before anyone signs in, plus a tray icon at login and Start menu and desktop shortcuts that open its page (the tray is only a viewer, so Server Core simply has no tray) |
 | Silent install | `KestrelGatewaySetup.exe /VERYSILENT /CloudUrl=https://... /Token=...` |
 | Firewall | Allow inbound TCP 8080 on the management network |
 | Serial devices | Use the COM port name |
