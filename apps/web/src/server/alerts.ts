@@ -223,7 +223,32 @@ export function teamsCard(m: AlertMessage) {
       wrap: true,
       spacing: 'Medium',
     },
-    ...(facts.length ? [{ type: 'FactSet', facts, spacing: 'Medium' }] : []),
+    // Not a FactSet: Teams only evaluates {{DATE()}} / {{TIME()}} inside TextBlocks.
+    ...facts.map((f, n) => ({
+      type: 'ColumnSet',
+      spacing: n === 0 ? 'Medium' : 'Small',
+      columns: [
+        {
+          type: 'Column',
+          width: '80px',
+          items: [
+            {
+              type: 'TextBlock',
+              text: f.title,
+              weight: 'Bolder',
+              isSubtle: true,
+              wrap: true,
+              spacing: 'None',
+            },
+          ],
+        },
+        {
+          type: 'Column',
+          width: 'stretch',
+          items: [{ type: 'TextBlock', text: f.value, wrap: true, spacing: 'None' }],
+        },
+      ],
+    })),
     ...(i.detail
       ? [
           {
