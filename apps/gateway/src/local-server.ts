@@ -13,6 +13,8 @@ export interface LocalServerOptions {
   allowedHosts?: string[];
   /** The machine's own name, for the host check. Tests set it. */
   machineName?: string;
+  /** Serve over HTTPS with this certificate and key. */
+  tls?: { cert: Buffer; key: Buffer };
 }
 
 /**
@@ -21,7 +23,11 @@ export interface LocalServerOptions {
  */
 export async function createLocalServer(opts: LocalServerOptions): Promise<FastifyInstance> {
   const { log } = opts;
-  const app = Fastify({ logger: false, trustProxy: opts.trustProxy ?? false });
+  const app = Fastify({
+    logger: false,
+    trustProxy: opts.trustProxy ?? false,
+    ...(opts.tls ? { https: opts.tls } : {}),
+  });
 
   // Only names the gateway is meant to be reached by (a rebinding page uses a public-looking one).
   const hostAllowed = makeHostCheck(opts.allowedHosts, opts.machineName);
@@ -43,7 +49,7 @@ export async function createLocalServer(opts: LocalServerOptions): Promise<Fasti
     return payload;
   });
 
-  await app.register(localAdmin, opts.admin);
+  await app.register(localAdmin, { ...opts.admin, secure: !!opts.tls });
   app.get('/health', async () => ({ ok: true }));
   return app;
 }

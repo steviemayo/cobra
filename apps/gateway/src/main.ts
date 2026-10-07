@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CloudClient } from './cloud';
 import { loadConfig } from './config';
 import { Gateway } from './gateway';
+import { LocalAccess } from './local-access';
 import { loadAdminCode } from './local-admin';
 import { createLocalServer } from './local-server';
 import { createLogger } from './log';
@@ -25,17 +27,32 @@ async function main() {
   let server: Awaited<ReturnType<typeof createLocalServer>> | null = null;
   try {
     const admin = loadAdminCode(cfg.dataDir, log);
+    let tls: { cert: Buffer; key: Buffer } | undefined;
+    if (cfg.tlsCertFile || cfg.tlsKeyFile) {
+      try {
+        if (!cfg.tlsCertFile || !cfg.tlsKeyFile) throw new Error('both a certificate and a key are needed');
+        tls = { cert: readFileSync(cfg.tlsCertFile), key: readFileSync(cfg.tlsKeyFile) };
+      } catch (e) {
+        // A bad certificate must not take the gateway down, but it must not quietly fall back to HTTP unnoticed either.
+        log('error', 'The TLS certificate could not be loaded; the local page is served over plain HTTP', {
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    const access = new LocalAccess(() => gateway.localAccessContext(), log);
     server = await createLocalServer({
       log,
-      admin: { gateway, log, adminCode: admin.code },
+      admin: { gateway, log, adminCode: admin.code, access },
       allowedHosts: cfg.allowedHosts,
+      tls,
     });
     let bound = false;
     for (let i = 0; i < 10 && !bound; i++) {
       const port = cfg.panelPort + i;
       try {
         await server.listen({ port, host: cfg.panelHost });
-        log('info', 'Local status page listening', { port });
+        log('info', 'Local status page listening', { port, https: !!tls });
+        gateway.setListener(port, !!tls);
         if (i > 0)
           log('warn', 'The usual port was busy, so the status page moved', {
             wanted: cfg.panelPort,

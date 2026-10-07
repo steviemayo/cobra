@@ -166,6 +166,51 @@ export const orgRouter = router({
     return { requireMfa: org?.requireMfa ?? false, members };
   }),
 
+  // Who may open a gateway's own page (see docs/gateway-local-access.md). Signing in with a Kestrel
+  // account always works for people in the organisation; the admin code kept on the machine can be
+  // switched off, and "sign everyone out" ends every sign-in made on those pages so far.
+  getGatewayAccess: orgProcedure
+    .input(z.object({ orgId: z.string().uuid() }))
+    .query(async ({ ctx }) => {
+      const org = await db.org.findFirst({
+        where: { id: ctx.orgId },
+        select: { gatewayBreakGlass: true },
+      });
+      return { breakGlass: org?.gatewayBreakGlass ?? true };
+    }),
+
+  setGatewayBreakGlass: orgProcedure
+    .input(z.object({ orgId: z.string().uuid(), on: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      requireRole(ctx.role, ['owner']);
+      await db.org.update({ where: { id: ctx.orgId }, data: { gatewayBreakGlass: input.on } });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'org.gateway_break_glass',
+        target: ctx.orgId,
+        meta: { on: input.on },
+      });
+      return { breakGlass: input.on };
+    }),
+
+  signOutGatewayPages: orgProcedure
+    .input(z.object({ orgId: z.string().uuid() }))
+    .mutation(async ({ ctx }) => {
+      requireRole(ctx.role, ['owner']);
+      await db.org.update({
+        where: { id: ctx.orgId },
+        data: { gatewayLocalEpoch: { increment: 1 } },
+      });
+      await writeAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.user.id,
+        action: 'org.gateway_sign_out_all',
+        target: ctx.orgId,
+      });
+      return { ok: true as const };
+    }),
+
   // Camera previews: off until an owner turns them on (a picture can show people).
   getCameraPreview: orgProcedure
     .input(z.object({ orgId: z.string().uuid() }))

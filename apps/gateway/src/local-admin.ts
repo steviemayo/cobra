@@ -1,24 +1,30 @@
-import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Gateway, LocalStatus } from './gateway';
+import { LocalAccess, type LocalSession } from './local-access';
 import type { Logger } from './log';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const CODE_SHAPE = /^[A-Z2-9]{4}-[A-Z2-9]{4}$/;
-const COOKIE = 'kestrel_admin';
-const SESSION_MS = 30 * 60_000;
-const MAX_SESSIONS = 20;
+const COOKIE = 'kestrel_gw';
+const FLOW_COOKIE = 'kestrel_gw_flow';
+const COOKIE_MAX_AGE_S = 8 * 60 * 60;
 const MAX_FAILURES = 5;
 const LOCKOUT_MS = 60_000;
 const RECENT_MS = 3 * 60_000;
 
 export interface LocalAdminOptions {
-  gateway: Pick<Gateway, 'status' | 'enrolWithToken' | 'reset'>;
+  gateway: Pick<Gateway, 'status' | 'enrolWithToken' | 'reset'> &
+    Partial<Pick<Gateway, 'record'>>;
   log: Logger;
-  /** Unlocks the admin page. Kept in a file only people with access to this machine can read. */
+  /** Unlocks the admin page from the machine itself. Kept in a file only people with access to this machine can read. */
   adminCode: string;
+  /** Who is signed in and how people sign in. Without it only the admin code works (tests, an unenrolled gateway). */
+  access?: LocalAccess;
+  /** The page is served over HTTPS: cookies are marked Secure. */
+  secure?: boolean;
   now?: () => number;
 }
 
@@ -58,6 +64,15 @@ const MESSAGES: Record<string, { ok: boolean; text: string }> = {
     ok: true,
     text: 'Reset. This gateway has forgotten its organisation and is announcing itself to Kestrel staff.',
   },
+  signedout: { ok: true, text: 'Signed out.' },
+  signin_failed: {
+    ok: false,
+    text: 'That sign-in was not accepted. Start again with Sign in with Kestrel. If it keeps failing, check this machine’s clock and that you belong to this organisation.',
+  },
+  unavailable: {
+    ok: false,
+    text: 'Signing in with Kestrel is not available until this gateway has joined an organisation. Use the admin code on this machine.',
+  },
   locked: { ok: false, text: 'Too many wrong codes. Wait a minute and try again.' },
   wrong: { ok: false, text: 'That code is not right.' },
   confirm: { ok: false, text: 'Type RESET to confirm.' },
@@ -76,7 +91,7 @@ code{font:13px ui-monospace,Consolas,monospace;word-break:break-all}a{color:var(
 input[type=text],input[type=password]{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
 button{margin-top:10px;padding:8px 14px;border:1px solid var(--line);border-radius:6px;background:var(--fg);color:var(--bg);font:inherit;cursor:pointer}
 button.danger{background:var(--bad);color:#fff;border-color:var(--bad)}button.plain{background:transparent;color:var(--fg)}
-.banner{padding:10px 12px;border-radius:6px;border:1px solid var(--line);margin:12px 0}
+.btn{display:inline-block;padding:9px 16px;border-radius:6px;background:var(--fg);color:var(--bg);text-decoration:none}form.inline{display:inline}.banner{padding:10px 12px;border-radius:6px;border:1px solid var(--line);margin:12px 0}
 `;
 
 function layout(title: string, body: string, refresh = false): string {
@@ -128,7 +143,19 @@ function headline(s: LocalStatus, now: number): { text: string; ok: boolean } {
  */
 export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions): Promise<void> {
   const now = opts.now ?? (() => Date.now());
-  const sessions = new Map<string, number>();
+  const secure = opts.secure ?? false;
+  const access =
+    opts.access ??
+    new LocalAccess(
+      () => ({
+        gatewayId: null,
+        keys: [],
+        policy: { breakGlass: true, epoch: 0 },
+        cloudUrl: 'http://localhost',
+      }),
+      opts.log,
+      now,
+    );
   const failures = new Map<string, { count: number; until: number }>();
   const code = digest(opts.adminCode.replace(/-/g, ''));
 
@@ -152,24 +179,25 @@ export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions):
   const html = (reply: FastifyReply, page: string, status = 200) =>
     reply.code(status).type('text/html; charset=utf-8').send(page);
 
-  const cookieOf = (req: FastifyRequest): string | null => {
+  const cookieOf = (req: FastifyRequest, name: string): string | null => {
     for (const part of (req.headers.cookie ?? '').split(';')) {
       const [k, ...v] = part.trim().split('=');
-      if (k === COOKIE) return v.join('=');
+      if (k === name) return v.join('=');
     }
     return null;
   };
 
-  const signedIn = (req: FastifyRequest): boolean => {
-    const id = cookieOf(req);
-    const until = id ? sessions.get(id) : undefined;
-    if (!id || !until) return false;
-    if (until < now()) {
-      sessions.delete(id);
-      return false;
-    }
-    sessions.set(id, now() + SESSION_MS);
-    return true;
+  const flags = `HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`;
+  const sessionCookie = (id: string) =>
+    `${COOKIE}=${id}; ${flags}; Path=/; Max-Age=${COOKIE_MAX_AGE_S}`;
+  const clearCookie = (name: string, path: string) =>
+    `${name}=; ${flags}; Path=${path}; Max-Age=0`;
+
+  const sessionOf = (req: FastifyRequest): LocalSession | null =>
+    access.sessionFor(cookieOf(req, COOKIE));
+  const adminOf = (req: FastifyRequest): LocalSession | null => {
+    const s = sessionOf(req);
+    return s?.role === 'admin' ? s : null;
   };
 
   /** A form posted from another site (or another port) must not act on this page. */
@@ -186,16 +214,47 @@ export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions):
   const form = (req: FastifyRequest): Record<string, string> =>
     typeof req.body === 'object' && req.body ? (req.body as Record<string, string>) : {};
 
-  // ---- status: open on the network -----------------------------------------------------------
+  const record = (type: 'local.signin' | 'local.action', data: Record<string, unknown>) =>
+    opts.gateway.record?.({ type, data });
+
+  const message = (key: unknown) => (typeof key === 'string' ? MESSAGES[key] : undefined);
+
+  const signInButtons = (): string => {
+    const kestrel = access.kestrelSigninAvailable()
+      ? '<p><a class="btn" href="/signin">Sign in with Kestrel</a></p><p class="muted">Use the same account you use for the Kestrel portal. You must belong to this gateway’s organisation.</p>'
+      : '';
+    const machine = access.breakGlassAllowed()
+      ? '<p class="muted"><a href="/admin">Use the admin code from this machine</a></p>'
+      : '';
+    return kestrel + machine;
+  };
+
+  // ---- status ---------------------------------------------------------------------------------
 
   app.get('/', async (req, reply) => {
     const s = opts.gateway.status();
     const t = now();
+    const session = sessionOf(req);
+    const q = req.query as Record<string, unknown>;
+    const banner = message(q.msg);
+    const bannerHtml = banner
+      ? `<div class="banner ${banner.ok ? 'ok' : 'bad'}">${esc(banner.text)}</div>`
+      : '';
     const h = headline(s, t);
     const claimHelp =
       s.enrolment === 'unclaimed' || s.enrolment === 'dismissed'
         ? `<p>Install ID: <code>${esc(s.installId ?? 'still being made')}</code></p>`
         : '';
+
+    // Anyone on the network sees only whether the gateway is working. Everything else needs a sign-in.
+    if (!session) {
+      const line = s.enrolment === 'enrolled' ? (h.ok ? 'Connected to Kestrel.' : 'Not connected to Kestrel right now. Devices keep being watched.') : h.text;
+      const body = `<h1>Kestrel gateway</h1>${bannerHtml}
+<div class="card"><p class="${h.ok ? 'ok' : 'bad'}"><strong>${esc(line)}</strong></p>${claimHelp}</div>
+<div class="card"><h2 style="margin-top:0">Sign in</h2>${signInButtons() || '<p class="muted">Signing in is not available right now.</p>'}</div>`;
+      return html(reply, layout('Kestrel gateway', body, true));
+    }
+
     const facts: [string, string][] = [
       ['Name', s.name ? esc(s.name) : '<span class="muted">not set up</span>'],
       ['Version', esc(s.version)],
@@ -213,33 +272,82 @@ export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions):
         'Update',
         `${esc(s.update.state)}${s.update.version ? ` to ${esc(s.update.version)}` : ''}${s.update.error ? ` (${esc(s.update.error)})` : ''}`,
       ]);
-    const body = `<h1>Kestrel gateway</h1>
+    const body = `<h1>Kestrel gateway</h1>${bannerHtml}
+<p class="muted">Signed in as ${esc(session.who)} (${session.role === 'admin' ? 'can change settings' : 'view only'})${secure ? '' : ' · <span class="bad">this connection is not encrypted</span>'}</p>
 <div class="card"><p class="${h.ok ? 'ok' : 'bad'}"><strong>${esc(h.text)}</strong></p>${claimHelp}
 <dl>${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></div>
-<p class="muted"><a href="/admin">Admin</a></p>`;
+<p class="muted">${session.role === 'admin' ? '<a href="/admin">Admin</a> · ' : ''}<form class="inline" method="post" action="/signout"><button class="plain" type="submit">Sign out</button></form></p>`;
     return html(reply, layout('Kestrel gateway', body, true));
   });
 
-  // ---- admin: behind the code -----------------------------------------------------------------
+  // ---- signing in with a Kestrel account --------------------------------------------------------
 
-  const loginPage = (reply: FastifyReply, message?: string) =>
+  app.get('/signin', async (req, reply) => {
+    const origin = `${secure ? 'https' : 'http'}://${req.host}`;
+    const flow = access.startSignin(req.ip, origin);
+    if (!flow) return reply.redirect('/?msg=unavailable', 303);
+    reply.header('Set-Cookie', `${FLOW_COOKIE}=${flow.state}; ${flags}; Path=/auth; Max-Age=300`);
+    return reply.redirect(flow.url, 303);
+  });
+
+  app.get('/auth/callback', async (req, reply) => {
+    const q = req.query as Record<string, unknown>;
+    const grant = typeof q.grant === 'string' && q.grant.length < 6000 ? q.grant : '';
+    const result = access.redeem(grant, cookieOf(req, FLOW_COOKIE), req.ip);
+    if (!result.ok) {
+      reply.header('Set-Cookie', clearCookie(FLOW_COOKIE, '/auth'));
+      return reply.redirect('/?msg=signin_failed', 303);
+    }
+    reply.header('Set-Cookie', [clearCookie(FLOW_COOKIE, '/auth'), sessionCookie(result.session.id)]);
+    record('local.signin', {
+      how: 'kestrel',
+      who: result.session.who,
+      role: result.session.role,
+      ip: req.ip,
+    });
+    return reply.redirect('/', 303);
+  });
+
+  app.post('/signout', async (req, reply) => {
+    if (!sameOrigin(req)) return reply.code(403).send('Not allowed');
+    const s = sessionOf(req);
+    access.end(cookieOf(req, COOKIE));
+    if (s) record('local.signin', { how: 'signout', who: s.who, ip: req.ip });
+    reply.header('Set-Cookie', clearCookie(COOKIE, '/'));
+    return reply.redirect('/?msg=signedout', 303);
+  });
+
+  // ---- admin: admins only -----------------------------------------------------------------------
+
+  const loginPage = (reply: FastifyReply, msg?: string) =>
     html(
       reply,
       layout(
         'Kestrel gateway admin',
-        `<h1>Gateway admin</h1><p class="muted">Enter the admin code. It is in <code>admin-code.txt</code> in this gateway’s data folder (the tray menu has “Show admin code” on Windows).</p>
-${message ? `<div class="banner bad">${esc(message)}</div>` : ''}
+        `<h1>Gateway admin</h1>
+${msg ? `<div class="banner bad">${esc(msg)}</div>` : ''}
+${access.kestrelSigninAvailable() ? '<div class="card"><p><a class="btn" href="/signin">Sign in with Kestrel</a></p><p class="muted">Owners and developers of this gateway’s organisation can change its settings.</p></div>' : ''}
+${
+  access.breakGlassAllowed()
+    ? `<div class="card"><h2 style="margin-top:0">Admin code</h2><p class="muted">From the machine this gateway runs on: <code>admin-code.txt</code> in its data folder (the tray menu has “Show admin code” on Windows).</p>
 <form method="post" action="/admin/login"><label for="code">Admin code</label>
-<input id="code" name="code" type="password" autocomplete="off" autofocus required maxlength="20">
-<button type="submit">Unlock</button></form><p class="muted"><a href="/">Back to status</a></p>`,
+<input id="code" name="code" type="password" autocomplete="off" required maxlength="20">
+<button type="submit">Unlock</button></form></div>`
+    : '<p class="muted">The admin code on this machine has been switched off by your organisation. Sign in with Kestrel.</p>'
+}
+<p class="muted"><a href="/">Back to status</a></p>`,
       ),
-      message ? 401 : 200,
+      msg ? 401 : 200,
     );
 
-  const adminPage = (reply: FastifyReply, banner?: { ok: boolean; text: string }) => {
+  const adminPage = (
+    reply: FastifyReply,
+    session: LocalSession,
+    banner?: { ok: boolean; text: string },
+  ) => {
     const s = opts.gateway.status();
     const enrolled = s.enrolment === 'enrolled';
-    const body = `<h1>Gateway admin</h1><p class="muted"><a href="/">Back to status</a></p>
+    const body = `<h1>Gateway admin</h1><p class="muted"><a href="/">Back to status</a> · signed in as ${esc(session.who)}</p>
 ${banner ? `<div class="banner ${banner.ok ? 'ok' : 'bad'}">${esc(banner.text)}</div>` : ''}
 <section><h2 style="margin-top:0">Enter an enrolment token</h2>
 <p>Create a token in the portal (Gateways, then Add gateway) and paste it here.${
@@ -257,21 +365,31 @@ ${banner ? `<div class="banner ${banner.ok ? 'ok' : 'bad'}">${esc(banner.text)}<
 <button class="danger" type="submit">Reset this gateway</button></form></section>
 <section><h2 style="margin-top:0">This install</h2>
 <dl><dt>Install ID</dt><dd><code>${esc(s.installId ?? 'not made yet')}</code></dd><dt>Version</dt><dd>${esc(s.version)}</dd></dl></section>
-<form method="post" action="/admin/logout"><button class="plain" type="submit">Lock admin</button></form>`;
+<form method="post" action="/signout"><button class="plain" type="submit">Sign out</button></form>`;
     return html(reply, layout('Kestrel gateway admin', body));
   };
 
-  const message = (key: unknown) => (typeof key === 'string' ? MESSAGES[key] : undefined);
-
   app.get('/admin', async (req, reply) => {
     const q = req.query as Record<string, unknown>;
-    if (!signedIn(req))
+    const session = sessionOf(req);
+    if (session && session.role !== 'admin')
+      return html(
+        reply,
+        layout(
+          'Kestrel gateway admin',
+          '<h1>Gateway admin</h1><div class="banner bad">Your account can look at this gateway but not change it. Ask an owner or developer of your organisation.</div><p class="muted"><a href="/">Back to status</a></p>',
+        ),
+        403,
+      );
+    if (!session)
       return loginPage(reply, message(q.msg)?.ok === false ? message(q.msg)!.text : undefined);
-    return adminPage(reply, message(q.msg));
+    return adminPage(reply, session, message(q.msg));
   });
 
+  // The admin code, from the machine. Refused when the organisation has switched it off.
   app.post('/admin/login', async (req, reply) => {
     if (!sameOrigin(req)) return reply.code(403).send('Not allowed');
+    if (!access.breakGlassAllowed()) return reply.redirect('/admin', 303);
     const t = now();
     const slot = failures.get(req.ip);
     if (slot && slot.until > t) return reply.redirect('/admin?msg=locked', 303);
@@ -286,39 +404,43 @@ ${banner ? `<div class="banner ${banner.ok ? 'ok' : 'bad'}">${esc(banner.text)}<
       return reply.redirect('/admin?msg=wrong', 303);
     }
     failures.delete(req.ip);
-    if (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value!);
-    const id = randomBytes(24).toString('base64url');
-    sessions.set(id, t + SESSION_MS);
-    opts.log('info', 'The local admin page was unlocked', { ip: req.ip });
-    reply.header(
-      'Set-Cookie',
-      `${COOKIE}=${id}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=${SESSION_MS / 1000}`,
-    );
+    const session = access.openWithCode(req.ip);
+    if (!session) return reply.redirect('/admin', 303);
+    opts.log('info', 'The local admin page was unlocked with the admin code', { ip: req.ip });
+    record('local.signin', { how: 'admin-code', who: session.who, role: 'admin', ip: req.ip });
+    reply.header('Set-Cookie', sessionCookie(session.id));
     return reply.redirect('/admin', 303);
   });
 
   app.post('/admin/logout', async (req, reply) => {
     if (!sameOrigin(req)) return reply.code(403).send('Not allowed');
-    const id = cookieOf(req);
-    if (id) sessions.delete(id);
-    reply.header('Set-Cookie', `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=0`);
+    access.end(cookieOf(req, COOKIE));
+    reply.header('Set-Cookie', clearCookie(COOKIE, '/'));
     return reply.redirect('/admin', 303);
   });
 
   app.post('/admin/token', async (req, reply) => {
     if (!sameOrigin(req)) return reply.code(403).send('Not allowed');
-    if (!signedIn(req)) return reply.redirect('/admin', 303);
+    const session = adminOf(req);
+    if (!session) return reply.redirect('/admin', 303);
     const result = await opts.gateway.enrolWithToken(String(form(req).token ?? ''));
-    if (result.ok) return reply.redirect('/admin?msg=enrolled', 303);
-    return adminPage(reply, { ok: false, text: result.message });
+    record('local.action', { action: 'enrol', who: session.who, ok: result.ok, ip: req.ip });
+    if (result.ok) {
+      // It now belongs to another organisation: sign-ins made for the old one end here.
+      access.endAll();
+      return reply.redirect('/?msg=enrolled', 303);
+    }
+    return adminPage(reply, session, { ok: false, text: result.message });
   });
 
   app.post('/admin/reset', async (req, reply) => {
     if (!sameOrigin(req)) return reply.code(403).send('Not allowed');
-    if (!signedIn(req)) return reply.redirect('/admin', 303);
+    const session = adminOf(req);
+    if (!session) return reply.redirect('/admin', 303);
     if (String(form(req).confirm ?? '').trim() !== 'RESET')
-      return adminPage(reply, MESSAGES.confirm!);
+      return adminPage(reply, session, MESSAGES.confirm!);
     await opts.gateway.reset();
-    return reply.redirect('/admin?msg=reset', 303);
+    access.endAll();
+    return reply.redirect('/?msg=reset', 303);
   });
 }

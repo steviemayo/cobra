@@ -67,13 +67,20 @@ describe('the local pages', () => {
     expect(res.statusCode).toBe(303);
     const set = String(res.headers['set-cookie']);
     expect(set).toContain('HttpOnly');
-    expect(set).toContain('SameSite=Strict');
+    expect(set).toContain('SameSite=Lax');
     return set.split(';')[0]!;
   }
 
   it('is open to anyone on the network, with safe headers', async () => {
     gateway.status.mockImplementation(() => status({ enrolment: 'enrolled', name: 'Site gateway', devices: 3 }));
-    const res = await app.inject({ url: '/', headers: { host: '10.0.0.5:8080' } });
+    const open = await app.inject({ url: '/', headers: { host: '10.0.0.5:8080' } });
+    // Anyone on the network sees only whether it works, never its name, version or devices.
+    expect(open.body).not.toContain('Site gateway');
+    expect(open.body).not.toContain('Devices watched');
+    const res = await app.inject({
+      url: '/',
+      headers: { host: '10.0.0.5:8080', cookie: await unlock() },
+    });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Site gateway');
     expect(res.body).toContain('Devices watched');
@@ -113,7 +120,10 @@ describe('the local pages', () => {
         problem: 'The cloud cannot be reached from this machine.',
       }),
     );
-    const res = await app.inject({ url: '/' });
+    const open = await app.inject({ url: '/' });
+    expect(open.body).toContain('Devices keep being watched');
+    expect(open.body).not.toContain('1 h ago');
+    const res = await app.inject({ url: '/', headers: { cookie: await unlock() } });
     expect(res.body).toContain('Devices keep being watched');
     expect(res.body).toContain('1 h ago');
   });
@@ -165,13 +175,15 @@ describe('the local pages', () => {
     const cookie = await unlock();
     const ok = await post('/admin/token', 'token=my-token', cookie);
     expect(gateway.enrolWithToken).toHaveBeenCalledWith('my-token');
-    expect(ok.headers.location).toBe('/admin?msg=enrolled');
+    expect(ok.headers.location).toBe('/?msg=enrolled');
 
     gateway.enrolWithToken.mockResolvedValue({
       ok: false,
       message: 'The portal did not accept that token.',
     });
-    const bad = await post('/admin/token', 'token=nope', cookie);
+    // A successful enrolment ends every sign-in (the gateway has a new organisation), so sign in again.
+    expect((await post('/admin/token', 'token=again', cookie)).headers.location).toBe('/admin');
+    const bad = await post('/admin/token', 'token=nope', await unlock());
     expect(bad.statusCode).toBe(200);
     expect(bad.body).toContain('The portal did not accept that token.');
   });
@@ -183,7 +195,7 @@ describe('the local pages', () => {
     expect(gateway.reset).not.toHaveBeenCalled();
     const yes = await post('/admin/reset', 'confirm=RESET', cookie);
     expect(gateway.reset).toHaveBeenCalledTimes(1);
-    expect(yes.headers.location).toBe('/admin?msg=reset');
+    expect(yes.headers.location).toBe('/?msg=reset');
   });
 
   it('ignores forms posted from another site', async () => {

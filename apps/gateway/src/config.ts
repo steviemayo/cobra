@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { PublicKey } from '@kestrel/model';
 import { BUILT_IN_MANIFEST_KEYS } from './trusted-keys';
 
-export const GATEWAY_VERSION = '0.6.9';
+export const GATEWAY_VERSION = '0.7.0';
 
 const Env = z.object({
   /** Base URL of the Kestrel cloud, e.g. https://app.kestrel.example */
@@ -34,6 +34,13 @@ const Env = z.object({
    * cloud with its own signing key); it removes the protection against a hijacked cloud.
    */
   KESTREL_TRUST_CLOUD_KEYS: z.enum(['true', 'false']).default('false'),
+  /**
+   * Serve the local page over HTTPS with this certificate and key (PEM files, for example one issued
+   * by the organisation's own CA). Both must be set. Without them the page is plain HTTP, and the
+   * page says so.
+   */
+  KESTREL_TLS_CERT_FILE: z.string().optional(),
+  KESTREL_TLS_KEY_FILE: z.string().optional(),
   KESTREL_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
@@ -49,6 +56,8 @@ export interface GatewayConfig {
   updateUrl?: string;
   updateToken?: string;
   allowedHosts?: string[];
+  tlsCertFile?: string;
+  tlsKeyFile?: string;
   /** Signing keys this gateway trusts for device lists and update bundles. Empty or absent: trust what the cloud sends (tests, demos). */
   trustedKeys?: PublicKey[];
   /** Also trust keys the cloud sends, on top of `trustedKeys`. */
@@ -77,6 +86,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       .split(',')
       .map((h) => h.trim())
       .filter(Boolean),
+    tlsCertFile: e.KESTREL_TLS_CERT_FILE,
+    tlsKeyFile: e.KESTREL_TLS_KEY_FILE,
     trustedKeys: BUILT_IN_MANIFEST_KEYS,
     trustCloudKeys: e.KESTREL_TRUST_CLOUD_KEYS === 'true',
   };

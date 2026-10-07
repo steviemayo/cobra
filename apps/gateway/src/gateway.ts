@@ -10,10 +10,12 @@ import {
   type GatewayCommand,
   type GatewayUpdateOrder,
   type GatewayUpdateReport,
+  type LocalAccessPolicy,
   type TelemetryEvent,
 } from '@kestrel/model';
 import { CloudClient, CloudError } from './cloud';
 import type { GatewayConfig } from './config';
+import type { LocalAccessContext } from './local-access';
 import { createUpdater, takeUpdateResult, UpdateError, type Updater } from './updater';
 import { runCommand } from './commands';
 import type { Logger } from './log';
@@ -25,6 +27,7 @@ const KEY_PUBLIC_KEYS = 'publicKeys';
 const KEY_CONFIG_VERSION = 'configVersion';
 const KEY_DEVICE_SET = 'deviceSet';
 const KEY_INSTALL = 'install';
+const KEY_LOCAL_ACCESS = 'localAccess';
 const MAX_BACKOFF_MS = 60_000;
 /** A confirmed device change waits this long for others to join it, then checks in. */
 const URGENT_COALESCE_MS = 1_500;
@@ -32,7 +35,7 @@ const URGENT_COALESCE_MS = 1_500;
 const URGENT_MIN_GAP_MS = 3_000;
 
 /** What this gateway can do, sent in every heartbeat so the portal only hands it work it can run. */
-const FEATURES = ['discovery', 'firmware', 'self-update', 'device-set', 'config-enforce', 'address-tracking', 'browse-points', 'snapshot'];
+const FEATURES = ['discovery', 'firmware', 'self-update', 'device-set', 'config-enforce', 'address-tracking', 'browse-points', 'snapshot', 'local-signin'];
 
 /** An update is not started again for the same version this soon: an attempt that has reached the installer is left to finish. */
 const UPDATE_RETRY_MS = 20 * 60_000;
@@ -173,6 +176,38 @@ export class Gateway {
     return this.store.getJson<Identity>(KEY_IDENTITY);
   }
 
+  private listener: { port: number; tls: boolean } | null = null;
+
+  /** Where the local page ended up listening, so the portal can be told how people reach it. */
+  setListener(port: number, tls: boolean) {
+    this.listener = { port, tls };
+  }
+
+  /** The addresses people use to open this gateway's own page. The portal returns sign-ins only to these. */
+  localUrls(): string[] {
+    if (!this.listener) return [];
+    const scheme = this.listener.tls ? 'https' : 'http';
+    const names = new Set<string>();
+    for (const list of Object.values(networkInterfaces()))
+      for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal) names.add(a.address);
+    names.add(hostname().toLowerCase());
+    for (const h of this.cfg.allowedHosts ?? []) if (h && !h.includes('*')) names.add(h);
+    return [...names].slice(0, 20).map((n) => `${scheme}://${n}:${this.listener!.port}`);
+  }
+
+  /** What the local page needs to decide who may sign in. Before the portal has said, the safe default: the admin code works. */
+  localAccessContext(): LocalAccessContext {
+    return {
+      gatewayId: this.store.get(KEY_CREDENTIAL) ? (this.identity?.gatewayId ?? null) : null,
+      keys: this.trustedKeys(),
+      policy: this.store.getJson<LocalAccessPolicy>(KEY_LOCAL_ACCESS) ?? {
+        breakGlass: true,
+        epoch: 0,
+      },
+      cloudUrl: this.cfg.cloudUrl,
+    };
+  }
+
   /** What the local status page shows. Nothing secret: no credential, token or admin code. */
   status(): LocalStatus {
     const enrolled = !!this.store.get(KEY_CREDENTIAL);
@@ -258,6 +293,7 @@ export class Gateway {
       KEY_PUBLIC_KEYS,
       KEY_CONFIG_VERSION,
       KEY_DEVICE_SET,
+      KEY_LOCAL_ACCESS,
     ])
       this.store.delete(key);
     // Events the old organisation never received must not be filed under the new one.
@@ -592,6 +628,7 @@ export class Gateway {
         commandResults: results,
         dividers: [],
         features: FEATURES,
+        localUrls: this.localUrls(),
         ...(this.updateReport ? { updateReport: this.updateReport } : {}),
       })
       .catch((e: unknown) => {
@@ -600,6 +637,8 @@ export class Gateway {
         throw e;
       });
     this.pendingResults.splice(0, results.length);
+    // Who may open the local page. Kept, so it still applies when the cloud cannot be reached.
+    if (res.localAccess) this.store.setJson(KEY_LOCAL_ACCESS, res.localAccess);
     // A failure only needs telling once; progress is repeated until it settles.
     if (this.updateReport?.state === 'failed' || this.updateReport?.state === 'unsupported')
       this.updateReport = undefined;
