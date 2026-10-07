@@ -65,6 +65,8 @@ export interface AlertMessage {
   portalUrl: string | null;
   /** The organisation's name, for channels that show it. Filled in at delivery. */
   org?: string;
+  /** The room's site time zone (IANA), used to write times out in full. */
+  timezone?: string;
   /**
    * Present when this one message stands for several incidents that belong together (a room's
    * problems, a site's). `incident` is then the headline of the group, and these are its members.
@@ -155,8 +157,24 @@ const durationText = (from: string, to: string): string => {
 export function teamsCard(m: AlertMessage) {
   const tone = toneOf(m);
   const i = m.incident;
-  // Teams turns these into the reader's own date and time format and time zone.
-  const when = (iso: string) => `{{DATE(${iso},SHORT)}} {{TIME(${iso})}}`;
+  // Written out in the site's time zone, because the Teams {{DATE()}} / {{TIME()}} functions did
+  // not render in alerts posted through a webhook. Without a site, Teams is left to try them.
+  const when = (iso: string) => {
+    if (!m.timezone) return `{{DATE(${iso},SHORT)}} {{TIME(${iso})}}`;
+    try {
+      return new Intl.DateTimeFormat('en-AU', {
+        timeZone: m.timezone,
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      }).format(new Date(iso));
+    } catch {
+      return iso;
+    }
+  };
   const facts: { title: string; value: string }[] = [
     ...(i.room ? [{ title: 'Room', value: i.room }] : []),
     ...(m.event === 'opened' || m.event === 'reminder' || m.event === 'resolved'
@@ -552,6 +570,15 @@ export async function buildMessage(
       );
     room = roomNames.get(incident.roomId) ?? null;
   }
+  let timezone: string | undefined;
+  if (incident.roomId && db.site) {
+    try {
+      const r = await db.room.findFirst({ where: { id: incident.roomId } });
+      if (r) timezone = (await db.site.findFirst({ where: { id: r.siteId } }))?.timezone;
+    } catch (e) {
+      console.error('[alerts] could not look up the site time zone', e);
+    }
+  }
   let impact: Impact | undefined;
   if (incident.roomId && (event === 'opened' || event === 'reminder')) {
     try {
@@ -565,6 +592,7 @@ export async function buildMessage(
   }
   return {
     event,
+    ...(timezone ? { timezone } : {}),
     incident: {
       ...(impact ? { impact } : {}),
       id: incident.id,
