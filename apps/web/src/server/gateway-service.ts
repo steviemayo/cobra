@@ -226,6 +226,8 @@ export async function heartbeat(
       status: 'online',
       version: parsed.data.gatewayVersion,
       features: parsed.data.features,
+      // Where people open its own page: sign-ins are only ever sent back to one of these.
+      ...(parsed.data.features.includes('local-signin') ? { localUrls: parsed.data.localUrls } : {}),
     },
     select: { id: true },
   });
@@ -291,6 +293,10 @@ export async function heartbeat(
       watch: await watchedRooms(db, gw.id, now),
       pollNow: await hasWaitingIntents(db, gw.id, now),
       control: entitlements.control,
+      // Who may open the gateway's own page, only for a gateway that knows how to sign people in.
+      ...(parsed.data.features.includes('local-signin')
+        ? { localAccess: await localAccessFor(db, gw.orgId) }
+        : {}),
       // The portal decides when a gateway updates and orders it (below), so it does not announce a version: that was read from a setting nobody kept current.
       update: { channel: gw.channel, latest: null },
       ...(updateOrder ? { updateOrder } : {}),
@@ -301,6 +307,15 @@ export async function heartbeat(
     },
     after: jobs.length ? () => queueAlerts(db, jobs) : undefined,
   };
+}
+
+/** The organisation's rules for who may open a gateway's own page. */
+async function localAccessFor(db: Db, orgId: string) {
+  const org = await db.org.findFirst({
+    where: { id: orgId },
+    select: { gatewayBreakGlass: true, gatewayLocalEpoch: true },
+  });
+  return { breakGlass: org?.gatewayBreakGlass ?? true, epoch: org?.gatewayLocalEpoch ?? 0 };
 }
 
 /**

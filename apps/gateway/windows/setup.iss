@@ -41,11 +41,22 @@ Source: "{#SourceDir}\*"; DestDir: "{app}\app"; Flags: recursesubdirs ignorevers
 Source: "{#SourceDir}\windows\configure.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\windows\reconfigure.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\windows\tray.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\windows\open-gateway.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\windows\update.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\windows\uninstall.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\windows\KestrelGatewayService.exe"; DestDir: "{app}"; Flags: ignoreversion
 
+[Tasks]
+Name: "desktopicon"; Description: "Put a Kestrel Gateway shortcut on the desktop"
+
 [Icons]
+; The gateway itself runs as a service with a tray icon; these shortcuts open its page.
+Name: "{group}\Kestrel Gateway"; Filename: "powershell.exe"; \
+  Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\open-gateway.ps1"""; \
+  WorkingDir: "{app}"
+Name: "{autodesktop}\Kestrel Gateway"; Filename: "powershell.exe"; \
+  Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\open-gateway.ps1"""; \
+  WorkingDir: "{app}"; Tasks: desktopicon
 Name: "{group}\Change cloud URL"; Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\reconfigure.ps1"" -InstallDir ""{app}"""; \
   WorkingDir: "{app}"
@@ -53,7 +64,6 @@ Name: "{group}\Change cloud URL"; Filename: "powershell.exe"; \
 [Code]
 var
   ConnectPage: TInputQueryWizardPage;
-  ModePage: TInputOptionWizardPage;
 
 procedure InitializeWizard;
 begin
@@ -63,18 +73,10 @@ begin
     'portal (Add gateway, or a gateway''s menu) - you can leave it blank and enrol later.');
   ConnectPage.Add('Cloud URL:', False);
   ConnectPage.Add('Enrolment token (optional):', False);
-  // Silent installs pass these on the command line: /CloudUrl=https://... /Token=... /Mode=Service|Tray
+  // Silent installs pass these on the command line: /CloudUrl=https://... /Token=...
+  // (/Mode is no longer read: the gateway always runs as a Windows service, with a tray icon.)
   ConnectPage.Values[0] := ExpandConstant('{param:CloudUrl|{#CloudUrlDefault}}');
   ConnectPage.Values[1] := ExpandConstant('{param:Token|}');
-
-  ModePage := CreateInputOptionPage(ConnectPage.ID,
-    'How should it run?', 'Choose how the gateway starts and keeps running',
-    'Either way it restarts on its own if it stops, and keeps running until you stop it.',
-    True, False);
-  ModePage.Add('As a Windows service (starts at boot, before anyone logs in - recommended for a dedicated room PC)');
-  ModePage.Add('When I log in (shows an icon in the system tray)');
-  ModePage.SelectedValueIndex := 0;
-  if CompareText(ExpandConstant('{param:Mode|Service}'), 'Tray') = 0 then ModePage.SelectedValueIndex := 1;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -107,10 +109,7 @@ end;
 
 function GetMode(Param: string): string;
 begin
-  if ModePage.SelectedValueIndex = 0 then
-    Result := 'Service'
-  else
-    Result := 'Tray';
+  Result := 'Service';
 end;
 
 // Whatever is already installed here is stopped and cleared before new files go down. Files of a

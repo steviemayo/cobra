@@ -490,8 +490,46 @@ export const HeartbeatRequest = z.object({
   features: z.array(z.string().max(40)).max(20).default([]),
   /** Progress on an update the portal asked for. Absent when there is none in hand. */
   updateReport: GatewayUpdateReport.optional(),
+  /**
+   * The addresses people on the site use to open this gateway's own page (`http://192.168.1.20:8080`).
+   * The portal only ever sends a signed-in person back to one of these.
+   */
+  localUrls: z.array(z.string().url().max(200)).max(20).default([]),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
+
+/** What a person signing in to a gateway's own page can do there. */
+export const LocalRole = z.enum(['admin', 'viewer']);
+export type LocalRole = z.infer<typeof LocalRole>;
+
+/** The portal's rules for who may open the gateway's own page (set per organisation). */
+export const LocalAccessPolicy = z.object({
+  /** Whether the admin code kept on the machine still unlocks the admin page. */
+  breakGlass: z.boolean(),
+  /** Raised by the portal to end every sign-in made before it ("sign everyone out"). */
+  epoch: z.number().int().min(0),
+});
+export type LocalAccessPolicy = z.infer<typeof LocalAccessPolicy>;
+
+/** Signed (purpose `local_access_grant`) by the portal after a person signs in there and confirms. */
+export const LOCAL_ACCESS_PURPOSE = 'local_access_grant';
+export const LocalAccessGrant = z.object({
+  /** One use only: the gateway remembers it until it has expired. */
+  id: z.string().uuid(),
+  gatewayId: z.string().uuid(),
+  orgId: z.string().uuid(),
+  userId: z.string().min(1).max(100),
+  email: z.string().max(200),
+  name: z.string().max(200).nullable(),
+  role: LocalRole,
+  /** Chosen by the gateway when the person started signing in; it must match the one the gateway holds. */
+  state: z.string().min(16).max(100),
+  issuedAt: z.number().int(),
+  expiresAt: z.number().int(),
+  /** The portal's policy epoch when this was issued. */
+  epoch: z.number().int().min(0),
+});
+export type LocalAccessGrant = z.infer<typeof LocalAccessGrant>;
 
 export const HeartbeatResponse = z.object({
   /** If this differs from the gateway's configVersion it should fetch /config. */
@@ -520,6 +558,8 @@ export const HeartbeatResponse = z.object({
   updateOrder: GatewayUpdateOrder.optional(),
   /** Today's bookings for the rooms whose calendars were read recently. Sent only to a gateway that says it shows them. */
   schedules: z.array(RoomMeetings).max(200).default([]),
+  /** Who may open this gateway's own page. Only sent to a gateway that advertised 'local-signin'. */
+  localAccess: LocalAccessPolicy.optional(),
 });
 export type HeartbeatResponse = z.infer<typeof HeartbeatResponse>;
 
@@ -605,6 +645,10 @@ export const TelemetryEvent = z.object({
     'command.finished',
     'gateway.started',
     'manifest.rejected',
+    /** Someone signed in to, or signed out of, the gateway's own page (who, how, from where). */
+    'local.signin',
+    /** Someone changed something on the gateway's own page (enrolled it, reset it). */
+    'local.action',
   ]),
   roomId: z.string().uuid().optional(),
   data: z.record(z.string(), z.unknown()).default({}),

@@ -6,14 +6,17 @@ import {
   PROTOCOL_VERSION,
   PublicKey,
   type CommandResult,
+  type DeviceReport,
   type EnrollResponse,
   type GatewayCommand,
   type GatewayUpdateOrder,
   type GatewayUpdateReport,
+  type LocalAccessPolicy,
   type TelemetryEvent,
 } from '@kestrel/model';
 import { CloudClient, CloudError } from './cloud';
 import type { GatewayConfig } from './config';
+import type { LocalAccessContext } from './local-access';
 import { createUpdater, takeUpdateResult, UpdateError, type Updater } from './updater';
 import { runCommand } from './commands';
 import type { Logger } from './log';
@@ -25,6 +28,7 @@ const KEY_PUBLIC_KEYS = 'publicKeys';
 const KEY_CONFIG_VERSION = 'configVersion';
 const KEY_DEVICE_SET = 'deviceSet';
 const KEY_INSTALL = 'install';
+const KEY_LOCAL_ACCESS = 'localAccess';
 const MAX_BACKOFF_MS = 60_000;
 /** A confirmed device change waits this long for others to join it, then checks in. */
 const URGENT_COALESCE_MS = 1_500;
@@ -32,7 +36,7 @@ const URGENT_COALESCE_MS = 1_500;
 const URGENT_MIN_GAP_MS = 3_000;
 
 /** What this gateway can do, sent in every heartbeat so the portal only hands it work it can run. */
-const FEATURES = ['discovery', 'firmware', 'self-update', 'device-set', 'config-enforce', 'address-tracking', 'browse-points', 'snapshot'];
+const FEATURES = ['discovery', 'firmware', 'self-update', 'device-set', 'config-enforce', 'address-tracking', 'browse-points', 'snapshot', 'local-signin'];
 
 /** An update is not started again for the same version this soon: an attempt that has reached the installer is left to finish. */
 const UPDATE_RETRY_MS = 20 * 60_000;
@@ -60,6 +64,30 @@ export interface LocalStatus {
   /** How many devices this gateway is polling. */
   devices: number;
   update: { state: string; version?: string; error?: string } | null;
+}
+
+export interface CheckIn {
+  at: string;
+  ok: boolean;
+  /** How long the whole check-in took. */
+  ms: number;
+  error?: string;
+}
+
+export interface GatewaySnapshot {
+  startedAt: string;
+  uptimeSeconds: number;
+  gatewayId: string | null;
+  heartbeatSeconds: number | null;
+  checkIns: CheckIn[];
+  consecutiveFailures: number;
+  clockSkewMs: number | null;
+  configVersion: string | null;
+  deviceSetVersion: string | null;
+  localUrls: string[];
+  tls: boolean;
+  trustedKeys: number;
+  devices: DeviceReport[];
 }
 
 function hostOf(url: string): string {
@@ -129,6 +157,10 @@ export class Gateway {
   private lastContactAt: Date | null = null;
   private lastProblem: string | null = null;
   private lastUpdateAttempt: { version: string; at: number } | null = null;
+  /** How the last check-ins went, newest last, for the page's troubleshooting view. */
+  private readonly beats: CheckIn[] = [];
+  /** How far this machine's clock is from Kestrel's at the last check-in (Kestrel minus here). */
+  private skewMs: number | null = null;
 
   // ---- Lifecycle ------------------------------------------------------------------------------
 
@@ -171,6 +203,59 @@ export class Gateway {
 
   get identity(): Identity | null {
     return this.store.getJson<Identity>(KEY_IDENTITY);
+  }
+
+  private listener: { port: number; tls: boolean } | null = null;
+
+  /** Where the local page ended up listening, so the portal can be told how people reach it. */
+  setListener(port: number, tls: boolean) {
+    this.listener = { port, tls };
+  }
+
+  /** The addresses people use to open this gateway's own page. The portal returns sign-ins only to these. */
+  localUrls(): string[] {
+    if (!this.listener) return [];
+    const scheme = this.listener.tls ? 'https' : 'http';
+    // This machine's own address too: the tray icon and the Start menu shortcut open the page that way.
+    const names = new Set<string>(['127.0.0.1']);
+    for (const list of Object.values(networkInterfaces()))
+      for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal) names.add(a.address);
+    names.add(hostname().toLowerCase());
+    for (const h of this.cfg.allowedHosts ?? []) if (h && !h.includes('*')) names.add(h);
+    return [...names].slice(0, 20).map((n) => `${scheme}://${n}:${this.listener!.port}`);
+  }
+
+  /** Everything the troubleshooting pages show about how this gateway is getting on. Nothing secret. */
+  snapshot(): GatewaySnapshot {
+    const id = this.identity;
+    return {
+      startedAt: new Date(this.startedAt).toISOString(),
+      uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
+      gatewayId: id?.gatewayId ?? null,
+      heartbeatSeconds: id?.heartbeatSeconds ?? null,
+      checkIns: [...this.beats].reverse(),
+      consecutiveFailures: this.failures,
+      clockSkewMs: this.skewMs,
+      configVersion: this.store.get(KEY_CONFIG_VERSION),
+      deviceSetVersion: this.devices.setVersion ?? null,
+      localUrls: this.localUrls(),
+      tls: this.listener?.tls ?? false,
+      trustedKeys: this.trustedKeys().length,
+      devices: this.devices.reports(),
+    };
+  }
+
+  /** What the local page needs to decide who may sign in. Before the portal has said, the safe default: the admin code works. */
+  localAccessContext(): LocalAccessContext {
+    return {
+      gatewayId: this.store.get(KEY_CREDENTIAL) ? (this.identity?.gatewayId ?? null) : null,
+      keys: this.trustedKeys(),
+      policy: this.store.getJson<LocalAccessPolicy>(KEY_LOCAL_ACCESS) ?? {
+        breakGlass: true,
+        epoch: 0,
+      },
+      cloudUrl: this.cfg.cloudUrl,
+    };
   }
 
   /** What the local status page shows. Nothing secret: no credential, token or admin code. */
@@ -258,6 +343,7 @@ export class Gateway {
       KEY_PUBLIC_KEYS,
       KEY_CONFIG_VERSION,
       KEY_DEVICE_SET,
+      KEY_LOCAL_ACCESS,
     ])
       this.store.delete(key);
     // Events the old organisation never received must not be filed under the new one.
@@ -409,12 +495,19 @@ export class Gateway {
     return next;
   }
 
+  private noteBeat(beat: CheckIn) {
+    this.beats.push(beat);
+    if (this.beats.length > 30) this.beats.shift();
+  }
+
   private async runTick(): Promise<void> {
     const used = this.store.get(KEY_CREDENTIAL);
+    const began = Date.now();
     try {
       await this.ensureEnrolled();
       await this.heartbeat();
       await this.flushTelemetry();
+      this.noteBeat({ at: new Date().toISOString(), ok: true, ms: Date.now() - began });
       this.failures = 0;
       this.lastContactAt = new Date();
       this.lastProblem = null;
@@ -436,6 +529,12 @@ export class Gateway {
         return;
       }
       this.failures++;
+      this.noteBeat({
+        at: new Date().toISOString(),
+        ok: false,
+        ms: Date.now() - began,
+        error: (e instanceof Error ? e.message : String(e)).slice(0, 200),
+      });
       const unreachable = e instanceof CloudError && e.unreachable;
       this.lastProblem = unreachable
         ? 'The cloud cannot be reached from this machine.'
@@ -592,6 +691,7 @@ export class Gateway {
         commandResults: results,
         dividers: [],
         features: FEATURES,
+        localUrls: this.localUrls(),
         ...(this.updateReport ? { updateReport: this.updateReport } : {}),
       })
       .catch((e: unknown) => {
@@ -600,6 +700,9 @@ export class Gateway {
         throw e;
       });
     this.pendingResults.splice(0, results.length);
+    this.skewMs = Date.parse(res.serverTime) - Date.now();
+    // Who may open the local page. Kept, so it still applies when the cloud cannot be reached.
+    if (res.localAccess) this.store.setJson(KEY_LOCAL_ACCESS, res.localAccess);
     // A failure only needs telling once; progress is repeated until it settles.
     if (this.updateReport?.state === 'failed' || this.updateReport?.state === 'unsupported')
       this.updateReport = undefined;

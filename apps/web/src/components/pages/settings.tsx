@@ -18,6 +18,7 @@ import { PageContainer, PageHeader } from '@/components/common/page-header';
 import { BriefingSetting } from '@/components/common/briefing-setting';
 import { RecapSetting } from '@/components/common/recap-setting';
 import { CameraPreviewSetting } from '@/components/common/camera-preview-setting';
+import { GatewayAccessSetting } from '@/components/common/gateway-access-setting';
 import { SecuritySetting } from '@/components/common/security-setting';
 import { ServiceProvidersSetting } from '@/components/common/service-providers-setting';
 import { StaffAccessSetting } from '@/components/common/staff-access-setting';
@@ -87,6 +88,7 @@ export function GeneralSettings() {
       <ApiKeysSetting />
       {org.kind !== 'msp' && <ServiceProvidersSetting />}
       <CameraPreviewSetting />
+      <GatewayAccessSetting />
       <SecuritySetting />
       <StaffAccessSetting />
       <DeleteOrgSetting />
