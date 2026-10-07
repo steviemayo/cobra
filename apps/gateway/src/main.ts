@@ -42,7 +42,18 @@ async function main() {
     const access = new LocalAccess(() => gateway.localAccessContext(), log);
     server = await createLocalServer({
       log,
-      admin: { gateway, log, adminCode: admin.code, access },
+      admin: {
+        gateway,
+        log,
+        adminCode: admin.code,
+        access,
+        diagnostics: {
+          snapshot: () => gateway.snapshot(),
+          dataDir: cfg.dataDir,
+          cloudUrl: cfg.cloudUrl,
+          logFile: join(cfg.dataDir, 'logs', 'gateway.log'),
+        },
+      },
       allowedHosts: cfg.allowedHosts,
       tls,
     });

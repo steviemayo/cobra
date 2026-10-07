@@ -50,5 +50,5 @@ What B needs:
 
 1. Sign in with Kestrel on the gateway's local page (done, gateway 0.7.0; see `docs/gateway-local-access.md`)
 2. Windows: one install mode (a service), tray icon as a viewer (done, gateway 0.7.0)
-3. Gateway page: web-app styling, troubleshooting content
+3. Gateway page: web-app styling, troubleshooting content (done, gateway 0.7.0)
 4. Platform requirements published (`docs/gateway-requirements.md`), Linux native options above kept for later

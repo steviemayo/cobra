@@ -2,8 +2,10 @@ import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { Gateway, LocalStatus } from './gateway';
+import { hostFacts, runChecks, tailLog, type CheckResult } from './diagnostics';
+import type { Gateway, GatewaySnapshot, LocalStatus } from './gateway';
 import { LocalAccess, type LocalSession } from './local-access';
+import { ago, duration, esc, kv, layout, pill, table, type Tab } from './local-ui';
 import type { Logger } from './log';
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -25,6 +27,15 @@ export interface LocalAdminOptions {
   access?: LocalAccess;
   /** The page is served over HTTPS: cookies are marked Secure. */
   secure?: boolean;
+  /** What the troubleshooting pages (devices, diagnostics, logs) read. Without it only the overview and admin pages exist. */
+  diagnostics?: {
+    snapshot: () => GatewaySnapshot;
+    dataDir: string;
+    cloudUrl: string;
+    logFile: string;
+    /** Test seam. */
+    runChecks?: typeof runChecks;
+  };
   now?: () => number;
 }
 
@@ -49,12 +60,6 @@ export function loadAdminCode(dataDir: string, log: Logger): { code: string; pat
 }
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
-const esc = (s: string) =>
-  s.replace(
-    /[&<>"']/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
-  );
-
 const MESSAGES: Record<string, { ok: boolean; text: string }> = {
   enrolled: {
     ok: true,
@@ -77,35 +82,6 @@ const MESSAGES: Record<string, { ok: boolean; text: string }> = {
   wrong: { ok: false, text: 'That code is not right.' },
   confirm: { ok: false, text: 'Type RESET to confirm.' },
 };
-
-const CSS = `
-:root{color-scheme:light dark;--bg:#fafaf9;--fg:#1c1917;--muted:#78716c;--line:#e7e5e4;--card:#fff;--ok:#15803d;--bad:#b91c1c;--accent:#1d4ed8}
-@media (prefers-color-scheme:dark){:root{--bg:#0c0a09;--fg:#f5f5f4;--muted:#a8a29e;--line:#292524;--card:#171412;--ok:#4ade80;--bad:#f87171;--accent:#93c5fd}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
-main{max-width:720px;margin:0 auto;padding:24px 16px 48px}h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:28px 0 8px}
-p{margin:8px 0}.muted{color:var(--muted)}section,.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin:12px 0}
-dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:8px 0}dt{color:var(--muted)}dd{margin:0}
-table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px 6px;border-top:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:500;border-top:0}
-code{font:13px ui-monospace,Consolas,monospace;word-break:break-all}a{color:var(--accent)}
-.ok{color:var(--ok)}.bad{color:var(--bad)}label{display:block;margin:10px 0 4px}
-input[type=text],input[type=password]{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
-button{margin-top:10px;padding:8px 14px;border:1px solid var(--line);border-radius:6px;background:var(--fg);color:var(--bg);font:inherit;cursor:pointer}
-button.danger{background:var(--bad);color:#fff;border-color:var(--bad)}button.plain{background:transparent;color:var(--fg)}
-.btn{display:inline-block;padding:9px 16px;border-radius:6px;background:var(--fg);color:var(--bg);text-decoration:none}form.inline{display:inline}.banner{padding:10px 12px;border-radius:6px;border:1px solid var(--line);margin:12px 0}
-`;
-
-function layout(title: string, body: string, refresh = false): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-${refresh ? '<meta http-equiv="refresh" content="30">' : ''}<title>${esc(title)}</title><style>${CSS}</style></head><body><main>${body}</main></body></html>`;
-}
-
-function ago(iso: string | null, now: number): string {
-  if (!iso) return 'not yet';
-  const s = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.round(s / 60)} min ago`;
-  return `${Math.round(s / 3600)} h ago`;
-}
 
 function headline(s: LocalStatus, now: number): { text: string; ok: boolean } {
   switch (s.enrolment) {
@@ -136,11 +112,43 @@ function headline(s: LocalStatus, now: number): { text: string; ok: boolean } {
   }
 }
 
-/**
- * The gateway's own pages: a status page anyone on the network can read (what it is
- * doing, nothing secret) and an admin page behind a code for entering a new enrolment token or
- * resetting. Plain server-rendered HTML with no scripts, so it works offline and needs no build.
- */
+/** What to try next, in plain language, from what the gateway knows about itself. */
+function guidance(s: LocalStatus, snap: GatewaySnapshot | null, now: number, cloudHost: string): string[] {
+  const out: string[] = [];
+  const problem = (s.problem ?? '').toLowerCase();
+  if (s.enrolment === 'enrolled') {
+    const recent = s.lastContactAt && now - Date.parse(s.lastContactAt) < RECENT_MS;
+    if (!recent) {
+      if (problem.includes('cannot be reached') || problem.includes('could not reach'))
+        out.push(
+          `This machine cannot reach ${esc(cloudHost)}. Check it has internet access and that outbound HTTPS (port 443) to that address is allowed by the firewall or proxy, then run the checks on the <a href="/diagnostics">Diagnostics</a> page. Devices keep being watched in the meantime and events are saved to send later.`,
+        );
+      else if (problem.includes('unauthorised') || problem.includes('credential'))
+        out.push(
+          'Kestrel no longer recognises this gateway. If its record was deleted it joins again by itself using its enrolment token; otherwise an admin can enter a new token on the <a href="/admin">Admin</a> page.',
+        );
+      else
+        out.push(
+          `The last check-in failed${s.problem ? `: ${esc(s.problem)}` : ''}. See <a href="/logs?level=warn">Logs</a> for details.`,
+        );
+    }
+    if (snap?.clockSkewMs != null && Math.abs(snap.clockSkewMs) > 60_000)
+      out.push(
+        `This machine’s clock is about ${Math.round(Math.abs(snap.clockSkewMs) / 1000)} seconds ${snap.clockSkewMs > 0 ? 'behind' : 'ahead of'} Kestrel’s. Signed releases and sign-ins can be refused when it is this far out; fix the machine’s time settings.`,
+      );
+    const offline = snap?.devices.filter((d) => !d.online).length ?? 0;
+    if (offline > 0)
+      out.push(
+        `${offline} device${offline === 1 ? ' is' : 's are'} not answering. See <a href="/devices">Devices</a>.`,
+      );
+    if (s.update?.state === 'failed' || s.update?.state === 'unsupported')
+      out.push(`The last update did not go ahead${s.update.error ? ` (${esc(s.update.error)})` : ''}. The previous version is still running.`);
+  } else if (s.enrolment === 'refused') {
+    out.push('The token was not accepted. It may have been used already or expired: create a new one in the portal (Gateways, then Add gateway) and enter it on the Admin page.');
+  }
+  return out;
+}
+
 export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions): Promise<void> {
   const now = opts.now ?? (() => Date.now());
   const secure = opts.secure ?? false;
@@ -156,8 +164,11 @@ export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions):
       opts.log,
       now,
     );
+  const diag = opts.diagnostics;
   const failures = new Map<string, { count: number; until: number }>();
   const code = digest(opts.adminCode.replace(/-/g, ''));
+  let lastCheckAt = 0;
+  let lastChecks: { at: number; results: CheckResult[] } | null = null;
 
   app.addContentTypeParser(
     'application/x-www-form-urlencoded',
@@ -218,6 +229,59 @@ export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions):
     opts.gateway.record?.({ type, data });
 
   const message = (key: unknown) => (typeof key === 'string' ? MESSAGES[key] : undefined);
+  const bannerHtml = (b?: { ok: boolean; text: string }) =>
+    b ? `<div class="banner ${b.ok ? 'ok' : 'bad'}" role="status">${esc(b.text)}</div>` : '';
+
+  /** A page in the shared look, with the header and tabs that fit who is looking. */
+  const page = (
+    session: LocalSession | null,
+    o: { title: string; active?: string; body: string; refresh?: boolean },
+  ): string => {
+    const s = opts.gateway.status();
+    const h = headline(s, now());
+    const tabs: Tab[] = session
+      ? [
+          { href: '/', label: 'Overview' },
+          ...(diag
+            ? [
+                { href: '/devices', label: 'Devices' },
+                { href: '/diagnostics', label: 'Diagnostics' },
+                { href: '/logs', label: 'Logs' },
+              ]
+            : []),
+          ...(session.role === 'admin' ? [{ href: '/admin', label: 'Admin' }] : []),
+        ]
+      : [];
+    const status: { text: string; kind: 'ok' | 'warn' | 'fail' } =
+      s.enrolment === 'enrolled'
+        ? h.ok
+          ? { text: 'Connected', kind: 'ok' }
+          : { text: 'Not connected', kind: 'fail' }
+        : s.enrolment === 'unclaimed' || s.enrolment === 'dismissed' || s.enrolment === 'claimed'
+          ? { text: 'Not set up', kind: 'warn' }
+          : { text: 'Connecting', kind: 'warn' };
+    return layout({
+      title: o.title,
+      body: o.body,
+      who: session ? { name: session.who, role: session.role === 'admin' ? 'admin' : 'view only' } : null,
+      gatewayName: session ? s.name : null,
+      status,
+      tabs,
+      active: o.active,
+      refresh: o.refresh,
+      version: session ? s.version : undefined,
+    });
+  };
+
+  /** Signed-in pages only; anyone else is sent to the front page to sign in. */
+  const needSession = (req: FastifyRequest, reply: FastifyReply): LocalSession | null => {
+    const s = sessionOf(req);
+    if (!s) {
+      void reply.redirect('/', 303);
+      return null;
+    }
+    return s;
+  };
 
   const signInButtons = (): string => {
     const kestrel = access.kestrelSigninAvailable()
@@ -229,17 +293,14 @@ export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions):
     return kestrel + machine;
   };
 
-  // ---- status ---------------------------------------------------------------------------------
+  // ---- overview ----------------------------------------------------------------------------------
 
   app.get('/', async (req, reply) => {
     const s = opts.gateway.status();
     const t = now();
     const session = sessionOf(req);
     const q = req.query as Record<string, unknown>;
-    const banner = message(q.msg);
-    const bannerHtml = banner
-      ? `<div class="banner ${banner.ok ? 'ok' : 'bad'}">${esc(banner.text)}</div>`
-      : '';
+    const banner = bannerHtml(message(q.msg));
     const h = headline(s, t);
     const claimHelp =
       s.enrolment === 'unclaimed' || s.enrolment === 'dismissed'
@@ -248,20 +309,39 @@ export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions):
 
     // Anyone on the network sees only whether the gateway is working. Everything else needs a sign-in.
     if (!session) {
-      const line = s.enrolment === 'enrolled' ? (h.ok ? 'Connected to Kestrel.' : 'Not connected to Kestrel right now. Devices keep being watched.') : h.text;
-      const body = `<h1>Kestrel gateway</h1>${bannerHtml}
-<div class="card"><p class="${h.ok ? 'ok' : 'bad'}"><strong>${esc(line)}</strong></p>${claimHelp}</div>
-<div class="card"><h2 style="margin-top:0">Sign in</h2>${signInButtons() || '<p class="muted">Signing in is not available right now.</p>'}</div>`;
-      return html(reply, layout('Kestrel gateway', body, true));
+      const line =
+        s.enrolment === 'enrolled'
+          ? h.ok
+            ? 'Connected to Kestrel.'
+            : 'Not connected to Kestrel right now. Devices keep being watched.'
+          : h.text;
+      const body = `<h1>Kestrel gateway</h1><p class="sub">An on-site gateway that watches this site’s devices and reports to Kestrel.</p>${banner}
+<div class="card"><p class="${h.ok ? 'ok' : 'bad'}" style="margin:0"><strong>${esc(line)}</strong></p>${claimHelp}</div>
+<div class="card"><h2>Sign in</h2>${signInButtons() || '<p class="muted">Signing in is not available right now.</p>'}</div>`;
+      return html(reply, page(null, { title: 'Sign in', body, refresh: true }));
     }
 
+    const snap = diag?.snapshot() ?? null;
+    const hints = guidance(s, snap, t, s.cloudHost)
+      .map((x) => `<div class="hint">${x}</div>`)
+      .join('');
+    const online = snap?.devices.filter((d) => d.online).length ?? 0;
+    const offline = (snap?.devices.length ?? 0) - online;
     const facts: [string, string][] = [
       ['Name', s.name ? esc(s.name) : '<span class="muted">not set up</span>'],
       ['Version', esc(s.version)],
       ['Kestrel address', esc(s.cloudHost)],
       ['Last contact', esc(ago(s.lastContactAt, t))],
     ];
-    if (s.enrolment === 'enrolled') facts.push(['Devices watched', String(s.devices)]);
+    if (snap) {
+      facts.push(['Running for', esc(duration(snap.uptimeSeconds))]);
+      if (snap.heartbeatSeconds) facts.push(['Checks in every', `${snap.heartbeatSeconds} seconds`]);
+    }
+    if (s.enrolment === 'enrolled')
+      facts.push([
+        'Devices watched',
+        `${s.devices}${snap && s.devices > 0 ? ` (${online} answering${offline ? `, <span class="bad">${offline} not</span>` : ''})` : ''}`,
+      ]);
     if (s.bufferedEvents > 0)
       facts.push([
         'Waiting to send',
@@ -272,15 +352,195 @@ export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions):
         'Update',
         `${esc(s.update.state)}${s.update.version ? ` to ${esc(s.update.version)}` : ''}${s.update.error ? ` (${esc(s.update.error)})` : ''}`,
       ]);
-    const body = `<h1>Kestrel gateway</h1>${bannerHtml}
-<p class="muted">Signed in as ${esc(session.who)} (${session.role === 'admin' ? 'can change settings' : 'view only'})${secure ? '' : ' · <span class="bad">this connection is not encrypted</span>'}</p>
-<div class="card"><p class="${h.ok ? 'ok' : 'bad'}"><strong>${esc(h.text)}</strong></p>${claimHelp}
-<dl>${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></div>
-<p class="muted">${session.role === 'admin' ? '<a href="/admin">Admin</a> · ' : ''}<form class="inline" method="post" action="/signout"><button class="plain" type="submit">Sign out</button></form></p>`;
-    return html(reply, layout('Kestrel gateway', body, true));
+    const checkIns = snap
+      ? `<div class="card"><h2>Recent check-ins</h2>${table(
+          ['When', 'Result', 'Took'],
+          snap.checkIns
+            .slice(0, 8)
+            .map((c) => [
+              `<span class="muted">${esc(ago(c.at, t))}</span>`,
+              c.ok ? pill('ok', 'OK') : `${pill('fail', 'Failed')} <span class="muted">${esc(c.error ?? '')}</span>`,
+              `${c.ms} ms`,
+            ]),
+          'No check-ins yet.',
+        )}</div>`
+      : '';
+    const body = `<h1>Overview</h1><p class="sub">How this gateway is getting on.</p>${banner}
+<div class="card"><p class="${h.ok ? 'ok' : 'bad'}" style="margin:0"><strong>${esc(h.text)}</strong></p>${claimHelp}${hints}</div>
+<div class="grid"><div class="card"><h2>This gateway</h2>${kv(facts)}</div>${checkIns}</div>`;
+    return html(reply, page(session, { title: 'Overview', active: '/', body, refresh: true }));
   });
 
-  // ---- signing in with a Kestrel account --------------------------------------------------------
+  // ---- troubleshooting pages (signed in) ---------------------------------------------------------
+
+  if (diag) {
+    app.get('/devices', async (req, reply) => {
+      const session = needSession(req, reply);
+      if (!session) return;
+      const snap = diag.snapshot();
+      const rows = [...snap.devices]
+        .sort((a, b) => Number(a.online) - Number(b.online) || a.name.localeCompare(b.name))
+        .map((d) => {
+          const lat = d.latency;
+          const loss = lat && lat.sent > 0 ? Math.round(((lat.sent - lat.ok) / lat.sent) * 100) : null;
+          return [
+            esc(d.name || d.deviceId),
+            d.online
+              ? pill('ok', 'Answering')
+              : pill('fail', d.offlineForMs ? `Not answering for ${duration(Math.round(d.offlineForMs / 1000))}` : 'Not answering'),
+            esc(d.driver ?? ''),
+            lat?.avgMs !== undefined
+              ? `${Math.round(lat.avgMs)} ms${loss ? ` <span class="warnc">(${loss}% lost)</span>` : ''}`
+              : lat && lat.ok === 0
+                ? '<span class="bad">no reply</span>'
+                : '<span class="muted">-</span>',
+            esc(d.firmware ?? ''),
+            d.address?.change
+              ? `<span class="warnc">moved ${esc(d.address.change.from)} → ${esc(d.address.change.to)}</span>`
+              : '',
+          ];
+        });
+      const online = snap.devices.filter((d) => d.online).length;
+      const body = `<h1>Devices</h1><p class="sub">${snap.devices.length === 0 ? 'No devices yet.' : `${online} of ${snap.devices.length} answering.`} A device that stops answering is reported to Kestrel after a few quick re-checks.</p>
+<div class="card">${table(
+        ['Device', 'State', 'Driver', 'Network delay', 'Firmware', 'Address'],
+        rows,
+        'This gateway has no devices to watch yet. Add devices in the Kestrel portal and assign them to this gateway.',
+      )}</div>
+<p class="muted">If a device is not answering, check it is powered and on the network, that this gateway can reach its address (firewalls and VLAN rules between the two), and that its login in the portal is still correct.</p>`;
+      return html(reply, page(session, { title: 'Devices', active: '/devices', body, refresh: true }));
+    });
+
+    const checksCard = () => {
+      if (!lastChecks) return '<p class="muted">Not run yet.</p>';
+      return `<p class="muted">Run ${esc(ago(new Date(lastChecks.at).toISOString(), now()))}.</p>${table(
+        ['Check', 'Result', 'What it found'],
+        lastChecks.results.map((r) => [
+          esc(r.label),
+          pill(r.status, { ok: 'OK', warn: 'Check', fail: 'Problem', info: 'Note' }[r.status]) +
+            (r.ms !== undefined ? ` <span class="muted">${r.ms} ms</span>` : ''),
+          esc(r.detail),
+        ]),
+        '',
+      )}`;
+    };
+
+    const diagnosticsPage = (req: FastifyRequest, reply: FastifyReply, session: LocalSession, banner?: string) => {
+      const snap = diag.snapshot();
+      const host = hostFacts(diag.dataDir);
+      const mb = (n: number) => `${n.toLocaleString('en')} MB`;
+      const skew = snap.clockSkewMs;
+      const machine: [string, string][] = [
+        ['Machine', esc(host.hostname)],
+        ['System', esc(`${host.os} (${host.arch})`)],
+        ['Memory', `gateway ${mb(host.memoryUsedMb)}; ${mb(host.memoryFreeMb)} free of ${mb(host.memoryTotalMb)}`],
+        ['Disk', host.dataFreeGb !== null ? `${host.dataFreeGb} GB free of ${host.dataTotalGb} GB` : '<span class="muted">unknown</span>'],
+        ['Data folder', `<code>${esc(host.dataDir)}</code>${host.databaseKb !== null ? ` <span class="muted">(database ${host.databaseKb.toLocaleString('en')} KB)</span>` : ''}`],
+        ['Time zone', esc(host.timeZone)],
+        ['Local time', esc(host.localTime)],
+        [
+          'Clock vs Kestrel',
+          skew === null
+            ? '<span class="muted">not checked yet</span>'
+            : Math.abs(skew) > 60_000
+              ? `<span class="bad">${Math.round(Math.abs(skew) / 1000)} seconds ${skew > 0 ? 'behind' : 'ahead'}</span>`
+              : 'in step',
+        ],
+        ['Node.js', esc(host.node)],
+      ];
+      const net: [string, string][] = [
+        ['Kestrel address', esc(diag.cloudUrl)],
+        ['Reached at', snap.localUrls.length ? snap.localUrls.map((u) => `<code>${esc(u)}</code>`).join('<br>') : '<span class="muted">not known yet</span>'],
+        ['This page', snap.tls ? `${pill('ok', 'Encrypted')} HTTPS` : `${pill('warn', 'Not encrypted')} plain HTTP. Set a certificate (see the gateway README) to use HTTPS.`],
+        ['Gateway ID', snap.gatewayId ? `<code>${esc(snap.gatewayId)}</code>` : '<span class="muted">not enrolled</span>'],
+        ['Settings version', esc(snap.configVersion ?? 'none')],
+        ['Device list version', esc(snap.deviceSetVersion ?? 'none')],
+        ['Trusted signing keys', String(snap.trustedKeys)],
+      ];
+      const body = `<h1>Diagnostics</h1><p class="sub">Checks and facts for working out why a gateway is not connecting.</p>${banner ?? ''}
+<div class="card"><h2>Run checks</h2><p class="muted" style="margin-top:0">Looks up and connects to Kestrel from this machine, compares the clock, and checks the data folder.</p>
+<form method="post" action="/diagnostics/run"><button type="submit">Run checks now</button></form>${checksCard()}</div>
+<div class="grid"><div class="card"><h2>This machine</h2>${kv(machine)}</div><div class="card"><h2>Network and identity</h2>${kv(net)}</div></div>
+<div class="card"><h2>Support</h2><p class="muted" style="margin-top:0">A file with these facts and the recent log, to send to whoever is helping. It holds no passwords, tokens or admin code.</p>
+<a class="btn outline" href="/support-bundle">Download support bundle</a></div>`;
+      return html(reply, page(session, { title: 'Diagnostics', active: '/diagnostics', body }));
+    };
+
+    app.get('/diagnostics', async (req, reply) => {
+      const session = needSession(req, reply);
+      if (!session) return;
+      return diagnosticsPage(req, reply, session);
+    });
+
+    app.post('/diagnostics/run', async (req, reply) => {
+      if (!sameOrigin(req)) return reply.code(403).send('Not allowed');
+      const session = needSession(req, reply);
+      if (!session) return;
+      const t = now();
+      // One run at a time, and not in quick succession: it makes real network calls.
+      if (t - lastCheckAt < 5000)
+        return diagnosticsPage(req, reply, session, bannerHtml({ ok: false, text: 'Checks ran a moment ago. Wait a few seconds and try again.' }));
+      lastCheckAt = t;
+      const results = await (diag.runChecks ?? runChecks)({ cloudUrl: diag.cloudUrl, dataDir: diag.dataDir });
+      lastChecks = { at: now(), results };
+      record('local.action', { action: 'run-checks', who: session.who, ip: req.ip });
+      return diagnosticsPage(req, reply, session);
+    });
+
+    app.get('/logs', async (req, reply) => {
+      const session = needSession(req, reply);
+      if (!session) return;
+      const q = req.query as Record<string, unknown>;
+      const level = (['info', 'warn', 'error', 'debug'] as const).find((l) => l === q.level) ?? 'info';
+      const lines = tailLog(diag.logFile, 300, level);
+      const filters = (['info', 'warn', 'error'] as const)
+        .map((l) => `<a href="/logs?level=${l}"${l === level ? ' class="on"' : ''}>${{ info: 'Everything', warn: 'Warnings and errors', error: 'Errors only' }[l]}</a>`)
+        .join('');
+      const rows = lines.map((l) => [
+        `<span class="time mono">${esc(l.time.replace('T', ' ').replace(/\.\d+/, ''))}</span>`,
+        pill(l.level === 'error' ? 'fail' : l.level === 'warn' ? 'warn' : 'info', l.level),
+        `${esc(l.message)}${l.extra ? `<details><summary>details</summary><code>${esc(l.extra)}</code></details>` : ''}`,
+      ]);
+      const body = `<h1>Logs</h1><p class="sub">The newest ${lines.length} lines, newest first. The full file is <code>${esc(diag.logFile)}</code>.</p>
+<div class="filters">${filters}</div>
+<div class="card">${table(['Time', 'Level', 'What happened'], rows, 'Nothing logged at this level yet.')}</div>
+<a class="btn outline" href="/support-bundle">Download support bundle</a>`;
+      return html(reply, page(session, { title: 'Logs', active: '/logs', body }));
+    });
+
+    app.get('/support-bundle', async (req, reply) => {
+      const session = needSession(req, reply);
+      if (!session) return;
+      const s = opts.gateway.status();
+      const snap = diag.snapshot();
+      const bundle = {
+        generatedAt: new Date(now()).toISOString(),
+        generatedBy: session.who,
+        status: s,
+        host: hostFacts(diag.dataDir),
+        gateway: { ...snap, devices: undefined },
+        devices: snap.devices.map((d) => ({
+          deviceId: d.deviceId,
+          name: d.name,
+          online: d.online,
+          offlineForMs: d.offlineForMs,
+          driver: d.driver,
+          firmware: d.firmware,
+          latency: d.latency,
+        })),
+        lastChecks: lastChecks?.results ?? null,
+        log: tailLog(diag.logFile, 1000, 'debug'),
+      };
+      record('local.action', { action: 'support-bundle', who: session.who, ip: req.ip });
+      const day = new Date(now()).toISOString().slice(0, 10);
+      return reply
+        .header('Content-Disposition', `attachment; filename="kestrel-gateway-support-${day}.json"`)
+        .type('application/json')
+        .send(JSON.stringify(bundle, null, 2));
+    });
+  }
+
+  // ---- signing in with a Kestrel account ---------------------------------------------------------
 
   app.get('/signin', async (req, reply) => {
     const origin = `${secure ? 'https' : 'http'}://${req.host}`;
@@ -317,26 +577,26 @@ export async function localAdmin(app: FastifyInstance, opts: LocalAdminOptions):
     return reply.redirect('/?msg=signedout', 303);
   });
 
-  // ---- admin: admins only -----------------------------------------------------------------------
+  // ---- admin: admins only ------------------------------------------------------------------------
 
   const loginPage = (reply: FastifyReply, msg?: string) =>
     html(
       reply,
-      layout(
-        'Kestrel gateway admin',
-        `<h1>Gateway admin</h1>
-${msg ? `<div class="banner bad">${esc(msg)}</div>` : ''}
-${access.kestrelSigninAvailable() ? '<div class="card"><p><a class="btn" href="/signin">Sign in with Kestrel</a></p><p class="muted">Owners and developers of this gateway’s organisation can change its settings.</p></div>' : ''}
+      page(null, {
+        title: 'Admin',
+        body: `<h1>Gateway admin</h1><p class="sub">Change which organisation this gateway belongs to, or reset it.</p>
+${msg ? `<div class="banner bad" role="alert">${esc(msg)}</div>` : ''}
+${access.kestrelSigninAvailable() ? '<div class="card"><h2>Sign in with Kestrel</h2><p><a class="btn" href="/signin">Sign in with Kestrel</a></p><p class="muted">Owners and developers of this gateway’s organisation can change its settings.</p></div>' : ''}
 ${
   access.breakGlassAllowed()
-    ? `<div class="card"><h2 style="margin-top:0">Admin code</h2><p class="muted">From the machine this gateway runs on: <code>admin-code.txt</code> in its data folder (the tray menu has “Show admin code” on Windows).</p>
+    ? `<div class="card"><h2>Admin code</h2><p class="muted" style="margin-top:0">From the machine this gateway runs on: <code>admin-code.txt</code> in its data folder (the tray menu has “Show admin code” on Windows).</p>
 <form method="post" action="/admin/login"><label for="code">Admin code</label>
 <input id="code" name="code" type="password" autocomplete="off" required maxlength="20">
 <button type="submit">Unlock</button></form></div>`
     : '<p class="muted">The admin code on this machine has been switched off by your organisation. Sign in with Kestrel.</p>'
 }
 <p class="muted"><a href="/">Back to status</a></p>`,
-      ),
+      }),
       msg ? 401 : 200,
     );
 
@@ -347,26 +607,27 @@ ${
   ) => {
     const s = opts.gateway.status();
     const enrolled = s.enrolment === 'enrolled';
-    const body = `<h1>Gateway admin</h1><p class="muted"><a href="/">Back to status</a> · signed in as ${esc(session.who)}</p>
-${banner ? `<div class="banner ${banner.ok ? 'ok' : 'bad'}">${esc(banner.text)}</div>` : ''}
-<section><h2 style="margin-top:0">Enter an enrolment token</h2>
-<p>Create a token in the portal (Gateways, then Add gateway) and paste it here.${
+    const body = `<h1>Admin</h1><p class="sub">Signed in as ${esc(session.who)}.</p>
+${bannerHtml(banner)}
+<div class="card"><h2>Enter an enrolment token</h2>
+<p class="muted" style="margin-top:0">Create a token in the portal (Gateways, then Add gateway) and paste it here.${
       enrolled
         ? ` <strong>This gateway already belongs to ${s.name ? esc(s.name) : 'an organisation'}.</strong> A working token moves it: its devices stop being watched and the new organisation’s replace them.`
         : ''
     }</p>
 <form method="post" action="/admin/token"><label for="token">Enrolment token</label>
 <input id="token" name="token" type="text" autocomplete="off" required maxlength="300">
-<button type="submit">Enrol</button></form></section>
-<section><h2 style="margin-top:0">Reset</h2>
-<p>Forget the organisation and start again as an unclaimed gateway. <strong>Its devices stop being watched</strong> until the gateway is claimed or enrolled again. Devices are not touched.</p>
+<button type="submit">Enrol</button></form></div>
+<div class="card"><h2>Reset</h2>
+<p class="muted" style="margin-top:0">Forget the organisation and start again as an unclaimed gateway. <strong>Its devices stop being watched</strong> until the gateway is claimed or enrolled again. Devices are not touched.</p>
 <form method="post" action="/admin/reset"><label for="confirm">Type RESET to confirm</label>
 <input id="confirm" name="confirm" type="text" autocomplete="off" required maxlength="10">
-<button class="danger" type="submit">Reset this gateway</button></form></section>
-<section><h2 style="margin-top:0">This install</h2>
-<dl><dt>Install ID</dt><dd><code>${esc(s.installId ?? 'not made yet')}</code></dd><dt>Version</dt><dd>${esc(s.version)}</dd></dl></section>
-<form method="post" action="/signout"><button class="plain" type="submit">Sign out</button></form>`;
-    return html(reply, layout('Kestrel gateway admin', body));
+<button class="danger" type="submit">Reset this gateway</button></form></div>
+<div class="card"><h2>This install</h2>${kv([
+      ['Install ID', `<code>${esc(s.installId ?? 'not made yet')}</code>`],
+      ['Version', esc(s.version)],
+    ])}</div>`;
+    return html(reply, page(session, { title: 'Admin', active: '/admin', body }));
   };
 
   app.get('/admin', async (req, reply) => {
@@ -375,10 +636,10 @@ ${banner ? `<div class="banner ${banner.ok ? 'ok' : 'bad'}">${esc(banner.text)}<
     if (session && session.role !== 'admin')
       return html(
         reply,
-        layout(
-          'Kestrel gateway admin',
-          '<h1>Gateway admin</h1><div class="banner bad">Your account can look at this gateway but not change it. Ask an owner or developer of your organisation.</div><p class="muted"><a href="/">Back to status</a></p>',
-        ),
+        page(session, {
+          title: 'Admin',
+          body: '<h1>Admin</h1><div class="banner bad" role="alert">Your account can look at this gateway but not change it. Ask an owner or developer of your organisation.</div>',
+        }),
         403,
       );
     if (!session)
